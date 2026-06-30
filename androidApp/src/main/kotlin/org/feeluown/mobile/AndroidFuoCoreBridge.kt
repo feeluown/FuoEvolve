@@ -6,6 +6,7 @@ import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 class AndroidFuoCoreBridge(
@@ -36,12 +37,21 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun search(keyword: String): List<MusicTrack> {
+    override suspend fun providers(): List<ProviderInfo> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("providers").toString()
+            val array = JSONObject(raw).getJSONArray("providers")
+            List(array.length()) { index -> array.getJSONObject(index).toProviderInfo() }
+        }
+    }
+
+    override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> {
         initialize()
         return withContext(Dispatchers.IO) {
             try {
-                Log.d(TAG, "search start keyword=$keyword")
-                val raw = requireNotNull(bridge).callAttr("search", keyword).toString()
+                Log.d(TAG, "search start keyword=$keyword providerId=$providerId")
+                val raw = requireNotNull(bridge).callAttr("search", keyword, providerId.orEmpty()).toString()
                 val array = JSONObject(raw).getJSONArray("tracks")
                 List(array.length()) { index ->
                     array.getJSONObject(index).toTrack()
@@ -49,7 +59,7 @@ class AndroidFuoCoreBridge(
                     Log.d(TAG, "search done count=${it.size}")
                 }
             } catch (throwable: Throwable) {
-                Log.e(TAG, "search failed keyword=$keyword", throwable)
+                Log.e(TAG, "search failed keyword=$keyword providerId=$providerId", throwable)
                 throw throwable
             }
         }
@@ -88,18 +98,118 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun features(): List<ProviderFeature> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("features").toString()
+            val array = JSONObject(raw).getJSONArray("features")
+            List(array.length()) { index -> array.getJSONObject(index).toFeature() }
+        }
+    }
+
+    override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "loadFeature start featureId=${feature.id}")
+                val raw = requireNotNull(bridge).callAttr("load_feature", feature.id).toString()
+                JSONObject(raw).toContentSection(feature).also {
+                    Log.d(
+                        TAG,
+                        "loadFeature done featureId=${feature.id} tracks=${it.tracks.size} playlists=${it.playlists.size} loginRequired=${it.isLoginRequired}",
+                    )
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "loadFeature failed featureId=${feature.id}", throwable)
+                throw throwable
+            }
+        }
+    }
+
+    override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "playlistTracks start playlistId=${playlist.id} title=${playlist.title}")
+                val raw = requireNotNull(bridge).callAttr("playlist_tracks", playlist.id).toString()
+                val array = JSONObject(raw).getJSONArray("tracks")
+                List(array.length()) { index -> array.getJSONObject(index).toTrack() }.also {
+                    Log.d(TAG, "playlistTracks done playlistId=${playlist.id} count=${it.size}")
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "playlistTracks failed playlistId=${playlist.id}", throwable)
+                throw throwable
+            }
+        }
+    }
+
+    private fun JSONObject.toProviderInfo(): ProviderInfo {
+        val providerId = optString("provider_id")
+        return ProviderInfo(
+            providerId = providerId,
+            providerName = optString("provider_name").ifBlank { providerId },
+            loginConfig = optJSONObject("login_config")?.toLoginConfig(),
+        )
+    }
+
+    private fun JSONObject.toLoginConfig(): ProviderLoginConfig = ProviderLoginConfig(
+        loginUrl = optString("login_url"),
+        cookieKeyGroups = optJSONArray("cookie_key_groups").toStringGroups(),
+    )
+
+    private fun JSONObject.toFeature(): ProviderFeature {
+        val providerId = optString("provider_id")
+        return ProviderFeature(
+            id = getString("id"),
+            providerId = providerId,
+            providerName = optString("provider_name").ifBlank { providerId },
+            title = optString("title"),
+            category = ProviderFeatureCategory.valueOf(optString("category")),
+            contentType = ProviderContentType.valueOf(optString("content_type")),
+            requiresLogin = optBoolean("requires_login"),
+        )
+    }
+
+    private fun JSONObject.toContentSection(fallbackFeature: ProviderFeature): ProviderContentSection {
+        val parsedFeature = optJSONObject("feature")?.toFeature() ?: fallbackFeature
+        val tracksArray = optJSONArray("tracks") ?: JSONArray()
+        val playlistsArray = optJSONArray("playlists") ?: JSONArray()
+        return ProviderContentSection(
+            feature = parsedFeature,
+            tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
+            playlists = List(playlistsArray.length()) { index -> playlistsArray.getJSONObject(index).toPlaylist() },
+            isLoginRequired = optBoolean("is_login_required"),
+            errorMessage = optString("error_message").takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun JSONObject.toPlaylist(): ProviderPlaylist {
+        val providerId = optString("provider_id")
+        return ProviderPlaylist(
+            id = getString("id"),
+            title = optString("title"),
+            providerId = providerId,
+            providerName = optString("provider_name").ifBlank { providerId },
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
+            description = optString("description"),
+            playCount = optLong("play_count").takeIf { it > 0 },
+        )
+    }
+
     private fun JSONObject.toTrack(): MusicTrack {
         val id = getString("id")
+        val source = optString("source")
         return MusicTrack(
             id = id,
             title = optString("title"),
             artists = optString("artists"),
             album = optString("album"),
-            source = optString("source"),
+            source = source,
             sourceType = TrackSourceType.Provider,
             coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
             durationMs = optLong("duration_ms").takeIf { it > 0 },
             providerId = id,
+            providerName = optString("provider_name").ifBlank { source }.takeIf { it.isNotBlank() },
         )
     }
 
@@ -121,6 +231,14 @@ class AndroidFuoCoreBridge(
         isLoggedIn = optBoolean("is_logged_in"),
         userName = optString("user_name").takeIf { it.isNotBlank() },
     )
+
+    private fun JSONArray?.toStringGroups(): List<List<String>> {
+        if (this == null) return emptyList()
+        return List(length()) { index ->
+            val group = getJSONArray(index)
+            List(group.length()) { keyIndex -> group.getString(keyIndex) }
+        }
+    }
 
     private fun JSONObject?.toStringMap(): Map<String, String> {
         if (this == null) return emptyMap()

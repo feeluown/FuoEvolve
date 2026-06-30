@@ -5,8 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class SearchScope {
     Local,
@@ -33,11 +35,31 @@ class FuoPlayerController(
     private val playbackEngine: PlaybackEngine,
     private val scope: CoroutineScope,
 ) {
+    var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
+        private set
+    var providerFeatures by mutableStateOf<List<ProviderFeature>>(emptyList())
+        private set
+    var providerAuthStates by mutableStateOf<Map<String, ProviderAuthState>>(emptyMap())
+        private set
+    var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    var recommendSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
+        private set
+    var musicSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
+        private set
+    var selectedPlaylist by mutableStateOf<ProviderPlaylist?>(null)
+        private set
+    var selectedPlaylistTracks by mutableStateOf<List<MusicTrack>>(emptyList())
+        private set
+    var selectedPlaylistError by mutableStateOf<String?>(null)
+        private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var query by mutableStateOf("")
         private set
     var searchScope by mutableStateOf(SearchScope.All)
+        private set
+    var selectedSearchProviderId by mutableStateOf<String?>(null)
         private set
     var searchResults by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
@@ -52,16 +74,6 @@ class FuoPlayerController(
     var isSettingsOpen by mutableStateOf(false)
         private set
     var isQueueOpen by mutableStateOf(false)
-        private set
-    var neteaseCookies by mutableStateOf("")
-        private set
-    var providerAuthState by mutableStateOf(
-        ProviderAuthState(
-            providerId = NETEASE_PROVIDER_ID,
-            providerName = "网易云音乐",
-            isLoggedIn = false,
-        )
-    )
         private set
     var isLoading by mutableStateOf(false)
         private set
@@ -80,10 +92,12 @@ class FuoPlayerController(
         scope.launch {
             runCatching {
                 providerRepository.initialize()
+                refreshProviderCatalog()
                 downloadRepository.load()
             }.onSuccess {
                 message = "音乐服务已就绪"
-                refreshProviderAuthState()
+                refreshAllProviderAuthStates()
+                refreshHomeContent(HomeSection.Recommend)
             }.onFailure {
                 setError(it)
             }
@@ -113,6 +127,24 @@ class FuoPlayerController(
         }
     }
 
+    fun authStateFor(provider: ProviderInfo): ProviderAuthState {
+        return providerAuthStates[provider.providerId] ?: ProviderAuthState(
+            providerId = provider.providerId,
+            providerName = provider.providerName,
+            isLoggedIn = false,
+        )
+    }
+
+    fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
+
+    fun contentSectionsFor(section: HomeSection): List<ProviderContentSection> {
+        return when (section) {
+            HomeSection.Recommend -> recommendSections
+            HomeSection.Music -> musicSections
+            HomeSection.Local -> emptyList()
+        }
+    }
+
     fun refreshLocalMusic() {
         scope.launch {
             isLoading = true
@@ -137,34 +169,38 @@ class FuoPlayerController(
 
     fun openSettings() {
         isSettingsOpen = true
-        refreshProviderAuthState()
+        refreshAllProviderAuthStates()
     }
 
     fun closeSettings() {
         isSettingsOpen = false
     }
 
-    fun onNeteaseCookiesChange(value: String) {
-        neteaseCookies = value
+    fun onProviderCookiesChange(providerId: String, value: String) {
+        providerCookieInputs = providerCookieInputs + (providerId to value)
     }
 
-    fun loginNeteaseWithCookies() {
-        val cookies = neteaseCookies.trim()
+    fun loginProviderWithCookies(providerId: String, cookiesJson: String) {
+        val cookies = cookiesJson.trim()
+        val providerName = providerName(providerId)
         if (cookies.isEmpty()) {
-            message = "请输入网易云 cookies JSON"
+            message = "请输入 $providerName cookies"
             return
         }
         scope.launch {
             isLoading = true
-            message = "正在登录网易云音乐"
-            runCatching { providerRepository.loginWithCookies(NETEASE_PROVIDER_ID, cookies) }
+            message = "正在登录 $providerName"
+            runCatching { providerRepository.loginWithCookies(providerId, cookies) }
                 .onSuccess {
-                    providerAuthState = it
-                    neteaseCookies = ""
+                    providerAuthStates = providerAuthStates + (providerId to it)
+                    providerCookieInputs = providerCookieInputs - providerId
                     message = if (it.isLoggedIn) {
-                        "网易云音乐已登录：${it.userName.orEmpty()}"
+                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
                     } else {
-                        "网易云音乐未登录"
+                        "${it.providerName} 未登录"
+                    }
+                    if (homeSection != HomeSection.Local) {
+                        refreshHomeContent(homeSection)
                     }
                 }
                 .onFailure { setError(it) }
@@ -178,11 +214,23 @@ class FuoPlayerController(
 
     fun onSearchScopeChange(value: SearchScope) {
         searchScope = value
+        if (value != SearchScope.Provider) {
+            selectedSearchProviderId = null
+        }
+        if (query.isNotBlank()) search()
+    }
+
+    fun onSearchProviderChange(providerId: String) {
+        searchScope = SearchScope.Provider
+        selectedSearchProviderId = providerId
         if (query.isNotBlank()) search()
     }
 
     fun onHomeSectionChange(value: HomeSection) {
         homeSection = value
+        if (value != HomeSection.Local && contentSectionsFor(value).isEmpty()) {
+            refreshHomeContent(value)
+        }
     }
 
     fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
@@ -203,7 +251,7 @@ class FuoPlayerController(
                 withTimeout(25_000) {
                     when (searchScope) {
                         SearchScope.Local -> localRepository.search(keyword)
-                        SearchScope.Provider -> providerRepository.search(keyword)
+                        SearchScope.Provider -> providerRepository.search(keyword, selectedSearchProviderId)
                         SearchScope.All -> mergeResults(
                             localRepository.search(keyword),
                             providerRepository.search(keyword),
@@ -220,11 +268,77 @@ class FuoPlayerController(
         }
     }
 
-    private fun refreshProviderAuthState() {
-        scope.launch {
-            runCatching { providerRepository.authState(NETEASE_PROVIDER_ID) }
-                .onSuccess { providerAuthState = it }
+    fun refreshHomeContent(section: HomeSection = homeSection) {
+        if (section == HomeSection.Local) {
+            refreshLocalMusic()
+            return
         }
+        scope.launch {
+            isLoading = true
+            val title = if (section == HomeSection.Recommend) "推荐" else "音乐"
+            message = "正在加载$title"
+            runCatching {
+                refreshProviderCatalog()
+                val category = when (section) {
+                    HomeSection.Recommend -> ProviderFeatureCategory.Recommend
+                    HomeSection.Music -> ProviderFeatureCategory.Music
+                    HomeSection.Local -> error("local section has no provider content")
+                }
+                withTimeout(30_000) {
+                    providerFeatures.filter { it.category == category }.map { feature ->
+                        runCatching { providerRepository.loadFeature(feature) }
+                            .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
+                    }
+                }
+            }.onSuccess {
+                if (section == HomeSection.Recommend) {
+                    recommendSections = it
+                } else {
+                    musicSections = it
+                }
+                message = if (it.isEmpty()) "$title 暂无内容" else "$title 已更新"
+            }.onFailure {
+                setError(it)
+            }
+            isLoading = false
+        }
+    }
+
+    fun openPlaylist(playlist: ProviderPlaylist) {
+        selectedPlaylist = playlist
+        selectedPlaylistTracks = emptyList()
+        selectedPlaylistError = null
+        scope.launch {
+            isLoading = true
+            message = "正在加载：${playlist.title}"
+            val deferred = scope.async { providerRepository.playlistTracks(playlist) }
+            val result = withTimeoutOrNull(30_000) {
+                runCatching { deferred.await() }
+            }
+            if (result == null) {
+                deferred.cancel()
+                selectedPlaylistError = "加载超时，请检查网络后重试"
+                message = selectedPlaylistError.orEmpty()
+            } else {
+                result.onSuccess {
+                    if (selectedPlaylist == playlist) {
+                        selectedPlaylistTracks = it
+                        selectedPlaylistError = null
+                        message = if (it.isEmpty()) "歌单暂无歌曲" else "${playlist.title} · ${it.size} 首"
+                    }
+                }.onFailure {
+                    selectedPlaylistError = it.message ?: it::class.simpleName.orEmpty()
+                    setError(it)
+                }
+            }
+            isLoading = false
+        }
+    }
+
+    fun closePlaylist() {
+        selectedPlaylist = null
+        selectedPlaylistTracks = emptyList()
+        selectedPlaylistError = null
     }
 
     fun playFromLocal(index: Int) {
@@ -237,10 +351,34 @@ class FuoPlayerController(
         if (index >= 0) play(track, sourceQueue, index)
     }
 
+    fun playAllLocalTracks(sourceQueue: List<MusicTrack>) {
+        playFirst(sourceQueue)
+    }
+
     fun playFromSearch(index: Int) {
         val track = searchResults.getOrNull(index) ?: return
         play(track, searchResults, index)
         closeSearch()
+    }
+
+    fun playFromFeature(featureId: String, index: Int) {
+        val tracks = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }?.tracks.orEmpty()
+        val track = tracks.getOrNull(index) ?: return
+        play(track, tracks, index)
+    }
+
+    fun playAllFromFeature(featureId: String) {
+        val tracks = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }?.tracks.orEmpty()
+        playFirst(tracks)
+    }
+
+    fun playFromSelectedPlaylist(index: Int) {
+        val track = selectedPlaylistTracks.getOrNull(index) ?: return
+        play(track, selectedPlaylistTracks, index)
+    }
+
+    fun playAllFromSelectedPlaylist() {
+        playFirst(selectedPlaylistTracks)
     }
 
     fun playQueueIndex(index: Int) {
@@ -322,6 +460,28 @@ class FuoPlayerController(
         }
     }
 
+    private suspend fun refreshProviderCatalog() {
+        val loadedProviders = providerRepository.providers()
+        providers = loadedProviders
+        providerAuthStates = loadedProviders.associate { provider ->
+            provider.providerId to (providerAuthStates[provider.providerId] ?: ProviderAuthState(
+                providerId = provider.providerId,
+                providerName = provider.providerName,
+                isLoggedIn = false,
+            ))
+        }
+        providerFeatures = providerRepository.features()
+    }
+
+    private fun refreshAllProviderAuthStates() {
+        scope.launch {
+            providers.forEach { provider ->
+                runCatching { providerRepository.authState(provider.providerId) }
+                    .onSuccess { providerAuthStates = providerAuthStates + (provider.providerId to it) }
+            }
+        }
+    }
+
     private fun play(track: MusicTrack, sourceQueue: List<MusicTrack>, index: Int) {
         scope.launch {
             isLoading = true
@@ -353,6 +513,11 @@ class FuoPlayerController(
         }
     }
 
+    private fun playFirst(sourceQueue: List<MusicTrack>) {
+        val track = sourceQueue.firstOrNull() ?: return
+        play(track, sourceQueue, 0)
+    }
+
     private fun MusicTrack.preferDownloaded(): MusicTrack {
         val downloaded = downloadStates[id] as? DownloadState.Downloaded ?: return this
         return copy(
@@ -380,6 +545,10 @@ class FuoPlayerController(
         return (local + provider).filter { seen.add(it.id) }
     }
 
+    private fun providerName(providerId: String): String {
+        return providers.firstOrNull { it.providerId == providerId }?.providerName ?: providerId
+    }
+
     private fun setError(throwable: Throwable) {
         message = when (throwable) {
             is TimeoutCancellationException -> "操作超时，请检查网络后重试"
@@ -390,8 +559,4 @@ class FuoPlayerController(
     }
 
     private fun Int.floorMod(size: Int): Int = ((this % size) + size) % size
-
-    private companion object {
-        private const val NETEASE_PROVIDER_ID = "netease"
-    }
 }

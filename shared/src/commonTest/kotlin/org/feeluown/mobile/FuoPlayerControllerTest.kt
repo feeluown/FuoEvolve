@@ -78,6 +78,46 @@ class FuoPlayerControllerTest {
         }
     }
 
+    @Test
+    fun playAllFromSelectedPlaylistStartsFirstTrackAndKeepsQueue() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val provider = FakeProviderRepository(emptyList(), playlistTracks = tracks)
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylist(
+                ProviderPlaylist(
+                    id = "playlist:netease:1",
+                    title = "榜单",
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                ),
+            )
+            advanceUntilIdle()
+            controller.playAllFromSelectedPlaylist()
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
     private fun providerTrack(id: String, title: String): MusicTrack = MusicTrack(
         id = id,
         title = title,
@@ -86,16 +126,22 @@ class FuoPlayerControllerTest {
         source = "netease",
         sourceType = TrackSourceType.Provider,
         providerId = id,
+        providerName = "网易云音乐",
     )
 
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
+        private val playlistTracks: List<MusicTrack> = emptyList(),
     ) : ProviderMusicRepository {
         var resolveCount = 0
 
         override suspend fun initialize() = Unit
 
-        override suspend fun search(keyword: String): List<MusicTrack> = tracks
+        override suspend fun providers(): List<ProviderInfo> = listOf(
+            ProviderInfo(providerId = "netease", providerName = "网易云音乐"),
+        )
+
+        override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = tracks
 
         override suspend fun resolve(track: MusicTrack): PlaybackPayload {
             resolveCount += 1
@@ -121,6 +167,13 @@ class FuoPlayerControllerTest {
                 isLoggedIn = true,
                 userName = "tester",
             )
+
+        override suspend fun features(): List<ProviderFeature> = emptyList()
+
+        override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
+            ProviderContentSection(feature)
+
+        override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks
     }
 
     private class FakeLocalMusicRepository : LocalMusicRepository {

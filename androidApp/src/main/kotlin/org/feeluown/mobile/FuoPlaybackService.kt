@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -53,6 +55,7 @@ class FuoPlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
+    @OptIn(UnstableApi::class)
     private fun playPayload(raw: String) {
         val payload = JSONObject(raw)
         val extras = Bundle().apply {
@@ -60,6 +63,7 @@ class FuoPlaybackService : MediaSessionService() {
             putString("source_type", payload.optString("source_type"))
             putString("local_uri", payload.optString("local_uri"))
             putString("provider_id", payload.optString("provider_id"))
+            putString("provider_name", payload.optString("provider_name"))
         }
         val mediaItem = MediaItem.Builder()
             .setMediaId(payload.optString("track_id").ifBlank { payload.getString("url") })

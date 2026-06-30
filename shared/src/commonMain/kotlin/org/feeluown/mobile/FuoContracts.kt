@@ -19,6 +19,7 @@ data class MusicTrack(
     val durationMs: Long? = null,
     val localUri: String? = null,
     val providerId: String? = null,
+    val providerName: String? = null,
 )
 
 data class PlaybackPayload(
@@ -75,12 +76,65 @@ data class ProviderAuthState(
     val userName: String? = null,
 )
 
+data class ProviderLoginConfig(
+    val loginUrl: String,
+    val cookieKeyGroups: List<List<String>>,
+)
+
+data class ProviderInfo(
+    val providerId: String,
+    val providerName: String,
+    val loginConfig: ProviderLoginConfig? = null,
+)
+
+enum class ProviderFeatureCategory {
+    Recommend,
+    Music,
+}
+
+enum class ProviderContentType {
+    Songs,
+    Playlists,
+}
+
+data class ProviderFeature(
+    val id: String,
+    val providerId: String,
+    val providerName: String,
+    val title: String,
+    val category: ProviderFeatureCategory,
+    val contentType: ProviderContentType,
+    val requiresLogin: Boolean,
+)
+
+data class ProviderPlaylist(
+    val id: String,
+    val title: String,
+    val providerId: String,
+    val providerName: String,
+    val coverUrl: String? = null,
+    val description: String = "",
+    val playCount: Long? = null,
+)
+
+data class ProviderContentSection(
+    val feature: ProviderFeature,
+    val tracks: List<MusicTrack> = emptyList(),
+    val playlists: List<ProviderPlaylist> = emptyList(),
+    val isLoginRequired: Boolean = false,
+    val errorMessage: String? = null,
+)
+
 interface ProviderMusicRepository {
     suspend fun initialize()
-    suspend fun search(keyword: String): List<MusicTrack>
+    suspend fun providers(): List<ProviderInfo>
+    suspend fun search(keyword: String, providerId: String? = null): List<MusicTrack>
     suspend fun resolve(track: MusicTrack): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+    suspend fun features(): List<ProviderFeature>
+    suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
+    suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>
 }
 
 interface LocalMusicRepository {

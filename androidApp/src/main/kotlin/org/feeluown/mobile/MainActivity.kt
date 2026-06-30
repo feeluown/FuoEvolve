@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import android.Manifest
+import android.app.Activity.RESULT_OK
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -44,6 +45,21 @@ class MainActivity : ComponentActivity() {
                     scope = lifecycleScope,
                 )
             }
+            val webLoginLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartActivityForResult(),
+            ) { result ->
+                if (result.resultCode == RESULT_OK) {
+                    val providerId = result.data
+                        ?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID)
+                        .orEmpty()
+                    val cookiesJson = result.data
+                        ?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON)
+                        .orEmpty()
+                    if (providerId.isNotBlank() && cookiesJson.isNotBlank()) {
+                        controller.loginProviderWithCookies(providerId, cookiesJson)
+                    }
+                }
+            }
 
             LaunchedEffect(hasAudioPermission) {
                 if (hasAudioPermission) {
@@ -56,6 +72,11 @@ class MainActivity : ComponentActivity() {
                 hasAudioPermission = hasAudioPermission,
                 onRequestAudioPermission = {
                     permissionLauncher.launch(audioPermissions())
+                },
+                onOpenProviderWebLogin = { provider ->
+                    if (provider.loginConfig != null) {
+                        webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
+                    }
                 },
             )
         }

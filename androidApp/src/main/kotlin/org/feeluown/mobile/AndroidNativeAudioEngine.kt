@@ -143,6 +143,7 @@ class AndroidNativeAudioEngine(
             .put("source_type", track.sourceType.name)
             .put("local_uri", track.localUri ?: "")
             .put("provider_id", track.providerId ?: "")
+            .put("provider_name", track.providerName ?: "")
             .put("url", url)
             .put("title", title)
             .put("artists", artists)
@@ -171,6 +172,7 @@ class AndroidNativeAudioEngine(
             coverUrl = metadata.artworkUri?.toString(),
             localUri = mediaMetadata.extras?.getString("local_uri")?.takeIf { it.isNotBlank() },
             providerId = mediaMetadata.extras?.getString("provider_id")?.takeIf { it.isNotBlank() },
+            providerName = mediaMetadata.extras?.getString("provider_name")?.takeIf { it.isNotBlank() },
         )
     }
 }
