@@ -3,8 +3,10 @@ package org.feeluown.mobile
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -53,7 +55,14 @@ class FuoPlaybackService : MediaSessionService() {
 
     private fun playPayload(raw: String) {
         val payload = JSONObject(raw)
+        val extras = Bundle().apply {
+            putString("source", payload.optString("source"))
+            putString("source_type", payload.optString("source_type"))
+            putString("local_uri", payload.optString("local_uri"))
+            putString("provider_id", payload.optString("provider_id"))
+        }
         val mediaItem = MediaItem.Builder()
+            .setMediaId(payload.optString("track_id").ifBlank { payload.getString("url") })
             .setUri(payload.getString("url"))
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -61,14 +70,15 @@ class FuoPlaybackService : MediaSessionService() {
                     .setArtist(payload.optString("artists"))
                     .setAlbumTitle(payload.optString("album"))
                     .setArtworkUri(payload.optString("cover_url").takeIf { it.isNotBlank() }?.let(Uri::parse))
+                    .setExtras(extras)
                     .build()
             )
             .build()
 
         val headers = payload.optJSONObject("headers").toStringMap()
-        val source = ProgressiveMediaSource.Factory(
-            DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
-        ).createMediaSource(mediaItem)
+        val httpFactory = DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
+        val sourceFactory = DefaultDataSource.Factory(this, httpFactory)
+        val source = ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(mediaItem)
 
         player?.run {
             setMediaSource(source)

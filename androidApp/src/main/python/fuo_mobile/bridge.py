@@ -199,8 +199,6 @@ class FuoMobileBridge:
         self.provider_registry = ProviderRegistry(self.app, providers)
         self.provider_registry.load()
         self._tracks: Dict[str, Any] = {}
-        self._queue: List[str] = []
-        self._current_index = -1
 
     def search(self, keyword: str) -> str:
         tracks = []
@@ -210,28 +208,44 @@ class FuoMobileBridge:
                 track = song_to_dict(song)
                 self._tracks[track["id"]] = song
                 tracks.append(track)
-        self._queue = [track["id"] for track in tracks]
-        self._current_index = -1
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
-    def play(self, track_id: str) -> str:
+    def resolve(self, track_id: str) -> str:
         if track_id not in self._tracks:
             raise RuntimeError(f"unknown track id: {track_id}")
-        self._current_index = self._queue.index(track_id) if track_id in self._queue else -1
         payload = self._prepare_payload(self._tracks[track_id])
         return json.dumps(payload, ensure_ascii=False)
 
-    def next(self) -> str:
-        if not self._queue:
-            return "null"
-        self._current_index = (self._current_index + 1) % len(self._queue)
-        return self.play(self._queue[self._current_index])
+    def play(self, track_id: str) -> str:
+        return self.resolve(track_id)
 
-    def previous(self) -> str:
-        if not self._queue:
-            return "null"
-        self._current_index = (self._current_index - 1) % len(self._queue)
-        return self.play(self._queue[self._current_index])
+    def provider_auth_state(self, provider_id: str) -> str:
+        provider = self._get_provider(provider_id)
+        user = provider.get_current_user_or_none()
+        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def provider_login_with_cookies(self, provider_id: str, cookies_json: str) -> str:
+        provider = self._get_provider(provider_id)
+        cookies = parse_cookies(cookies_json)
+        if not isinstance(cookies, dict) or not cookies:
+            raise RuntimeError("cookies must be a non-empty JSON object")
+        if not hasattr(provider, "get_user_from_cookies"):
+            raise RuntimeError(f"provider does not support cookies login: {provider_id}")
+        user = provider.get_user_from_cookies(cookies)
+        provider.auth(user)
+        if provider_id == "netease":
+            import os
+            from fuo_netease.login_controller import LoginController
+            from fuo_netease.consts import USERS_INFO_FILE
+            os.makedirs(os.path.dirname(USERS_INFO_FILE), exist_ok=True)
+            LoginController.save(user)
+        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def _get_provider(self, provider_id: str):
+        provider = self.app.library.get(provider_id)
+        if provider is None:
+            raise RuntimeError(f"provider not found: {provider_id}")
+        return provider
 
     def _prepare_payload(self, song) -> Dict[str, Any]:
         try:
@@ -245,11 +259,53 @@ class FuoMobileBridge:
         cover = self.app.library.model_get_cover(song)
         if cover:
             payload["cover_url"] = cover
+        lyrics = self._get_lyrics(song)
+        if lyrics:
+            payload["lyrics"] = lyrics
         return payload
+
+    def _get_lyrics(self, song) -> str:
+        try:
+            lyric = self.app.library.song_get_lyric(song)
+        except Exception:
+            return ""
+        if lyric is None:
+            return ""
+        content = getattr(lyric, "content", "") or ""
+        trans_content = getattr(lyric, "trans_content", "") or ""
+        if content and trans_content:
+            return f"{content}\n{trans_content}"
+        return content or trans_content
 
 
 def create_bridge(providers_json: str) -> FuoMobileBridge:
     return FuoMobileBridge(providers_json)
+
+
+def provider_auth_state(provider, user) -> Dict[str, Any]:
+    return {
+        "provider_id": getattr(provider, "identifier", ""),
+        "provider_name": getattr(provider, "name", getattr(provider, "identifier", "")),
+        "is_logged_in": user is not None,
+        "user_name": getattr(user, "name", "") if user is not None else "",
+    }
+
+
+def parse_cookies(raw: str) -> Dict[str, str]:
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        return json.loads(text)
+    cookies = {}
+    for part in text.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip()
+        if key:
+            cookies[key] = value.strip()
+    return cookies
 
 
 def song_to_dict(song) -> Dict[str, str]:
@@ -261,6 +317,8 @@ def song_to_dict(song) -> Dict[str, str]:
         "artists": display_artists(song),
         "album": display_album(song),
         "source": source,
+        "duration_ms": duration_ms(song),
+        "cover_url": "",
     }
 
 
@@ -271,6 +329,7 @@ def song_to_metadata(song) -> Dict[str, str]:
         "artists": data["artists"],
         "album": data["album"],
         "source": data["source"],
+        "duration_ms": data["duration_ms"],
     }
 
 
@@ -286,6 +345,8 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
         "source": metadata.get("source", ""),
         "headers": dict(media.http_headers or {}),
         "cover_url": metadata.get("cover_url", ""),
+        "duration_ms": metadata.get("duration_ms", 0),
+        "lyrics": metadata.get("lyrics", ""),
     }
 
 
@@ -317,3 +378,16 @@ def display_album(song) -> str:
     if album is None:
         return ""
     return display(album, "name")
+
+
+def duration_ms(song) -> int:
+    duration = getattr(song, "duration", None) or getattr(song, "duration_ms", None)
+    if not duration:
+        return 0
+    try:
+        value = int(duration)
+    except (TypeError, ValueError):
+        return 0
+    if value < 10_000:
+        return value * 1000
+    return value

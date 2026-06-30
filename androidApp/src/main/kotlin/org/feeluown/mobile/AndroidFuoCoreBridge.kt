@@ -6,12 +6,11 @@ import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 class AndroidFuoCoreBridge(
     private val context: Context,
-) : FuoCoreBridge {
+) : ProviderMusicRepository {
     @Volatile
     private var bridge: PyObject? = null
 
@@ -37,7 +36,7 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun search(keyword: String): List<FuoTrack> {
+    override suspend fun search(keyword: String): List<MusicTrack> {
         initialize()
         return withContext(Dispatchers.IO) {
             try {
@@ -56,54 +55,71 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun play(trackId: String): PlaybackPayload {
+    override suspend fun resolve(track: MusicTrack): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
+            val trackId = track.providerId ?: track.id
             try {
-                Log.d(TAG, "play start trackId=$trackId")
-                val raw = requireNotNull(bridge).callAttr("play", trackId).toString()
-                JSONObject(raw).toPayload().also {
-                    Log.d(TAG, "play done title=${it.title}")
+                Log.d(TAG, "resolve start trackId=$trackId")
+                val raw = requireNotNull(bridge).callAttr("resolve", trackId).toString()
+                JSONObject(raw).toPayload(track).also {
+                    Log.d(TAG, "resolve done title=${it.title}")
                 }
             } catch (throwable: Throwable) {
-                Log.e(TAG, "play failed trackId=$trackId", throwable)
+                Log.e(TAG, "resolve failed trackId=$trackId", throwable)
                 throw throwable
             }
         }
     }
 
-    override suspend fun next(): PlaybackPayload? {
+    override suspend fun authState(providerId: String): ProviderAuthState {
         initialize()
         return withContext(Dispatchers.IO) {
-            val raw = requireNotNull(bridge).callAttr("next").toString()
-            if (raw == "null") null else JSONObject(raw).toPayload()
+            val raw = requireNotNull(bridge).callAttr("provider_auth_state", providerId).toString()
+            JSONObject(raw).toAuthState(providerId)
         }
     }
 
-    override suspend fun previous(): PlaybackPayload? {
+    override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
         initialize()
         return withContext(Dispatchers.IO) {
-            val raw = requireNotNull(bridge).callAttr("previous").toString()
-            if (raw == "null") null else JSONObject(raw).toPayload()
+            val raw = requireNotNull(bridge).callAttr("provider_login_with_cookies", providerId, cookiesJson).toString()
+            JSONObject(raw).toAuthState(providerId)
         }
     }
 
-    private fun JSONObject.toTrack(): FuoTrack = FuoTrack(
-        id = getString("id"),
-        title = optString("title"),
-        artists = optString("artists"),
-        album = optString("album"),
-        source = optString("source"),
+    private fun JSONObject.toTrack(): MusicTrack {
+        val id = getString("id")
+        return MusicTrack(
+            id = id,
+            title = optString("title"),
+            artists = optString("artists"),
+            album = optString("album"),
+            source = optString("source"),
+            sourceType = TrackSourceType.Provider,
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
+            durationMs = optLong("duration_ms").takeIf { it > 0 },
+            providerId = id,
+        )
+    }
+
+    private fun JSONObject.toPayload(track: MusicTrack): PlaybackPayload = PlaybackPayload(
+        url = getString("url"),
+        title = optString("title").ifBlank { track.title },
+        artists = optString("artists").ifBlank { track.artists },
+        album = optString("album").ifBlank { track.album },
+        source = optString("source").ifBlank { track.source },
+        headers = optJSONObject("headers").toStringMap(),
+        coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
+        durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
+        lyrics = optString("lyrics").takeIf { it.isNotBlank() },
     )
 
-    private fun JSONObject.toPayload(): PlaybackPayload = PlaybackPayload(
-        url = getString("url"),
-        title = optString("title"),
-        artists = optString("artists"),
-        album = optString("album"),
-        source = optString("source"),
-        headers = optJSONObject("headers").toStringMap(),
-        coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
+    private fun JSONObject.toAuthState(providerId: String): ProviderAuthState = ProviderAuthState(
+        providerId = optString("provider_id").ifBlank { providerId },
+        providerName = optString("provider_name").ifBlank { providerId },
+        isLoggedIn = optBoolean("is_logged_in"),
+        userName = optString("user_name").takeIf { it.isNotBlank() },
     )
 
     private fun JSONObject?.toStringMap(): Map<String, String> {
