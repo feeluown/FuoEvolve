@@ -138,13 +138,24 @@ class FuoPlayerControllerTest {
             contentType = ProviderContentType.Playlists,
             requiresLogin = true,
         )
+        val radioFeature = ProviderFeature(
+            id = "netease_radio",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "私人 FM",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
         val dailyTracks = listOf(providerTrack("provider:1", "First"))
+        val radioTracks = listOf(providerTrack("provider:2", "Radio"))
         val provider = FakeProviderRepository(
             tracks = emptyList(),
-            features = listOf(dailyFeature, playlistFeature),
+            features = listOf(dailyFeature, playlistFeature, radioFeature),
             featureSections = mapOf(
                 dailyFeature.id to ProviderContentSection(dailyFeature, tracks = dailyTracks),
                 playlistFeature.id to ProviderContentSection(playlistFeature),
+                radioFeature.id to ProviderContentSection(radioFeature, tracks = radioTracks),
             ),
         )
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -161,12 +172,82 @@ class FuoPlayerControllerTest {
 
             assertEquals(listOf(playlistFeature.id), provider.loadedFeatureIds)
             assertEquals(emptyList(), controller.recommendSections.first { it.feature.id == dailyFeature.id }.tracks)
+            assertEquals(emptyList(), controller.recommendSections.first { it.feature.id == radioFeature.id }.tracks)
 
             controller.openFeature(dailyFeature)
             advanceUntilIdle()
 
             assertEquals(listOf(playlistFeature.id, dailyFeature.id), provider.loadedFeatureIds)
             assertEquals(dailyTracks, controller.selectedFeatureTracks)
+
+            controller.openFeature(radioFeature)
+            advanceUntilIdle()
+
+            assertEquals(listOf(playlistFeature.id, dailyFeature.id, radioFeature.id), provider.loadedFeatureIds)
+            assertEquals(radioTracks, controller.selectedFeatureTracks)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun privateFmAppendsMoreTracksBeforeQueueEnds() = runTest {
+        val radioFeature = ProviderFeature(
+            id = "netease_radio",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "私人 FM",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val initialTracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+        )
+        val nextTracks = listOf(
+            providerTrack("provider:4", "Fourth"),
+            providerTrack("provider:5", "Fifth"),
+            providerTrack("provider:6", "Sixth"),
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(radioFeature),
+            featureSections = mapOf(radioFeature.id to ProviderContentSection(radioFeature, tracks = initialTracks)),
+            additionalFeatureTracks = mapOf(radioFeature.id to nextTracks),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openFeature(radioFeature)
+            advanceUntilIdle()
+            controller.playAllFromSelectedFeature()
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf("provider:1", "provider:2", "provider:3", "provider:4", "provider:5", "provider:6"),
+                controller.playbackState.queue.map { it.id },
+            )
+            assertEquals(listOf(radioFeature.id), provider.loadedMoreFeatureIds)
+
+            controller.next()
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals("provider:4", engine.lastTrack?.id)
         } finally {
             controllerScope.cancel()
         }
@@ -382,12 +463,14 @@ class FuoPlayerControllerTest {
         private val playlistTracks: List<MusicTrack> = emptyList(),
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
+        private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
     ) : ProviderMusicRepository {
         var resolveCount = 0
         var logoutCount = 0
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
         val loadedFeatureIds = mutableListOf<String>()
+        val loadedMoreFeatureIds = mutableListOf<String>()
 
         override suspend fun initialize() = Unit
 
@@ -444,6 +527,11 @@ class FuoPlayerControllerTest {
         override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection {
             loadedFeatureIds += feature.id
             return featureSections[feature.id] ?: ProviderContentSection(feature)
+        }
+
+        override suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> {
+            loadedMoreFeatureIds += feature.id
+            return additionalFeatureTracks[feature.id] ?: loadFeature(feature).tracks
         }
 
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks

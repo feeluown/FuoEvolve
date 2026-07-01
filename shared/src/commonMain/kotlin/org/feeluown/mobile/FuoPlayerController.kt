@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -27,6 +28,8 @@ enum class LocalMusicViewMode {
     Artist,
     Album,
 }
+
+private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 
 class FuoPlayerController(
     private val providerRepository: ProviderMusicRepository,
@@ -120,6 +123,8 @@ class FuoPlayerController(
 
     private var queue: List<MusicTrack> = emptyList()
     private var queueIndex: Int = -1
+    private var queueFeature: ProviderFeature? = null
+    private var appendQueueFeatureTask: Deferred<Int>? = null
     private var lastEndedTrackId: String? = null
 
     init {
@@ -601,14 +606,15 @@ class FuoPlayerController(
     }
 
     fun playFromFeature(featureId: String, index: Int) {
-        val tracks = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }?.tracks.orEmpty()
+        val section = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }
+        val tracks = section?.tracks.orEmpty()
         val track = tracks.getOrNull(index) ?: return
-        play(track, tracks, index)
+        play(track, tracks, index, section?.feature?.takeIf { it.isDynamicQueueFeature() })
     }
 
     fun playAllFromFeature(featureId: String) {
-        val tracks = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }?.tracks.orEmpty()
-        playFirst(tracks)
+        val section = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }
+        playFirst(section?.tracks.orEmpty(), section?.feature?.takeIf { it.isDynamicQueueFeature() })
     }
 
     fun playFromSelectedPlaylist(index: Int) {
@@ -622,16 +628,16 @@ class FuoPlayerController(
 
     fun playFromSelectedFeature(index: Int) {
         val track = selectedFeatureTracks.getOrNull(index) ?: return
-        play(track, selectedFeatureTracks, index)
+        play(track, selectedFeatureTracks, index, selectedFeature?.takeIf { it.isDynamicQueueFeature() })
     }
 
     fun playAllFromSelectedFeature() {
-        playFirst(selectedFeatureTracks)
+        playFirst(selectedFeatureTracks, selectedFeature?.takeIf { it.isDynamicQueueFeature() })
     }
 
     fun playQueueIndex(index: Int) {
         val track = queue.getOrNull(index) ?: return
-        play(track, queue, index)
+        play(track, queue, index, queueFeature)
     }
 
     fun toggle() {
@@ -646,6 +652,19 @@ class FuoPlayerController(
 
     fun next() {
         if (queue.isEmpty()) return
+        val feature = queueFeature
+        if (feature != null && queueIndex >= queue.lastIndex) {
+            scope.launch {
+                val nextIndex = queue.size
+                val appendedCount = appendFeatureQueue(feature)
+                if (appendedCount > 0 && queueFeature == feature) {
+                    playQueueIndex(nextIndex)
+                } else if (queueFeature == feature) {
+                    message = "${feature.title} 暂无后续歌曲"
+                }
+            }
+            return
+        }
         val nextIndex = (queueIndex + 1).floorMod(queue.size)
         playQueueIndex(nextIndex)
     }
@@ -740,7 +759,12 @@ class FuoPlayerController(
         }
     }
 
-    private fun play(track: MusicTrack, sourceQueue: List<MusicTrack>, index: Int) {
+    private fun play(
+        track: MusicTrack,
+        sourceQueue: List<MusicTrack>,
+        index: Int,
+        sourceFeature: ProviderFeature? = null,
+    ) {
         scope.launch {
             isLoading = true
             message = "正在播放：${track.title}"
@@ -755,6 +779,7 @@ class FuoPlayerController(
                     if (itemIndex == index) playableTrack else item
                 }
                 queueIndex = index
+                queueFeature = sourceFeature
                 playbackEngine.play(playableTrack, payload)
                 playbackState = playbackState.copy(
                     status = PlayerStatus.Loading,
@@ -765,6 +790,7 @@ class FuoPlayerController(
                     audioQuality = payload.audioQuality,
                 )
                 message = "${playableTrack.title} - ${playableTrack.artists}"
+                prefetchFeatureQueueIfNeeded()
             }.onFailure {
                 setError(it)
             }
@@ -772,9 +798,66 @@ class FuoPlayerController(
         }
     }
 
-    private fun playFirst(sourceQueue: List<MusicTrack>) {
+    private fun playFirst(sourceQueue: List<MusicTrack>, sourceFeature: ProviderFeature? = null) {
         val track = sourceQueue.firstOrNull() ?: return
-        play(track, sourceQueue, 0)
+        play(track, sourceQueue, 0, sourceFeature)
+    }
+
+    private fun prefetchFeatureQueueIfNeeded() {
+        val feature = queueFeature ?: return
+        if (queueIndex < 0) return
+        val remaining = queue.size - queueIndex
+        if (remaining <= DYNAMIC_QUEUE_PREFETCH_REMAINING) {
+            scope.launch {
+                appendFeatureQueue(feature)
+            }
+        }
+    }
+
+    private suspend fun appendFeatureQueue(feature: ProviderFeature): Int {
+        if (queueFeature != feature) return 0
+        val activeTask = appendQueueFeatureTask?.takeIf { it.isActive }
+        if (activeTask != null) return activeTask.await()
+        val task = scope.async { appendFeatureQueueOnce(feature) }
+        appendQueueFeatureTask = task
+        return try {
+            task.await()
+        } finally {
+            if (appendQueueFeatureTask == task) {
+                appendQueueFeatureTask = null
+            }
+        }
+    }
+
+    private suspend fun appendFeatureQueueOnce(feature: ProviderFeature): Int {
+        return try {
+            val tracks = withTimeout(30_000) {
+                providerRepository.loadMoreFeatureTracks(feature)
+            }
+            if (queueFeature != feature) return 0
+            val seenQueueIds = queue.mapTo(mutableSetOf()) { it.id }
+            val newTracks = tracks.filter { seenQueueIds.add(it.id) }
+            if (newTracks.isNotEmpty()) {
+                queue = queue + newTracks
+                playbackState = playbackState.copy(queue = queue, queueIndex = queueIndex)
+                if (selectedFeature == feature) {
+                    val seenSelectedIds = selectedFeatureTracks.mapTo(mutableSetOf()) { it.id }
+                    val newSelectedTracks = newTracks.filter { seenSelectedIds.add(it.id) }
+                    if (newSelectedTracks.isNotEmpty()) {
+                        selectedFeatureTracks = selectedFeatureTracks + newSelectedTracks
+                    }
+                }
+            }
+            newTracks.size
+        } catch (throwable: Throwable) {
+            if (queueFeature == feature) {
+                message = when (throwable) {
+                    is TimeoutCancellationException -> "加载后续歌曲超时，请检查网络后重试"
+                    else -> throwable.message ?: throwable::class.simpleName.orEmpty()
+                }
+            }
+            0
+        }
     }
 
     private fun MusicTrack.preferDownloaded(): MusicTrack {
@@ -810,7 +893,12 @@ class FuoPlayerController(
     }
 
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
-        return category == ProviderFeatureCategory.Recommend && id.endsWith("_daily_songs")
+        return category == ProviderFeatureCategory.Recommend &&
+            (id.endsWith("_daily_songs") || isDynamicQueueFeature())
+    }
+
+    private fun ProviderFeature.isDynamicQueueFeature(): Boolean {
+        return id.endsWith("_radio")
     }
 
     private fun applySettings(settings: AppSettings) {

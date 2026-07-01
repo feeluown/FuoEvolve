@@ -187,6 +187,7 @@ interface ProviderMusicRepository {
     suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)
     suspend fun features(): List<ProviderFeature>
     suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
+    suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> = loadFeature(feature).tracks
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>
 }
 
