@@ -34,6 +34,7 @@ class FuoPlayerController(
     private val downloadRepository: DownloadRepository,
     private val playbackEngine: PlaybackEngine,
     private val settingsStore: AppSettingsStore = NoOpAppSettingsStore,
+    private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository,
     private val scope: CoroutineScope,
 ) {
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
@@ -94,6 +95,12 @@ class FuoPlayerController(
         private set
     var playbackState by mutableStateOf(PlaybackState())
         private set
+    var cacheUsage by mutableStateOf(CacheUsage())
+        private set
+    var audioCacheLimitMb by mutableStateOf(DEFAULT_AUDIO_CACHE_LIMIT_MB)
+        private set
+    var imageCacheLimitMb by mutableStateOf(DEFAULT_IMAGE_CACHE_LIMIT_MB)
+        private set
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
             isSettingsOpen ||
@@ -107,8 +114,10 @@ class FuoPlayerController(
 
     init {
         scope.launch {
-            runCatching { settingsStore.load() }
-                .onSuccess { applySettings(it) }
+            val loadedSettings = runCatching { settingsStore.load() }
+            loadedSettings.onSuccess { applySettings(it) }
+            updateResourceCacheLimit()
+            resourceCacheRepository.refreshUsage()
             runCatching {
                 providerRepository.initialize()
                 refreshProviderCatalog()
@@ -124,6 +133,11 @@ class FuoPlayerController(
         scope.launch {
             downloadRepository.states.collect {
                 downloadStates = it
+            }
+        }
+        scope.launch {
+            resourceCacheRepository.usage.collect {
+                cacheUsage = it
             }
         }
         scope.launch {
@@ -223,6 +237,7 @@ class FuoPlayerController(
     fun openSettings() {
         isSettingsOpen = true
         refreshAllProviderAuthStates()
+        refreshResourceCacheUsage()
     }
 
     fun closeSettings() {
@@ -242,6 +257,47 @@ class FuoPlayerController(
     fun onProviderLoginModeChange(value: ProviderLoginMode) {
         providerLoginMode = value
         persistSettings()
+    }
+
+    fun onAudioCacheLimitChange(value: Int) {
+        audioCacheLimitMb = value
+        persistSettings()
+        scope.launch {
+            updateResourceCacheLimit()
+            resourceCacheRepository.refreshUsage()
+        }
+    }
+
+    fun onImageCacheLimitChange(value: Int) {
+        imageCacheLimitMb = value
+        persistSettings()
+        scope.launch {
+            updateResourceCacheLimit()
+            resourceCacheRepository.refreshUsage()
+        }
+    }
+
+    fun refreshResourceCacheUsage() {
+        scope.launch {
+            runCatching { resourceCacheRepository.refreshUsage() }
+                .onFailure { setError(it) }
+        }
+    }
+
+    fun clearResourceCache() {
+        scope.launch {
+            isLoading = true
+            message = "正在清空缓存"
+            runCatching {
+                resourceCacheRepository.clearAll()
+                resourceCacheRepository.refreshUsage()
+            }.onSuccess {
+                message = "缓存已清空"
+            }.onFailure {
+                setError(it)
+            }
+            isLoading = false
+        }
     }
 
     fun loginProviderWithCookies(providerId: String, cookiesJson: String) {
@@ -698,6 +754,8 @@ class FuoPlayerController(
         selectedSettingsProviderId = settings.selectedSettingsProviderId
         providerLoginMode = settings.providerLoginMode
         providerCookieInputs = settings.providerCookieInputs
+        audioCacheLimitMb = settings.audioCacheLimitMb
+        imageCacheLimitMb = settings.imageCacheLimitMb
     }
 
     private fun persistSettings() {
@@ -709,10 +767,21 @@ class FuoPlayerController(
             selectedSettingsProviderId = selectedSettingsProviderId,
             providerLoginMode = providerLoginMode,
             providerCookieInputs = providerCookieInputs,
+            audioCacheLimitMb = audioCacheLimitMb,
+            imageCacheLimitMb = imageCacheLimitMb,
         )
         scope.launch {
             settingsStore.save(settings)
         }
+    }
+
+    private suspend fun updateResourceCacheLimit() {
+        resourceCacheRepository.updateLimit(
+            CacheLimit(
+                audioMaxBytes = audioCacheLimitMb.mbToBytes(),
+                imageMaxBytes = imageCacheLimitMb.mbToBytes(),
+            ),
+        )
     }
 
     private fun setError(throwable: Throwable) {
@@ -725,4 +794,6 @@ class FuoPlayerController(
     }
 
     private fun Int.floorMod(size: Int): Int = ((this % size) + size) % size
+
+    private fun Int.mbToBytes(): Long = this.toLong() * 1024L * 1024L
 }

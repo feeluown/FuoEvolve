@@ -10,6 +10,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaSession
@@ -80,9 +81,17 @@ class FuoPlaybackService : MediaSessionService() {
             )
             .build()
 
+        val url = payload.getString("url")
         val headers = payload.optJSONObject("headers").toStringMap()
         val httpFactory = DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
-        val sourceFactory = DefaultDataSource.Factory(this, httpFactory)
+        val upstreamFactory = DefaultDataSource.Factory(this, httpFactory)
+        val sourceFactory = if (url.isRemoteUrl()) {
+            CacheDataSource.Factory()
+                .setCache(AndroidResourceCache.audioCache(this))
+                .setUpstreamDataSourceFactory(upstreamFactory)
+        } else {
+            upstreamFactory
+        }
         val source = ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(mediaItem)
 
         player?.run {
@@ -101,6 +110,11 @@ class FuoPlaybackService : MediaSessionService() {
             result[key] = optString(key)
         }
         return result
+    }
+
+    private fun String.isRemoteUrl(): Boolean {
+        val scheme = Uri.parse(this).scheme
+        return scheme == "http" || scheme == "https"
     }
 
     companion object {

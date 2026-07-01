@@ -72,11 +72,15 @@ private fun loadDirectCover(context: Context, imageUrl: String): ImageBitmap? {
     val uri = Uri.parse(imageUrl)
     val bitmap = when (uri.scheme) {
         "content", "file" -> context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
-        "http", "https" -> URL(imageUrl).openStream().use(BitmapFactory::decodeStream)
+        "http", "https" -> loadCachedRemoteCover(context, imageUrl)
         else -> null
     }
     return bitmap?.asImageBitmap()
 }
+
+private fun loadCachedRemoteCover(context: Context, imageUrl: String) =
+    AndroidResourceCache.cachedImage(context, imageUrl)?.let { BitmapFactory.decodeFile(it.path) }
+        ?: URL(imageUrl).openStream().use(BitmapFactory::decodeStream)
 
 private fun loadEmbeddedCover(context: Context, imageUrl: String): ImageBitmap? {
     val uri = Uri.parse(imageUrl)

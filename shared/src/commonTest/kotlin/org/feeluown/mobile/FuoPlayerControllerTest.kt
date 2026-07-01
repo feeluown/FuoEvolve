@@ -229,8 +229,11 @@ class FuoPlayerControllerTest {
                 localMusicViewMode = LocalMusicViewMode.Album,
                 providerLoginMode = ProviderLoginMode.Cookie,
                 providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"saved"}"""),
+                audioCacheLimitMb = 256,
+                imageCacheLimitMb = 64,
             ),
         )
+        val cache = FakeResourceCacheRepository()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
             val controller = FuoPlayerController(
@@ -239,6 +242,7 @@ class FuoPlayerControllerTest {
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
                 settingsStore = store,
+                resourceCacheRepository = cache,
                 scope = controllerScope,
             )
 
@@ -248,13 +252,54 @@ class FuoPlayerControllerTest {
             assertEquals(LocalMusicViewMode.Album, controller.localMusicViewMode)
             assertEquals(ProviderLoginMode.Cookie, controller.providerLoginMode)
             assertEquals("""{"MUSIC_U":"saved"}""", controller.cookieInputFor("netease"))
+            assertEquals(256, controller.audioCacheLimitMb)
+            assertEquals(64, controller.imageCacheLimitMb)
+            assertEquals(CacheLimit(256L * 1024L * 1024L, 64L * 1024L * 1024L), cache.lastLimit)
 
             controller.onProviderLoginModeChange(ProviderLoginMode.WebView)
             controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
+            controller.onAudioCacheLimitChange(1024)
+            controller.onImageCacheLimitChange(256)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
             assertEquals("""{"MUSIC_U":"draft"}""", store.saved.providerCookieInputs["netease"])
+            assertEquals(1024, store.saved.audioCacheLimitMb)
+            assertEquals(256, store.saved.imageCacheLimitMb)
+            assertEquals(CacheLimit(1024L * 1024L * 1024L, 256L * 1024L * 1024L), cache.lastLimit)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun clearResourceCacheRefreshesUsageAndMessage() = runTest {
+        val cache = FakeResourceCacheRepository(
+            CacheUsage(
+                audioBytes = 10L * 1024L * 1024L,
+                imageBytes = 2L * 1024L * 1024L,
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                resourceCacheRepository = cache,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            assertEquals(12L * 1024L * 1024L, controller.cacheUsage.totalBytes)
+
+            controller.clearResourceCache()
+            advanceUntilIdle()
+
+            assertEquals(1, cache.clearCount)
+            assertEquals(CacheUsage(), controller.cacheUsage)
+            assertEquals("缓存已清空", controller.message)
         } finally {
             controllerScope.cancel()
         }
@@ -384,6 +429,26 @@ class FuoPlayerControllerTest {
 
         override suspend fun save(settings: AppSettings) {
             saved = settings
+        }
+    }
+
+    private class FakeResourceCacheRepository(
+        initialUsage: CacheUsage = CacheUsage(),
+    ) : ResourceCacheRepository {
+        private val mutableUsage = MutableStateFlow(initialUsage)
+        override val usage = mutableUsage
+        var lastLimit: CacheLimit? = null
+        var clearCount = 0
+
+        override suspend fun refreshUsage() = Unit
+
+        override suspend fun clearAll() {
+            clearCount += 1
+            mutableUsage.value = CacheUsage()
+        }
+
+        override suspend fun updateLimit(limit: CacheLimit) {
+            lastLimit = limit
         }
     }
 }

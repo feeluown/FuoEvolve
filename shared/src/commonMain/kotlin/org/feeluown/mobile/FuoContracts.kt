@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 enum class TrackSourceType {
@@ -21,7 +22,12 @@ data class AppSettings(
     val selectedSettingsProviderId: String? = null,
     val providerLoginMode: ProviderLoginMode = ProviderLoginMode.WebView,
     val providerCookieInputs: Map<String, String> = emptyMap(),
+    val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
+    val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
 )
+
+const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
+const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
 
 data class MusicTrack(
     val id: String,
@@ -182,4 +188,35 @@ object NoOpAppSettingsStore : AppSettingsStore {
     override suspend fun load(): AppSettings = AppSettings()
 
     override suspend fun save(settings: AppSettings) = Unit
+}
+
+data class CacheUsage(
+    val audioBytes: Long = 0,
+    val imageBytes: Long = 0,
+) {
+    val totalBytes: Long
+        get() = audioBytes + imageBytes
+}
+
+data class CacheLimit(
+    val audioMaxBytes: Long,
+    val imageMaxBytes: Long,
+)
+
+interface ResourceCacheRepository {
+    val usage: StateFlow<CacheUsage>
+    suspend fun refreshUsage()
+    suspend fun clearAll()
+    suspend fun updateLimit(limit: CacheLimit)
+}
+
+object NoOpResourceCacheRepository : ResourceCacheRepository {
+    private val mutableUsage = MutableStateFlow(CacheUsage())
+    override val usage: StateFlow<CacheUsage> = mutableUsage
+
+    override suspend fun refreshUsage() = Unit
+
+    override suspend fun clearAll() = Unit
+
+    override suspend fun updateLimit(limit: CacheLimit) = Unit
 }

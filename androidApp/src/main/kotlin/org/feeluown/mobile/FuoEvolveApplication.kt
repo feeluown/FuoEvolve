@@ -29,6 +29,10 @@ class FuoEvolveApplication : PyApplication() {
         AndroidAppSettingsStore(applicationContext)
     }
 
+    private val resourceCacheRepository: AndroidResourceCacheRepository by lazy {
+        AndroidResourceCacheRepository(applicationContext)
+    }
+
     val controller: FuoPlayerController by lazy {
         FuoPlayerController(
             providerRepository = providerRepository,
@@ -36,6 +40,7 @@ class FuoEvolveApplication : PyApplication() {
             downloadRepository = downloadRepository,
             playbackEngine = playbackEngine,
             settingsStore = settingsStore,
+            resourceCacheRepository = resourceCacheRepository,
             scope = appScope,
         )
     }

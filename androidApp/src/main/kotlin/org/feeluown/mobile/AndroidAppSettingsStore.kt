@@ -17,6 +17,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             selectedSettingsProviderId = preferences.getString(KEY_SELECTED_SETTINGS_PROVIDER_ID, null),
             providerLoginMode = enumValue(KEY_PROVIDER_LOGIN_MODE, ProviderLoginMode.WebView),
             providerCookieInputs = readCookieInputs(),
+            audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
+            imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
         )
     }
 
@@ -30,6 +32,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putNullableString(KEY_SELECTED_SETTINGS_PROVIDER_ID, settings.selectedSettingsProviderId)
                 .putString(KEY_PROVIDER_LOGIN_MODE, settings.providerLoginMode.name)
                 .putString(KEY_PROVIDER_COOKIE_INPUTS, cookieInputsJson(settings.providerCookieInputs))
+                .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
+                .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
                 .apply()
         }
     }
@@ -79,5 +83,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_SELECTED_SETTINGS_PROVIDER_ID = "selected_settings_provider_id"
         private const val KEY_PROVIDER_LOGIN_MODE = "provider_login_mode"
         private const val KEY_PROVIDER_COOKIE_INPUTS = "provider_cookie_inputs"
+        private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
+        private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
     }
 }

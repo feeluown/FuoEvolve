@@ -898,6 +898,7 @@ private fun SettingsScreen(
                     )
                 }
             }
+            CacheSettingsPanel(controller)
         }
     }
 }
@@ -985,6 +986,85 @@ private fun ProviderLoginPanel(
                         Text(if (controller.isLoading) "登录中" else "登录")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CacheSettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "缓存",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "音乐 ${formatBytes(controller.cacheUsage.audioBytes)} · 图片 ${formatBytes(controller.cacheUsage.imageBytes)} · 总计 ${formatBytes(controller.cacheUsage.totalBytes)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            CacheLimitRow(
+                title = "音乐缓存",
+                selected = controller.audioCacheLimitMb,
+                options = listOf(128, 256, 512, 1024, 2048),
+                onSelect = controller::onAudioCacheLimitChange,
+            )
+            CacheLimitRow(
+                title = "图片缓存",
+                selected = controller.imageCacheLimitMb,
+                options = listOf(32, 64, 128, 256, 512),
+                onSelect = controller::onImageCacheLimitChange,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = controller::refreshResourceCacheUsage) {
+                    Icon(Icons.Filled.Refresh, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("刷新")
+                }
+                Button(
+                    enabled = !controller.isLoading,
+                    onClick = controller::clearResourceCache,
+                ) {
+                    Icon(Icons.Filled.Delete, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("清空缓存")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CacheLimitRow(
+    title: String,
+    selected: Int,
+    options: List<Int>,
+    onSelect: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "$title：${formatCacheLimit(selected)}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            options.forEach { value ->
+                FilterChip(
+                    selected = selected == value,
+                    onClick = { onSelect(value) },
+                    label = { Text(formatCacheLimit(value)) },
+                )
             }
         }
     }
@@ -1705,6 +1785,23 @@ private fun formatPlayCount(value: Long): String {
         value >= 100_000_000 -> "${value / 100_000_000} 亿次播放"
         value >= 10_000 -> "${value / 10_000} 万次播放"
         else -> "$value 次播放"
+    }
+}
+
+private fun formatBytes(value: Long): String {
+    return when {
+        value >= 1024L * 1024L * 1024L -> "${value / (1024L * 1024L * 1024L)} GB"
+        value >= 1024L * 1024L -> "${value / (1024L * 1024L)} MB"
+        value >= 1024L -> "${value / 1024L} KB"
+        else -> "$value B"
+    }
+}
+
+private fun formatCacheLimit(value: Int): String {
+    return if (value >= 1024 && value % 1024 == 0) {
+        "${value / 1024}GB"
+    } else {
+        "${value}MB"
     }
 }
 
