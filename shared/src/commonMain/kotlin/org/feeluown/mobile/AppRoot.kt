@@ -1,5 +1,17 @@
 package org.feeluown.mobile
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +33,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -66,8 +80,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +92,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,107 +105,217 @@ fun AppRoot(
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     MaterialTheme {
-        if (controller.isFullPlayerOpen) {
-            FullPlayer(controller)
-            return@MaterialTheme
+        val destination = appDestination(controller)
+        val currentFeature = controller.selectedFeature
+        val currentPlaylist = controller.selectedPlaylist
+        var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
+        var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
+
+        LaunchedEffect(currentFeature) {
+            if (currentFeature != null) {
+                lastFeature = currentFeature
+            }
         }
-        if (controller.isSettingsOpen) {
-            SettingsScreen(controller, onOpenProviderWebLogin, onLogoutProvider)
-            return@MaterialTheme
-        }
-        if (controller.isSearchOpen) {
-            SearchScreen(controller)
-            return@MaterialTheme
-        }
-        if (controller.selectedFeature != null) {
-            ProviderFeatureScreen(controller)
-            return@MaterialTheme
-        }
-        if (controller.selectedPlaylist != null) {
-            ProviderPlaylistScreen(controller)
-            return@MaterialTheme
+        LaunchedEffect(currentPlaylist) {
+            if (currentPlaylist != null) {
+                lastPlaylist = currentPlaylist
+            }
         }
 
-        Scaffold(
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text("FeelUOwn") },
-                    navigationIcon = {
-                        IconButton(onClick = controller::openSettings) {
-                            Icon(Icons.Filled.Settings, contentDescription = "设置")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = controller::openSearch) {
-                            Icon(Icons.Filled.Search, contentDescription = "搜索")
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
-                )
-            },
-            bottomBar = {
-                if (controller.playbackState.currentTrack != null) {
-                    MiniPlayer(controller)
+        Box(modifier = Modifier.fillMaxSize()) {
+            AnimatedContent(
+                targetState = destination,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                    (slideInHorizontally(animationSpec = tween(220)) { it / 5 * direction } + fadeIn(tween(180)))
+                        .togetherWith(
+                            slideOutHorizontally(animationSpec = tween(180)) { -it / 6 * direction } +
+                                fadeOut(tween(160)),
+                        )
+                        .using(SizeTransform(clip = false))
+                },
+            ) { target ->
+                when (target) {
+                    AppDestination.Home -> HomeScreen(
+                        controller = controller,
+                        hasAudioPermission = hasAudioPermission,
+                        onRequestAudioPermission = onRequestAudioPermission,
+                    )
+                    AppDestination.Settings -> SettingsScreen(controller, onOpenProviderWebLogin, onLogoutProvider)
+                    AppDestination.Search -> SearchScreen(controller)
+                    AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
+                    AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
                 }
-            },
-        ) { paddingValues ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            }
+            AnimatedVisibility(
+                visible = controller.isFullPlayerOpen,
+                modifier = Modifier.fillMaxSize(),
+                enter = slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(180)),
+                exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
             ) {
-                if (!hasAudioPermission) {
-                    PermissionPanel(onRequestAudioPermission)
-                }
-                if (controller.isLoading) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                Text(
-                    text = controller.message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                HomeSectionTabs(controller)
-                when (controller.homeSection) {
-                    HomeSection.Recommend -> ProviderContentHomeSection(
-                        controller = controller,
-                        section = HomeSection.Recommend,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    )
-                    HomeSection.Music -> ProviderContentHomeSection(
-                        controller = controller,
-                        section = HomeSection.Music,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    )
-                    HomeSection.Local -> LocalMusicSection(
-                        controller = controller,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    )
-                }
+                FullPlayer(controller)
             }
         }
     }
 }
 
+private enum class AppDestination {
+    Home,
+    Feature,
+    Playlist,
+    Search,
+    Settings,
+}
+
+private fun appDestination(controller: FuoPlayerController): AppDestination {
+    return when {
+        controller.isSettingsOpen -> AppDestination.Settings
+        controller.isSearchOpen -> AppDestination.Search
+        controller.selectedFeature != null -> AppDestination.Feature
+        controller.selectedPlaylist != null -> AppDestination.Playlist
+        else -> AppDestination.Home
+    }
+}
+
 @Composable
-private fun HomeSectionTabs(controller: FuoPlayerController) {
+private fun LoadingIndicator(visible: Boolean) {
+    AnimatedVisibility(visible = visible) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeScreen(
+    controller: FuoPlayerController,
+    hasAudioPermission: Boolean,
+    onRequestAudioPermission: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("FeelUOwn") },
+                navigationIcon = {
+                    IconButton(onClick = controller::openSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "设置")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = controller::openSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "搜索")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
+            )
+        },
+        bottomBar = {
+            if (controller.playbackState.currentTrack != null) {
+                MiniPlayer(controller)
+            }
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (!hasAudioPermission) {
+                PermissionPanel(onRequestAudioPermission)
+            }
+            LoadingIndicator(controller.isLoading)
+            Text(
+                text = controller.message,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            HomeSectionPager(controller, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier) {
     val sections = listOf(
         HomeSection.Recommend to "推荐",
         HomeSection.Music to "探索",
         HomeSection.Local to "本地音乐",
     )
     val selectedIndex = sections.indexOfFirst { it.first == controller.homeSection }.coerceAtLeast(0)
+    val pagerState = rememberPagerState(
+        initialPage = selectedIndex,
+        pageCount = { sections.size },
+    )
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(controller.homeSection) {
+        val page = sections.indexOfFirst { it.first == controller.homeSection }
+        if (page >= 0 && page != pagerState.currentPage) {
+            pagerState.animateScrollToPage(page)
+        }
+    }
+
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page ->
+                val section = sections.getOrNull(page)?.first
+                if (section != null && section != controller.homeSection) {
+                    controller.onHomeSectionChange(section)
+                }
+            }
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HomeSectionTabs(
+            sections = sections,
+            selectedIndex = selectedIndex,
+            onClick = { index, section ->
+                controller.onHomeSectionChange(section)
+                scope.launch { pagerState.animateScrollToPage(index) }
+            },
+        )
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            pageSpacing = 16.dp,
+        ) { page ->
+            when (sections[page].first) {
+                HomeSection.Recommend -> ProviderContentHomeSection(
+                    controller = controller,
+                    section = HomeSection.Recommend,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                HomeSection.Music -> ProviderContentHomeSection(
+                    controller = controller,
+                    section = HomeSection.Music,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                HomeSection.Local -> LocalMusicSection(
+                    controller = controller,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionTabs(
+    sections: List<Pair<HomeSection, String>>,
+    selectedIndex: Int,
+    onClick: (Int, HomeSection) -> Unit,
+) {
     TabRow(
         selectedTabIndex = selectedIndex,
         modifier = Modifier.fillMaxWidth(),
@@ -196,8 +324,8 @@ private fun HomeSectionTabs(controller: FuoPlayerController) {
     ) {
         sections.forEachIndexed { index, (section, label) ->
             Tab(
-                selected = controller.homeSection == section,
-                onClick = { controller.onHomeSectionChange(section) },
+                selected = index == selectedIndex,
+                onClick = { onClick(index, section) },
                 text = {
                     Text(
                         text = label,
@@ -1274,8 +1402,8 @@ private fun PermissionPanel(onRequestAudioPermission: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProviderFeatureScreen(controller: FuoPlayerController) {
-    val feature = controller.selectedFeature ?: return
+private fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeature?) {
+    feature ?: return
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -1306,9 +1434,7 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (controller.isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            LoadingIndicator(controller.isLoading)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1366,8 +1492,8 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProviderPlaylistScreen(controller: FuoPlayerController) {
-    val playlist = controller.selectedPlaylist ?: return
+private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPlaylist?) {
+    playlist ?: return
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -1398,9 +1524,7 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (controller.isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            LoadingIndicator(controller.isLoading)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1526,9 +1650,7 @@ private fun SearchScreen(controller: FuoPlayerController) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (controller.isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            LoadingIndicator(controller.isLoading)
             Text(
                 text = controller.message,
                 style = MaterialTheme.typography.bodyMedium,
@@ -1691,6 +1813,7 @@ private fun MiniPlayer(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .animateContentSize(animationSpec = tween(220))
             .clickable(onClick = controller::openFullPlayer),
         tonalElevation = 3.dp,
     ) {
@@ -1714,19 +1837,12 @@ private fun MiniPlayer(controller: FuoPlayerController) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            RoundControlButton(
-                imageVector = Icons.Filled.SkipPrevious,
-                contentDescription = "上一首",
-                onClick = controller::previous,
-            )
-            PlayPauseButton(
-                isPlaying = state.status == PlayerStatus.Playing,
-                onClick = controller::toggle,
-            )
-            RoundControlButton(
-                imageVector = Icons.Filled.SkipNext,
-                contentDescription = "下一首",
-                onClick = controller::next,
+            PlayerControls(
+                state = state,
+                onPrevious = controller::previous,
+                onToggle = controller::toggle,
+                onNext = controller::next,
+                compact = true,
             )
         }
     }
@@ -1774,19 +1890,27 @@ private fun FullPlayer(controller: FuoPlayerController) {
                         )
                     }
                 }
-                when (visualTab) {
-                    PlayerVisualTab.Cover -> CoverBox(
-                        track = currentTrack ?: emptyDisplayTrack(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                    )
-                    PlayerVisualTab.Lyrics -> LyricsPanel(
-                        state = state,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                    )
+                AnimatedContent(
+                    targetState = visualTab,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    transitionSpec = {
+                        (fadeIn(tween(160)) + slideInHorizontally(tween(180)) { it / 8 })
+                            .togetherWith(fadeOut(tween(120)) + slideOutHorizontally(tween(160)) { -it / 8 })
+                            .using(SizeTransform(clip = false))
+                    },
+                ) { tab ->
+                    when (tab) {
+                        PlayerVisualTab.Cover -> CoverBox(
+                            track = currentTrack ?: emptyDisplayTrack(),
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        PlayerVisualTab.Lyrics -> LyricsPanel(
+                            state = state,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
                 PlayerTitleRow(currentTrack, state.audioQuality)
                 Text(
@@ -1797,33 +1921,15 @@ private fun FullPlayer(controller: FuoPlayerController) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 ProgressBlock(state, controller::seekTo)
-                Row(
+                PlayerControls(
+                    state = state,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RoundControlButton(
-                        imageVector = Icons.Filled.SkipPrevious,
-                        contentDescription = "上一首",
-                        onClick = controller::previous,
-                    )
-                    PlayPauseButton(
-                        isPlaying = state.status == PlayerStatus.Playing,
-                        onClick = controller::toggle,
-                        size = 64.dp,
-                        iconSize = 34.dp,
-                        prominent = true,
-                    )
-                    RoundControlButton(
-                        imageVector = Icons.Filled.SkipNext,
-                        contentDescription = "下一首",
-                        onClick = controller::next,
-                    )
-                }
+                    onPrevious = controller::previous,
+                    onToggle = controller::toggle,
+                    onNext = controller::next,
+                )
             }
-            if (controller.isQueueOpen) {
-                QueueBottomSheet(controller)
-            }
+            QueueBottomSheet(controller)
         }
     }
 }
@@ -1886,49 +1992,71 @@ private fun InfoTag(text: String) {
 @Composable
 private fun QueueBottomSheet(controller: FuoPlayerController) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-            .clickable(onClick = controller::toggleQueue),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 460.dp)
-                .navigationBarsPadding()
-                .clickable { },
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+        AnimatedVisibility(
+            visible = controller.isQueueOpen,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(140)),
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+                    .clickable(onClick = controller::toggleQueue),
+            )
+        }
+        AnimatedVisibility(
+            visible = controller.isQueueOpen,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically(animationSpec = tween(220)) { it } + fadeIn(tween(160)),
+            exit = slideOutVertically(animationSpec = tween(180)) { it } + fadeOut(tween(140)),
+        ) {
+            QueueBottomSheetContent(controller)
+        }
+    }
+}
+
+@Composable
+private fun QueueBottomSheetContent(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 460.dp)
+            .navigationBarsPadding()
+            .clickable { },
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 8.dp,
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "播放队列",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "${controller.playbackState.queue.size} 首",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                QueueList(
-                    controller = controller,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 380.dp),
+                Text(
+                    text = "播放队列",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${controller.playbackState.queue.size} 首",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            QueueList(
+                controller = controller,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 380.dp),
+            )
         }
     }
 }
@@ -1941,6 +2069,44 @@ private fun emptyDisplayTrack() = MusicTrack(
     source = "",
     sourceType = TrackSourceType.LocalMediaStore,
 )
+
+@Composable
+private fun PlayerControls(
+    state: PlaybackState,
+    onPrevious: () -> Unit,
+    onToggle: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    Row(
+        modifier = modifier.animateContentSize(animationSpec = tween(220)),
+        horizontalArrangement = if (compact) Arrangement.spacedBy(8.dp) else Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RoundControlButton(
+            imageVector = Icons.Filled.SkipPrevious,
+            contentDescription = "上一首",
+            onClick = onPrevious,
+            size = if (compact) 44.dp else 48.dp,
+            iconSize = if (compact) 24.dp else 26.dp,
+        )
+        PlayPauseButton(
+            isPlaying = state.status == PlayerStatus.Playing,
+            onClick = onToggle,
+            size = if (compact) 48.dp else 64.dp,
+            iconSize = if (compact) 26.dp else 34.dp,
+            prominent = !compact,
+        )
+        RoundControlButton(
+            imageVector = Icons.Filled.SkipNext,
+            contentDescription = "下一首",
+            onClick = onNext,
+            size = if (compact) 44.dp else 48.dp,
+            iconSize = if (compact) 24.dp else 26.dp,
+        )
+    }
+}
 
 @Composable
 private fun RoundControlButton(
