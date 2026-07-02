@@ -165,6 +165,9 @@ class AndroidNativeAudioEngine(
             .put("local_uri", track.localUri ?: "")
             .put("provider_id", track.providerId ?: "")
             .put("provider_name", track.providerName ?: "")
+            .put("smart_replacement", track.isSmartReplacement)
+            .put("original_title", track.originalTitle ?: "")
+            .put("original_provider_name", track.originalProviderName ?: "")
             .put("url", url)
             .put("title", title)
             .put("artists", artists)
@@ -196,6 +199,9 @@ class AndroidNativeAudioEngine(
             lyrics = mediaMetadata.extras?.getString("lyrics")?.takeIf { it.isNotBlank() },
             providerId = mediaMetadata.extras?.getString("provider_id")?.takeIf { it.isNotBlank() },
             providerName = mediaMetadata.extras?.getString("provider_name")?.takeIf { it.isNotBlank() },
+            isSmartReplacement = mediaMetadata.extras?.getBoolean("smart_replacement") ?: false,
+            originalTitle = mediaMetadata.extras?.getString("original_title")?.takeIf { it.isNotBlank() },
+            originalProviderName = mediaMetadata.extras?.getString("original_provider_name")?.takeIf { it.isNotBlank() },
         )
     }
 }

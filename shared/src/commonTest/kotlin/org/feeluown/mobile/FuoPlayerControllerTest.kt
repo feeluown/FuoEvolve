@@ -46,6 +46,53 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun smartReplacementPayloadUpdatesCurrentPlaybackTrack() = runTest {
+        val origin = providerTrack("provider:1", "First")
+        val provider = FakeProviderRepository(
+            listOf(origin),
+            resolveHandler = { track, _ ->
+                PlaybackPayload(
+                    url = "https://example.com/replacement.mp3",
+                    title = "Replacement",
+                    artists = "Other Artist",
+                    album = "Other Album",
+                    source = "qqmusic",
+                    providerName = "QQ 音乐",
+                    isSmartReplacement = true,
+                    originalTitle = track.title,
+                    originalProviderName = track.providerName,
+                )
+            },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("first")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            assertEquals("Replacement", engine.lastTrack?.title)
+            assertEquals("QQ 音乐", engine.lastTrack?.providerName)
+            assertEquals(true, engine.lastTrack?.isSmartReplacement)
+            assertEquals("First", engine.lastTrack?.originalTitle)
+            assertEquals("网易云音乐", engine.lastTrack?.originalProviderName)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun nextUsesKotlinQueueOrder() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -709,6 +756,14 @@ class FuoPlayerControllerTest {
                 localMusicMinDurationSeconds = 30,
                 providerLoginMode = ProviderLoginMode.Cookie,
                 providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"saved"}"""),
+                providerHeaderInputs = mapOf(
+                    "ytmusic" to ProviderHeaderInput(
+                        authorization = "SAPISIDHASH saved",
+                        cookie = "SID=saved",
+                    ),
+                ),
+                enabledProviderIds = setOf("netease", "ytmusic"),
+                providerOrderIds = listOf("ytmusic", "netease", "qqmusic", "bilibili"),
                 audioCacheLimitMb = 256,
                 imageCacheLimitMb = 64,
                 wifiAudioQualityPolicy = AudioQualityPolicy.Highest,
@@ -743,6 +798,12 @@ class FuoPlayerControllerTest {
             assertEquals(LocalMusicScanSettings(setOf("Podcasts/"), 30), local.lastSettings)
             assertEquals(ProviderLoginMode.Cookie, controller.providerLoginMode)
             assertEquals("""{"MUSIC_U":"saved"}""", controller.cookieInputFor("netease"))
+            assertEquals(setOf("netease", "ytmusic"), controller.enabledProviderIds)
+            assertEquals(listOf("ytmusic", "netease"), controller.providers.map { it.providerId })
+            assertEquals(
+                ProviderHeaderInput("SAPISIDHASH saved", "SID=saved"),
+                controller.providerHeaderInputFor("ytmusic"),
+            )
             assertEquals(256, controller.audioCacheLimitMb)
             assertEquals(64, controller.imageCacheLimitMb)
             assertEquals(CacheLimit(256L * 1024L * 1024L, 64L * 1024L * 1024L), cache.lastLimit)
@@ -754,6 +815,8 @@ class FuoPlayerControllerTest {
 
             controller.onProviderLoginModeChange(ProviderLoginMode.WebView)
             controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
+            controller.onProviderHeaderAuthorizationChange("ytmusic", "SAPISIDHASH draft")
+            controller.onProviderHeaderCookieChange("ytmusic", "SID=draft")
             controller.onMineSectionChange(MineSection.Favorites)
             controller.onLocalMusicDirectoryEnabledChange("Podcasts/", enabled = true)
             controller.onLocalMusicMinDurationChange(60)
@@ -766,6 +829,12 @@ class FuoPlayerControllerTest {
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
             assertEquals("""{"MUSIC_U":"draft"}""", store.saved.providerCookieInputs["netease"])
+            assertEquals(
+                ProviderHeaderInput("SAPISIDHASH draft", "SID=draft"),
+                store.saved.providerHeaderInputs["ytmusic"],
+            )
+            assertEquals(setOf("netease", "ytmusic"), store.saved.enabledProviderIds)
+            assertEquals(listOf("ytmusic", "netease", "qqmusic", "bilibili"), store.saved.providerOrderIds)
             assertEquals(MineSection.Favorites, store.saved.mineSection)
             assertEquals(emptySet(), store.saved.excludedLocalMusicDirectoryIds)
             assertEquals(60, store.saved.localMusicMinDurationSeconds)
@@ -778,6 +847,107 @@ class FuoPlayerControllerTest {
             assertEquals(UnavailablePlaybackPolicy.SmartReplace, store.saved.unavailablePlaybackPolicy)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun providerSwitchesDefaultToNeteaseAndPersistChanges() = runTest {
+        val store = FakeSettingsStore()
+        val provider = FakeProviderRepository(emptyList())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = store,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(setOf("netease"), controller.enabledProviderIds)
+            assertEquals(listOf("netease"), controller.providers.map { it.providerId })
+            assertEquals(listOf("netease", "qqmusic", "bilibili", "ytmusic"), controller.availableProviders.map { it.providerId })
+            assertEquals(setOf("netease"), provider.lastEnabledProviderIds)
+
+            controller.onProviderEnabledChange("ytmusic", enabled = true)
+            advanceUntilIdle()
+
+            assertEquals(setOf("netease", "ytmusic"), controller.enabledProviderIds)
+            assertEquals(listOf("netease", "ytmusic"), controller.providers.map { it.providerId })
+            assertEquals(setOf("netease", "ytmusic"), store.saved.enabledProviderIds)
+            assertEquals(setOf("netease", "ytmusic"), provider.lastEnabledProviderIds)
+
+            controller.moveProvider("ytmusic", -3)
+            advanceUntilIdle()
+
+            assertEquals(listOf("ytmusic", "netease"), controller.providers.map { it.providerId })
+            assertEquals(listOf("ytmusic", "netease", "qqmusic", "bilibili"), store.saved.providerOrderIds)
+
+            controller.onSearchProviderChange("ytmusic")
+            controller.onProviderEnabledChange("ytmusic", enabled = false)
+            advanceUntilIdle()
+
+            assertEquals(setOf("netease"), controller.enabledProviderIds)
+            assertEquals(listOf("netease"), controller.providers.map { it.providerId })
+            assertEquals(SearchScope.All, controller.searchScope)
+            assertEquals(null, controller.selectedSearchProviderId)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun providerSectionsFollowConfiguredOrder() = runTest {
+        val neteaseFeature = ProviderFeature(
+            id = "netease_recommend",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "网易推荐",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = false,
+        )
+        val ytmusicFeature = ProviderFeature(
+            id = "ytmusic_recommend",
+            providerId = "ytmusic",
+            providerName = "YouTube Music",
+            title = "YT 推荐",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = false,
+        )
+        val store = FakeSettingsStore(
+            AppSettings(
+                enabledProviderIds = setOf("netease", "ytmusic"),
+                providerOrderIds = listOf("ytmusic", "netease", "qqmusic", "bilibili"),
+            ),
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(neteaseFeature, ytmusicFeature),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = store,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf("ytmusic_recommend", "netease_recommend"),
+                controller.recommendSections.map { it.feature.id },
+            )
         } finally {
             controllerScope.cancel()
         }
@@ -879,11 +1049,23 @@ class FuoPlayerControllerTest {
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
         private val resolveFailures: Set<String> = emptySet(),
         private val resolveHandler: (suspend (MusicTrack, UnavailablePlaybackPolicy) -> PlaybackPayload)? = null,
+        private val availableProviderInfos: List<ProviderInfo> = listOf(
+            ProviderInfo(providerId = "netease", providerName = "网易云音乐"),
+            ProviderInfo(providerId = "qqmusic", providerName = "QQ 音乐"),
+            ProviderInfo(providerId = "bilibili", providerName = "哔哩哔哩"),
+            ProviderInfo(
+                providerId = "ytmusic",
+                providerName = "YouTube Music",
+                supportedLoginModes = setOf(ProviderLoginMode.Headers),
+            ),
+        ),
         initialIsLoggedIn: Boolean = true,
     ) : ProviderMusicRepository {
         private var isLoggedIn = initialIsLoggedIn
+        private var enabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS
         var resolveCount = 0
         var logoutCount = 0
+        var lastEnabledProviderIds: Set<String>? = null
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
         val loadedFeatureIds = mutableListOf<String>()
@@ -892,9 +1074,15 @@ class FuoPlayerControllerTest {
 
         override suspend fun initialize() = Unit
 
-        override suspend fun providers(): List<ProviderInfo> = listOf(
-            ProviderInfo(providerId = "netease", providerName = "网易云音乐"),
-        )
+        override suspend fun availableProviders(): List<ProviderInfo> = availableProviderInfos
+
+        override suspend fun updateEnabledProviders(providerIds: Set<String>) {
+            enabledProviderIds = providerIds
+            lastEnabledProviderIds = providerIds
+        }
+
+        override suspend fun providers(): List<ProviderInfo> =
+            availableProviderInfos.filter { it.providerId in enabledProviderIds }
 
         override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = tracks
 
@@ -924,6 +1112,11 @@ class FuoPlayerControllerTest {
             )
 
         override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
+            isLoggedIn = true
+            return authState(providerId)
+        }
+
+        override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
             isLoggedIn = true
             return authState(providerId)
         }

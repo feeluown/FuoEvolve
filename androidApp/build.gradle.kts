@@ -45,15 +45,36 @@ chaquopy {
         version = "3.12"
         configuredBuildPython?.let { buildPython(it) }
         pip {
+            options("--no-deps")
             install(feelUOwnSource)
             install("https://files.pythonhosted.org/packages/1c/70/cf356c9096d401ad63acbe686b51f1d50d491e9afb478e704c574ab17606/fuo_netease-1.0.8.tar.gz")
             install("fuo-qqmusic==1.0.16")
+            install("feeluown-bilibili==0.5.5")
+            install("fuo-ytmusic==0.4.18")
+            install("attrs")
             install("beautifulsoup4")
+            install("babel")
+            install("cachetools")
+            install("certifi")
+            install("charset-normalizer")
+            install("fluent-runtime==0.4.0")
+            install("fluent.syntax")
+            install("idna")
+            install("janus")
             install("marshmallow==3.26.2")
             install("mutagen")
+            install("packaging")
             install("pydantic==1.10.26")
             install("pycryptodome==3.21.0")
+            install("pytz")
+            install("qasync")
             install("requests")
+            install("soupsieve")
+            install("tomlkit")
+            install("typing-extensions")
+            install("urllib3")
+            install("yt-dlp")
+            install("ytmusicapi")
         }
     }
 }

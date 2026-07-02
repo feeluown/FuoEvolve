@@ -17,23 +17,33 @@ class AndroidFuoCoreBridge(
     @Volatile
     private var bridge: PyObject? = null
     @Volatile
+    private var enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS
+    @Volatile
     private var wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY
     @Volatile
     private var cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY
 
     override suspend fun initialize() {
+        updateEnabledProviders(enabledProviderIds)
+    }
+
+    override suspend fun availableProviders(): List<ProviderInfo> = AVAILABLE_PROVIDERS
+
+    override suspend fun updateEnabledProviders(providerIds: Set<String>) {
+        val nextProviderIds = providerIds
+            .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
+            .intersect(AVAILABLE_PROVIDERS.map { it.providerId }.toSet())
+            .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
         withContext(Dispatchers.IO) {
-            if (bridge != null) return@withContext
             synchronized(this@AndroidFuoCoreBridge) {
-                if (bridge != null) return@synchronized
+                if (bridge != null && enabledProviderIds == nextProviderIds) return@synchronized
                 try {
-                    Log.d(TAG, "initialize start")
-                    val providers = context.assets.open("providers.json")
-                        .bufferedReader()
-                        .use { it.readText() }
-                    bridge = Python.getInstance()
+                    Log.d(TAG, "initialize start providers=$nextProviderIds")
+                    val nextBridge = Python.getInstance()
                         .getModule("fuo_mobile.bridge")
-                        .callAttr("create_bridge", providers)
+                        .callAttr("create_bridge", enabledProvidersJson(nextProviderIds))
+                    bridge = nextBridge
+                    enabledProviderIds = nextProviderIds
                     Log.d(TAG, "initialize done")
                 } catch (throwable: Throwable) {
                     Log.e(TAG, "initialize failed", throwable)
@@ -90,7 +100,7 @@ class AndroidFuoCoreBridge(
                     )
                     .toString()
                 JSONObject(raw).toPayload(track).also {
-                    Log.d(TAG, "resolve done title=${it.title}")
+                    Log.d(TAG, it.resolveLog(trackId))
                 }
             } catch (throwable: Throwable) {
                 Log.e(TAG, "resolve failed trackId=$trackId", throwable)
@@ -116,6 +126,16 @@ class AndroidFuoCoreBridge(
         initialize()
         return withContext(Dispatchers.IO) {
             val raw = requireNotNull(bridge).callAttr("provider_login_with_cookies", providerId, cookiesJson).toString()
+            JSONObject(raw).toAuthState(providerId)
+        }
+    }
+
+    override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge)
+                .callAttr("provider_login_with_headers", providerId, authorization, cookie)
+                .toString()
             JSONObject(raw).toAuthState(providerId)
         }
     }
@@ -196,6 +216,7 @@ class AndroidFuoCoreBridge(
             providerId = providerId,
             providerName = optString("provider_name").ifBlank { providerId },
             loginConfig = optJSONObject("login_config")?.toLoginConfig(),
+            supportedLoginModes = optJSONArray("login_modes").toLoginModes(),
         )
     }
 
@@ -275,18 +296,40 @@ class AndroidFuoCoreBridge(
         )
     }
 
-    private fun JSONObject.toPayload(track: MusicTrack): PlaybackPayload = PlaybackPayload(
-        url = getString("url"),
-        title = optString("title").ifBlank { track.title },
-        artists = optString("artists").ifBlank { track.artists },
-        album = optString("album").ifBlank { track.album },
-        source = optString("source").ifBlank { track.source },
-        headers = optJSONObject("headers").toStringMap(),
-        coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
-        durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
-        lyrics = optString("lyrics").takeIf { it.isNotBlank() },
-        audioQuality = optString("audio_quality").takeIf { it.isNotBlank() },
-    )
+    private fun JSONObject.toPayload(track: MusicTrack): PlaybackPayload {
+        val smartReplacement = optBoolean("smart_replacement", false)
+        return PlaybackPayload(
+            url = getString("url"),
+            title = optString("title").ifBlank { track.title },
+            artists = optString("artists").ifBlank { track.artists },
+            album = optString("album").ifBlank { track.album },
+            source = optString("source").ifBlank { track.source },
+            headers = optJSONObject("headers").toStringMap(),
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
+            durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
+            lyrics = optString("lyrics").takeIf { it.isNotBlank() },
+            audioQuality = optString("audio_quality").takeIf { it.isNotBlank() },
+            providerName = optString("replacement_provider_name")
+                .takeIf { smartReplacement && it.isNotBlank() }
+                ?: optString("provider_name").takeIf { it.isNotBlank() }
+                ?: track.providerName,
+            isSmartReplacement = smartReplacement,
+            originalTitle = optString("original_title").takeIf { smartReplacement && it.isNotBlank() },
+            originalProviderName = optString("original_provider_name").takeIf { smartReplacement && it.isNotBlank() },
+            replacementStrategy = optString("standby_strategy").takeIf { smartReplacement && it.isNotBlank() },
+            replacementScore = optDouble("standby_score").takeIf { smartReplacement && has("standby_score") },
+        )
+    }
+
+    private fun PlaybackPayload.resolveLog(trackId: String): String {
+        if (!isSmartReplacement) {
+            return "resolve done trackId=$trackId title=$title source=$source quality=${audioQuality.orEmpty()}"
+        }
+        return "resolve done smartReplacement trackId=$trackId strategy=${replacementStrategy.orEmpty()} " +
+            "score=${replacementScore?.toString().orEmpty()} " +
+            "original=${originalProviderName.orEmpty()}:${originalTitle.orEmpty()} " +
+            "replacement=${providerName.orEmpty()}:$title source=$source quality=${audioQuality.orEmpty()}"
+    }
 
     private fun JSONObject.toAuthState(providerId: String): ProviderAuthState = ProviderAuthState(
         providerId = optString("provider_id").ifBlank { providerId },
@@ -314,6 +357,14 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    private fun JSONArray?.toLoginModes(): Set<ProviderLoginMode> {
+        if (this == null) return setOf(ProviderLoginMode.WebView, ProviderLoginMode.Cookie)
+        return List(length()) { index -> optString(index) }
+            .mapNotNull { raw -> runCatching { ProviderLoginMode.valueOf(raw) }.getOrNull() }
+            .toSet()
+            .ifEmpty { setOf(ProviderLoginMode.WebView, ProviderLoginMode.Cookie) }
+    }
+
     private fun JSONObject?.toStringMap(): Map<String, String> {
         if (this == null) return emptyMap()
         val keys = keys()
@@ -327,5 +378,46 @@ class AndroidFuoCoreBridge(
 
     private companion object {
         private const val TAG = "FuoCoreBridge"
+
+        private val AVAILABLE_PROVIDERS = listOf(
+            ProviderInfo(
+                providerId = "netease",
+                providerName = "网易云音乐",
+                loginConfig = ProviderLoginConfig(
+                    loginUrl = "https://music.163.com",
+                    cookieKeyGroups = listOf(listOf("MUSIC_U")),
+                ),
+            ),
+            ProviderInfo(
+                providerId = "qqmusic",
+                providerName = "QQ 音乐",
+                loginConfig = ProviderLoginConfig(
+                    loginUrl = "https://y.qq.com",
+                    cookieKeyGroups = listOf(
+                        listOf("qqmusic_key", "wxuin", "qm_keyst"),
+                        listOf("qqmusic_key", "uin", "qm_keyst"),
+                    ),
+                ),
+            ),
+            ProviderInfo(
+                providerId = "bilibili",
+                providerName = "哔哩哔哩",
+                loginConfig = ProviderLoginConfig(
+                    loginUrl = "https://www.bilibili.com",
+                    cookieKeyGroups = listOf(listOf("SESSDATA", "bili_jct")),
+                ),
+            ),
+            ProviderInfo(
+                providerId = "ytmusic",
+                providerName = "YouTube Music",
+                supportedLoginModes = setOf(ProviderLoginMode.Headers),
+            ),
+        )
+
+        private fun enabledProvidersJson(providerIds: Set<String>): String {
+            val array = JSONArray()
+            providerIds.forEach { array.put(it) }
+            return JSONObject().put("enabled", array).toString()
+        }
     }
 }

@@ -12,6 +12,7 @@ enum class TrackSourceType {
 enum class ProviderLoginMode {
     WebView,
     Cookie,
+    Headers,
 }
 
 enum class AudioQualityPolicy(
@@ -42,6 +43,9 @@ data class AppSettings(
     val selectedSettingsProviderId: String? = null,
     val providerLoginMode: ProviderLoginMode = ProviderLoginMode.WebView,
     val providerCookieInputs: Map<String, String> = emptyMap(),
+    val providerHeaderInputs: Map<String, ProviderHeaderInput> = emptyMap(),
+    val enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS,
+    val providerOrderIds: List<String> = DEFAULT_PROVIDER_ORDER_IDS,
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
     val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
@@ -49,9 +53,16 @@ data class AppSettings(
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
 )
 
+data class ProviderHeaderInput(
+    val authorization: String = "",
+    val cookie: String = "",
+)
+
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
 const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
 const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
+val DEFAULT_ENABLED_PROVIDER_IDS = setOf("netease")
+val DEFAULT_PROVIDER_ORDER_IDS = listOf("netease", "qqmusic", "bilibili", "ytmusic")
 val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
@@ -80,6 +91,9 @@ data class MusicTrack(
     val lyrics: String? = null,
     val providerId: String? = null,
     val providerName: String? = null,
+    val isSmartReplacement: Boolean = false,
+    val originalTitle: String? = null,
+    val originalProviderName: String? = null,
 )
 
 data class PlaybackPayload(
@@ -93,6 +107,12 @@ data class PlaybackPayload(
     val durationMs: Long? = null,
     val lyrics: String? = null,
     val audioQuality: String? = null,
+    val providerName: String? = null,
+    val isSmartReplacement: Boolean = false,
+    val originalTitle: String? = null,
+    val originalProviderName: String? = null,
+    val replacementStrategy: String? = null,
+    val replacementScore: Double? = null,
 )
 
 enum class PlayerStatus {
@@ -147,6 +167,7 @@ data class ProviderInfo(
     val providerId: String,
     val providerName: String,
     val loginConfig: ProviderLoginConfig? = null,
+    val supportedLoginModes: Set<ProviderLoginMode> = setOf(ProviderLoginMode.WebView, ProviderLoginMode.Cookie),
 )
 
 enum class ProviderFeatureCategory {
@@ -210,6 +231,8 @@ data class ProviderContentSection(
 
 interface ProviderMusicRepository {
     suspend fun initialize()
+    suspend fun availableProviders(): List<ProviderInfo> = providers()
+    suspend fun updateEnabledProviders(providerIds: Set<String>) = Unit
     suspend fun providers(): List<ProviderInfo>
     suspend fun search(keyword: String, providerId: String? = null): List<MusicTrack>
     suspend fun resolve(
@@ -218,6 +241,9 @@ interface ProviderMusicRepository {
     ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+    suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support header login: $providerId")
+    }
     suspend fun logout(providerId: String): ProviderAuthState
     suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)
     suspend fun features(): List<ProviderFeature>

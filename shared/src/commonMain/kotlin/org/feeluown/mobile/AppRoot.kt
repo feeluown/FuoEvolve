@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -1315,12 +1316,27 @@ private fun SettingsScreen(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
+    var loginProviderId by remember { mutableStateOf<String?>(null) }
+    val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
+    LaunchedEffect(loginProviderId, controller.providers) {
+        if (loginProviderId != null && loginProvider == null) {
+            loginProviderId = null
+        }
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("设置") },
+                title = { Text(loginProvider?.providerName ?: "设置") },
                 navigationIcon = {
-                    IconButton(onClick = controller::closeSettings) {
+                    IconButton(
+                        onClick = {
+                            if (loginProvider != null) {
+                                loginProviderId = null
+                            } else {
+                                controller.closeSettings()
+                            }
+                        },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -1335,46 +1351,110 @@ private fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = "Provider 登录",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            if (controller.providers.isEmpty()) {
-                ProviderContentMessage("Provider 正在初始化")
+            if (loginProvider != null) {
+                ProviderLoginPanel(
+                    controller = controller,
+                    provider = loginProvider,
+                    onOpenProviderWebLogin = onOpenProviderWebLogin,
+                    onLogoutProvider = onLogoutProvider,
+                )
             } else {
-                if (controller.providers.size > 1) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        controller.providers.forEach { provider ->
-                            FilterChip(
-                                selected = controller.selectedSettingsProviderId == provider.providerId,
-                                onClick = { controller.onSettingsProviderChange(provider.providerId) },
-                                label = { Text(provider.providerName) },
-                            )
-                        }
-                    }
+                ProviderSwitchPanel(
+                    controller = controller,
+                    onOpenProviderLogin = { provider -> loginProviderId = provider.providerId },
+                )
+                AudioQualitySettingsPanel(controller)
+                PlaybackPolicySettingsPanel(controller)
+                LocalMusicScanSettingsPanel(controller)
+                CacheSettingsPanel(controller)
+                if (controller.isDebugLogViewerAvailable) {
+                    DebugSettingsPanel(controller)
                 }
-                controller.selectedSettingsProvider()?.let { provider ->
-                    ProviderLoginPanel(
-                        controller = controller,
-                        provider = provider,
-                        onOpenProviderWebLogin = onOpenProviderWebLogin,
-                        onLogoutProvider = onLogoutProvider,
-                    )
-                }
-            }
-            AudioQualitySettingsPanel(controller)
-            PlaybackPolicySettingsPanel(controller)
-            LocalMusicScanSettingsPanel(controller)
-            CacheSettingsPanel(controller)
-            if (controller.isDebugLogViewerAvailable) {
-                DebugSettingsPanel(controller)
             }
         }
     }
+}
+
+@Composable
+private fun ProviderSwitchPanel(
+    controller: FuoPlayerController,
+    onOpenProviderLogin: (ProviderInfo) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "音源",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (controller.availableProviders.isEmpty()) {
+                ProviderContentMessage("音源正在初始化")
+            } else {
+                val orderedProviders = controller.orderedAvailableProviders()
+                orderedProviders.forEachIndexed { index, provider ->
+                    val isEnabled = controller.isProviderEnabled(provider.providerId)
+                    val authState = controller.authStateFor(provider)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = provider.providerName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = providerStatusText(isEnabled, authState),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                enabled = !controller.isLoading && index > 0,
+                                onClick = { controller.moveProvider(provider.providerId, -1) },
+                            ) {
+                                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上移${provider.providerName}")
+                            }
+                            IconButton(
+                                enabled = !controller.isLoading && index < orderedProviders.lastIndex,
+                                onClick = { controller.moveProvider(provider.providerId, 1) },
+                            ) {
+                                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下移${provider.providerName}")
+                            }
+                            TextButton(
+                                enabled = !controller.isLoading && isEnabled,
+                                onClick = { onOpenProviderLogin(provider) },
+                            ) {
+                                Text(if (authState.isLoggedIn) "管理" else "登录")
+                            }
+                        }
+                        Checkbox(
+                            checked = isEnabled,
+                            enabled = !controller.isLoading &&
+                                (isEnabled && controller.enabledProviderIds.size > 1 || !isEnabled),
+                            onCheckedChange = { controller.onProviderEnabledChange(provider.providerId, it) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun providerStatusText(isEnabled: Boolean, authState: ProviderAuthState): String {
+    val enabledText = if (isEnabled) "已启用" else "未启用"
+    val loginText = if (isEnabled && authState.isLoggedIn) "已登录" else "未登录"
+    return "$enabledText · $loginText"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1386,6 +1466,15 @@ private fun ProviderLoginPanel(
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     val authState = controller.authStateFor(provider)
+    val supportedLoginModes = listOf(
+        ProviderLoginMode.WebView,
+        ProviderLoginMode.Cookie,
+        ProviderLoginMode.Headers,
+    ).filter { it in provider.supportedLoginModes }
+    val activeLoginMode = supportedLoginModes
+        .firstOrNull { it == controller.providerLoginMode }
+        ?: supportedLoginModes.firstOrNull()
+        ?: ProviderLoginMode.Cookie
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1418,23 +1507,20 @@ private fun ProviderLoginPanel(
                 }
                 return@Column
             }
-            SingleChoiceSegmentedButtonRow {
-                SegmentedButton(
-                    selected = controller.providerLoginMode == ProviderLoginMode.WebView,
-                    onClick = { controller.onProviderLoginModeChange(ProviderLoginMode.WebView) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                ) {
-                    Text("WebView")
-                }
-                SegmentedButton(
-                    selected = controller.providerLoginMode == ProviderLoginMode.Cookie,
-                    onClick = { controller.onProviderLoginModeChange(ProviderLoginMode.Cookie) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                ) {
-                    Text("复制 Cookie")
+            if (supportedLoginModes.size > 1) {
+                SingleChoiceSegmentedButtonRow {
+                    supportedLoginModes.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = activeLoginMode == mode,
+                            onClick = { controller.onProviderLoginModeChange(mode) },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = supportedLoginModes.size),
+                        ) {
+                            Text(mode.label())
+                        }
+                    }
                 }
             }
-            when (controller.providerLoginMode) {
+            when (activeLoginMode) {
                 ProviderLoginMode.WebView -> {
                     Button(
                         enabled = !controller.isLoading && provider.loginConfig != null,
@@ -1470,9 +1556,43 @@ private fun ProviderLoginPanel(
                         Text(if (controller.isLoading) "登录中" else "登录")
                     }
                 }
+                ProviderLoginMode.Headers -> {
+                    val headerInput = controller.providerHeaderInputFor(provider.providerId)
+                    TextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = headerInput.authorization,
+                        onValueChange = { controller.onProviderHeaderAuthorizationChange(provider.providerId, it) },
+                        placeholder = { Text("Authorization") },
+                        singleLine = true,
+                    )
+                    TextField(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp),
+                        value = headerInput.cookie,
+                        onValueChange = { controller.onProviderHeaderCookieChange(provider.providerId, it) },
+                        placeholder = { Text("Cookie") },
+                        minLines = 4,
+                        maxLines = 8,
+                    )
+                    Button(
+                        enabled = !controller.isLoading,
+                        onClick = { controller.loginProviderWithHeaders(provider.providerId) },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (controller.isLoading) "登录中" else "登录")
+                    }
+                }
             }
         }
     }
+}
+
+private fun ProviderLoginMode.label(): String = when (this) {
+    ProviderLoginMode.WebView -> "WebView"
+    ProviderLoginMode.Cookie -> "复制 Cookie"
+    ProviderLoginMode.Headers -> "Headers"
 }
 
 @Composable
@@ -2525,6 +2645,11 @@ private fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
     ) {
         if (track != null) {
             InfoTag(sourceLabel(track, null))
+            if (track.isSmartReplacement) {
+                track.originalProviderName?.takeIf { it.isNotBlank() }?.let {
+                    InfoTag("原：$it")
+                }
+            }
         }
         audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(it.uppercase())
@@ -2830,10 +2955,11 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
     }
     return listOfNotNull(
         when (track.sourceType) {
-            TrackSourceType.Provider -> track.providerName ?: track.source.ifBlank { "Provider" }
+            TrackSourceType.Provider -> track.providerName ?: track.source.ifBlank { "音源" }
             TrackSourceType.LocalMediaStore -> "本地"
             TrackSourceType.Downloaded -> track.providerName ?: "FeelUOwn"
         },
+        "智能替换".takeIf { track.isSmartReplacement },
         state,
     ).joinToString(" · ")
 }

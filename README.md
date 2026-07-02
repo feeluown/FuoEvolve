@@ -16,8 +16,9 @@ shell ready for the same bridge.
 
 ## Android
 
-The Android build packages Python through Chaquopy. The default provider list is
-stored in `androidApp/src/main/assets/providers.json` and enables `fuo_netease`.
+The Android build packages Python through Chaquopy. Provider packages are
+bundled in the APK, while the runtime enabled provider list is controlled from
+Settings. The default enabled provider is NetEase only.
 
 ```bash
 ./gradlew :androidApp:assembleDebug
@@ -33,11 +34,12 @@ XCFramework still needs to be added to the Xcode project before device builds.
 
 ## Provider Extension
 
-Add a Python package dependency and append a provider module to
-`providers.json`, for example:
+Add a Python package dependency, register the provider in the Android bridge,
+and expose it from Settings. The fallback asset keeps NetEase as the only
+default provider:
 
 ```json
 {
-  "enabled": ["fuo_netease", "fuo_qqmusic"]
+  "enabled": ["netease"]
 }
 ```

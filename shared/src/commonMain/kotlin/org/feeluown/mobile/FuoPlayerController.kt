@@ -47,6 +47,8 @@ class FuoPlayerController(
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val scope: CoroutineScope,
 ) {
+    var availableProviders by mutableStateOf<List<ProviderInfo>>(emptyList())
+        private set
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
         private set
     var providerFeatures by mutableStateOf<List<ProviderFeature>>(emptyList())
@@ -54,6 +56,12 @@ class FuoPlayerController(
     var providerAuthStates by mutableStateOf<Map<String, ProviderAuthState>>(emptyMap())
         private set
     var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    var providerHeaderInputs by mutableStateOf<Map<String, ProviderHeaderInput>>(emptyMap())
+        private set
+    var enabledProviderIds by mutableStateOf(DEFAULT_ENABLED_PROVIDER_IDS)
+        private set
+    var providerOrderIds by mutableStateOf(DEFAULT_PROVIDER_ORDER_IDS)
         private set
     var recommendSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
         private set
@@ -170,6 +178,7 @@ class FuoPlayerController(
             updateAudioQualityPolicies()
             resourceCacheRepository.refreshUsage()
             runCatching {
+                providerRepository.updateEnabledProviders(enabledProviderIds)
                 providerRepository.initialize()
                 refreshProviderCatalog()
                 downloadRepository.load()
@@ -220,6 +229,14 @@ class FuoPlayerController(
     }
 
     fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
+
+    fun providerHeaderInputFor(providerId: String): ProviderHeaderInput = providerHeaderInputs[providerId] ?: ProviderHeaderInput()
+
+    fun isProviderEnabled(providerId: String): Boolean = providerId in enabledProviderIds
+
+    fun orderedAvailableProviders(): List<ProviderInfo> = availableProviders.sortedProvidersByOrder()
+
+    fun orderedProviders(): List<ProviderInfo> = providers.sortedProvidersByOrder()
 
     fun selectedSettingsProvider(): ProviderInfo? {
         return providers.firstOrNull { it.providerId == selectedSettingsProviderId } ?: providers.firstOrNull()
@@ -336,8 +353,65 @@ class FuoPlayerController(
         persistSettings()
     }
 
+    fun onProviderHeaderAuthorizationChange(providerId: String, value: String) {
+        val input = providerHeaderInputFor(providerId).copy(authorization = value)
+        providerHeaderInputs = providerHeaderInputs + (providerId to input)
+        persistSettings()
+    }
+
+    fun onProviderHeaderCookieChange(providerId: String, value: String) {
+        val input = providerHeaderInputFor(providerId).copy(cookie = value)
+        providerHeaderInputs = providerHeaderInputs + (providerId to input)
+        persistSettings()
+    }
+
     fun onSettingsProviderChange(providerId: String) {
         selectedSettingsProviderId = providerId
+        persistSettings()
+    }
+
+    fun onProviderEnabledChange(providerId: String, enabled: Boolean) {
+        val next = if (enabled) {
+            enabledProviderIds + providerId
+        } else {
+            enabledProviderIds - providerId
+        }
+        if (next.isEmpty()) {
+            message = "至少保留一个音源"
+            return
+        }
+        enabledProviderIds = next
+        persistSettings()
+        scope.launch {
+            isLoading = true
+            message = "正在更新音源"
+            runCatching {
+                providerRepository.updateEnabledProviders(enabledProviderIds)
+                clearProviderContent()
+                refreshProviderCatalog()
+            }.onSuccess {
+                message = "音源已更新"
+                refreshHomeContent(homeSection)
+            }.onFailure {
+                setError(it)
+            }
+            isLoading = false
+        }
+    }
+
+    fun moveProvider(providerId: String, offset: Int) {
+        val availableIds = availableProviders.map { it.providerId }.toSet()
+        val orderedIds = normalizedProviderOrder(availableIds).toMutableList()
+        val index = orderedIds.indexOf(providerId)
+        val targetIndex = (index + offset).coerceIn(0, orderedIds.lastIndex)
+        if (index < 0 || index == targetIndex) return
+        val moved = orderedIds.removeAt(index)
+        orderedIds.add(targetIndex, moved)
+        providerOrderIds = orderedIds
+        availableProviders = availableProviders.sortedProvidersByOrder()
+        providers = providers.sortedProvidersByOrder()
+        providerFeatures = providerFeatures.sortedFeaturesByOrder()
+        reorderProviderContent()
         persistSettings()
     }
 
@@ -418,6 +492,38 @@ class FuoPlayerController(
         }
     }
 
+    fun loginProviderWithHeaders(providerId: String) {
+        val input = providerHeaderInputFor(providerId)
+        val authorization = input.authorization.trim()
+        val cookie = input.cookie.trim()
+        val providerName = providerName(providerId)
+        if (authorization.isEmpty() || cookie.isEmpty()) {
+            message = "请输入 $providerName Authorization 和 Cookie"
+            return
+        }
+        scope.launch {
+            isLoading = true
+            message = "正在登录 $providerName"
+            runCatching { providerRepository.loginWithHeaders(providerId, authorization, cookie) }
+                .onSuccess {
+                    providerAuthStates = providerAuthStates + (providerId to it)
+                    persistSettings()
+                    message = if (it.isLoggedIn) {
+                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
+                    } else {
+                        "${it.providerName} 未登录"
+                    }
+                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                        refreshActiveMineProviderContent()
+                    } else {
+                        refreshHomeContent(homeSection)
+                    }
+                }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
     fun logoutProvider(providerId: String) {
         val providerName = providerName(providerId)
         scope.launch {
@@ -427,6 +533,7 @@ class FuoPlayerController(
                 .onSuccess {
                     providerAuthStates = providerAuthStates + (providerId to it)
                     providerCookieInputs = providerCookieInputs - providerId
+                    providerHeaderInputs = providerHeaderInputs - providerId
                     persistSettings()
                     message = "${it.providerName} 已退出登录"
                     if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
@@ -575,7 +682,7 @@ class FuoPlayerController(
                             runCatching { providerRepository.loadFeature(feature) }
                                 .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
                         }
-                    }
+                    }.sortedSectionsByOrder()
                 }
             }.onSuccess {
                 if (section == HomeSection.Recommend) {
@@ -637,7 +744,7 @@ class FuoPlayerController(
                     runCatching { providerRepository.loadFeature(feature) }
                         .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
                 }
-            }
+            }.sortedSectionsByOrder()
         }
     }
 
@@ -945,7 +1052,25 @@ class FuoPlayerController(
     }
 
     private suspend fun refreshProviderCatalog() {
-        val loadedProviders = providerRepository.providers()
+        val loadedAvailableProviders = providerRepository.availableProviders()
+        val availableProviderIds = loadedAvailableProviders.map { it.providerId }.toSet()
+        val normalizedProviderOrderIds = normalizedProviderOrder(availableProviderIds)
+        if (normalizedProviderOrderIds != providerOrderIds) {
+            providerOrderIds = normalizedProviderOrderIds
+            persistSettings()
+        }
+        availableProviders = loadedAvailableProviders.sortedProvidersByOrder()
+        if (availableProviderIds.isNotEmpty()) {
+            val normalizedEnabledProviderIds = enabledProviderIds.intersect(availableProviderIds)
+                .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS.intersect(availableProviderIds) }
+                .ifEmpty { setOf(loadedAvailableProviders.first().providerId) }
+            if (normalizedEnabledProviderIds != enabledProviderIds) {
+                enabledProviderIds = normalizedEnabledProviderIds
+                persistSettings()
+                providerRepository.updateEnabledProviders(enabledProviderIds)
+            }
+        }
+        val loadedProviders = providerRepository.providers().sortedProvidersByOrder()
         providers = loadedProviders
         val providerIds = loadedProviders.map { it.providerId }.toSet()
         if (selectedSettingsProviderId !in providerIds) {
@@ -964,8 +1089,30 @@ class FuoPlayerController(
                 isLoggedIn = false,
             ))
         }
-        providerFeatures = providerRepository.features()
+        providerFeatures = providerRepository.features().sortedFeaturesByOrder()
         refreshProviderAuthStates()
+    }
+
+    private fun clearProviderContent() {
+        recommendSections = emptyList()
+        musicSections = emptyList()
+        mineSections = emptyList()
+        minePlaylistSections = emptyList()
+        mineFavoritePlaylistSections = emptyList()
+        selectedFeature = null
+        selectedPlaylist = null
+        selectedMediaItem = null
+        selectedFeatureTracks = emptyList()
+        selectedPlaylistTracks = emptyList()
+        selectedMediaItemTracks = emptyList()
+    }
+
+    private fun reorderProviderContent() {
+        recommendSections = recommendSections.sortedSectionsByOrder()
+        musicSections = musicSections.sortedSectionsByOrder()
+        mineSections = mineSections.sortedSectionsByOrder()
+        minePlaylistSections = minePlaylistSections.sortedSectionsByOrder()
+        mineFavoritePlaylistSections = mineFavoritePlaylistSections.sortedSectionsByOrder()
     }
 
     private fun refreshAllProviderAuthStates() {
@@ -1015,8 +1162,16 @@ class FuoPlayerController(
                     ?: providerRepository.resolve(playbackTrack, unavailablePlaybackPolicy)
                 if (requestSerial != playRequestSerial) return@playRequest
                 val playableTrack = playbackTrack.copy(
+                    title = payload.title.ifBlank { playbackTrack.title },
+                    artists = payload.artists.ifBlank { playbackTrack.artists },
+                    album = payload.album.ifBlank { playbackTrack.album },
+                    source = payload.source.ifBlank { playbackTrack.source },
                     coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
                     durationMs = payload.durationMs ?: playbackTrack.durationMs,
+                    providerName = payload.providerName ?: playbackTrack.providerName,
+                    isSmartReplacement = payload.isSmartReplacement,
+                    originalTitle = payload.originalTitle,
+                    originalProviderName = payload.originalProviderName,
                 )
                 queue = sourceQueue.mapIndexed { itemIndex, item ->
                     if (itemIndex == index) playableTrack else item
@@ -1167,6 +1322,10 @@ class FuoPlayerController(
             durationMs = durationMs,
             lyrics = lyrics,
             audioQuality = null,
+            providerName = providerName,
+            isSmartReplacement = isSmartReplacement,
+            originalTitle = originalTitle,
+            originalProviderName = originalProviderName,
         )
     }
 
@@ -1176,8 +1335,32 @@ class FuoPlayerController(
     }
 
     private fun providerName(providerId: String): String {
-        return providers.firstOrNull { it.providerId == providerId }?.providerName ?: providerId
+        return providers.firstOrNull { it.providerId == providerId }?.providerName
+            ?: availableProviders.firstOrNull { it.providerId == providerId }?.providerName
+            ?: providerId
     }
+
+    private fun normalizedProviderOrder(availableProviderIds: Set<String>): List<String> {
+        val orderedIds = (providerOrderIds + DEFAULT_PROVIDER_ORDER_IDS + availableProviderIds)
+            .filter { it in availableProviderIds }
+            .distinct()
+        return orderedIds.ifEmpty { availableProviderIds.toList() }
+    }
+
+    private fun providerOrderIndex(providerId: String): Int {
+        val normalizedOrder = (providerOrderIds + DEFAULT_PROVIDER_ORDER_IDS).distinct()
+        val index = normalizedOrder.indexOf(providerId)
+        return if (index >= 0) index else Int.MAX_VALUE
+    }
+
+    private fun List<ProviderInfo>.sortedProvidersByOrder(): List<ProviderInfo> =
+        sortedWith(compareBy<ProviderInfo> { providerOrderIndex(it.providerId) }.thenBy { it.providerName })
+
+    private fun List<ProviderFeature>.sortedFeaturesByOrder(): List<ProviderFeature> =
+        sortedWith(compareBy<ProviderFeature> { providerOrderIndex(it.providerId) }.thenBy { it.id })
+
+    private fun List<ProviderContentSection>.sortedSectionsByOrder(): List<ProviderContentSection> =
+        sortedWith(compareBy<ProviderContentSection> { providerOrderIndex(it.feature.providerId) }.thenBy { it.feature.id })
 
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
         return category == ProviderFeatureCategory.Recommend &&
@@ -1199,6 +1382,9 @@ class FuoPlayerController(
         selectedSettingsProviderId = settings.selectedSettingsProviderId
         providerLoginMode = settings.providerLoginMode
         providerCookieInputs = settings.providerCookieInputs
+        providerHeaderInputs = settings.providerHeaderInputs
+        enabledProviderIds = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
+        providerOrderIds = settings.providerOrderIds.ifEmpty { DEFAULT_PROVIDER_ORDER_IDS }
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
@@ -1218,6 +1404,9 @@ class FuoPlayerController(
             selectedSettingsProviderId = selectedSettingsProviderId,
             providerLoginMode = providerLoginMode,
             providerCookieInputs = providerCookieInputs,
+            providerHeaderInputs = providerHeaderInputs,
+            enabledProviderIds = enabledProviderIds,
+            providerOrderIds = providerOrderIds,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,

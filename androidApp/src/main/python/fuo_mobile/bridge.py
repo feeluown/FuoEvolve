@@ -56,6 +56,14 @@ def _patch_pydantic_v1() -> None:
 
         pydantic.model_validator = model_validator
 
+    if not hasattr(pydantic, "field_validator"):
+        from pydantic import validator
+
+        def field_validator(*fields, mode="after", **kwargs):
+            return validator(*fields, pre=(mode == "before"), allow_reuse=True)
+
+        pydantic.field_validator = field_validator
+
     if not hasattr(pydantic, "model_serializer"):
         def model_serializer(*args, **kwargs):
             def decorator(func):
@@ -82,7 +90,7 @@ def _patch_feeluown_models_for_pydantic_v1() -> None:
     import pydantic
     import feeluown.library.models as models
 
-    if hasattr(pydantic, "field_validator"):
+    if hasattr(pydantic.BaseModel, "model_rebuild"):
         return
 
     refs = {
@@ -162,6 +170,14 @@ class MobileAppContext:
         self.last_message = str(msg)
 
 
+PROVIDER_MODULES = {
+    "netease": "fuo_netease",
+    "qqmusic": "fuo_qqmusic",
+    "bilibili": "fuo_bilibili",
+    "ytmusic": "fuo_ytmusic",
+}
+
+
 class ProviderRegistry:
     def __init__(self, app: MobileAppContext, enabled: List[str]):
         self.app = app
@@ -169,12 +185,16 @@ class ProviderRegistry:
         self.provider_ids: List[str] = []
 
     def load(self):
-        for module_name in self.enabled:
+        for provider_or_module in self.enabled:
+            module_name = PROVIDER_MODULES.get(provider_or_module, provider_or_module)
             module = __import__(module_name)
             if not hasattr(module, "enable"):
                 raise RuntimeError(f"provider module has no enable(app): {module_name}")
             if hasattr(module, "init_config"):
-                module.init_config(Config(module_name))
+                config_name = self._config_name(provider_or_module, module_name, module)
+                provider_config = Config(config_name)
+                module.init_config(provider_config)
+                setattr(self.app.config, config_name, provider_config)
             before = {provider.identifier for provider in self.app.library.list()}
             self._enable_without_auto_login(module)
             provider = getattr(module, "provider", None)
@@ -184,6 +204,16 @@ class ProviderRegistry:
             else:
                 after = [provider.identifier for provider in self.app.library.list()]
                 self.provider_ids.extend(provider_id for provider_id in after if provider_id not in before)
+
+    def _config_name(self, provider_or_module: str, module_name: str, module) -> str:
+        if provider_or_module in PROVIDER_MODULES:
+            return provider_or_module
+        provider_id = getattr(module, "__identifier__", "")
+        if provider_id:
+            return provider_id
+        if module_name.startswith("fuo_"):
+            return module_name.removeprefix("fuo_")
+        return module_name
 
     def _enable_without_auto_login(self, module):
         import feeluown.library.library as library_module
@@ -345,6 +375,90 @@ FEATURE_DEFS = {
             "action": "current_user_fav_create_albums_rd",
         },
     ],
+    "bilibili": [
+        {
+            "id": "bilibili_user_playlists",
+            "title": "我的歌单",
+            "category": "MinePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_list_playlists",
+        },
+        {
+            "id": "bilibili_favorite_playlists",
+            "title": "收藏歌单",
+            "category": "MineFavoritePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_fav_create_playlists_rd",
+        },
+    ],
+    "ytmusic": [
+        {
+            "id": "ytmusic_daily_songs",
+            "title": "每日推荐歌曲",
+            "category": "Recommend",
+            "content_type": "Songs",
+            "requires_login": False,
+            "action": "rec_list_daily_songs",
+        },
+        {
+            "id": "ytmusic_daily_playlists",
+            "title": "推荐歌单",
+            "category": "Recommend",
+            "content_type": "Playlists",
+            "requires_login": False,
+            "action": "rec_list_daily_playlists",
+        },
+        {
+            "id": "ytmusic_toplists",
+            "title": "排行榜",
+            "category": "Music",
+            "content_type": "Playlists",
+            "requires_login": False,
+            "action": "toplist_list",
+        },
+        {
+            "id": "ytmusic_user_playlists",
+            "title": "我的歌单",
+            "category": "MinePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_list_playlists",
+        },
+        {
+            "id": "ytmusic_favorite_songs",
+            "title": "收藏歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_fav_create_songs_rd",
+        },
+        {
+            "id": "ytmusic_favorite_playlists",
+            "title": "收藏歌单",
+            "category": "MineFavoritePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_fav_create_playlists_rd",
+        },
+        {
+            "id": "ytmusic_favorite_artists",
+            "title": "收藏歌手",
+            "category": "Mine",
+            "content_type": "Artists",
+            "requires_login": True,
+            "action": "current_user_fav_create_artists_rd",
+        },
+        {
+            "id": "ytmusic_favorite_albums",
+            "title": "收藏专辑",
+            "category": "Mine",
+            "content_type": "Albums",
+            "requires_login": True,
+            "action": "current_user_fav_create_albums_rd",
+        },
+    ],
 }
 
 LOGIN_CONFIGS = {
@@ -359,12 +473,23 @@ LOGIN_CONFIGS = {
             ["qqmusic_key", "uin", "qm_keyst"],
         ],
     },
+    "bilibili": {
+        "login_url": "https://www.bilibili.com",
+        "cookie_key_groups": [["SESSDATA", "bili_jct"]],
+    },
+}
+
+LOGIN_MODES = {
+    "netease": ["WebView", "Cookie"],
+    "qqmusic": ["WebView", "Cookie"],
+    "bilibili": ["WebView", "Cookie"],
+    "ytmusic": ["Headers"],
 }
 
 
 class FuoMobileBridge:
     def __init__(self, providers_json: str):
-        providers = json.loads(providers_json or "{}").get("enabled") or ["fuo_netease"]
+        providers = json.loads(providers_json or "{}").get("enabled") or ["netease"]
         library = Library(
             MobileConfig.PROVIDERS_STANDBY,
             MobileConfig.ENABLE_AI_STANDBY_MATCHER,
@@ -429,7 +554,10 @@ class FuoMobileBridge:
         cookies = parse_cookies(cookies_json)
         if not isinstance(cookies, dict) or not cookies:
             raise RuntimeError("cookies must be a non-empty JSON object")
-        if hasattr(provider, "get_user_from_cookies"):
+        if provider_id == "bilibili":
+            provider._api.from_cookiedict(cookies)
+            user = provider.user_info()
+        elif hasattr(provider, "get_user_from_cookies"):
             user = provider.get_user_from_cookies(cookies)
         elif hasattr(provider, "try_get_user_from_cookies"):
             user, err = provider.try_get_user_from_cookies(cookies)
@@ -439,6 +567,27 @@ class FuoMobileBridge:
             raise RuntimeError(f"provider does not support cookies login: {provider_id}")
         provider.auth(user)
         self._save_login(provider_id, user, cookies)
+        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def provider_login_with_headers(self, provider_id: str, authorization: str, cookie: str) -> str:
+        if provider_id != "ytmusic":
+            raise RuntimeError(f"provider does not support header login: {provider_id}")
+        auth = (authorization or "").strip()
+        cookie_value = (cookie or "").strip()
+        if not auth or not cookie_value:
+            raise RuntimeError("authorization and cookie must be non-empty")
+        provider = self._get_provider(provider_id)
+        from fuo_ytmusic.consts import HEADER_FILE
+        from fuo_ytmusic.headerfile import write_headerfile
+
+        write_headerfile(auth, cookie_value, HEADER_FILE)
+        user = provider.try_get_user_with_headerfile()
+        if user is None:
+            raise RuntimeError("get user with ytmusic headers failed")
+        provider.auth(user)
+        current_user_changed = getattr(provider, "current_user_changed", None)
+        if current_user_changed is not None:
+            current_user_changed.emit(user)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
     def provider_logout(self, provider_id: str) -> str:
@@ -636,6 +785,10 @@ class FuoMobileBridge:
             from fuo_qqmusic.login import write_cookies
 
             write_cookies(user, cookies)
+        elif provider_id == "bilibili":
+            from fuo_bilibili.login import dump_user_cookies
+
+            dump_user_cookies(cookies)
 
     def _delete_saved_login(self, provider_id: str) -> None:
         if provider_id == "netease":
@@ -648,6 +801,20 @@ class FuoMobileBridge:
 
             if os.path.exists(USER_INFO_FILE):
                 os.remove(USER_INFO_FILE)
+        elif provider_id == "bilibili":
+            from fuo_bilibili.const import PLUGIN_API_COOKIEJAR_FILE, PLUGIN_API_COOKIEDICT_FILE
+
+            for path in (PLUGIN_API_COOKIEJAR_FILE, PLUGIN_API_COOKIEDICT_FILE):
+                if os.path.exists(path):
+                    os.remove(path)
+        elif provider_id == "ytmusic":
+            from fuo_ytmusic.consts import HEADER_FILE
+            from fuo_ytmusic.headerfile import YtdlpCookiefileManager
+
+            cookiefile = YtdlpCookiefileManager(HEADER_FILE).cookiefile_path
+            for path in (HEADER_FILE, cookiefile):
+                if path is not None and os.path.exists(path):
+                    os.remove(path)
 
     def _clear_provider_auth(self, provider_id: str, provider) -> None:
         try:
@@ -663,6 +830,12 @@ class FuoMobileBridge:
             LoginController._api = provider.api
         elif provider_id == "qqmusic":
             provider.api.set_cookies(None)
+        elif provider_id == "bilibili":
+            from fuo_bilibili.api import BilibiliApi
+
+            provider._api = BilibiliApi()
+        elif provider_id == "ytmusic":
+            provider._user = None
         current_user_changed = getattr(provider, "current_user_changed", None)
         if current_user_changed is not None:
             current_user_changed.emit(None)
@@ -689,14 +862,30 @@ class FuoMobileBridge:
                 user, err = provider.try_get_user_from_cookies(cookies)
                 if user is None:
                     bridge_log(f"restore login skipped provider_id={provider_id}: {err}")
+        elif provider_id == "bilibili":
+            from fuo_bilibili.login import load_user_cookies
+
+            cookies = load_user_cookies()
+            if cookies:
+                provider._api.from_cookiedict(cookies)
+                user = provider.user_info()
+        elif provider_id == "ytmusic":
+            user = provider.try_get_user_with_headerfile()
         if user is not None:
             provider.auth(user)
+            current_user_changed = getattr(provider, "current_user_changed", None)
+            if current_user_changed is not None:
+                current_user_changed.emit(user)
             bridge_log(f"restore login ok provider_id={provider_id} user={getattr(user, 'name', '')}")
 
     def _prepare_payload(self, song, audio_select_policy: str, allow_standby: bool) -> Dict[str, Any]:
         try:
             media, quality = self._select_media(song, audio_select_policy)
         except MediaNotFound as exc:
+            bridge_log(
+                "media not found "
+                f"track={song_log_label(song)} allow_standby={allow_standby} policy={audio_select_policy}"
+            )
             if allow_standby:
                 standby_payload = self._prepare_standby_payload(song, audio_select_policy)
                 if standby_payload is not None:
@@ -709,8 +898,11 @@ class FuoMobileBridge:
         source = getattr(song, "source", "")
         source_in = [provider_id for provider_id in self.provider_registry.provider_ids if provider_id != source]
         if not source_in:
+            bridge_log(f"standby skipped no source track={song_log_label(song)}")
             return None
-        bridge_log(f"standby start song={getattr(song, 'title', '')} source_in={source_in}")
+        bridge_log(
+            f"standby start track={song_log_label(song)} source_in={source_in} policy={audio_select_policy}"
+        )
         try:
             standby_list = asyncio.run(
                 self.app.library.a_list_song_standby_v2(
@@ -721,21 +913,23 @@ class FuoMobileBridge:
                 )
             )
         except Exception as exc:  # pylint: disable=broad-except
-            bridge_log(f"standby failed: {exc}")
+            bridge_log(f"standby failed track={song_log_label(song)} error={exc}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         if not standby_list:
-            bridge_log("standby empty")
+            bridge_log(f"standby empty track={song_log_label(song)}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         standby, _ = standby_list[0]
         self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
         bridge_log(
-            f"standby selected source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
+            f"standby selected origin={song_log_label(song)} replacement={song_log_label(standby)}"
         )
         try:
             media, quality = self._select_media(standby, audio_select_policy)
         except MediaNotFound:
+            bridge_log(f"standby selected media not found replacement={song_log_label(standby)}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
-        return self._payload_from_media(standby, media, quality)
+        payload = self._payload_from_media(standby, media, quality)
+        return self._mark_standby_payload(payload, song, standby, "library", None)
 
     def _prepare_search_standby_payload(
         self,
@@ -746,6 +940,7 @@ class FuoMobileBridge:
         candidates = []
         seen = set()
         for query in standby_queries(song):
+            bridge_log(f"search standby query track={song_log_label(song)} query={query} source_in={source_in}")
             for result in self.app.library.search(query, type_in=[SearchType.so], source_in=source_in):
                 for standby in read_models(getattr(result, "songs", []) or [], limit=10):
                     key = (getattr(standby, "source", ""), getattr(standby, "identifier", ""))
@@ -754,42 +949,118 @@ class FuoMobileBridge:
                     seen.add(key)
                     score = standby_score(song, standby)
                     if score >= 0.55:
+                        bridge_log(
+                            f"search standby candidate score={score:.2f} replacement={song_log_label(standby)}"
+                        )
                         candidates.append((score, standby))
         if not candidates:
-            bridge_log("search standby empty")
+            bridge_log(f"search standby empty track={song_log_label(song)}")
             return None
         for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True)[:8]:
             try:
                 media, quality = self._select_media(standby, audio_select_policy)
             except MediaNotFound:
+                bridge_log(
+                    f"search standby candidate media not found score={score:.2f} replacement={song_log_label(standby)}"
+                )
                 continue
             self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
             bridge_log(
-                "search standby selected "
-                f"score={score:.2f} source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
+                f"search standby selected score={score:.2f} "
+                f"origin={song_log_label(song)} replacement={song_log_label(standby)}"
             )
-            return self._payload_from_media(standby, media, quality)
-        bridge_log("search standby media empty")
+            payload = self._payload_from_media(standby, media, quality)
+            return self._mark_standby_payload(payload, song, standby, "search", score)
+        bridge_log(f"search standby media empty track={song_log_label(song)} candidates={len(candidates)}")
         return None
 
     def _select_media(self, song, audio_select_policy: str):
         provider = self.app.library.get(getattr(song, "source", ""))
         if provider is not None and isinstance(provider, SupportsSongMultiQuality):
-            media, quality = provider.song_select_media(song, audio_select_policy)
+            try:
+                media, quality = provider.song_select_media(song, audio_select_policy)
+            except MediaNotFound:
+                refreshed_song = self._refresh_song_for_media_retry(song, provider)
+                if refreshed_song is None:
+                    raise
+                media, quality = provider.song_select_media(refreshed_song, audio_select_policy)
+                song = refreshed_song
+            self._tracks[f"{getattr(song, 'source', '')}:{getattr(song, 'identifier', '')}"] = song
             return media, getattr(quality, "value", str(quality)).upper()
         return self.app.library.song_prepare_media(song, audio_select_policy), ""
+
+    def _refresh_song_for_media_retry(self, song, provider):
+        source = getattr(song, "source", "")
+        identifier = getattr(song, "identifier", "")
+        if source != "netease" or not identifier:
+            return None
+        try:
+            song.cache_set("q_media_mapping", None, ttl=-1)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"netease media cache clear failed track={song_log_label(song)} error={exc}")
+        refreshed_song = None
+        try:
+            refreshed_song = provider.song_get(identifier)
+            refreshed_song.cache_set("q_media_mapping", None, ttl=-1)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"netease song refresh failed track={song_log_label(song)} error={exc}")
+        retry_song = refreshed_song or song
+        bridge_log(f"netease media retry track={song_log_label(retry_song)}")
+        return retry_song
 
     def _payload_from_media(self, song, media: Media, quality: str) -> Dict[str, Any]:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
         if quality:
             payload["audio_quality"] = quality
-        cover = normalize_image_url(self.app.library.model_get_cover(song))
+        cover = self._get_cover(song)
         if cover:
             payload["cover_url"] = cover
         lyrics = self._get_lyrics(song)
         if lyrics:
             payload["lyrics"] = lyrics
         return payload
+
+    def _mark_standby_payload(
+        self,
+        payload: Dict[str, Any],
+        origin,
+        standby,
+        strategy: str,
+        score: Optional[float],
+    ) -> Dict[str, Any]:
+        origin_provider = provider_name(self.app.library.get(getattr(origin, "source", "")))
+        standby_provider = provider_name(self.app.library.get(getattr(standby, "source", "")))
+        payload.update(
+            {
+                "smart_replacement": True,
+                "standby_strategy": strategy,
+                "original_id": f"{getattr(origin, 'source', '')}:{getattr(origin, 'identifier', '')}",
+                "original_title": display(origin, "title"),
+                "original_artists": display_artists(origin),
+                "original_source": getattr(origin, "source", ""),
+                "original_provider_name": origin_provider,
+                "replacement_id": f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}",
+                "replacement_title": display(standby, "title"),
+                "replacement_artists": display_artists(standby),
+                "replacement_source": getattr(standby, "source", ""),
+                "replacement_provider_name": standby_provider,
+            }
+        )
+        if score is not None:
+            payload["standby_score"] = round(score, 2)
+        bridge_log(
+            f"standby payload ready strategy={strategy} "
+            f"origin={song_log_label(origin)} replacement={song_log_label(standby)} "
+            f"quality={payload.get('audio_quality', '')}"
+        )
+        return payload
+
+    def _get_cover(self, song) -> str:
+        try:
+            return normalize_image_url(self.app.library.model_get_cover(song))
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"cover lookup failed: {exc}")
+            return ""
 
     def _get_lyrics(self, song) -> str:
         try:
@@ -824,6 +1095,7 @@ def provider_info(provider) -> Dict[str, Any]:
         "provider_id": provider_id,
         "provider_name": provider_name(provider),
         "login_config": LOGIN_CONFIGS.get(provider_id),
+        "login_modes": LOGIN_MODES.get(provider_id, ["WebView", "Cookie"]),
     }
 
 
@@ -907,6 +1179,7 @@ def song_to_metadata(song, library: Library) -> Dict[str, Any]:
         "artists": data["artists"],
         "album": data["album"],
         "source": data["source"],
+        "provider_name": data["provider_name"],
         "duration_ms": data["duration_ms"],
         "cover_url": data["cover_url"],
     }
@@ -950,6 +1223,7 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
         "artists": metadata.get("artists", ""),
         "album": metadata.get("album", ""),
         "source": metadata.get("source", ""),
+        "provider_name": metadata.get("provider_name", ""),
         "headers": dict(media.http_headers or {}),
         "cover_url": normalize_image_url(metadata.get("cover_url", "")),
         "duration_ms": metadata.get("duration_ms", 0),
@@ -1061,6 +1335,14 @@ def provider_name(provider) -> str:
     if provider is None:
         return ""
     return getattr(provider, "name", getattr(provider, "identifier", ""))
+
+
+def song_log_label(song) -> str:
+    source = getattr(song, "source", "")
+    identifier = getattr(song, "identifier", "")
+    title = display(song, "title")
+    artists = display_artists(song)
+    return f"{source}:{identifier} title={title} artists={artists}"
 
 
 def duration_ms(song) -> int:

@@ -177,6 +177,12 @@ class ProviderWebLoginActivity : Activity() {
                 "ptlogin2.qq.com",
                 "qq.com",
             )
+            "bilibili" -> listOf(
+                "www.bilibili.com",
+                "api.bilibili.com",
+                "passport.bilibili.com",
+                "bilibili.com",
+            )
             else -> emptyList()
         }
     }

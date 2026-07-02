@@ -107,6 +107,9 @@ class FuoPlaybackService : MediaSessionService() {
             putString("local_uri", payload.optString("local_uri"))
             putString("provider_id", payload.optString("provider_id"))
             putString("provider_name", payload.optString("provider_name"))
+            putBoolean("smart_replacement", payload.optBoolean("smart_replacement", false))
+            putString("original_title", payload.optString("original_title"))
+            putString("original_provider_name", payload.optString("original_provider_name"))
             putString("lyrics", payload.optString("lyrics"))
             putString("audio_quality", payload.optString("audio_quality"))
         }
