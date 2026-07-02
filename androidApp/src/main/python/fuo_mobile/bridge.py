@@ -90,7 +90,7 @@ def _patch_feeluown_models_for_pydantic_v1() -> None:
     import pydantic
     import feeluown.library.models as models
 
-    if hasattr(pydantic, "field_validator"):
+    if hasattr(pydantic.BaseModel, "model_rebuild"):
         return
 
     refs = {
