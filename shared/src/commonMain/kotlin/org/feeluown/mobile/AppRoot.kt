@@ -296,8 +296,9 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
             selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
             indicatorOffsetFraction = pagerState.currentPageOffsetFraction,
             onClick = { index, section ->
-                controller.onHomeSectionChange(section)
-                scope.launch { pagerState.animateScrollToPage(index) }
+                if (section != controller.homeSection || index != pagerState.currentPage) {
+                    scope.launch { pagerState.animateScrollToPage(index) }
+                }
             },
         )
         HorizontalPager(
