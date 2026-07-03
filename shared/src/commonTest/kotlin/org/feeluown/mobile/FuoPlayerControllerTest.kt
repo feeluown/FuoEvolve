@@ -160,6 +160,59 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun staleEndedWhileNextTrackIsLoadingDoesNotSkipAgain() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+        )
+        val payloads = tracks.associate { track ->
+            track.id to CompletableDeferred<PlaybackPayload>()
+        }
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            resolveHandler = { track, _, _ -> payloads.getValue(track.id).await() },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("song")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+            payloads.getValue("provider:1").complete(payloadFor(tracks[0]))
+            advanceUntilIdle()
+
+            engine.emitEnded(tracks[0])
+            advanceUntilIdle()
+            engine.emitEnded(tracks[1])
+            advanceUntilIdle()
+
+            assertEquals("provider:2", controller.playbackState.currentTrack?.id)
+            assertEquals(1, controller.playbackState.queueIndex)
+            assertEquals("provider:1", engine.lastTrack?.id)
+
+            payloads.getValue("provider:2").complete(payloadFor(tracks[1]))
+            advanceUntilIdle()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun staleResolveResultDoesNotOverrideLatestNextSelection() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -245,6 +298,45 @@ class FuoPlayerControllerTest {
             advanceUntilIdle()
 
             assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(PlayerStatus.Playing, controller.playbackState.status)
+            assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun smartReplacementMarksUnavailableAndPlaysNextTrackWhenResolveMediaIsMissing() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            resolveFailures = setOf("provider:1"),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("song")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(true, controller.playbackState.queue[0].isUnavailable)
+            assertEquals(false, controller.playbackState.queue[1].isUnavailable)
+            assertEquals(1, controller.playbackState.queueIndex)
             assertEquals(PlayerStatus.Playing, controller.playbackState.status)
             assertEquals(2, provider.resolveCount)
         } finally {
@@ -1308,6 +1400,15 @@ class FuoPlayerControllerTest {
         var lastTrack: MusicTrack? = null
         var lastPayload: PlaybackPayload? = null
 
+        override fun prepareLoading(track: MusicTrack) {
+            mutableState.value = PlaybackState(
+                status = PlayerStatus.Loading,
+                currentTrack = track,
+                durationMs = track.durationMs ?: 0,
+                lyrics = track.lyrics,
+            )
+        }
+
         override fun play(track: MusicTrack, payload: PlaybackPayload) {
             lastTrack = track
             lastPayload = payload
@@ -1317,6 +1418,13 @@ class FuoPlayerControllerTest {
                 durationMs = payload.durationMs ?: 0,
                 lyrics = payload.lyrics,
                 audioQuality = payload.audioQuality,
+            )
+        }
+
+        fun emitEnded(track: MusicTrack) {
+            mutableState.value = mutableState.value.copy(
+                status = PlayerStatus.Ended,
+                currentTrack = track,
             )
         }
 

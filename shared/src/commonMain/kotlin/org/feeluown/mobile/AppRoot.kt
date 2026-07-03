@@ -2986,10 +2986,16 @@ private fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
     ) {
         itemsIndexed(controller.playbackState.queue, key = { _, item -> item.id }) { index, track ->
             val isCurrent = index == controller.playbackState.queueIndex
+            val isUnavailable = track.isUnavailable
+            val titleColor = when {
+                isUnavailable -> MaterialTheme.colorScheme.onSurfaceVariant
+                isCurrent -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { controller.playQueueIndex(index) }
+                    .clickable(enabled = !isUnavailable) { controller.playQueueIndex(index) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2999,8 +3005,8 @@ private fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
                     Text(
                         text = "${index + 1}. ${track.title.ifBlank { "未知歌曲" }}",
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                        color = titleColor,
+                        fontWeight = if (isCurrent && !isUnavailable) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -3045,6 +3051,7 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
             TrackSourceType.Downloaded -> track.providerName ?: "FeelUOwn"
         },
         "智能替换".takeIf { track.isSmartReplacement },
+        "不可用".takeIf { track.isUnavailable },
         state,
     ).joinToString(" · ")
 }

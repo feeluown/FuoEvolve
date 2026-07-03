@@ -180,6 +180,7 @@ class FuoPlayerController(
     private var queueFeature: ProviderFeature? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
     private var lastEndedTrackId: String? = null
+    private var autoAdvanceEligibleTrackId: String? = null
     private var playRequestSerial: Long = 0
 
     init {
@@ -215,14 +216,27 @@ class FuoPlayerController(
         }
         scope.launch {
             playbackEngine.state.collect { engineState ->
-                if (engineState.status == PlayerStatus.Ended) {
-                    val endedTrackId = queue.getOrNull(queueIndex)?.id
-                    if (endedTrackId != null && endedTrackId != lastEndedTrackId) {
-                        lastEndedTrackId = endedTrackId
-                        next()
+                val queueTrackId = queue.getOrNull(queueIndex)?.id
+                when (engineState.status) {
+                    PlayerStatus.Playing -> {
+                        autoAdvanceEligibleTrackId = queueTrackId ?: engineState.currentTrack?.id
+                        lastEndedTrackId = null
                     }
-                } else {
-                    lastEndedTrackId = null
+                    PlayerStatus.Ended -> {
+                        val endedTrackId = queueTrackId
+                        if (
+                            endedTrackId != null &&
+                            endedTrackId == autoAdvanceEligibleTrackId &&
+                            endedTrackId != lastEndedTrackId
+                        ) {
+                            autoAdvanceEligibleTrackId = null
+                            lastEndedTrackId = endedTrackId
+                            next()
+                        }
+                    }
+                    else -> {
+                        lastEndedTrackId = null
+                    }
                 }
                 playbackState = engineState.copy(
                     queue = queue,
@@ -1243,6 +1257,7 @@ class FuoPlayerController(
                     isSmartReplacement = payload.isSmartReplacement,
                     originalTitle = payload.originalTitle,
                     originalProviderName = payload.originalProviderName,
+                    isUnavailable = false,
                 )
                 queue = sourceQueue.mapIndexed { itemIndex, item ->
                     if (itemIndex == index) playableTrack else item
@@ -1551,22 +1566,37 @@ class FuoPlayerController(
         skippedUnavailableCount: Int,
         throwable: Throwable,
     ): Boolean {
-        if (unavailablePlaybackPolicy != UnavailablePlaybackPolicy.Skip || !throwable.isMediaNotFound()) {
+        if (!shouldSkipUnavailable(throwable)) {
             return false
         }
-        if (sourceQueue.size <= 1 || skippedUnavailableCount >= sourceQueue.lastIndex) {
+        val skippedQueue = sourceQueue.mapIndexed { itemIndex, item ->
+            if (itemIndex == index) item.copy(isUnavailable = true) else item
+        }
+        queue = skippedQueue
+        playbackState = playbackState.copy(
+            queue = queue,
+            queueIndex = index,
+            currentTrack = queue.getOrNull(index),
+        )
+        if (skippedQueue.size <= 1 || skippedUnavailableCount >= skippedQueue.lastIndex) {
             return false
         }
-        val nextIndex = (index + 1).floorMod(sourceQueue.size)
+        val nextIndex = (index + 1).floorMod(skippedQueue.size)
         message = "已跳过不可用资源：${track.title}"
         play(
-            track = sourceQueue[nextIndex],
-            sourceQueue = sourceQueue,
+            track = skippedQueue[nextIndex],
+            sourceQueue = skippedQueue,
             index = nextIndex,
             sourceFeature = sourceFeature,
             skippedUnavailableCount = skippedUnavailableCount + 1,
         )
         return true
+    }
+
+    private fun shouldSkipUnavailable(throwable: Throwable): Boolean {
+        if (!throwable.isMediaNotFound()) return false
+        return unavailablePlaybackPolicy == UnavailablePlaybackPolicy.Skip ||
+            unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace
     }
 
     private fun Throwable.isMediaNotFound(): Boolean {

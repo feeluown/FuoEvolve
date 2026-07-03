@@ -96,6 +96,7 @@ data class MusicTrack(
     val isSmartReplacement: Boolean = false,
     val originalTitle: String? = null,
     val originalProviderName: String? = null,
+    val isUnavailable: Boolean = false,
 )
 
 data class PlaybackPayload(
