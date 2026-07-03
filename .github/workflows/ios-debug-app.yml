@@ -1,0 +1,54 @@
+name: iOS Debug App
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug-app:
+    name: Build debug iOS app
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug simulator app
+        run: |
+          xcodebuild \
+            -project iosApp/FuoEvolve.xcodeproj \
+            -target FuoEvolve \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath build/ios-ci \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package debug app
+        run: |
+          mkdir -p build/artifacts
+          ditto -c -k --keepParent \
+            build/ios-ci/Build/Products/Debug-iphonesimulator/FuoEvolve.app \
+            build/artifacts/FuoEvolve-debug-ios-simulator.zip
+
+      - name: Upload debug app
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuo-evolve-ios-debug-${{ github.sha }}
+          path: build/artifacts/FuoEvolve-debug-ios-simulator.zip
+          if-no-files-found: error

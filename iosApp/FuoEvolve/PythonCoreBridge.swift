@@ -2,7 +2,9 @@ import Foundation
 
 final class PythonCoreBridge: FuoCoreBridge {
     func initialize() async throws {
-        // Wire Python Apple Support here once Python.xcframework is added.
+        // The shared Compose app now owns provider calls through IosFuoCoreBridge.
+        // This legacy SwiftUI bridge is kept for local experiments until the
+        // Python.xcframework cinterop is wired into shared/src/iosMain.
     }
 
     func search(keyword: String) async throws -> [FuoTrack] {

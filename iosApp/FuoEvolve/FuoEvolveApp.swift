@@ -1,15 +1,21 @@
 import SwiftUI
+import Shared
 
 @main
 struct FuoEvolveApp: App {
-    @StateObject private var model = PlayerViewModel(
-        core: PythonCoreBridge(),
-        audio: IOSNativeAudioEngine()
-    )
-
     var body: some Scene {
         WindowGroup {
-            ContentView(model: model)
+            SharedComposeRoot()
+                .ignoresSafeArea()
         }
+    }
+}
+
+private struct SharedComposeRoot: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        IosAppHostKt.MainViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
     }
 }
