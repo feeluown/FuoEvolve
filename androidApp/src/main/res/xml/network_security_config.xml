@@ -3,6 +3,7 @@
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">music.126.net</domain>
         <domain includeSubdomains="true">qqmusic.qq.com</domain>
+        <domain includeSubdomains="true">hdslb.com</domain>
         <domain includeSubdomains="true">bilivideo.com</domain>
         <domain includeSubdomains="true">bilivideo.cn</domain>
     </domain-config>

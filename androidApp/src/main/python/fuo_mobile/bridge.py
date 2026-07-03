@@ -490,6 +490,11 @@ LOGIN_MODES = {
     "ytmusic": ["WebView", "Headers"],
 }
 
+BILIBILI_MEDIA_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
+
 
 class FuoMobileBridge:
     def __init__(self, providers_json: str):
@@ -1085,6 +1090,10 @@ class FuoMobileBridge:
 
     def _payload_from_media(self, song, media: Media, quality: str) -> Dict[str, Any]:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
+        if getattr(song, "source", "") == "bilibili":
+            headers = payload.setdefault("headers", {})
+            headers.setdefault("Referer", "https://www.bilibili.com/")
+            headers.setdefault("User-Agent", BILIBILI_MEDIA_USER_AGENT)
         if quality:
             payload["audio_quality"] = quality
         cover = self._get_cover(song)
