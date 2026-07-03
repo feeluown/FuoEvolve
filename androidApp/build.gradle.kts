@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,12 +7,33 @@ plugins {
     alias(libs.plugins.chaquopy)
 }
 
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.isFile) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun signingValue(envName: String, propertyName: String): String? =
+    providers.environmentVariable(envName).orNull
+        ?: localProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+
 val localBuildPython = "/home/bruce/.local/bin/python3.12"
 val configuredBuildPython = providers.environmentVariable("FUO_BUILD_PYTHON").orNull
     ?: localBuildPython.takeIf { file(it).exists() }
 val pypiFeelUOwnSource = "https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz"
 val feelUOwnSource = providers.environmentVariable("FUO_FEELUOWN_SOURCE").orNull
     ?: pypiFeelUOwnSource
+val fuoSigningStoreFile = signingValue("FUO_SIGNING_STORE_FILE", "fuo.signing.storeFile")
+val fuoSigningStorePassword = signingValue("FUO_SIGNING_STORE_PASSWORD", "fuo.signing.storePassword")
+val fuoSigningKeyAlias = signingValue("FUO_SIGNING_KEY_ALIAS", "fuo.signing.keyAlias")
+val fuoSigningKeyPassword = signingValue("FUO_SIGNING_KEY_PASSWORD", "fuo.signing.keyPassword")
+val hasFuoSigningConfig = listOf(
+    fuoSigningStoreFile,
+    fuoSigningStorePassword,
+    fuoSigningKeyAlias,
+    fuoSigningKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "org.feeluown.mobile"
@@ -31,6 +54,32 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        create("fuo") {
+            if (hasFuoSigningConfig) {
+                storeFile = rootProject.file(fuoSigningStoreFile!!)
+                storePassword = fuoSigningStorePassword
+                keyAlias = fuoSigningKeyAlias
+                keyPassword = fuoSigningKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig = if (hasFuoSigningConfig) {
+                signingConfigs.getByName("fuo")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+        release {
+            if (hasFuoSigningConfig) {
+                signingConfig = signingConfigs.getByName("fuo")
+            }
+        }
     }
 }
 

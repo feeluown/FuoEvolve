@@ -1,4 +1,4 @@
-name: Android Debug APK
+name: Android APK
 
 "on":
   push:
@@ -8,13 +8,18 @@ permissions:
   contents: read
 
 jobs:
-  build-debug-apk:
-    name: Build debug APK
+  build-apk:
+    name: Build signed APKs
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       FUO_BUILD_PYTHON: python
       FUO_FEELUOWN_SOURCE: https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz
+      FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
+      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
+      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
+      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
+      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
 
     steps:
       - name: Checkout
@@ -38,12 +43,30 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew :androidApp:assembleDebug
+      - name: Prepare signing keystore
+        run: |
+          for name in FUO_SIGNING_KEYSTORE_BASE64 FUO_SIGNING_STORE_PASSWORD FUO_SIGNING_KEY_ALIAS FUO_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required signing secret: ${name}"
+              exit 1
+            fi
+          done
+          mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
+          printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
-      - name: Upload debug APK
+      - name: Build signed APKs
+        run: ./gradlew :androidApp:assembleDebug :androidApp:assembleRelease
+
+      - name: Upload signed debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: fuo-evolve-debug-${{ github.sha }}
+          name: fuo-evolve-debug-signed-${{ github.sha }}
           path: androidApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload signed release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuo-evolve-release-signed-${{ github.sha }}
+          path: androidApp/build/outputs/apk/release/*.apk
           if-no-files-found: error

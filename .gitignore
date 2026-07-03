@@ -12,3 +12,6 @@ iosApp/**/*.xcuserstate
 androidApp/src/main/python/.venv/
 androidApp/src/main/python/__pycache__/
 androidApp/src/main/python/**/__pycache__/
+signing/
+*.jks
+*.keystore
