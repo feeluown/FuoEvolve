@@ -669,6 +669,7 @@ class FuoMobileBridge:
         bridge_log(f"playlist_tracks start playlist_id={playlist_id}")
         playlist = self._playlist_from_id(playlist_id)
         provider = self._get_provider(getattr(playlist, "source", ""))
+        playlist = self._playlist_for_tracks(playlist_id, provider, playlist)
         bridge_log(
             f"playlist_tracks resolved playlist_id={playlist_id} source={getattr(playlist, 'source', '')}"
         )
@@ -701,6 +702,21 @@ class FuoMobileBridge:
         if provider is None:
             raise RuntimeError(f"provider not found: {provider_id}")
         return provider
+
+    def _playlist_for_tracks(self, playlist_id: str, provider, playlist):
+        if getattr(playlist, "source", "") != "bilibili":
+            return playlist
+        if model_declares_field(playlist, "count"):
+            return playlist
+        playlist_get = getattr(provider, "playlist_get", None)
+        if playlist_get is None:
+            return playlist
+        detail = playlist_get(getattr(playlist, "identifier", ""))
+        if detail is None:
+            return playlist
+        self._playlists[playlist_id] = detail
+        bridge_log(f"playlist_tracks hydrated playlist_id={playlist_id}")
+        return detail
 
     def _feature_by_id(self, feature_id: str) -> Dict[str, Any]:
         for provider_id, features in FEATURE_DEFS.items():
@@ -1246,6 +1262,14 @@ def read_models(value, limit: int = 50) -> List[Any]:
         return result
     except TypeError:
         return []
+
+
+def model_declares_field(model, field: str) -> bool:
+    model_fields = getattr(model.__class__, "model_fields", None)
+    if model_fields is not None:
+        return field in model_fields
+    fields = getattr(model.__class__, "__fields__", None)
+    return field in (fields or {})
 
 
 def song_to_dict(song, library: Library) -> Dict[str, Any]:
