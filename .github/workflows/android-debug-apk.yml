@@ -56,8 +56,11 @@ jobs:
           mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
           printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
-      - name: Build signed APKs
-        run: ./gradlew :androidApp:assembleDebug :androidApp:assembleRelease
+      - name: Build signed debug APK
+        run: ./gradlew :androidApp:assembleDebug
+
+      - name: Build signed release APKs
+        run: ./gradlew :androidApp:assembleRelease -Pfuo.releaseAbiSplits=true
 
       - name: Upload signed debug APK
         uses: actions/upload-artifact@v4
@@ -66,7 +69,7 @@ jobs:
           path: androidApp/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: Upload signed release APK
+      - name: Upload signed release APKs
         uses: actions/upload-artifact@v4
         with:
           name: fuo-evolve-release-signed-${{ github.sha }}

@@ -34,6 +34,14 @@ val hasFuoSigningConfig = listOf(
     fuoSigningKeyAlias,
     fuoSigningKeyPassword,
 ).all { !it.isNullOrBlank() }
+val releaseApkTasks = setOf("assembleRelease", "packageRelease", "packageReleaseUniversalApk")
+val inferredReleaseAbiSplits = gradle.startParameter.taskNames.any {
+    it.substringAfterLast(':') in releaseApkTasks
+}
+val releaseAbiSplitsEnabled = providers.gradleProperty("fuo.releaseAbiSplits")
+    .map(String::toBoolean)
+    .orElse(inferredReleaseAbiSplits)
+    .get()
 
 android {
     namespace = "org.feeluown.mobile"
@@ -79,6 +87,15 @@ android {
             if (hasFuoSigningConfig) {
                 signingConfig = signingConfigs.getByName("fuo")
             }
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = releaseAbiSplitsEnabled
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
         }
     }
 }
