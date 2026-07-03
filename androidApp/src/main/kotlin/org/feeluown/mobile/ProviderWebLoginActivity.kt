@@ -250,6 +250,13 @@ class ProviderWebLoginActivity : Activity() {
                 "passport.bilibili.com",
                 "bilibili.com",
             )
+            "ytmusic" -> listOf(
+                "music.youtube.com",
+                "youtube.com",
+                "www.youtube.com",
+                "accounts.google.com",
+                "google.com",
+            )
             else -> emptyList()
         }
     }

@@ -477,13 +477,17 @@ LOGIN_CONFIGS = {
         "login_url": "https://www.bilibili.com",
         "cookie_key_groups": [["SESSDATA", "bili_jct"]],
     },
+    "ytmusic": {
+        "login_url": "https://music.youtube.com",
+        "cookie_key_groups": [["__Secure-3PAPISID"]],
+    },
 }
 
 LOGIN_MODES = {
     "netease": ["WebView", "Cookie"],
     "qqmusic": ["WebView", "Cookie"],
     "bilibili": ["WebView", "Cookie"],
-    "ytmusic": ["Headers"],
+    "ytmusic": ["WebView", "Headers"],
 }
 
 
@@ -561,6 +565,9 @@ class FuoMobileBridge:
         cookies = parse_cookies(cookies_json)
         if not isinstance(cookies, dict) or not cookies:
             raise RuntimeError("cookies must be a non-empty JSON object")
+        if provider_id == "ytmusic":
+            user = self._login_ytmusic_with_cookies(provider, cookies)
+            return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
         if provider_id == "bilibili":
             provider._api.from_cookiedict(cookies)
             user = provider.user_info()
@@ -575,6 +582,22 @@ class FuoMobileBridge:
         provider.auth(user)
         self._save_login(provider_id, user, cookies)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def _login_ytmusic_with_cookies(self, provider, cookies: Dict[str, str]):
+        cookie_value = ytmusic_cookie_header(cookies)
+        auth = ytmusic_authorization_from_cookies(cookies)
+        from fuo_ytmusic.consts import HEADER_FILE
+        from fuo_ytmusic.headerfile import write_headerfile
+
+        write_headerfile(auth, cookie_value, HEADER_FILE)
+        user = provider.try_get_user_with_headerfile()
+        if user is None:
+            raise RuntimeError("get user with ytmusic cookies failed")
+        provider.auth(user)
+        current_user_changed = getattr(provider, "current_user_changed", None)
+        if current_user_changed is not None:
+            current_user_changed.emit(user)
+        return user
 
     def provider_login_with_headers(self, provider_id: str, authorization: str, cookie: str) -> str:
         if provider_id != "ytmusic":
@@ -1171,6 +1194,23 @@ def parse_cookies(raw: str) -> Dict[str, str]:
         if key:
             cookies[key] = value.strip()
     return cookies
+
+
+def ytmusic_cookie_header(cookies: Dict[str, str]) -> str:
+    return "; ".join(
+        f"{key}={value}"
+        for key, value in cookies.items()
+        if key and value
+    )
+
+
+def ytmusic_authorization_from_cookies(cookies: Dict[str, str]) -> str:
+    sapisid = (cookies.get("__Secure-3PAPISID") or "").strip()
+    if not sapisid:
+        raise RuntimeError("ytmusic cookies must include __Secure-3PAPISID")
+    from ytmusicapi.helpers import get_authorization
+
+    return get_authorization(f"{sapisid} https://music.youtube.com")
 
 
 def parse_provider_ids(raw: str) -> Optional[List[str]]:

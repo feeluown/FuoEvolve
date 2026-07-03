@@ -971,6 +971,18 @@ class FuoPlayerControllerTest {
             assertEquals(setOf("netease"), controller.enabledProviderIds)
             assertEquals(listOf("netease"), controller.providers.map { it.providerId })
             assertEquals(listOf("netease", "qqmusic", "bilibili", "ytmusic"), controller.availableProviders.map { it.providerId })
+            val ytmusic = controller.availableProviders.first { it.providerId == "ytmusic" }
+            assertEquals(
+                setOf(ProviderLoginMode.WebView, ProviderLoginMode.Headers),
+                ytmusic.supportedLoginModes,
+            )
+            assertEquals(
+                ProviderLoginConfig(
+                    loginUrl = "https://music.youtube.com",
+                    cookieKeyGroups = listOf(listOf("__Secure-3PAPISID")),
+                ),
+                ytmusic.loginConfig,
+            )
             assertEquals(setOf("netease"), provider.lastEnabledProviderIds)
 
             controller.onProviderEnabledChange("ytmusic", enabled = true)
@@ -1155,7 +1167,11 @@ class FuoPlayerControllerTest {
             ProviderInfo(
                 providerId = "ytmusic",
                 providerName = "YouTube Music",
-                supportedLoginModes = setOf(ProviderLoginMode.Headers),
+                loginConfig = ProviderLoginConfig(
+                    loginUrl = "https://music.youtube.com",
+                    cookieKeyGroups = listOf(listOf("__Secure-3PAPISID")),
+                ),
+                supportedLoginModes = setOf(ProviderLoginMode.WebView, ProviderLoginMode.Headers),
             ),
         ),
         initialIsLoggedIn: Boolean = true,

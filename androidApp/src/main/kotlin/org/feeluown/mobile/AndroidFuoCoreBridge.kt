@@ -416,7 +416,11 @@ class AndroidFuoCoreBridge(
             ProviderInfo(
                 providerId = "ytmusic",
                 providerName = "YouTube Music",
-                supportedLoginModes = setOf(ProviderLoginMode.Headers),
+                loginConfig = ProviderLoginConfig(
+                    loginUrl = "https://music.youtube.com",
+                    cookieKeyGroups = listOf(listOf("__Secure-3PAPISID")),
+                ),
+                supportedLoginModes = setOf(ProviderLoginMode.WebView, ProviderLoginMode.Headers),
             ),
         )
 
