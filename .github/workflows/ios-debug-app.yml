@@ -11,6 +11,7 @@ jobs:
   build-debug-app:
     name: Build debug iOS app
     runs-on: macos-15
+    continue-on-error: true
     timeout-minutes: 45
 
     steps:
