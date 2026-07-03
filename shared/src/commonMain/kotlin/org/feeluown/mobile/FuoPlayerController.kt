@@ -25,8 +25,15 @@ enum class HomeSection {
 
 enum class MineSection {
     Playlists,
-    Favorites,
+    Artists,
+    Albums,
     LocalMusic,
+}
+
+enum class PlaylistFilter {
+    All,
+    UserPlaylists,
+    FavoritePlaylists,
 }
 
 enum class LocalMusicViewMode {
@@ -108,6 +115,8 @@ class FuoPlayerController(
     var homeSection by mutableStateOf(HomeSection.Recommend)
         private set
     var mineSection by mutableStateOf(MineSection.Playlists)
+        private set
+    var playlistFilter by mutableStateOf(PlaylistFilter.All)
         private set
     var localMusicViewMode by mutableStateOf(LocalMusicViewMode.All)
         private set
@@ -600,9 +609,15 @@ class FuoPlayerController(
         persistSettings()
         when (value) {
             MineSection.Playlists -> if (minePlaylistSections.isEmpty()) refreshMinePlaylistContent()
-            MineSection.Favorites -> if (mineSections.isEmpty()) refreshMineContent()
+            MineSection.Artists,
+            MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
             MineSection.LocalMusic -> if (localTracks.isEmpty()) refreshLocalMusic()
         }
+    }
+
+    fun onPlaylistFilterChange(value: PlaylistFilter) {
+        playlistFilter = value
+        persistSettings()
     }
 
     fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
@@ -722,14 +737,15 @@ class FuoPlayerController(
     fun refreshMineContent() {
         scope.launch {
             isLoading = true
-            message = "正在加载我的收藏"
+            message = "正在加载歌手和专辑"
             runCatching {
                 refreshProviderCatalog()
-                loadProviderSections(ProviderFeatureCategory.Mine) { it.contentType != ProviderContentType.Songs } +
-                    loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists)
+                loadProviderSections(ProviderFeatureCategory.Mine) {
+                    it.contentType == ProviderContentType.Artists || it.contentType == ProviderContentType.Albums
+                }
             }.onSuccess {
                 mineSections = it
-                message = if (it.isEmpty()) "我的收藏暂无内容" else "我的收藏已更新"
+                message = if (it.isEmpty()) "歌手和专辑暂无内容" else "歌手和专辑已更新"
             }.onFailure {
                 setError(it)
             }
@@ -758,7 +774,8 @@ class FuoPlayerController(
             MineSection.Playlists -> if (minePlaylistSections.isEmpty() && mineFavoritePlaylistSections.isEmpty()) {
                 refreshMinePlaylistContent()
             }
-            MineSection.Favorites -> if (mineSections.isEmpty()) refreshMineContent()
+            MineSection.Artists,
+            MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
             MineSection.LocalMusic -> if (localTracks.isEmpty()) refreshLocalMusic()
         }
     }
@@ -766,7 +783,8 @@ class FuoPlayerController(
     private fun refreshActiveMineSection() {
         when (mineSection) {
             MineSection.Playlists -> refreshMinePlaylistContent()
-            MineSection.Favorites -> refreshMineContent()
+            MineSection.Artists,
+            MineSection.Albums -> refreshMineContent()
             MineSection.LocalMusic -> refreshLocalMusic()
         }
     }
@@ -774,7 +792,8 @@ class FuoPlayerController(
     private fun refreshActiveMineProviderContent() {
         when (mineSection) {
             MineSection.Playlists -> refreshMinePlaylistContent()
-            MineSection.Favorites -> refreshMineContent()
+            MineSection.Artists,
+            MineSection.Albums -> refreshMineContent()
             MineSection.LocalMusic -> Unit
         }
     }
@@ -1379,6 +1398,7 @@ class FuoPlayerController(
     private fun applySettings(settings: AppSettings) {
         homeSection = settings.homeSection
         mineSection = settings.mineSection
+        playlistFilter = settings.playlistFilter
         localMusicViewMode = settings.localMusicViewMode
         excludedLocalMusicDirectoryIds = settings.excludedLocalMusicDirectoryIds
         localMusicMinDurationSeconds = settings.localMusicMinDurationSeconds
@@ -1401,6 +1421,7 @@ class FuoPlayerController(
         val settings = AppSettings(
             homeSection = homeSection,
             mineSection = mineSection,
+            playlistFilter = playlistFilter,
             localMusicViewMode = localMusicViewMode,
             excludedLocalMusicDirectoryIds = excludedLocalMusicDirectoryIds,
             localMusicMinDurationSeconds = localMusicMinDurationSeconds,

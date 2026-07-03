@@ -35,6 +35,7 @@ enum class UnavailablePlaybackPolicy(
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
+    val playlistFilter: PlaylistFilter = PlaylistFilter.All,
     val localMusicViewMode: LocalMusicViewMode = LocalMusicViewMode.All,
     val excludedLocalMusicDirectoryIds: Set<String> = emptySet(),
     val localMusicMinDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,

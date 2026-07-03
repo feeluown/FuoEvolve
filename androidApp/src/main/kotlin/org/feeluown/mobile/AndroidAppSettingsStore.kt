@@ -14,6 +14,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         AppSettings(
             homeSection = homeSectionValue(rawHomeSection),
             mineSection = mineSectionValue(rawHomeSection),
+            playlistFilter = enumValue(KEY_PLAYLIST_FILTER, PlaylistFilter.All),
             localMusicViewMode = enumValue(KEY_LOCAL_MUSIC_VIEW_MODE, LocalMusicViewMode.All),
             excludedLocalMusicDirectoryIds = readStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS),
             localMusicMinDurationSeconds = preferences.getInt(
@@ -47,6 +48,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             preferences.edit()
                 .putString(KEY_HOME_SECTION, settings.homeSection.name)
                 .putString(KEY_MINE_SECTION, settings.mineSection.name)
+                .putString(KEY_PLAYLIST_FILTER, settings.playlistFilter.name)
                 .putString(KEY_LOCAL_MUSIC_VIEW_MODE, settings.localMusicViewMode.name)
                 .putStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS, settings.excludedLocalMusicDirectoryIds)
                 .putInt(KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS, settings.localMusicMinDurationSeconds)
@@ -175,6 +177,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val PREFS_NAME = "fuo_settings"
         private const val KEY_HOME_SECTION = "home_section"
         private const val KEY_MINE_SECTION = "mine_section"
+        private const val KEY_PLAYLIST_FILTER = "playlist_filter"
         private const val KEY_LOCAL_MUSIC_VIEW_MODE = "local_music_view_mode"
         private const val KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS = "excluded_local_music_directory_ids"
         private const val KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS = "local_music_min_duration_seconds"

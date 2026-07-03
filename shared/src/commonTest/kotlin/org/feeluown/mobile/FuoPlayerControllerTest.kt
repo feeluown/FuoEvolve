@@ -621,7 +621,7 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun switchingToMineLoadsFavoriteSections() = runTest {
+    fun switchingToMineLoadsArtistSections() = runTest {
         val favoriteSongsFeature = ProviderFeature(
             id = "netease_favorite_songs",
             providerId = "netease",
@@ -649,37 +649,16 @@ class FuoPlayerControllerTest {
                 type = ProviderMediaItemType.Artist,
             ),
         )
-        val favoritePlaylistsFeature = ProviderFeature(
-            id = "netease_favorite_playlists",
-            providerId = "netease",
-            providerName = "网易云音乐",
-            title = "收藏歌单",
-            category = ProviderFeatureCategory.MineFavoritePlaylists,
-            contentType = ProviderContentType.Playlists,
-            requiresLogin = true,
-        )
-        val favoritePlaylists = listOf(
-            ProviderPlaylist(
-                id = "playlist:netease:1",
-                title = "Favorite Playlist",
-                providerId = "netease",
-                providerName = "网易云音乐",
-            ),
-        )
         val favoriteTracks = listOf(providerTrack("provider:1", "Favorite"))
         val provider = FakeProviderRepository(
             tracks = emptyList(),
-            features = listOf(favoriteSongsFeature, favoriteArtistsFeature, favoritePlaylistsFeature),
+            features = listOf(favoriteSongsFeature, favoriteArtistsFeature),
             featureSections = mapOf(
                 favoriteSongsFeature.id to ProviderContentSection(
                     favoriteSongsFeature,
                     tracks = favoriteTracks,
                 ),
                 favoriteArtistsFeature.id to ProviderContentSection(favoriteArtistsFeature, mediaItems = favoriteArtists),
-                favoritePlaylistsFeature.id to ProviderContentSection(
-                    favoritePlaylistsFeature,
-                    playlists = favoritePlaylists,
-                ),
             ),
         )
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -696,15 +675,14 @@ class FuoPlayerControllerTest {
             controller.onHomeSectionChange(HomeSection.Mine)
             advanceUntilIdle()
             provider.loadedFeatureIds.clear()
-            controller.onMineSectionChange(MineSection.Favorites)
+            controller.onMineSectionChange(MineSection.Artists)
             advanceUntilIdle()
 
             assertEquals(
-                listOf(favoriteArtistsFeature.id, favoritePlaylistsFeature.id),
+                listOf(favoriteArtistsFeature.id),
                 provider.loadedFeatureIds,
             )
             assertEquals(favoriteArtists, controller.mineSections[0].mediaItems)
-            assertEquals(favoritePlaylists, controller.mineSections[1].playlists)
         } finally {
             controllerScope.cancel()
         }
@@ -738,7 +716,7 @@ class FuoPlayerControllerTest {
 
             advanceUntilIdle()
             controller.onHomeSectionChange(HomeSection.Mine)
-            controller.onMineSectionChange(MineSection.Favorites)
+            controller.onMineSectionChange(MineSection.Artists)
             advanceUntilIdle()
 
             assertEquals(true, controller.mineSections.first().isLoginRequired)
@@ -835,6 +813,7 @@ class FuoPlayerControllerTest {
             AppSettings(
                 homeSection = HomeSection.Mine,
                 mineSection = MineSection.LocalMusic,
+                playlistFilter = PlaylistFilter.FavoritePlaylists,
                 localMusicViewMode = LocalMusicViewMode.Album,
                 excludedLocalMusicDirectoryIds = setOf("Podcasts/"),
                 localMusicMinDurationSeconds = 30,
@@ -876,6 +855,7 @@ class FuoPlayerControllerTest {
 
             assertEquals(HomeSection.Mine, controller.homeSection)
             assertEquals(MineSection.LocalMusic, controller.mineSection)
+            assertEquals(PlaylistFilter.FavoritePlaylists, controller.playlistFilter)
             assertEquals(LocalMusicViewMode.Album, controller.localMusicViewMode)
             assertEquals(setOf("Podcasts/"), controller.excludedLocalMusicDirectoryIds)
             assertEquals(30, controller.localMusicMinDurationSeconds)
@@ -901,7 +881,8 @@ class FuoPlayerControllerTest {
             controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
             controller.onProviderHeaderAuthorizationChange("ytmusic", "SAPISIDHASH draft")
             controller.onProviderHeaderCookieChange("ytmusic", "SID=draft")
-            controller.onMineSectionChange(MineSection.Favorites)
+            controller.onMineSectionChange(MineSection.Artists)
+            controller.onPlaylistFilterChange(PlaylistFilter.UserPlaylists)
             controller.onLocalMusicDirectoryEnabledChange("Podcasts/", enabled = true)
             controller.onLocalMusicMinDurationChange(60)
             controller.onAudioCacheLimitChange(1024)
@@ -919,7 +900,8 @@ class FuoPlayerControllerTest {
             )
             assertEquals(setOf("netease", "ytmusic"), store.saved.enabledProviderIds)
             assertEquals(listOf("ytmusic", "netease", "qqmusic", "bilibili"), store.saved.providerOrderIds)
-            assertEquals(MineSection.Favorites, store.saved.mineSection)
+            assertEquals(MineSection.Artists, store.saved.mineSection)
+            assertEquals(PlaylistFilter.UserPlaylists, store.saved.playlistFilter)
             assertEquals(emptySet(), store.saved.excludedLocalMusicDirectoryIds)
             assertEquals(60, store.saved.localMusicMinDurationSeconds)
             assertEquals(LocalMusicScanSettings(emptySet(), 60), local.lastSettings)
