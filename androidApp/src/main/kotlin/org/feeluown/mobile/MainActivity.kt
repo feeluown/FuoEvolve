@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 
@@ -30,13 +31,18 @@ class MainActivity : ComponentActivity() {
                 hasAudioPermission = hasAudioPermission()
             }
             val controller = fuoApplication.controller
+            var pendingWebLoginProviderId by rememberSaveable { mutableStateOf<String?>(null) }
             val webLoginLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.StartActivityForResult(),
             ) { result ->
+                val returnedProviderId = result.data
+                    ?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID)
+                    .orEmpty()
+                val providerId = returnedProviderId.ifBlank { pendingWebLoginProviderId.orEmpty() }
+                if (providerId.isNotBlank()) {
+                    controller.openSettings(providerId)
+                }
                 if (result.resultCode == RESULT_OK) {
-                    val providerId = result.data
-                        ?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID)
-                        .orEmpty()
                     val cookiesJson = result.data
                         ?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON)
                         .orEmpty()
@@ -44,6 +50,7 @@ class MainActivity : ComponentActivity() {
                         controller.loginProviderWithCookies(providerId, cookiesJson)
                     }
                 }
+                pendingWebLoginProviderId = null
             }
 
             BackHandler(enabled = controller.canNavigateBack) {
@@ -64,6 +71,8 @@ class MainActivity : ComponentActivity() {
                 },
                 onOpenProviderWebLogin = { provider ->
                     if (provider.loginConfig != null) {
+                        pendingWebLoginProviderId = provider.providerId
+                        controller.openSettings(provider.providerId)
                         webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
                     }
                 },

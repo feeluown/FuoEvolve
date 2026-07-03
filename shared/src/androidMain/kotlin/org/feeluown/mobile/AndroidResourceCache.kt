@@ -19,14 +19,11 @@ object AndroidResourceCache {
 
     private val lock = Any()
     private var audioCache: SimpleCache? = null
-    private var audioCacheLimitBytes: Long = 0
 
     fun audioCache(context: Context): SimpleCache {
         val limit = limit(context).audioMaxBytes
         synchronized(lock) {
-            audioCache?.takeIf { audioCacheLimitBytes == limit }?.let { return it }
-            audioCache?.release()
-            audioCacheLimitBytes = limit
+            audioCache?.let { return it }
             return SimpleCache(
                 audioDir(context).apply { mkdirs() },
                 LeastRecentlyUsedCacheEvictor(limit),
@@ -50,23 +47,20 @@ object AndroidResourceCache {
             .putLong(KEY_AUDIO_LIMIT_BYTES, limit.audioMaxBytes)
             .putLong(KEY_IMAGE_LIMIT_BYTES, limit.imageMaxBytes)
             .apply()
-        synchronized(lock) {
-            if (audioCache != null && audioCacheLimitBytes != limit.audioMaxBytes) {
-                audioCache?.release()
-                audioCache = null
-                audioCacheLimitBytes = 0
-            }
-        }
         trimImages(context)
     }
 
     fun clearAll(context: Context) {
         synchronized(lock) {
-            audioCache?.release()
-            audioCache = null
-            audioCacheLimitBytes = 0
+            val cache = audioCache
+            if (cache == null) {
+                audioDir(context).deleteRecursively()
+            } else {
+                cache.keys.toList().forEach { key ->
+                    cache.removeResource(key)
+                }
+            }
         }
-        audioDir(context).deleteRecursively()
         imageDir(context).deleteRecursively()
         rootDir(context).mkdirs()
     }

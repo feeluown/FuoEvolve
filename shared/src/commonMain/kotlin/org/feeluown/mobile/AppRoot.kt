@@ -220,7 +220,7 @@ private fun HomeScreen(
             CenterAlignedTopAppBar(
                 title = { Text("FeelUOwn") },
                 navigationIcon = {
-                    IconButton(onClick = controller::openSettings) {
+                    IconButton(onClick = { controller.openSettings() }) {
                         Icon(Icons.Filled.Settings, contentDescription = "设置")
                     }
                 },
@@ -406,10 +406,10 @@ private fun ProviderContentHomeSection(
     val title = if (section == HomeSection.Recommend) "推荐" else "探索"
     val sections = controller.contentSectionsFor(section)
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
-    val lockedProviderNames = remember(sections) {
+    val lockedProviders = remember(sections) {
         sections.filter { it.isLoginRequired }
-            .map { it.feature.providerName }
-            .distinct()
+            .map { it.feature }
+            .distinctBy { it.providerId }
     }
     Column(
         modifier = modifier,
@@ -523,11 +523,11 @@ private fun ProviderContentHomeSection(
                         }
                     }
                 }
-                if (lockedProviderNames.isNotEmpty()) {
+                if (lockedProviders.isNotEmpty()) {
                     item(key = "locked-providers:${section.name}") {
                         ProviderLockedSummary(
-                            providerNames = lockedProviderNames,
-                            onClick = controller::openSettings,
+                            providers = lockedProviders,
+                            onClick = { controller.openSettings(it.providerId) },
                         )
                     }
                 }
@@ -903,8 +903,8 @@ private fun ProviderMediaItem.toDisplayTrack(): MusicTrack {
 }
 
 @Composable
-private fun ProviderLockedSummary(providerNames: List<String>, onClick: () -> Unit) {
-    val label = providerNames.joinToString("、")
+private fun ProviderLockedSummary(providers: List<ProviderFeature>, onClick: (ProviderFeature) -> Unit) {
+    val label = providers.joinToString("、") { it.providerName }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -920,7 +920,7 @@ private fun ProviderLockedSummary(providerNames: List<String>, onClick: () -> Un
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        TextButton(onClick = onClick) {
+        TextButton(onClick = { providers.firstOrNull()?.let(onClick) }) {
             Text("登录")
         }
     }
@@ -1023,10 +1023,10 @@ private fun MinePlaylistsSection(controller: FuoPlayerController, modifier: Modi
     val favoriteSections = controller.mineFavoritePlaylistSections
     val sections = userSections + favoriteSections
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
-    val lockedProviderNames = remember(sections) {
+    val lockedProviders = remember(sections) {
         sections.filter { it.isLoginRequired }
-            .map { it.feature.providerName }
-            .distinct()
+            .map { it.feature }
+            .distinctBy { it.providerId }
     }
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
@@ -1045,11 +1045,11 @@ private fun MinePlaylistsSection(controller: FuoPlayerController, modifier: Modi
                 .forEach { contentSection ->
                     playlistSectionItems(controller, contentSection)
                 }
-            if (lockedProviderNames.isNotEmpty()) {
+            if (lockedProviders.isNotEmpty()) {
                 item(key = "locked-providers:mine-playlists") {
                     ProviderLockedSummary(
-                        providerNames = lockedProviderNames,
-                        onClick = controller::openSettings,
+                        providers = lockedProviders,
+                        onClick = { controller.openSettings(it.providerId) },
                     )
                 }
             }
@@ -1085,83 +1085,154 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
 @Composable
 private fun MineFavoritesSection(controller: FuoPlayerController, modifier: Modifier) {
     val sections = controller.mineSections
-    val visibleSections = remember(sections) {
-        sections.filterNot { it.isLoginRequired || it.feature.contentType == ProviderContentType.Playlists }
+    var selectedTypes by remember { mutableStateOf<Set<ProviderContentType>>(emptySet()) }
+    val filteredSections = remember(sections, selectedTypes) {
+        if (selectedTypes.isEmpty()) {
+            sections
+        } else {
+            sections.filter { it.feature.contentType in selectedTypes }
+        }
     }
-    val lockedProviderNames = remember(sections) {
-        sections.filter { it.isLoginRequired }
-            .map { it.feature.providerName }
-            .distinct()
+    val visibleSections = remember(filteredSections) {
+        filteredSections.filterNot { it.isLoginRequired }
     }
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
+    val lockedProviders = remember(filteredSections) {
+        filteredSections.filter { it.isLoginRequired }
+            .map { it.feature }
+            .distinctBy { it.providerId }
+    }
+
+    Column(
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (sections.isEmpty()) {
-            item {
-                EmptyProviderContentHint("我的收藏")
-            }
-        } else {
-            visibleSections.forEach { contentSection ->
-                item(key = "header:${contentSection.feature.id}") {
-                    ProviderFeatureHeader(
-                        feature = contentSection.feature,
-                        onPlayAll = if (contentSection.tracks.isNotEmpty()) {
-                            { controller.playAllFromFeature(contentSection.feature.id) }
-                        } else {
-                            null
-                        },
-                    )
+        FavoriteTypeChips(
+            selectedTypes = selectedTypes,
+            onToggle = { type ->
+                selectedTypes = if (type in selectedTypes) {
+                    selectedTypes - type
+                } else {
+                    selectedTypes + type
                 }
-                when {
-                    contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
-                        ProviderContentMessage(contentSection.errorMessage)
+            },
+            onClear = { selectedTypes = emptySet() },
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (sections.isEmpty()) {
+                item {
+                    EmptyProviderContentHint("我的收藏")
+                }
+            } else if (filteredSections.isEmpty()) {
+                item {
+                    ProviderContentMessage("当前筛选暂无内容")
+                }
+            } else {
+                visibleSections.forEach { contentSection ->
+                    item(key = "header:${contentSection.feature.id}") {
+                        ProviderFeatureHeader(
+                            feature = contentSection.feature,
+                            onPlayAll = if (contentSection.tracks.isNotEmpty()) {
+                                { controller.playAllFromFeature(contentSection.feature.id) }
+                            } else {
+                                null
+                            },
+                        )
                     }
-                    contentSection.tracks.isNotEmpty() -> {
-                        itemsIndexed(
-                            contentSection.tracks,
-                            key = { _, item -> "${contentSection.feature.id}:${item.id}" },
-                        ) { index, track ->
-                            TrackRow(
-                                track = track,
-                                downloadState = controller.downloadStates[track.id],
-                                onClick = { controller.playFromFeature(contentSection.feature.id, index) },
-                                onDownload = { controller.download(track) },
-                                onDeleteDownload = { controller.deleteDownload(track) },
-                            )
-                            HorizontalDivider()
+                    when {
+                        contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+                            ProviderContentMessage(contentSection.errorMessage)
                         }
-                    }
-                    contentSection.playlists.isNotEmpty() -> {
-                        item(key = "playlists:${contentSection.feature.id}") {
-                            ProviderPlaylistGrid(
-                                playlists = contentSection.playlists,
-                                onClick = controller::openPlaylist,
-                            )
+                        contentSection.tracks.isNotEmpty() -> {
+                            itemsIndexed(
+                                contentSection.tracks,
+                                key = { _, item -> "${contentSection.feature.id}:${item.id}" },
+                            ) { index, track ->
+                                TrackRow(
+                                    track = track,
+                                    downloadState = controller.downloadStates[track.id],
+                                    onClick = { controller.playFromFeature(contentSection.feature.id, index) },
+                                    onDownload = { controller.download(track) },
+                                    onDeleteDownload = { controller.deleteDownload(track) },
+                                )
+                                HorizontalDivider()
+                            }
                         }
-                    }
-                    contentSection.mediaItems.isNotEmpty() -> {
-                        item(key = "media-items:${contentSection.feature.id}") {
-                            ProviderMediaItemGrid(
-                                items = contentSection.mediaItems,
-                                onClick = controller::openMediaItem,
-                            )
+                        contentSection.playlists.isNotEmpty() -> {
+                            item(key = "playlists:${contentSection.feature.id}") {
+                                ProviderPlaylistGrid(
+                                    playlists = contentSection.playlists,
+                                    onClick = controller::openPlaylist,
+                                )
+                            }
                         }
-                    }
-                    else -> item(key = "empty:${contentSection.feature.id}") {
-                        ProviderContentMessage("暂无内容")
+                        contentSection.mediaItems.isNotEmpty() -> {
+                            item(key = "media-items:${contentSection.feature.id}") {
+                                ProviderMediaItemGrid(
+                                    items = contentSection.mediaItems,
+                                    onClick = controller::openMediaItem,
+                                )
+                            }
+                        }
+                        else -> item(key = "empty:${contentSection.feature.id}") {
+                            ProviderContentMessage("暂无内容")
+                        }
                     }
                 }
-            }
-            if (lockedProviderNames.isNotEmpty()) {
-                item(key = "locked-providers:mine") {
-                    ProviderLockedSummary(
-                        providerNames = lockedProviderNames,
-                        onClick = controller::openSettings,
-                    )
+                if (lockedProviders.isNotEmpty()) {
+                    item(key = "locked-providers:mine") {
+                        ProviderLockedSummary(
+                            providers = lockedProviders,
+                            onClick = { controller.openSettings(it.providerId) },
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FavoriteTypeChips(
+    selectedTypes: Set<ProviderContentType>,
+    onToggle: (ProviderContentType) -> Unit,
+    onClear: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = selectedTypes.isEmpty(),
+            onClick = onClear,
+            label = { Text("全部") },
+        )
+        favoriteFilterTypes.forEach { type ->
+            FilterChip(
+                selected = type in selectedTypes,
+                onClick = { onToggle(type) },
+                label = { Text(type.favoriteFilterLabel()) },
+            )
+        }
+    }
+}
+
+private val favoriteFilterTypes = listOf(
+    ProviderContentType.Playlists,
+    ProviderContentType.Artists,
+    ProviderContentType.Albums,
+)
+
+private fun ProviderContentType.favoriteFilterLabel(): String {
+    return when (this) {
+        ProviderContentType.Playlists -> "歌单"
+        ProviderContentType.Artists -> "歌手"
+        ProviderContentType.Albums -> "专辑"
+        ProviderContentType.Songs -> "歌曲"
     }
 }
 

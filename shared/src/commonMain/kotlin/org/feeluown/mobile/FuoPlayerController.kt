@@ -314,7 +314,8 @@ class FuoPlayerController(
         }
     }
 
-    fun openSettings() {
+    fun openSettings(providerId: String? = null) {
+        providerId?.takeIf { it.isNotBlank() }?.let { selectedSettingsProviderId = it }
         isSettingsOpen = true
         refreshAllProviderAuthStates()
         refreshResourceCacheUsage()
@@ -724,7 +725,8 @@ class FuoPlayerController(
             message = "正在加载我的收藏"
             runCatching {
                 refreshProviderCatalog()
-                loadProviderSections(ProviderFeatureCategory.Mine)
+                loadProviderSections(ProviderFeatureCategory.Mine) { it.contentType != ProviderContentType.Songs } +
+                    loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists)
             }.onSuccess {
                 mineSections = it
                 message = if (it.isEmpty()) "我的收藏暂无内容" else "我的收藏已更新"
@@ -735,9 +737,12 @@ class FuoPlayerController(
         }
     }
 
-    private suspend fun loadProviderSections(category: ProviderFeatureCategory): List<ProviderContentSection> {
+    private suspend fun loadProviderSections(
+        category: ProviderFeatureCategory,
+        includeFeature: (ProviderFeature) -> Boolean = { true },
+    ): List<ProviderContentSection> {
         return withTimeout(30_000) {
-            providerFeatures.filter { it.category == category }.map { feature ->
+            providerFeatures.filter { it.category == category && includeFeature(it) }.map { feature ->
                 if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
                     ProviderContentSection(feature, isLoginRequired = true)
                 } else {
