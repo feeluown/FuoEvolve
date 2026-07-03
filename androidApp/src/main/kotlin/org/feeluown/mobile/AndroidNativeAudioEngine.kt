@@ -37,6 +37,22 @@ class AndroidNativeAudioEngine(
         }
     }
 
+    override fun prepareLoading(track: MusicTrack) {
+        currentPayload = null
+        mutableState.value = mutableState.value.copy(
+            status = PlayerStatus.Loading,
+            currentTrack = track,
+            positionMs = 0,
+            durationMs = track.durationMs ?: 0,
+            bufferedMs = 0,
+            lyrics = track.lyrics,
+            audioQuality = null,
+            errorMessage = null,
+        )
+        FuoPlaybackService.loading(context, track.toLoadingJson())
+        connectController()
+    }
+
     override fun play(track: MusicTrack, payload: PlaybackPayload) {
         currentPayload = payload
         mutableState.value = mutableState.value.copy(
@@ -178,6 +194,22 @@ class AndroidNativeAudioEngine(
             .put("duration_ms", durationMs ?: 0)
             .put("lyrics", lyrics ?: "")
             .put("audio_quality", audioQuality ?: "")
+            .toString()
+    }
+
+    private fun MusicTrack.toLoadingJson(): String {
+        return JSONObject()
+            .put("track_id", id)
+            .put("source_type", sourceType.name)
+            .put("local_uri", localUri ?: "")
+            .put("provider_id", providerId ?: "")
+            .put("provider_name", providerName ?: "")
+            .put("title", title)
+            .put("artists", artists)
+            .put("album", album)
+            .put("source", source)
+            .put("cover_url", coverUrl ?: "")
+            .put("duration_ms", durationMs ?: 0)
             .toString()
     }
 

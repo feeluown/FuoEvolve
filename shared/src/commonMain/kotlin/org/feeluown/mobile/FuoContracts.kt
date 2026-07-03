@@ -52,6 +52,7 @@ data class AppSettings(
     val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
     val cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
+    val smartReplacementProviderIds: Set<String> = emptySet(),
 )
 
 data class ProviderHeaderInput(
@@ -239,6 +240,7 @@ interface ProviderMusicRepository {
     suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
+        smartReplacementProviderIds: Set<String> = emptySet(),
     ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
@@ -270,6 +272,7 @@ interface DownloadRepository {
 
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>
+    fun prepareLoading(track: MusicTrack) = Unit
     fun play(track: MusicTrack, payload: PlaybackPayload)
     fun pause()
     fun resume()

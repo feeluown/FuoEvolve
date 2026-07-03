@@ -3,17 +3,24 @@ package org.feeluown.mobile
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.TextUtils
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,7 +48,10 @@ class ProviderWebLoginActivity : Activity() {
 
         statusView = TextView(this).apply {
             text = "完成登录后会自动获取 Cookie"
-            setPadding(24, 12, 24, 12)
+            textSize = 13f
+            setTextColor(Color.parseColor("#5F6F66"))
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+            setBackgroundColor(Color.parseColor("#F3F7F4"))
         }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -65,36 +75,93 @@ class ProviderWebLoginActivity : Activity() {
         val titleView = TextView(this).apply {
             text = "$providerName 浏览器登录"
             textSize = 18f
-            setPadding(24, 0, 12, 0)
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#18211B"))
+            gravity = Gravity.CENTER_VERTICAL
+            ellipsize = TextUtils.TruncateAt.END
+            maxLines = 1
+            setPadding(0, 0, dp(12), 0)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val doneButton = Button(this).apply {
-            text = "完成"
-            setOnClickListener { finishWithCookies(webView.url, auto = false) }
+        val closeButton = toolbarButton(text = "关闭", filled = false) {
+            setResult(RESULT_CANCELED)
+            finish()
         }
-        val closeButton = Button(this).apply {
-            text = "关闭"
-            setOnClickListener {
-                setResult(RESULT_CANCELED)
-                finish()
-            }
+        val doneButton = toolbarButton(text = "完成", filled = true) {
+            finishWithCookies(webView.url, auto = false)
+        }
+        val toolbarDivider = View(this).apply {
+            setBackgroundColor(Color.parseColor("#E3E8E4"))
+        }
+        val toolbarContent = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(8), dp(16), dp(8))
+            minimumHeight = dp(56)
+            setBackgroundColor(Color.WHITE)
+            addView(titleView)
+            addView(closeButton)
+            addView(doneButton)
         }
         val toolbar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 18, 12, 12)
-            addView(titleView)
-            addView(doneButton)
-            addView(closeButton)
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
+            addView(toolbarContent, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(toolbarDivider, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
             addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(statusView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, systemBars.top, 0, systemBars.bottom)
+            insets
+        }
         setContentView(root)
+        ViewCompat.requestApplyInsets(root)
         webView.loadUrl(loginUrl, mapOf("User-Agent" to DESKTOP_USER_AGENT))
     }
+
+    private fun toolbarButton(text: String, filled: Boolean, onClick: () -> Unit): TextView {
+        return TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            minWidth = dp(64)
+            minHeight = dp(40)
+            setPadding(dp(14), 0, dp(14), 0)
+            setTextColor(if (filled) Color.WHITE else Color.parseColor("#516157"))
+            background = roundedBackground(
+                color = if (filled) Color.parseColor("#1DB954") else Color.TRANSPARENT,
+                strokeColor = if (filled) Color.TRANSPARENT else Color.parseColor("#D6DED8"),
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(40),
+            ).apply {
+                marginStart = dp(8)
+            }
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun roundedBackground(color: Int, strokeColor: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(8).toFloat()
+            setColor(color)
+            setStroke(dp(1), strokeColor)
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
         cookieManager().flush()

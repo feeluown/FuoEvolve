@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -1345,11 +1346,11 @@ private fun SettingsScreen(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
-    var loginProviderId by remember { mutableStateOf<String?>(null) }
+    val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
     LaunchedEffect(loginProviderId, controller.providers) {
         if (loginProviderId != null && loginProvider == null) {
-            loginProviderId = null
+            controller.closeSettingsProviderLogin()
         }
     }
     Scaffold(
@@ -1360,7 +1361,7 @@ private fun SettingsScreen(
                     IconButton(
                         onClick = {
                             if (loginProvider != null) {
-                                loginProviderId = null
+                                controller.closeSettingsProviderLogin()
                             } else {
                                 controller.closeSettings()
                             }
@@ -1390,7 +1391,7 @@ private fun SettingsScreen(
             } else {
                 ProviderSwitchPanel(
                     controller = controller,
-                    onOpenProviderLogin = { provider -> loginProviderId = provider.providerId },
+                    onOpenProviderLogin = { provider -> controller.openSettingsProviderLogin(provider.providerId) },
                 )
                 AudioQualitySettingsPanel(controller)
                 PlaybackPolicySettingsPanel(controller)
@@ -1656,6 +1657,33 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                         ),
                     ) {
                         Text(policy.label)
+                    }
+                }
+            }
+            if (controller.unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace) {
+                Text(
+                    text = "替换音源",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                controller.orderedProviders().forEach { provider ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            modifier = Modifier.weight(1f),
+                            text = provider.providerName,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Checkbox(
+                            checked = controller.isSmartReplacementProviderEnabled(provider.providerId),
+                            enabled = !controller.isLoading,
+                            onCheckedChange = {
+                                controller.onSmartReplacementProviderEnabledChange(provider.providerId, it)
+                            },
+                        )
                     }
                 }
             }
@@ -2519,6 +2547,7 @@ private fun TrackAction(
 @Composable
 private fun MiniPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
+    val isLoadingAudio = state.status == PlayerStatus.Loading
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -2526,33 +2555,47 @@ private fun MiniPlayer(controller: FuoPlayerController) {
             .clickable(onClick = controller::openFullPlayer),
         tonalElevation = 3.dp,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            state.currentTrack?.let { CoverBox(it) }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = state.currentTrack?.title ?: "未播放",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = state.currentTrack?.artists ?: "选择一首音乐开始播放",
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                state.currentTrack?.let { CoverBox(it) }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = state.currentTrack?.title ?: "未播放",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (isLoadingAudio) {
+                            "正在加载音频"
+                        } else {
+                            state.currentTrack?.let(::artistAlbumLabel) ?: "选择一首音乐开始播放"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isLoadingAudio) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                PlayerControls(
+                    state = state,
+                    onPrevious = controller::previous,
+                    onToggle = controller::toggle,
+                    onNext = controller::next,
+                    compact = true,
                 )
             }
-            PlayerControls(
-                state = state,
-                onPrevious = controller::previous,
-                onToggle = controller::toggle,
-                onNext = controller::next,
-                compact = true,
-            )
+            if (isLoadingAudio) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
     }
 }
@@ -2621,9 +2664,9 @@ private fun FullPlayer(controller: FuoPlayerController) {
                         )
                     }
                 }
-                PlayerTitleRow(currentTrack, state.audioQuality)
+                PlayerTitleBlock(currentTrack, state.audioQuality)
                 Text(
-                    text = currentTrack?.artists ?: "",
+                    text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -2649,14 +2692,12 @@ private enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
-private fun PlayerTitleRow(track: MusicTrack?, audioQuality: String?) {
-    Row(
+private fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?) {
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            modifier = Modifier.weight(1f),
             text = track?.title ?: "未播放",
             style = MaterialTheme.typography.headlineSmall,
             maxLines = 1,
@@ -2674,11 +2715,6 @@ private fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
     ) {
         if (track != null) {
             InfoTag(sourceLabel(track, null))
-            if (track.isSmartReplacement) {
-                track.originalProviderName?.takeIf { it.isNotBlank() }?.let {
-                    InfoTag("原：$it")
-                }
-            }
         }
         audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(it.uppercase())
@@ -2807,6 +2843,7 @@ private fun PlayerControls(
         )
         PlayPauseButton(
             isPlaying = state.status == PlayerStatus.Playing,
+            isLoading = state.status == PlayerStatus.Loading,
             onClick = onToggle,
             size = if (compact) 48.dp else 64.dp,
             iconSize = if (compact) 26.dp else 34.dp,
@@ -2853,11 +2890,30 @@ private fun RoundControlButton(
 @Composable
 private fun PlayPauseButton(
     isPlaying: Boolean,
+    isLoading: Boolean,
     onClick: () -> Unit,
     size: androidx.compose.ui.unit.Dp = 52.dp,
     iconSize: androidx.compose.ui.unit.Dp = 28.dp,
     prominent: Boolean = false,
 ) {
+    if (isLoading) {
+        Surface(
+            modifier = Modifier.size(size),
+            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+            tonalElevation = if (prominent) 3.dp else 1.dp,
+            shape = RoundedCornerShape(50),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(iconSize),
+                    strokeWidth = 2.dp,
+                    color = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        return
+    }
     RoundControlButton(
         imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
         contentDescription = if (isPlaying) "暂停" else "播放",
@@ -2991,6 +3047,12 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
         "智能替换".takeIf { track.isSmartReplacement },
         state,
     ).joinToString(" · ")
+}
+
+private fun artistAlbumLabel(track: MusicTrack): String {
+    return listOf(track.artists, track.album)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
 }
 
 private fun formatPlayCount(value: Long): String {

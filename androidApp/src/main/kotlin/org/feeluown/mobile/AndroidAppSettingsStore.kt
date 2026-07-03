@@ -40,6 +40,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 KEY_UNAVAILABLE_PLAYBACK_POLICY,
                 DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
             ),
+            smartReplacementProviderIds = readStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS),
         )
     }
 
@@ -65,6 +66,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
                 .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
                 .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
+                .putStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS, settings.smartReplacementProviderIds)
                 .apply()
         }
     }
@@ -194,5 +196,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
+        private const val KEY_SMART_REPLACEMENT_PROVIDER_IDS = "smart_replacement_provider_ids"
     }
 }

@@ -50,7 +50,7 @@ class FuoPlayerControllerTest {
         val origin = providerTrack("provider:1", "First")
         val provider = FakeProviderRepository(
             listOf(origin),
-            resolveHandler = { track, _ ->
+            resolveHandler = { track, _, _ ->
                 PlaybackPayload(
                     url = "https://example.com/replacement.mp3",
                     title = "Replacement",
@@ -87,6 +87,39 @@ class FuoPlayerControllerTest {
             assertEquals(true, engine.lastTrack?.isSmartReplacement)
             assertEquals("First", engine.lastTrack?.originalTitle)
             assertEquals("网易云音乐", engine.lastTrack?.originalProviderName)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun smartReplacementUsesConfiguredProviderIds() = runTest {
+        val provider = FakeProviderRepository(listOf(providerTrack("provider:1", "First")))
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                settingsStore = FakeSettingsStore(
+                    AppSettings(
+                        enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
+                        smartReplacementProviderIds = setOf("qqmusic", "bilibili"),
+                    ),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("first")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            assertEquals(setOf("qqmusic", "bilibili"), provider.lastSmartReplacementProviderIds)
         } finally {
             controllerScope.cancel()
         }
@@ -138,7 +171,7 @@ class FuoPlayerControllerTest {
         }
         val provider = FakeProviderRepository(
             tracks = tracks,
-            resolveHandler = { track, _ -> payloads.getValue(track.id).await() },
+            resolveHandler = { track, _, _ -> payloads.getValue(track.id).await() },
         )
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -1114,7 +1147,7 @@ class FuoPlayerControllerTest {
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
         private val resolveFailures: Set<String> = emptySet(),
-        private val resolveHandler: (suspend (MusicTrack, UnavailablePlaybackPolicy) -> PlaybackPayload)? = null,
+        private val resolveHandler: (suspend (MusicTrack, UnavailablePlaybackPolicy, Set<String>) -> PlaybackPayload)? = null,
         private val availableProviderInfos: List<ProviderInfo> = listOf(
             ProviderInfo(providerId = "netease", providerName = "网易云音乐"),
             ProviderInfo(providerId = "qqmusic", providerName = "QQ 音乐"),
@@ -1134,6 +1167,7 @@ class FuoPlayerControllerTest {
         var lastEnabledProviderIds: Set<String>? = null
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
+        var lastSmartReplacementProviderIds: Set<String>? = null
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
         val loadedMediaItemIds = mutableListOf<String>()
@@ -1155,12 +1189,14 @@ class FuoPlayerControllerTest {
         override suspend fun resolve(
             track: MusicTrack,
             unavailablePolicy: UnavailablePlaybackPolicy,
+            smartReplacementProviderIds: Set<String>,
         ): PlaybackPayload {
             resolveCount += 1
+            lastSmartReplacementProviderIds = smartReplacementProviderIds
             if (track.id in resolveFailures) {
                 throw RuntimeException("media not found: ${track.id}")
             }
-            return resolveHandler?.invoke(track, unavailablePolicy) ?: PlaybackPayload(
+            return resolveHandler?.invoke(track, unavailablePolicy, smartReplacementProviderIds) ?: PlaybackPayload(
                 url = "https://example.com/${track.id}.mp3",
                 title = track.title,
                 artists = track.artists,

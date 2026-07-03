@@ -108,6 +108,8 @@ class FuoPlayerController(
         private set
     var selectedSettingsProviderId by mutableStateOf<String?>(null)
         private set
+    var settingsLoginProviderId by mutableStateOf<String?>(null)
+        private set
     var providerLoginMode by mutableStateOf(ProviderLoginMode.WebView)
         private set
     var searchResults by mutableStateOf<List<MusicTrack>>(emptyList())
@@ -155,6 +157,8 @@ class FuoPlayerController(
     var cellularAudioQualityPolicy by mutableStateOf(DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY)
         private set
     var unavailablePlaybackPolicy by mutableStateOf(DEFAULT_UNAVAILABLE_PLAYBACK_POLICY)
+        private set
+    var smartReplacementProviderIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
         private set
@@ -299,6 +303,10 @@ class FuoPlayerController(
                 closeDebugLogs()
                 true
             }
+            isSettingsOpen && settingsLoginProviderId != null -> {
+                closeSettingsProviderLogin()
+                true
+            }
             isSettingsOpen -> {
                 closeSettings()
                 true
@@ -325,6 +333,7 @@ class FuoPlayerController(
 
     fun openSettings(providerId: String? = null) {
         providerId?.takeIf { it.isNotBlank() }?.let { selectedSettingsProviderId = it }
+        providerId?.takeIf { it.isNotBlank() }?.let { settingsLoginProviderId = it }
         isSettingsOpen = true
         refreshAllProviderAuthStates()
         refreshResourceCacheUsage()
@@ -334,6 +343,17 @@ class FuoPlayerController(
     fun closeSettings() {
         isSettingsOpen = false
         isDebugLogOpen = false
+        settingsLoginProviderId = null
+    }
+
+    fun openSettingsProviderLogin(providerId: String) {
+        settingsLoginProviderId = providerId
+        selectedSettingsProviderId = providerId
+        persistSettings()
+    }
+
+    fun closeSettingsProviderLogin() {
+        settingsLoginProviderId = null
     }
 
     fun openDebugLogs() {
@@ -571,6 +591,25 @@ class FuoPlayerController(
 
     fun onUnavailablePlaybackPolicyChange(value: UnavailablePlaybackPolicy) {
         unavailablePlaybackPolicy = value
+        persistSettings()
+    }
+
+    fun isSmartReplacementProviderEnabled(providerId: String): Boolean {
+        return providerId in selectedSmartReplacementProviderIds()
+    }
+
+    fun onSmartReplacementProviderEnabledChange(providerId: String, enabled: Boolean) {
+        val current = selectedSmartReplacementProviderIds().toMutableSet()
+        if (enabled) {
+            current += providerId
+        } else {
+            current -= providerId
+        }
+        if (current.isEmpty()) {
+            message = "至少保留一个替换音源"
+            return
+        }
+        smartReplacementProviderIds = current
         persistSettings()
     }
 
@@ -1100,6 +1139,9 @@ class FuoPlayerController(
         if (selectedSettingsProviderId !in providerIds) {
             selectedSettingsProviderId = loadedProviders.firstOrNull()?.providerId
         }
+        if (settingsLoginProviderId !in providerIds) {
+            settingsLoginProviderId = null
+        }
         if (selectedSearchProviderId !in providerIds) {
             selectedSearchProviderId = null
             if (searchScope == SearchScope.Provider) {
@@ -1178,12 +1220,17 @@ class FuoPlayerController(
             positionMs = 0,
             errorMessage = null,
         )
+        playbackEngine.prepareLoading(playbackTrack)
         scope.launch playRequest@{
             isLoading = true
             message = "正在播放：${track.title}"
             runCatching {
                 val payload = playbackTrack.toPayload()
-                    ?: providerRepository.resolve(playbackTrack, unavailablePlaybackPolicy)
+                    ?: providerRepository.resolve(
+                        playbackTrack,
+                        unavailablePlaybackPolicy,
+                        selectedSmartReplacementProviderIds(),
+                    )
                 if (requestSerial != playRequestSerial) return@playRequest
                 val playableTrack = playbackTrack.copy(
                     title = payload.title.ifBlank { playbackTrack.title },
@@ -1415,6 +1462,7 @@ class FuoPlayerController(
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
         cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
+        smartReplacementProviderIds = settings.smartReplacementProviderIds
     }
 
     private fun persistSettings() {
@@ -1438,6 +1486,7 @@ class FuoPlayerController(
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,
             cellularAudioQualityPolicy = cellularAudioQualityPolicy,
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,
+            smartReplacementProviderIds = smartReplacementProviderIds,
         )
         scope.launch {
             settingsStore.save(settings)
@@ -1455,6 +1504,12 @@ class FuoPlayerController(
 
     private suspend fun updateAudioQualityPolicies() {
         providerRepository.updateAudioQualityPolicies(wifiAudioQualityPolicy, cellularAudioQualityPolicy)
+    }
+
+    private fun selectedSmartReplacementProviderIds(): Set<String> {
+        val availableEnabledIds = enabledProviderIds.intersect(availableProviders.map { it.providerId }.toSet())
+            .ifEmpty { enabledProviderIds }
+        return smartReplacementProviderIds.intersect(availableEnabledIds).ifEmpty { availableEnabledIds }
     }
 
     private fun refreshLocalMusicDirectories() {

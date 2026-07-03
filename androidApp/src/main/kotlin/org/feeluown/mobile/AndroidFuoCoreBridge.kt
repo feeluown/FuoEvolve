@@ -84,19 +84,25 @@ class AndroidFuoCoreBridge(
     override suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy,
+        smartReplacementProviderIds: Set<String>,
     ): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
             val trackId = track.providerId ?: track.id
             try {
                 val policy = currentAudioQualityPolicy()
-                Log.d(TAG, "resolve start trackId=$trackId policy=${policy.policy} unavailablePolicy=$unavailablePolicy")
+                Log.d(
+                    TAG,
+                    "resolve start trackId=$trackId policy=${policy.policy} " +
+                        "unavailablePolicy=$unavailablePolicy smartReplacementProviderIds=$smartReplacementProviderIds",
+                )
                 val raw = requireNotNull(bridge)
                     .callAttr(
                         "resolve",
                         trackId,
                         policy.policy,
                         unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace,
+                        smartReplacementProviderIdsJson(smartReplacementProviderIds),
                     )
                     .toString()
                 JSONObject(raw).toPayload(track).also {
@@ -418,6 +424,12 @@ class AndroidFuoCoreBridge(
             val array = JSONArray()
             providerIds.forEach { array.put(it) }
             return JSONObject().put("enabled", array).toString()
+        }
+
+        private fun smartReplacementProviderIdsJson(providerIds: Set<String>): String {
+            val array = JSONArray()
+            providerIds.forEach { array.put(it) }
+            return array.toString()
         }
     }
 }

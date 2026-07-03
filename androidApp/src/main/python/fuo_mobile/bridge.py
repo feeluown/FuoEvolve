@@ -532,13 +532,20 @@ class FuoMobileBridge:
                 tracks.append(track)
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
-    def resolve(self, track_id: str, audio_select_policy: str = "", allow_standby: bool = True) -> str:
+    def resolve(
+        self,
+        track_id: str,
+        audio_select_policy: str = "",
+        allow_standby: bool = True,
+        standby_provider_ids_json: str = "",
+    ) -> str:
         song = self._tracks.get(track_id)
         if song is None:
             song = self._song_from_track_id(track_id)
             self._tracks[track_id] = song
         policy = audio_select_policy or self.app.config.AUDIO_SELECT_POLICY
-        payload = self._prepare_payload(song, policy, allow_standby)
+        standby_provider_ids = parse_provider_ids(standby_provider_ids_json)
+        payload = self._prepare_payload(song, policy, allow_standby, standby_provider_ids)
         return json.dumps(payload, ensure_ascii=False)
 
     def play(self, track_id: str) -> str:
@@ -878,7 +885,13 @@ class FuoMobileBridge:
                 current_user_changed.emit(user)
             bridge_log(f"restore login ok provider_id={provider_id} user={getattr(user, 'name', '')}")
 
-    def _prepare_payload(self, song, audio_select_policy: str, allow_standby: bool) -> Dict[str, Any]:
+    def _prepare_payload(
+        self,
+        song,
+        audio_select_policy: str,
+        allow_standby: bool,
+        standby_provider_ids: Optional[List[str]],
+    ) -> Dict[str, Any]:
         try:
             media, quality = self._select_media(song, audio_select_policy)
         except MediaNotFound as exc:
@@ -887,16 +900,26 @@ class FuoMobileBridge:
                 f"track={song_log_label(song)} allow_standby={allow_standby} policy={audio_select_policy}"
             )
             if allow_standby:
-                standby_payload = self._prepare_standby_payload(song, audio_select_policy)
+                standby_payload = self._prepare_standby_payload(song, audio_select_policy, standby_provider_ids)
                 if standby_payload is not None:
                     return standby_payload
             raise RuntimeError(f"media not found: {song}") from exc
         payload = self._payload_from_media(song, media, quality)
         return payload
 
-    def _prepare_standby_payload(self, song, audio_select_policy: str) -> Optional[Dict[str, Any]]:
+    def _prepare_standby_payload(
+        self,
+        song,
+        audio_select_policy: str,
+        standby_provider_ids: Optional[List[str]],
+    ) -> Optional[Dict[str, Any]]:
         source = getattr(song, "source", "")
-        source_in = [provider_id for provider_id in self.provider_registry.provider_ids if provider_id != source]
+        provider_ids = standby_provider_ids or self.provider_registry.provider_ids
+        loaded_provider_ids = set(self.provider_registry.provider_ids)
+        source_in = [
+            provider_id for provider_id in provider_ids
+            if provider_id in loaded_provider_ids and provider_id != source
+        ]
         if not source_in:
             bridge_log(f"standby skipped no source track={song_log_label(song)}")
             return None
@@ -909,7 +932,7 @@ class FuoMobileBridge:
                     song,
                     audio_select_policy=audio_select_policy,
                     source_in=source_in,
-                    limit=1,
+                    limit=8,
                 )
             )
         except Exception as exc:  # pylint: disable=broad-except
@@ -918,18 +941,31 @@ class FuoMobileBridge:
         if not standby_list:
             bridge_log(f"standby empty track={song_log_label(song)}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
-        standby, _ = standby_list[0]
-        self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
-        bridge_log(
-            f"standby selected origin={song_log_label(song)} replacement={song_log_label(standby)}"
-        )
-        try:
-            media, quality = self._select_media(standby, audio_select_policy)
-        except MediaNotFound:
-            bridge_log(f"standby selected media not found replacement={song_log_label(standby)}")
+        candidates = []
+        for standby, _ in standby_list:
+            score = standby_score(song, standby)
+            if score >= 0.55:
+                candidates.append((score, standby))
+        if not candidates:
+            bridge_log(f"standby no scored candidates track={song_log_label(song)}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
-        payload = self._payload_from_media(standby, media, quality)
-        return self._mark_standby_payload(payload, song, standby, "library", None)
+        for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True):
+            self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
+            bridge_log(
+                f"standby candidate score={score:.2f} origin={song_log_label(song)} "
+                f"replacement={song_log_label(standby)}"
+            )
+            try:
+                media, quality = self._select_media(standby, audio_select_policy)
+            except MediaNotFound:
+                bridge_log(
+                    f"standby candidate media not found score={score:.2f} replacement={song_log_label(standby)}"
+                )
+                continue
+            payload = self._payload_from_media(standby, media, quality)
+            return self._mark_standby_payload(payload, song, standby, "library", score)
+        bridge_log(f"standby scored media empty track={song_log_label(song)} candidates={len(candidates)}")
+        return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
 
     def _prepare_search_standby_payload(
         self,
@@ -1135,6 +1171,21 @@ def parse_cookies(raw: str) -> Dict[str, str]:
         if key:
             cookies[key] = value.strip()
     return cookies
+
+
+def parse_provider_ids(raw: str) -> Optional[List[str]]:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    values = json.loads(text)
+    if not isinstance(values, list):
+        return None
+    result = []
+    for value in values:
+        provider_id = str(value or "").strip()
+        if provider_id and provider_id not in result:
+            result.append(provider_id)
+    return result or None
 
 
 def read_models(value, limit: int = 50) -> List[Any]:

@@ -77,6 +77,7 @@ class FuoPlaybackService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
+            ACTION_LOADING -> showLoading(requireNotNull(intent.getStringExtra(EXTRA_PAYLOAD)))
             ACTION_PLAY -> playPayload(requireNotNull(intent.getStringExtra(EXTRA_PAYLOAD)))
             ACTION_PAUSE -> player?.pause()
             ACTION_RESUME -> player?.play()
@@ -86,6 +87,41 @@ class FuoPlaybackService : MediaSessionService() {
             }
         }
         return START_STICKY
+    }
+
+    private fun showLoading(raw: String) {
+        val payload = JSONObject(raw)
+        val extras = Bundle().apply {
+            putString("source", payload.optString("source"))
+            putString("source_type", payload.optString("source_type"))
+            putString("local_uri", payload.optString("local_uri"))
+            putString("provider_id", payload.optString("provider_id"))
+            putString("provider_name", payload.optString("provider_name"))
+            putBoolean("loading", true)
+        }
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(payload.optString("track_id"))
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(payload.optString("title"))
+                    .setArtist("正在加载音频")
+                    .setAlbumTitle(payload.optString("album"))
+                    .setArtworkUri(payload.optString("cover_url").takeIf { it.isNotBlank() }?.let(Uri::parse))
+                    .setExtras(extras)
+                    .build()
+            )
+            .build()
+        player?.run {
+            val currentItem = currentMediaItem
+            if (currentItem != null && mediaItem.mediaId == currentItem.mediaId) {
+                replaceMediaItem(
+                    currentMediaItemIndex,
+                    currentItem.buildUpon()
+                        .setMediaMetadata(mediaItem.mediaMetadata)
+                        .build(),
+                )
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -165,6 +201,7 @@ class FuoPlaybackService : MediaSessionService() {
 
     companion object {
         private const val ACTION_PLAY = "org.feeluown.mobile.action.PLAY"
+        private const val ACTION_LOADING = "org.feeluown.mobile.action.LOADING"
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
         private const val ACTION_RESUME = "org.feeluown.mobile.action.RESUME"
         private const val ACTION_STOP = "org.feeluown.mobile.action.STOP"
@@ -176,6 +213,13 @@ class FuoPlaybackService : MediaSessionService() {
 
         @Volatile
         var transportControls: TransportControls? = null
+
+        fun loading(context: Context, payload: String) {
+            start(context, Intent(context, FuoPlaybackService::class.java).apply {
+                action = ACTION_LOADING
+                putExtra(EXTRA_PAYLOAD, payload)
+            })
+        }
 
         fun play(context: Context, payload: String) {
             start(context, Intent(context, FuoPlaybackService::class.java).apply {
