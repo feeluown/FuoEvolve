@@ -474,7 +474,7 @@ LOGIN_CONFIGS = {
         ],
     },
     "bilibili": {
-        "login_url": "https://www.bilibili.com",
+        "login_url": "https://passport.bilibili.com/h5-app/passport/login?gourl=https%3A%2F%2Fm.bilibili.com%2F",
         "cookie_key_groups": [["SESSDATA", "bili_jct"]],
     },
     "ytmusic": {

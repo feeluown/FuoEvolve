@@ -45,6 +45,8 @@ class ProviderWebLoginActivity : Activity() {
         }
 
         cookieManager().setAcceptCookie(true)
+        val userAgent = loginUserAgent()
+        val useMobileViewport = providerId == "bilibili"
 
         statusView = TextView(this).apply {
             text = "完成登录后会自动获取 Cookie"
@@ -58,9 +60,9 @@ class ProviderWebLoginActivity : Activity() {
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
             settings.javaScriptCanOpenWindowsAutomatically = true
-            settings.userAgentString = DESKTOP_USER_AGENT
-            settings.useWideViewPort = true
-            settings.loadWithOverviewMode = true
+            settings.userAgentString = userAgent
+            settings.useWideViewPort = !useMobileViewport
+            settings.loadWithOverviewMode = !useMobileViewport
             cookieManager().setAcceptThirdPartyCookies(this, true)
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
@@ -123,7 +125,11 @@ class ProviderWebLoginActivity : Activity() {
         }
         setContentView(root)
         ViewCompat.requestApplyInsets(root)
-        webView.loadUrl(loginUrl, mapOf("User-Agent" to DESKTOP_USER_AGENT))
+        webView.loadUrl(loginUrl, mapOf("User-Agent" to userAgent))
+    }
+
+    private fun loginUserAgent(): String {
+        return if (providerId == "bilibili") MOBILE_USER_AGENT else DESKTOP_USER_AGENT
     }
 
     private fun toolbarButton(text: String, filled: Boolean, onClick: () -> Unit): TextView {
@@ -295,6 +301,9 @@ class ProviderWebLoginActivity : Activity() {
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        private const val MOBILE_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
         fun createIntent(context: Context, provider: ProviderInfo): Intent {
             val loginConfig = requireNotNull(provider.loginConfig)

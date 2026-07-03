@@ -409,7 +409,7 @@ class AndroidFuoCoreBridge(
                 providerId = "bilibili",
                 providerName = "哔哩哔哩",
                 loginConfig = ProviderLoginConfig(
-                    loginUrl = "https://www.bilibili.com",
+                    loginUrl = "https://passport.bilibili.com/h5-app/passport/login?gourl=https%3A%2F%2Fm.bilibili.com%2F",
                     cookieKeyGroups = listOf(listOf("SESSDATA", "bili_jct")),
                 ),
             ),
