@@ -684,8 +684,17 @@ class FuoMobileBridge:
 
     def playlist_tracks(self, playlist_id: str) -> str:
         bridge_log(f"playlist_tracks start playlist_id={playlist_id}")
-        payload = self._playlist_detail_payload(playlist_id)
-        tracks = payload["tracks"]
+        playlist = self._playlist_from_id(playlist_id)
+        provider = self._get_provider(getattr(playlist, "source", ""))
+        playlist = self._playlist_for_tracks(playlist_id, provider, playlist)
+        bridge_log(
+            f"playlist_tracks resolved playlist_id={playlist_id} source={getattr(playlist, 'source', '')}"
+        )
+        reader = provider.playlist_create_songs_rd(playlist)
+        bridge_log(f"playlist_tracks reader created playlist_id={playlist_id}")
+        songs = read_models(reader, limit=300)
+        bridge_log(f"playlist_tracks songs read playlist_id={playlist_id} count={len(songs)}")
+        tracks = [self._remember_song(song) for song in songs]
         bridge_log(f"playlist_tracks done playlist_id={playlist_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
@@ -699,8 +708,17 @@ class FuoMobileBridge:
 
     def media_item_tracks(self, item_id: str) -> str:
         bridge_log(f"media_item_tracks start item_id={item_id}")
-        payload = self._media_item_detail_payload(item_id)
-        tracks = payload["tracks"]
+        item_type, provider_id, _ = self._parse_media_item_id(item_id)
+        item = self._media_item_from_id(item_id)
+        provider = self._get_provider(provider_id)
+        if item_type == "artist":
+            reader = provider.artist_create_songs_rd(item)
+        elif item_type == "album":
+            reader = provider.album_create_songs_rd(item)
+        else:
+            raise RuntimeError(f"unsupported media item type: {item_type}")
+        songs = read_models(reader, limit=300)
+        tracks = [self._remember_song(song) for song in songs]
         bridge_log(f"media_item_tracks done item_id={item_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
@@ -735,23 +753,25 @@ class FuoMobileBridge:
         return detail
 
     def _playlist_detail_payload(self, playlist_id: str) -> Dict[str, Any]:
-        playlist = self._playlist_detail_from_id(playlist_id)
+        playlist = self._playlist_from_id(playlist_id)
+        detail_playlist = self._playlist_detail_from_id(playlist_id)
         provider = self._get_provider(getattr(playlist, "source", ""))
-        playlist = self._playlist_for_tracks(playlist_id, provider, playlist)
+        track_playlist = self._playlist_for_tracks(playlist_id, provider, playlist)
         bridge_log(
-            f"playlist_detail resolved playlist_id={playlist_id} source={getattr(playlist, 'source', '')}"
+            f"playlist_detail resolved playlist_id={playlist_id} source={getattr(track_playlist, 'source', '')}"
         )
-        reader = provider.playlist_create_songs_rd(playlist)
+        reader = provider.playlist_create_songs_rd(track_playlist)
         songs = read_models(reader, limit=300)
         tracks = [self._remember_song(song) for song in songs]
         return {
-            "playlist": self._remember_playlist(playlist),
+            "playlist": self._remember_playlist(detail_playlist),
             "tracks": tracks,
         }
 
     def _media_item_detail_payload(self, item_id: str) -> Dict[str, Any]:
         item_type, provider_id, _ = self._parse_media_item_id(item_id)
-        item = self._media_item_detail_from_id(item_id)
+        item = self._media_item_from_id(item_id)
+        detail_item = self._media_item_detail_from_id(item_id)
         provider = self._get_provider(provider_id)
         albums = []
         if item_type == "artist":
@@ -769,7 +789,7 @@ class FuoMobileBridge:
         songs = read_models(reader, limit=300)
         tracks = [self._remember_song(song) for song in songs]
         return {
-            "item": self._remember_media_item(item, item_type),
+            "item": self._remember_media_item(detail_item, item_type),
             "tracks": tracks,
             "albums": albums,
         }
