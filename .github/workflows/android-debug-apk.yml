@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  build-apk:
-    name: Build signed APKs
+  build-debug-apk:
+    name: Build signed debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -59,15 +59,61 @@ jobs:
       - name: Build signed debug APK
         run: ./gradlew :androidApp:assembleDebug
 
-      - name: Build signed release APKs
-        run: ./gradlew :androidApp:assembleRelease -Pfuo.releaseAbiSplits=true
-
       - name: Upload signed debug APK
         uses: actions/upload-artifact@v4
         with:
           name: fuo-evolve-debug-signed-${{ github.sha }}
           path: androidApp/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  build-release-apks:
+    name: Build signed release APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FUO_BUILD_PYTHON: python
+      FUO_FEELUOWN_SOURCE: https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz
+      FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
+      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
+      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
+      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
+      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            androidApp/build.gradle.kts
+            gradle/libs.versions.toml
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare signing keystore
+        run: |
+          for name in FUO_SIGNING_KEYSTORE_BASE64 FUO_SIGNING_STORE_PASSWORD FUO_SIGNING_KEY_ALIAS FUO_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required signing secret: ${name}"
+              exit 1
+            fi
+          done
+          mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
+          printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
+
+      - name: Build signed release APKs
+        run: ./gradlew :androidApp:assembleRelease -Pfuo.releaseAbiSplits=true
 
       - name: Upload signed release arm64-v8a APK
         uses: actions/upload-artifact@v4
