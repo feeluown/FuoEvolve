@@ -49,7 +49,6 @@ class AndroidNativeAudioEngine(
             audioQuality = null,
             errorMessage = null,
         )
-        FuoPlaybackService.loading(context, track.toLoadingJson())
         connectController()
     }
 
@@ -202,22 +201,6 @@ class AndroidNativeAudioEngine(
             .put("duration_ms", durationMs ?: 0)
             .put("lyrics", lyrics ?: "")
             .put("audio_quality", audioQuality ?: "")
-            .toString()
-    }
-
-    private fun MusicTrack.toLoadingJson(): String {
-        return JSONObject()
-            .put("track_id", id)
-            .put("source_type", sourceType.name)
-            .put("local_uri", localUri ?: "")
-            .put("provider_id", providerId ?: "")
-            .put("provider_name", providerName ?: "")
-            .put("title", title)
-            .put("artists", artists)
-            .put("album", album)
-            .put("source", source)
-            .put("cover_url", coverUrl ?: "")
-            .put("duration_ms", durationMs ?: 0)
             .toString()
     }
 
