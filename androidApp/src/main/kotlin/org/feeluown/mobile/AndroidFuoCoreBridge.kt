@@ -206,6 +206,22 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "playlistDetail start playlistId=${playlist.id} title=${playlist.title}")
+                val raw = requireNotNull(bridge).callAttr("playlist_detail", playlist.id).toString()
+                JSONObject(raw).toPlaylistDetail(playlist).also {
+                    Log.d(TAG, "playlistDetail done playlistId=${playlist.id} count=${it.tracks.size}")
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "playlistDetail failed playlistId=${playlist.id}", throwable)
+                throw throwable
+            }
+        }
+    }
+
     override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -218,6 +234,25 @@ class AndroidFuoCoreBridge(
                 }
             } catch (throwable: Throwable) {
                 Log.e(TAG, "mediaItemTracks failed itemId=${item.id}", throwable)
+                throw throwable
+            }
+        }
+    }
+
+    override suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "mediaItemDetail start itemId=${item.id} title=${item.title}")
+                val raw = requireNotNull(bridge).callAttr("media_item_detail", item.id).toString()
+                JSONObject(raw).toMediaItemDetail(item).also {
+                    Log.d(
+                        TAG,
+                        "mediaItemDetail done itemId=${item.id} tracks=${it.tracks.size} albums=${it.albums.size}",
+                    )
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "mediaItemDetail failed itemId=${item.id}", throwable)
                 throw throwable
             }
         }
@@ -279,6 +314,14 @@ class AndroidFuoCoreBridge(
         )
     }
 
+    private fun JSONObject.toPlaylistDetail(fallbackPlaylist: ProviderPlaylist): ProviderPlaylistDetail {
+        val tracksArray = optJSONArray("tracks") ?: JSONArray()
+        return ProviderPlaylistDetail(
+            playlist = optJSONObject("playlist")?.toPlaylist() ?: fallbackPlaylist,
+            tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
+        )
+    }
+
     private fun JSONObject.toMediaItem(): ProviderMediaItem {
         val providerId = optString("provider_id")
         return ProviderMediaItem(
@@ -289,6 +332,16 @@ class AndroidFuoCoreBridge(
             type = ProviderMediaItemType.valueOf(optString("type")),
             coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
             description = optString("description"),
+        )
+    }
+
+    private fun JSONObject.toMediaItemDetail(fallbackItem: ProviderMediaItem): ProviderMediaItemDetail {
+        val tracksArray = optJSONArray("tracks") ?: JSONArray()
+        val albumsArray = optJSONArray("albums") ?: JSONArray()
+        return ProviderMediaItemDetail(
+            item = optJSONObject("item")?.toMediaItem() ?: fallbackItem,
+            tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
+            albums = List(albumsArray.length()) { index -> albumsArray.getJSONObject(index).toMediaItem() },
         )
     }
 

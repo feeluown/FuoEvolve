@@ -97,6 +97,8 @@ class FuoPlayerController(
         private set
     var selectedMediaItemTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
+    var selectedMediaItemAlbums by mutableStateOf<List<ProviderMediaItem>>(emptyList())
+        private set
     var selectedMediaItemError by mutableStateOf<String?>(null)
         private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
@@ -958,7 +960,7 @@ class FuoPlayerController(
         scope.launch {
             isLoading = true
             message = "正在加载：${playlist.title}"
-            val deferred = scope.async { providerRepository.playlistTracks(playlist) }
+            val deferred = scope.async { providerRepository.playlistDetail(playlist) }
             val result = withTimeoutOrNull(30_000) {
                 runCatching { deferred.await() }
             }
@@ -967,11 +969,16 @@ class FuoPlayerController(
                 selectedPlaylistError = "加载超时，请检查网络后重试"
                 message = selectedPlaylistError.orEmpty()
             } else {
-                result.onSuccess {
-                    if (selectedPlaylist == playlist) {
-                        selectedPlaylistTracks = it
+                result.onSuccess { detail ->
+                    if (selectedPlaylist?.id == playlist.id) {
+                        selectedPlaylist = detail.playlist
+                        selectedPlaylistTracks = detail.tracks
                         selectedPlaylistError = null
-                        message = if (it.isEmpty()) "歌单暂无歌曲" else "${playlist.title} · ${it.size} 首"
+                        message = if (detail.tracks.isEmpty()) {
+                            "歌单暂无歌曲"
+                        } else {
+                            "${detail.playlist.title} · ${detail.tracks.size} 首"
+                        }
                     }
                 }.onFailure {
                     selectedPlaylistError = it.message ?: it::class.simpleName.orEmpty()
@@ -991,11 +998,12 @@ class FuoPlayerController(
     fun openMediaItem(item: ProviderMediaItem) {
         selectedMediaItem = item
         selectedMediaItemTracks = emptyList()
+        selectedMediaItemAlbums = emptyList()
         selectedMediaItemError = null
         scope.launch {
             isLoading = true
             message = "正在加载：${item.title}"
-            val deferred = scope.async { providerRepository.mediaItemTracks(item) }
+            val deferred = scope.async { providerRepository.mediaItemDetail(item) }
             val result = withTimeoutOrNull(30_000) {
                 runCatching { deferred.await() }
             }
@@ -1004,11 +1012,17 @@ class FuoPlayerController(
                 selectedMediaItemError = "加载超时，请检查网络后重试"
                 message = selectedMediaItemError.orEmpty()
             } else {
-                result.onSuccess {
-                    if (selectedMediaItem == item) {
-                        selectedMediaItemTracks = it
+                result.onSuccess { detail ->
+                    if (selectedMediaItem?.id == item.id) {
+                        selectedMediaItem = detail.item
+                        selectedMediaItemTracks = detail.tracks
+                        selectedMediaItemAlbums = detail.albums
                         selectedMediaItemError = null
-                        message = if (it.isEmpty()) "${item.title} 暂无歌曲" else "${item.title} · ${it.size} 首"
+                        val loadedParts = buildList {
+                            if (detail.tracks.isNotEmpty()) add("${detail.tracks.size} 首")
+                            if (detail.albums.isNotEmpty()) add("${detail.albums.size} 张专辑")
+                        }.joinToString(" · ")
+                        message = loadedParts.ifBlank { "${detail.item.title} 暂无内容" }
                     }
                 }.onFailure {
                     selectedMediaItemError = it.message ?: it::class.simpleName.orEmpty()
@@ -1022,6 +1036,7 @@ class FuoPlayerController(
     fun closeMediaItem() {
         selectedMediaItem = null
         selectedMediaItemTracks = emptyList()
+        selectedMediaItemAlbums = emptyList()
         selectedMediaItemError = null
     }
 
@@ -1357,6 +1372,7 @@ class FuoPlayerController(
         selectedFeatureTracks = emptyList()
         selectedPlaylistTracks = emptyList()
         selectedMediaItemTracks = emptyList()
+        selectedMediaItemAlbums = emptyList()
     }
 
     private fun reorderProviderContent() {

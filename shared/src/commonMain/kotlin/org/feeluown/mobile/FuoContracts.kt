@@ -437,6 +437,17 @@ data class ProviderContentSection(
     val errorMessage: String? = null,
 )
 
+data class ProviderPlaylistDetail(
+    val playlist: ProviderPlaylist,
+    val tracks: List<MusicTrack> = emptyList(),
+)
+
+data class ProviderMediaItemDetail(
+    val item: ProviderMediaItem,
+    val tracks: List<MusicTrack> = emptyList(),
+    val albums: List<ProviderMediaItem> = emptyList(),
+)
+
 interface ProviderMusicRepository {
     suspend fun initialize()
     suspend fun availableProviders(): List<ProviderInfo> = providers()
@@ -461,7 +472,11 @@ interface ProviderMusicRepository {
     suspend fun features(): List<ProviderFeature>
     suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
     suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> = loadFeature(feature).tracks
+    suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail =
+        ProviderPlaylistDetail(playlist, playlistTracks(playlist))
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>
+    suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
+        ProviderMediaItemDetail(item, mediaItemTracks(item))
     suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack>
 }
 

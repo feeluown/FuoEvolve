@@ -684,35 +684,34 @@ class FuoMobileBridge:
 
     def playlist_tracks(self, playlist_id: str) -> str:
         bridge_log(f"playlist_tracks start playlist_id={playlist_id}")
-        playlist = self._playlist_from_id(playlist_id)
-        provider = self._get_provider(getattr(playlist, "source", ""))
-        playlist = self._playlist_for_tracks(playlist_id, provider, playlist)
-        bridge_log(
-            f"playlist_tracks resolved playlist_id={playlist_id} source={getattr(playlist, 'source', '')}"
-        )
-        reader = provider.playlist_create_songs_rd(playlist)
-        bridge_log(f"playlist_tracks reader created playlist_id={playlist_id}")
-        songs = read_models(reader, limit=300)
-        bridge_log(f"playlist_tracks songs read playlist_id={playlist_id} count={len(songs)}")
-        tracks = [self._remember_song(song) for song in songs]
+        payload = self._playlist_detail_payload(playlist_id)
+        tracks = payload["tracks"]
         bridge_log(f"playlist_tracks done playlist_id={playlist_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
+    def playlist_detail(self, playlist_id: str) -> str:
+        bridge_log(f"playlist_detail start playlist_id={playlist_id}")
+        payload = self._playlist_detail_payload(playlist_id)
+        bridge_log(
+            f"playlist_detail done playlist_id={playlist_id} count={len(payload['tracks'])}"
+        )
+        return json.dumps(payload, ensure_ascii=False)
+
     def media_item_tracks(self, item_id: str) -> str:
         bridge_log(f"media_item_tracks start item_id={item_id}")
-        item_type, provider_id, _ = self._parse_media_item_id(item_id)
-        item = self._media_item_from_id(item_id)
-        provider = self._get_provider(provider_id)
-        if item_type == "artist":
-            reader = provider.artist_create_songs_rd(item)
-        elif item_type == "album":
-            reader = provider.album_create_songs_rd(item)
-        else:
-            raise RuntimeError(f"unsupported media item type: {item_type}")
-        songs = read_models(reader, limit=300)
-        tracks = [self._remember_song(song) for song in songs]
+        payload = self._media_item_detail_payload(item_id)
+        tracks = payload["tracks"]
         bridge_log(f"media_item_tracks done item_id={item_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
+
+    def media_item_detail(self, item_id: str) -> str:
+        bridge_log(f"media_item_detail start item_id={item_id}")
+        payload = self._media_item_detail_payload(item_id)
+        bridge_log(
+            f"media_item_detail done item_id={item_id} "
+            f"tracks={len(payload['tracks'])} albums={len(payload['albums'])}"
+        )
+        return json.dumps(payload, ensure_ascii=False)
 
     def _get_provider(self, provider_id: str):
         provider = self.app.library.get(provider_id)
@@ -734,6 +733,46 @@ class FuoMobileBridge:
         self._playlists[playlist_id] = detail
         bridge_log(f"playlist_tracks hydrated playlist_id={playlist_id}")
         return detail
+
+    def _playlist_detail_payload(self, playlist_id: str) -> Dict[str, Any]:
+        playlist = self._playlist_detail_from_id(playlist_id)
+        provider = self._get_provider(getattr(playlist, "source", ""))
+        playlist = self._playlist_for_tracks(playlist_id, provider, playlist)
+        bridge_log(
+            f"playlist_detail resolved playlist_id={playlist_id} source={getattr(playlist, 'source', '')}"
+        )
+        reader = provider.playlist_create_songs_rd(playlist)
+        songs = read_models(reader, limit=300)
+        tracks = [self._remember_song(song) for song in songs]
+        return {
+            "playlist": self._remember_playlist(playlist),
+            "tracks": tracks,
+        }
+
+    def _media_item_detail_payload(self, item_id: str) -> Dict[str, Any]:
+        item_type, provider_id, _ = self._parse_media_item_id(item_id)
+        item = self._media_item_detail_from_id(item_id)
+        provider = self._get_provider(provider_id)
+        albums = []
+        if item_type == "artist":
+            reader = provider.artist_create_songs_rd(item)
+            album_reader = getattr(provider, "artist_create_albums_rd", None)
+            if album_reader is not None:
+                albums = [
+                    self._remember_media_item(album, "album")
+                    for album in read_models(album_reader(item), limit=100)
+                ]
+        elif item_type == "album":
+            reader = provider.album_create_songs_rd(item)
+        else:
+            raise RuntimeError(f"unsupported media item type: {item_type}")
+        songs = read_models(reader, limit=300)
+        tracks = [self._remember_song(song) for song in songs]
+        return {
+            "item": self._remember_media_item(item, item_type),
+            "tracks": tracks,
+            "albums": albums,
+        }
 
     def _feature_by_id(self, feature_id: str) -> Dict[str, Any]:
         for provider_id, features in FEATURE_DEFS.items():
@@ -790,10 +829,36 @@ class FuoMobileBridge:
         self._playlists[playlist_id] = playlist
         return playlist
 
+    def _playlist_detail_from_id(self, playlist_id: str):
+        try:
+            _, provider_id, identifier = playlist_id.split(":", 2)
+        except ValueError as exc:
+            raise RuntimeError(f"invalid playlist id: {playlist_id}") from exc
+        provider = self._get_provider(provider_id)
+        playlist_get = getattr(provider, "playlist_get", None)
+        if playlist_get is not None:
+            detail = playlist_get(identifier)
+            if detail is not None:
+                self._playlists[playlist_id] = detail
+                return detail
+        return self._playlist_from_id(playlist_id)
+
     def _media_item_from_id(self, item_id: str):
         item = self._media_items.get(item_id)
         if item is not None:
             return item
+        item_type, provider_id, identifier = self._parse_media_item_id(item_id)
+        provider = self._get_provider(provider_id)
+        if item_type == "artist":
+            item = provider.artist_get(identifier)
+        elif item_type == "album":
+            item = provider.album_get(identifier)
+        else:
+            raise RuntimeError(f"unsupported media item type: {item_type}")
+        self._media_items[item_id] = item
+        return item
+
+    def _media_item_detail_from_id(self, item_id: str):
         item_type, provider_id, identifier = self._parse_media_item_id(item_id)
         provider = self._get_provider(provider_id)
         if item_type == "artist":

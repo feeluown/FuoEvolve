@@ -869,6 +869,56 @@ private fun PlayAllButton(onClick: () -> Unit, enabled: Boolean = true) {
     }
 }
 
+@Composable
+private fun ProviderDetailHeader(
+    track: MusicTrack,
+    title: String,
+    subtitle: String,
+    description: String,
+    action: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        CoverBox(
+            track = track,
+            modifier = Modifier.size(112.dp),
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (description.isNotBlank()) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            action?.invoke()
+        }
+    }
+}
+
 private fun ProviderFeature.isPrivateFm(): Boolean {
     return id.endsWith("_radio")
 }
@@ -2207,13 +2257,13 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController, feature: Prov
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPlaylist?) {
-    playlist ?: return
+    val displayPlaylist = controller.selectedPlaylist ?: playlist ?: return
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = playlist.title.ifBlank { "歌单" },
+                        text = displayPlaylist.title.ifBlank { "歌单" },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2239,33 +2289,23 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             LoadingIndicator(controller.isLoading)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    modifier = Modifier.weight(1f),
-                    text = listOf(playlist.providerName, "${controller.selectedPlaylistTracks.size} 首")
-                        .joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (controller.selectedPlaylistTracks.isNotEmpty()) {
-                    PlayAllButton(onClick = controller::playAllFromSelectedPlaylist)
-                }
-            }
-            if (playlist.description.isNotBlank()) {
-                Text(
-                    text = playlist.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            ProviderDetailHeader(
+                track = displayPlaylist.toDisplayTrack(),
+                title = displayPlaylist.title.ifBlank { "未命名歌单" },
+                subtitle = buildList {
+                    add(displayPlaylist.providerName)
+                    displayPlaylist.playCount?.let { add(formatPlayCount(it)) }
+                    add("${controller.selectedPlaylistTracks.size} 首")
+                }.joinToString(" · "),
+                description = displayPlaylist.description,
+                action = if (controller.selectedPlaylistTracks.isNotEmpty()) {
+                    {
+                        PlayAllButton(onClick = controller::playAllFromSelectedPlaylist)
+                    }
+                } else {
+                    null
+                },
+            )
             if (controller.selectedPlaylistError != null) {
                 ProviderContentMessage(controller.selectedPlaylistError.orEmpty())
             } else if (controller.isLoading && controller.selectedPlaylistTracks.isEmpty()) {
@@ -2309,14 +2349,16 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMediaItem?) {
-    item ?: return
+    val displayItem = controller.selectedMediaItem ?: item ?: return
+    val isArtist = displayItem.type == ProviderMediaItemType.Artist
+    var selectedTabIndex by remember(displayItem.id) { mutableStateOf(0) }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = item.title.ifBlank {
-                            if (item.type == ProviderMediaItemType.Artist) "歌手" else "专辑"
+                        text = displayItem.title.ifBlank {
+                            if (isArtist) "歌手" else "专辑"
                         },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -2343,36 +2385,24 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             LoadingIndicator(controller.isLoading)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    modifier = Modifier.weight(1f),
-                    text = listOf(
-                        item.providerName,
-                        if (item.type == ProviderMediaItemType.Artist) "歌手" else "专辑",
-                        "${controller.selectedMediaItemTracks.size} 首",
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (controller.selectedMediaItemTracks.isNotEmpty()) {
-                    PlayAllButton(onClick = controller::playAllFromSelectedMediaItem)
-                }
-            }
-            if (item.description.isNotBlank()) {
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            ProviderDetailHeader(
+                track = displayItem.toDisplayTrack(),
+                title = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
+                subtitle = buildList {
+                    add(displayItem.providerName)
+                    add(if (isArtist) "歌手" else "专辑")
+                    add("${controller.selectedMediaItemTracks.size} 首")
+                    if (isArtist) add("${controller.selectedMediaItemAlbums.size} 张专辑")
+                }.joinToString(" · "),
+                description = displayItem.description,
+                action = if (controller.selectedMediaItemTracks.isNotEmpty()) {
+                    {
+                        PlayAllButton(onClick = controller::playAllFromSelectedMediaItem)
+                    }
+                } else {
+                    null
+                },
+            )
             if (controller.selectedMediaItemError != null) {
                 ProviderContentMessage(controller.selectedMediaItemError.orEmpty())
             } else if (controller.isLoading && controller.selectedMediaItemTracks.isEmpty()) {
@@ -2384,28 +2414,55 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (isArtist) {
+                val tabs = listOf("歌曲", "专辑")
+                TabRow(selectedTabIndex = selectedTabIndex) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTabIndex == index,
+                            onClick = { selectedTabIndex = index },
+                            text = { Text(title) },
+                        )
+                    }
+                }
+            }
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                if (controller.selectedMediaItemTracks.isEmpty() && !controller.isLoading && controller.selectedMediaItemError == null) {
-                    item {
-                        ProviderContentMessage("暂无歌曲")
+                if (isArtist && selectedTabIndex == 1) {
+                    if (controller.selectedMediaItemAlbums.isEmpty() && !controller.isLoading && controller.selectedMediaItemError == null) {
+                        item {
+                            ProviderContentMessage("暂无专辑")
+                        }
+                    } else {
+                        item {
+                            ProviderMediaItemGrid(
+                                items = controller.selectedMediaItemAlbums,
+                                onClick = controller::openMediaItem,
+                            )
+                        }
                     }
                 } else {
-                    itemsIndexed(controller.selectedMediaItemTracks, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(
-                            track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playFromSelectedMediaItem(index) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                        )
-                        HorizontalDivider()
+                    if (controller.selectedMediaItemTracks.isEmpty() && !controller.isLoading && controller.selectedMediaItemError == null) {
+                        item {
+                            ProviderContentMessage("暂无歌曲")
+                        }
+                    } else {
+                        itemsIndexed(controller.selectedMediaItemTracks, key = { _, track -> track.id }) { index, track ->
+                            TrackRow(
+                                track = track,
+                                downloadState = controller.downloadStates[track.id],
+                                onClick = { controller.playFromSelectedMediaItem(index) },
+                                onAddToUpNext = { controller.addToUpNext(track) },
+                                onDownload = { controller.download(track) },
+                                onDeleteDownload = { controller.deleteDownload(track) },
+                                onOpenArtist = { controller.openTrackArtist(track) },
+                                onOpenAlbum = { controller.openTrackAlbum(track) },
+                            )
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
