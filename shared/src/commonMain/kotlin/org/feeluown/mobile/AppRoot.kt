@@ -51,18 +51,25 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -506,8 +513,11 @@ private fun ProviderContentHomeSection(
                                     track = track,
                                     downloadState = controller.downloadStates[track.id],
                                     onClick = { controller.playFromFeature(contentSection.feature.id, index) },
+                                    onAddToUpNext = { controller.addToUpNext(track) },
                                     onDownload = { controller.download(track) },
                                     onDeleteDownload = { controller.deleteDownload(track) },
+                                    onOpenArtist = { controller.openTrackArtist(track) },
+                                    onOpenAlbum = { controller.openTrackAlbum(track) },
                                 )
                                 HorizontalDivider()
                             }
@@ -1265,8 +1275,11 @@ private fun LocalMusicSection(controller: FuoPlayerController, modifier: Modifie
                             track = track,
                             downloadState = controller.downloadStates[track.id],
                             onClick = { controller.playLocalTrack(track, displayTracks) },
+                            onAddToUpNext = { controller.addToUpNext(track) },
                             onDownload = { controller.download(track) },
                             onDeleteDownload = { controller.deleteDownload(track) },
+                            onOpenArtist = { controller.openTrackArtist(track) },
+                            onOpenAlbum = { controller.openTrackAlbum(track) },
                         )
                         HorizontalDivider()
                     }
@@ -1691,6 +1704,38 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                         valueRange = 0f..1f,
                         steps = 19,
                         enabled = !controller.isLoading,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = "使用原曲信息",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Checkbox(
+                        checked = controller.smartReplacementUseOriginalMetadata,
+                        enabled = !controller.isLoading,
+                        onCheckedChange = controller::onSmartReplacementUseOriginalMetadataChange,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = "使用原曲歌词",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Checkbox(
+                        checked = controller.smartReplacementUseOriginalLyrics,
+                        enabled = !controller.isLoading,
+                        onCheckedChange = controller::onSmartReplacementUseOriginalLyricsChange,
                     )
                 }
                 controller.orderedProviders().forEach { provider ->
@@ -2144,8 +2189,11 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController, feature: Prov
                             track = track,
                             downloadState = controller.downloadStates[track.id],
                             onClick = { controller.playFromSelectedFeature(index) },
+                            onAddToUpNext = { controller.addToUpNext(track) },
                             onDownload = { controller.download(track) },
                             onDeleteDownload = { controller.deleteDownload(track) },
+                            onOpenArtist = { controller.openTrackArtist(track) },
+                            onOpenAlbum = { controller.openTrackAlbum(track) },
                         )
                         HorizontalDivider()
                     }
@@ -2243,8 +2291,11 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
                             track = track,
                             downloadState = controller.downloadStates[track.id],
                             onClick = { controller.playFromSelectedPlaylist(index) },
+                            onAddToUpNext = { controller.addToUpNext(track) },
                             onDownload = { controller.download(track) },
                             onDeleteDownload = { controller.deleteDownload(track) },
+                            onOpenArtist = { controller.openTrackArtist(track) },
+                            onOpenAlbum = { controller.openTrackAlbum(track) },
                         )
                         HorizontalDivider()
                     }
@@ -2347,8 +2398,11 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
                             track = track,
                             downloadState = controller.downloadStates[track.id],
                             onClick = { controller.playFromSelectedMediaItem(index) },
+                            onAddToUpNext = { controller.addToUpNext(track) },
                             onDownload = { controller.download(track) },
                             onDeleteDownload = { controller.deleteDownload(track) },
+                            onOpenArtist = { controller.openTrackArtist(track) },
+                            onOpenAlbum = { controller.openTrackAlbum(track) },
                         )
                         HorizontalDivider()
                     }
@@ -2437,8 +2491,11 @@ private fun SearchScreen(controller: FuoPlayerController) {
                             track = track,
                             downloadState = controller.downloadStates[track.id],
                             onClick = { controller.playFromSearch(index) },
+                            onAddToUpNext = { controller.addToUpNext(track) },
                             onDownload = { controller.download(track) },
                             onDeleteDownload = { controller.deleteDownload(track) },
+                            onOpenArtist = { controller.openTrackArtist(track) },
+                            onOpenAlbum = { controller.openTrackAlbum(track) },
                         )
                         HorizontalDivider()
                     }
@@ -2490,8 +2547,11 @@ private fun TrackRow(
     track: MusicTrack,
     downloadState: DownloadState?,
     onClick: () -> Unit,
+    onAddToUpNext: () -> Unit,
     onDownload: () -> Unit,
     onDeleteDownload: () -> Unit,
+    onOpenArtist: () -> Unit,
+    onOpenAlbum: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -2524,7 +2584,15 @@ private fun TrackRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        TrackAction(track, downloadState, onDownload, onDeleteDownload)
+        TrackAction(
+            track = track,
+            downloadState = downloadState,
+            onAddToUpNext = onAddToUpNext,
+            onDownload = onDownload,
+            onDeleteDownload = onDeleteDownload,
+            onOpenArtist = onOpenArtist,
+            onOpenAlbum = onOpenAlbum,
+        )
     }
 }
 
@@ -2546,27 +2614,78 @@ private fun CoverBox(
 private fun TrackAction(
     track: MusicTrack,
     downloadState: DownloadState?,
+    onAddToUpNext: () -> Unit,
     onDownload: () -> Unit,
     onDeleteDownload: () -> Unit,
+    onOpenArtist: () -> Unit,
+    onOpenAlbum: () -> Unit,
 ) {
-    when {
-        track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Downloaded -> {
-            IconButton(onClick = onDeleteDownload) {
-                Icon(Icons.Filled.Delete, contentDescription = "删除下载")
-            }
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
         }
-        track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Downloading -> {
-            Text("下载中", style = MaterialTheme.typography.labelMedium)
-        }
-        track.sourceType == TrackSourceType.Provider -> {
-            IconButton(onClick = onDownload) {
-                Icon(Icons.Filled.Download, contentDescription = "下载")
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("接下来播放") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onAddToUpNext()
+                },
+            )
+            when {
+                track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Downloading -> {
+                    DropdownMenuItem(
+                        text = { Text("下载中") },
+                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                        enabled = false,
+                        onClick = {},
+                    )
+                }
+                (track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Downloaded) ||
+                    track.sourceType == TrackSourceType.Downloaded -> {
+                    DropdownMenuItem(
+                        text = { Text("删除下载") },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        onClick = {
+                            expanded = false
+                            onDeleteDownload()
+                        },
+                    )
+                }
+                track.sourceType == TrackSourceType.Provider -> {
+                    DropdownMenuItem(
+                        text = { Text("下载") },
+                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                        onClick = {
+                            expanded = false
+                            onDownload()
+                        },
+                    )
+                }
             }
-        }
-        track.sourceType == TrackSourceType.Downloaded -> {
-            IconButton(onClick = onDeleteDownload) {
-                Icon(Icons.Filled.Delete, contentDescription = "删除下载")
-            }
+            DropdownMenuItem(
+                text = { Text("查看歌手") },
+                leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                enabled = track.artists.isNotBlank(),
+                onClick = {
+                    expanded = false
+                    onOpenArtist()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("查看专辑") },
+                leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null) },
+                enabled = track.album.isNotBlank(),
+                onClick = {
+                    expanded = false
+                    onOpenAlbum()
+                },
+            )
         }
     }
 }
@@ -2706,6 +2825,11 @@ private fun FullPlayer(controller: FuoPlayerController) {
                     onPrevious = controller::previous,
                     onToggle = controller::toggle,
                     onNext = controller::next,
+                    shuffleEnabled = controller.isShuffleEnabled,
+                    repeatEnabled = controller.isRepeatEnabled,
+                    shuffleAvailable = !controller.isFmQueueActive,
+                    onShuffle = controller::toggleShuffle,
+                    onRepeat = controller::toggleRepeat,
                 )
             }
             QueueBottomSheet(controller)
@@ -2855,12 +2979,28 @@ private fun PlayerControls(
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    shuffleEnabled: Boolean = false,
+    repeatEnabled: Boolean = true,
+    shuffleAvailable: Boolean = true,
+    onShuffle: (() -> Unit)? = null,
+    onRepeat: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.animateContentSize(animationSpec = tween(220)),
         horizontalArrangement = if (compact) Arrangement.spacedBy(8.dp) else Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (!compact && onShuffle != null) {
+            RoundControlButton(
+                imageVector = Icons.Filled.Shuffle,
+                contentDescription = if (shuffleAvailable) "随机播放" else "私人 FM 使用顺序播放",
+                onClick = onShuffle,
+                size = 44.dp,
+                iconSize = 24.dp,
+                selected = shuffleEnabled,
+                enabled = shuffleAvailable,
+            )
+        }
         RoundControlButton(
             imageVector = Icons.Filled.SkipPrevious,
             contentDescription = "上一首",
@@ -2883,6 +3023,16 @@ private fun PlayerControls(
             size = if (compact) 44.dp else 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
+        if (!compact && onRepeat != null) {
+            RoundControlButton(
+                imageVector = Icons.Filled.Repeat,
+                contentDescription = "循环播放",
+                onClick = onRepeat,
+                size = 44.dp,
+                iconSize = 24.dp,
+                selected = repeatEnabled,
+            )
+        }
     }
 }
 
@@ -2894,13 +3044,22 @@ private fun RoundControlButton(
     size: androidx.compose.ui.unit.Dp = 48.dp,
     iconSize: androidx.compose.ui.unit.Dp = 26.dp,
     prominent: Boolean = false,
+    selected: Boolean = false,
+    enabled: Boolean = true,
 ) {
     Surface(
         modifier = Modifier
             .size(size)
-            .clickable(onClick = onClick),
-        color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            .clickable(enabled = enabled, onClick = onClick),
+        color = when {
+            prominent || selected -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        },
+        contentColor = when {
+            prominent || selected -> MaterialTheme.colorScheme.onPrimary
+            enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+        },
         tonalElevation = if (prominent) 3.dp else 1.dp,
         shape = RoundedCornerShape(50),
     ) {
@@ -3008,10 +3167,29 @@ private fun LyricsPanel(state: PlaybackState, modifier: Modifier) {
 
 @Composable
 private fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
+    val upNextCount = controller.displayUpNextCount
     LazyColumn(
         modifier = modifier,
     ) {
+        if (upNextCount > 0) {
+            item(key = "queue-section-up-next") {
+                Text(
+                    text = "接下来播放",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                )
+            }
+        }
         itemsIndexed(controller.playbackState.queue, key = { _, item -> item.id }) { index, track ->
+            if (index == upNextCount && index > 0) {
+                Text(
+                    text = "主队列",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+                )
+            }
             val isCurrent = index == controller.playbackState.queueIndex
             val isUnavailable = track.isUnavailable
             val titleColor = when {

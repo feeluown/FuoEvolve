@@ -45,6 +45,14 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 KEY_SMART_REPLACEMENT_MIN_SCORE,
                 DEFAULT_SMART_REPLACEMENT_MIN_SCORE.toFloat(),
             ).toDouble(),
+            smartReplacementUseOriginalMetadata = preferences.getBoolean(
+                KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA,
+                false,
+            ),
+            smartReplacementUseOriginalLyrics = preferences.getBoolean(
+                KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS,
+                false,
+            ),
         )
     }
 
@@ -72,6 +80,11 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
                 .putStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS, settings.smartReplacementProviderIds)
                 .putFloat(KEY_SMART_REPLACEMENT_MIN_SCORE, settings.smartReplacementMinScore.toFloat())
+                .putBoolean(
+                    KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA,
+                    settings.smartReplacementUseOriginalMetadata,
+                )
+                .putBoolean(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, settings.smartReplacementUseOriginalLyrics)
                 .apply()
         }
     }
@@ -203,5 +216,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
         private const val KEY_SMART_REPLACEMENT_PROVIDER_IDS = "smart_replacement_provider_ids"
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
+        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
+        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
     }
 }

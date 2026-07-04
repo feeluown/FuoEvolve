@@ -86,6 +86,8 @@ class AndroidFuoCoreBridge(
         unavailablePolicy: UnavailablePlaybackPolicy,
         smartReplacementProviderIds: Set<String>,
         smartReplacementMinScore: Double,
+        smartReplacementUseOriginalMetadata: Boolean,
+        smartReplacementUseOriginalLyrics: Boolean,
     ): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -106,6 +108,8 @@ class AndroidFuoCoreBridge(
                         unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace,
                         smartReplacementProviderIdsJson(smartReplacementProviderIds),
                         smartReplacementMinScore,
+                        smartReplacementUseOriginalMetadata,
+                        smartReplacementUseOriginalLyrics,
                     )
                     .toString()
                 JSONObject(raw).toPayload(track).also {
@@ -302,6 +306,8 @@ class AndroidFuoCoreBridge(
             durationMs = optLong("duration_ms").takeIf { it > 0 },
             providerId = id,
             providerName = optString("provider_name").ifBlank { source }.takeIf { it.isNotBlank() },
+            artistItemId = optString("artist_item_id").takeIf { it.isNotBlank() },
+            albumItemId = optString("album_item_id").takeIf { it.isNotBlank() },
         )
     }
 
