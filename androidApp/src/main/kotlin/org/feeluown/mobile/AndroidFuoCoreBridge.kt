@@ -86,6 +86,8 @@ class AndroidFuoCoreBridge(
         unavailablePolicy: UnavailablePlaybackPolicy,
         smartReplacementProviderIds: Set<String>,
         smartReplacementMinScore: Double,
+        smartReplacementUseOriginalMetadata: Boolean,
+        smartReplacementUseOriginalLyrics: Boolean,
     ): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -106,6 +108,8 @@ class AndroidFuoCoreBridge(
                         unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace,
                         smartReplacementProviderIdsJson(smartReplacementProviderIds),
                         smartReplacementMinScore,
+                        smartReplacementUseOriginalMetadata,
+                        smartReplacementUseOriginalLyrics,
                     )
                     .toString()
                 JSONObject(raw).toPayload(track).also {

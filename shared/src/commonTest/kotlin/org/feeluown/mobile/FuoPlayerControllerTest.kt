@@ -50,7 +50,7 @@ class FuoPlayerControllerTest {
         val origin = providerTrack("provider:1", "First")
         val provider = FakeProviderRepository(
             listOf(origin),
-            resolveHandler = { track, _, _, _ ->
+            resolveHandler = { track, _, _, _, _, _ ->
                 PlaybackPayload(
                     url = "https://example.com/replacement.mp3",
                     title = "Replacement",
@@ -156,6 +156,40 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun smartReplacementUsesOriginalSourceOptions() = runTest {
+        val provider = FakeProviderRepository(listOf(providerTrack("provider:1", "First")))
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                settingsStore = FakeSettingsStore(
+                    AppSettings(
+                        smartReplacementUseOriginalMetadata = true,
+                        smartReplacementUseOriginalLyrics = true,
+                    ),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("first")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            assertEquals(true, provider.lastSmartReplacementUseOriginalMetadata)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalLyrics)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun nextUsesKotlinQueueOrder() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -201,7 +235,7 @@ class FuoPlayerControllerTest {
         }
         val provider = FakeProviderRepository(
             tracks = tracks,
-            resolveHandler = { track, _, _, _ -> payloads.getValue(track.id).await() },
+            resolveHandler = { track, _, _, _, _, _ -> payloads.getValue(track.id).await() },
         )
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -254,7 +288,7 @@ class FuoPlayerControllerTest {
         }
         val provider = FakeProviderRepository(
             tracks = tracks,
-            resolveHandler = { track, _, _, _ -> payloads.getValue(track.id).await() },
+            resolveHandler = { track, _, _, _, _, _ -> payloads.getValue(track.id).await() },
         )
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -987,6 +1021,8 @@ class FuoPlayerControllerTest {
                 wifiAudioQualityPolicy = AudioQualityPolicy.Highest,
                 cellularAudioQualityPolicy = AudioQualityPolicy.Low,
                 unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip,
+                smartReplacementUseOriginalMetadata = true,
+                smartReplacementUseOriginalLyrics = true,
             ),
         )
         val provider = FakeProviderRepository(emptyList())
@@ -1029,6 +1065,8 @@ class FuoPlayerControllerTest {
             assertEquals(AudioQualityPolicy.Highest, controller.wifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, controller.cellularAudioQualityPolicy)
             assertEquals(UnavailablePlaybackPolicy.Skip, controller.unavailablePlaybackPolicy)
+            assertEquals(true, controller.smartReplacementUseOriginalMetadata)
+            assertEquals(true, controller.smartReplacementUseOriginalLyrics)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, provider.lastCellularAudioQualityPolicy)
 
@@ -1045,6 +1083,8 @@ class FuoPlayerControllerTest {
             controller.onWifiAudioQualityPolicyChange(AudioQualityPolicy.High)
             controller.onCellularAudioQualityPolicyChange(AudioQualityPolicy.Standard)
             controller.onUnavailablePlaybackPolicyChange(UnavailablePlaybackPolicy.SmartReplace)
+            controller.onSmartReplacementUseOriginalMetadataChange(false)
+            controller.onSmartReplacementUseOriginalLyricsChange(false)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
@@ -1066,6 +1106,8 @@ class FuoPlayerControllerTest {
             assertEquals(AudioQualityPolicy.High, store.saved.wifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, store.saved.cellularAudioQualityPolicy)
             assertEquals(UnavailablePlaybackPolicy.SmartReplace, store.saved.unavailablePlaybackPolicy)
+            assertEquals(false, store.saved.smartReplacementUseOriginalMetadata)
+            assertEquals(false, store.saved.smartReplacementUseOriginalLyrics)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
         } finally {
@@ -1492,7 +1534,7 @@ class FuoPlayerControllerTest {
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
         private val resolveFailures: Set<String> = emptySet(),
         private val resolveHandler: (
-            suspend (MusicTrack, UnavailablePlaybackPolicy, Set<String>, Double) -> PlaybackPayload
+            suspend (MusicTrack, UnavailablePlaybackPolicy, Set<String>, Double, Boolean, Boolean) -> PlaybackPayload
         )? = null,
         private val availableProviderInfos: List<ProviderInfo> = listOf(
             ProviderInfo(providerId = "netease", providerName = "网易云音乐"),
@@ -1519,6 +1561,8 @@ class FuoPlayerControllerTest {
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
         var lastSmartReplacementProviderIds: Set<String>? = null
         var lastSmartReplacementMinScore: Double? = null
+        var lastSmartReplacementUseOriginalMetadata: Boolean? = null
+        var lastSmartReplacementUseOriginalLyrics: Boolean? = null
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
         val loadedMediaItemIds = mutableListOf<String>()
@@ -1542,10 +1586,14 @@ class FuoPlayerControllerTest {
             unavailablePolicy: UnavailablePlaybackPolicy,
             smartReplacementProviderIds: Set<String>,
             smartReplacementMinScore: Double,
+            smartReplacementUseOriginalMetadata: Boolean,
+            smartReplacementUseOriginalLyrics: Boolean,
         ): PlaybackPayload {
             resolveCount += 1
             lastSmartReplacementProviderIds = smartReplacementProviderIds
             lastSmartReplacementMinScore = smartReplacementMinScore
+            lastSmartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata
+            lastSmartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics
             if (track.id in resolveFailures) {
                 throw RuntimeException("media not found: ${track.id}")
             }
@@ -1554,6 +1602,8 @@ class FuoPlayerControllerTest {
                 unavailablePolicy,
                 smartReplacementProviderIds,
                 smartReplacementMinScore,
+                smartReplacementUseOriginalMetadata,
+                smartReplacementUseOriginalLyrics,
             ) ?: PlaybackPayload(
                 url = "https://example.com/${track.id}.mp3",
                 title = track.title,

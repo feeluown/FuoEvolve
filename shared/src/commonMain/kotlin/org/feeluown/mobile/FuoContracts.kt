@@ -54,6 +54,8 @@ data class AppSettings(
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
     val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    val smartReplacementUseOriginalMetadata: Boolean = false,
+    val smartReplacementUseOriginalLyrics: Boolean = false,
 )
 
 data class ProviderHeaderInput(
@@ -412,6 +414,8 @@ interface ProviderMusicRepository {
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
         smartReplacementProviderIds: Set<String> = emptySet(),
         smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+        smartReplacementUseOriginalMetadata: Boolean = false,
+        smartReplacementUseOriginalLyrics: Boolean = false,
     ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState

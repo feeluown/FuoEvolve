@@ -34,6 +34,8 @@ class IosAppSettingsStore : AppSettingsStore {
                 KEY_SMART_REPLACEMENT_MIN_SCORE,
                 DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
             ),
+            smartReplacementUseOriginalMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA, false),
+            smartReplacementUseOriginalLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, false),
         )
     }
 
@@ -58,6 +60,8 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setObject(settings.cellularAudioQualityPolicy.name, KEY_CELLULAR_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.unavailablePlaybackPolicy.name, KEY_UNAVAILABLE_PLAYBACK_POLICY)
             defaults.setDouble(settings.smartReplacementMinScore, KEY_SMART_REPLACEMENT_MIN_SCORE)
+            defaults.setBool(settings.smartReplacementUseOriginalMetadata, KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA)
+            defaults.setBool(settings.smartReplacementUseOriginalLyrics, KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS)
             defaults.synchronize()
         }
     }
@@ -76,6 +80,11 @@ class IosAppSettingsStore : AppSettingsStore {
     private fun doubleValue(key: String, fallback: Double): Double {
         if (defaults.objectForKey(key) == null) return fallback
         return defaults.doubleForKey(key)
+    }
+
+    private fun boolValue(key: String, fallback: Boolean): Boolean {
+        if (defaults.objectForKey(key) == null) return fallback
+        return defaults.boolForKey(key)
     }
 
     private fun readStringSet(key: String): Set<String> = readStringList(key).toSet()
@@ -157,5 +166,7 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
+        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
+        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
     }
 }

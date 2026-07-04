@@ -163,6 +163,10 @@ class FuoPlayerController(
         private set
     var smartReplacementMinScore by mutableStateOf(DEFAULT_SMART_REPLACEMENT_MIN_SCORE)
         private set
+    var smartReplacementUseOriginalMetadata by mutableStateOf(false)
+        private set
+    var smartReplacementUseOriginalLyrics by mutableStateOf(false)
+        private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
         private set
     var debugLogError by mutableStateOf<String?>(null)
@@ -650,6 +654,16 @@ class FuoPlayerController(
 
     fun onSmartReplacementMinScoreChange(value: Double) {
         smartReplacementMinScore = value.coerceIn(0.0, 1.0)
+        persistSettings()
+    }
+
+    fun onSmartReplacementUseOriginalMetadataChange(value: Boolean) {
+        smartReplacementUseOriginalMetadata = value
+        persistSettings()
+    }
+
+    fun onSmartReplacementUseOriginalLyricsChange(value: Boolean) {
+        smartReplacementUseOriginalLyrics = value
         persistSettings()
     }
 
@@ -1410,6 +1424,8 @@ class FuoPlayerController(
                         unavailablePlaybackPolicy,
                         selectedSmartReplacementProviderIds(),
                         smartReplacementMinScore,
+                        smartReplacementUseOriginalMetadata,
+                        smartReplacementUseOriginalLyrics,
                     )
                 if (requestSerial != playRequestSerial) return@playRequest
                 val playableTrack = playbackTrack.copy(
@@ -1784,6 +1800,8 @@ class FuoPlayerController(
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
         smartReplacementProviderIds = settings.smartReplacementProviderIds
         smartReplacementMinScore = settings.smartReplacementMinScore.coerceIn(0.0, 1.0)
+        smartReplacementUseOriginalMetadata = settings.smartReplacementUseOriginalMetadata
+        smartReplacementUseOriginalLyrics = settings.smartReplacementUseOriginalLyrics
     }
 
     private fun persistSettings() {
@@ -1809,6 +1827,8 @@ class FuoPlayerController(
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,
             smartReplacementProviderIds = smartReplacementProviderIds,
             smartReplacementMinScore = smartReplacementMinScore,
+            smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
+            smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
         )
         scope.launch {
             settingsStore.save(settings)

@@ -1706,6 +1706,38 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                         enabled = !controller.isLoading,
                     )
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = "使用原曲信息",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Checkbox(
+                        checked = controller.smartReplacementUseOriginalMetadata,
+                        enabled = !controller.isLoading,
+                        onCheckedChange = controller::onSmartReplacementUseOriginalMetadataChange,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = "使用原曲歌词",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Checkbox(
+                        checked = controller.smartReplacementUseOriginalLyrics,
+                        enabled = !controller.isLoading,
+                        onCheckedChange = controller::onSmartReplacementUseOriginalLyricsChange,
+                    )
+                }
                 controller.orderedProviders().forEach { provider ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),

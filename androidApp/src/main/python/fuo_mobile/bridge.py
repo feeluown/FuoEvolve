@@ -548,6 +548,8 @@ class FuoMobileBridge:
         allow_standby: bool = True,
         standby_provider_ids_json: str = "",
         standby_min_score: float = 0.55,
+        standby_use_origin_metadata: bool = False,
+        standby_use_origin_lyrics: bool = False,
     ) -> str:
         song = self._tracks.get(track_id)
         if song is None:
@@ -556,7 +558,15 @@ class FuoMobileBridge:
         policy = audio_select_policy or self.app.config.AUDIO_SELECT_POLICY
         standby_provider_ids = parse_provider_ids(standby_provider_ids_json)
         min_score = normalize_standby_min_score(standby_min_score)
-        payload = self._prepare_payload(song, policy, allow_standby, standby_provider_ids, min_score)
+        payload = self._prepare_payload(
+            song,
+            policy,
+            allow_standby,
+            standby_provider_ids,
+            min_score,
+            standby_use_origin_metadata,
+            standby_use_origin_lyrics,
+        )
         return json.dumps(payload, ensure_ascii=False)
 
     def play(self, track_id: str) -> str:
@@ -938,6 +948,8 @@ class FuoMobileBridge:
         allow_standby: bool,
         standby_provider_ids: Optional[List[str]],
         standby_min_score: float,
+        standby_use_origin_metadata: bool,
+        standby_use_origin_lyrics: bool,
     ) -> Dict[str, Any]:
         try:
             media, quality = self._select_media(song, audio_select_policy)
@@ -952,6 +964,8 @@ class FuoMobileBridge:
                     audio_select_policy,
                     standby_provider_ids,
                     standby_min_score,
+                    standby_use_origin_metadata,
+                    standby_use_origin_lyrics,
                 )
                 if standby_payload is not None:
                     return standby_payload
@@ -965,6 +979,8 @@ class FuoMobileBridge:
         audio_select_policy: str,
         standby_provider_ids: Optional[List[str]],
         standby_min_score: float,
+        standby_use_origin_metadata: bool,
+        standby_use_origin_lyrics: bool,
     ) -> Optional[Dict[str, Any]]:
         source = getattr(song, "source", "")
         provider_ids = standby_provider_ids or self.provider_registry.provider_ids
@@ -991,10 +1007,24 @@ class FuoMobileBridge:
             )
         except Exception as exc:  # pylint: disable=broad-except
             bridge_log(f"standby failed track={song_log_label(song)} error={exc}")
-            return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
+            return self._prepare_search_standby_payload(
+                song,
+                audio_select_policy,
+                source_in,
+                standby_min_score,
+                standby_use_origin_metadata,
+                standby_use_origin_lyrics,
+            )
         if not standby_list:
             bridge_log(f"standby empty track={song_log_label(song)}")
-            return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
+            return self._prepare_search_standby_payload(
+                song,
+                audio_select_policy,
+                source_in,
+                standby_min_score,
+                standby_use_origin_metadata,
+                standby_use_origin_lyrics,
+            )
         candidates = []
         for standby, _ in standby_list:
             score = standby_score(song, standby)
@@ -1002,7 +1032,14 @@ class FuoMobileBridge:
                 candidates.append((score, standby))
         if not candidates:
             bridge_log(f"standby no scored candidates track={song_log_label(song)}")
-            return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
+            return self._prepare_search_standby_payload(
+                song,
+                audio_select_policy,
+                source_in,
+                standby_min_score,
+                standby_use_origin_metadata,
+                standby_use_origin_lyrics,
+            )
         for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True):
             self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
             bridge_log(
@@ -1017,9 +1054,24 @@ class FuoMobileBridge:
                 )
                 continue
             payload = self._payload_from_media(standby, media, quality)
-            return self._mark_standby_payload(payload, song, standby, "library", score)
+            return self._mark_standby_payload(
+                payload,
+                song,
+                standby,
+                "library",
+                score,
+                standby_use_origin_metadata,
+                standby_use_origin_lyrics,
+            )
         bridge_log(f"standby scored media empty track={song_log_label(song)} candidates={len(candidates)}")
-        return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
+        return self._prepare_search_standby_payload(
+            song,
+            audio_select_policy,
+            source_in,
+            standby_min_score,
+            standby_use_origin_metadata,
+            standby_use_origin_lyrics,
+        )
 
     def _prepare_search_standby_payload(
         self,
@@ -1027,6 +1079,8 @@ class FuoMobileBridge:
         audio_select_policy: str,
         source_in: List[str],
         standby_min_score: float,
+        standby_use_origin_metadata: bool,
+        standby_use_origin_lyrics: bool,
     ) -> Optional[Dict[str, Any]]:
         candidates = []
         seen = set()
@@ -1061,7 +1115,15 @@ class FuoMobileBridge:
                 f"origin={song_log_label(song)} replacement={song_log_label(standby)}"
             )
             payload = self._payload_from_media(standby, media, quality)
-            return self._mark_standby_payload(payload, song, standby, "search", score)
+            return self._mark_standby_payload(
+                payload,
+                song,
+                standby,
+                "search",
+                score,
+                standby_use_origin_metadata,
+                standby_use_origin_lyrics,
+            )
         bridge_log(f"search standby media empty track={song_log_label(song)} candidates={len(candidates)}")
         return None
 
@@ -1122,6 +1184,8 @@ class FuoMobileBridge:
         standby,
         strategy: str,
         score: Optional[float],
+        use_origin_metadata: bool = False,
+        use_origin_lyrics: bool = False,
     ) -> Dict[str, Any]:
         origin_provider = provider_name(self.app.library.get(getattr(origin, "source", "")))
         standby_provider = provider_name(self.app.library.get(getattr(standby, "source", "")))
@@ -1143,6 +1207,12 @@ class FuoMobileBridge:
         )
         if score is not None:
             payload["standby_score"] = round(score, 2)
+        if use_origin_metadata:
+            apply_origin_metadata(payload, song_to_metadata(origin, self.app.library))
+        if use_origin_lyrics:
+            origin_lyrics = self._get_lyrics(origin)
+            if origin_lyrics:
+                payload["lyrics"] = origin_lyrics
         bridge_log(
             f"standby payload ready strategy={strategy} "
             f"origin={song_log_label(origin)} replacement={song_log_label(standby)} "
@@ -1320,6 +1390,16 @@ def song_to_metadata(song, library: Library) -> Dict[str, Any]:
         "duration_ms": data["duration_ms"],
         "cover_url": data["cover_url"],
     }
+
+
+def apply_origin_metadata(payload: Dict[str, Any], metadata: Dict[str, Any]) -> None:
+    for key in ("title", "artists", "album", "source", "provider_name", "cover_url"):
+        value = metadata.get(key)
+        if value:
+            payload[key] = value
+    duration = metadata.get("duration_ms", 0)
+    if duration:
+        payload["duration_ms"] = duration
 
 
 def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:

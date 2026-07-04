@@ -32,6 +32,8 @@ class IosFuoCoreBridge : ProviderMusicRepository {
         unavailablePolicy: UnavailablePlaybackPolicy,
         smartReplacementProviderIds: Set<String>,
         smartReplacementMinScore: Double,
+        smartReplacementUseOriginalMetadata: Boolean,
+        smartReplacementUseOriginalLyrics: Boolean,
     ): PlaybackPayload = withContext(Dispatchers.Default) {
         pythonUnavailable()
     }
