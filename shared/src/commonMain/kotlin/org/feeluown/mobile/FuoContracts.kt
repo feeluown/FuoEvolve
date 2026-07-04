@@ -99,6 +99,8 @@ data class MusicTrack(
     val originalTitle: String? = null,
     val originalProviderName: String? = null,
     val isUnavailable: Boolean = false,
+    val artistItemId: String? = null,
+    val albumItemId: String? = null,
 )
 
 data class PlaybackPayload(
@@ -147,6 +149,171 @@ data class PlaybackState(
     val audioQuality: String? = null,
     val errorMessage: String? = null,
 )
+
+data class PlaybackQueueSnapshot(
+    val mainQueue: List<MusicTrack> = emptyList(),
+    val originalMainQueue: List<MusicTrack> = emptyList(),
+    val upNextQueue: List<MusicTrack> = emptyList(),
+    val queueIndex: Int = -1,
+    val shuffleEnabled: Boolean = false,
+    val repeatEnabled: Boolean = true,
+    val isFmQueue: Boolean = false,
+    val shuffleBeforeFm: Boolean? = null,
+)
+
+interface PlaybackQueueStore {
+    suspend fun load(): PlaybackQueueSnapshot
+    suspend fun save(snapshot: PlaybackQueueSnapshot)
+}
+
+object NoOpPlaybackQueueStore : PlaybackQueueStore {
+    override suspend fun load(): PlaybackQueueSnapshot = PlaybackQueueSnapshot()
+
+    override suspend fun save(snapshot: PlaybackQueueSnapshot) = Unit
+}
+
+object PlaybackQueueCodec {
+    fun encode(snapshot: PlaybackQueueSnapshot): String {
+        return buildList {
+            add("v1")
+            add(
+                listOf(
+                    snapshot.queueIndex.toString(),
+                    snapshot.shuffleEnabled.toString(),
+                    snapshot.repeatEnabled.toString(),
+                    snapshot.isFmQueue.toString(),
+                    snapshot.shuffleBeforeFm?.toString().orEmpty(),
+                ).joinToString("\t")
+            )
+            addTracks("main", snapshot.mainQueue)
+            addTracks("original", snapshot.originalMainQueue)
+            addTracks("upNext", snapshot.upNextQueue)
+        }.joinToString("\n")
+    }
+
+    fun decode(raw: String): PlaybackQueueSnapshot {
+        val lines = raw.lineSequence().filter { it.isNotBlank() }.toList()
+        if (lines.size < 2 || lines.first() != "v1") return PlaybackQueueSnapshot()
+        val flags = lines[1].split("\t")
+        val tracksBySection = lines.drop(2)
+            .mapNotNull { line ->
+                val fields = line.split("\t")
+                if (fields.size < 2 || fields[0] != "track") return@mapNotNull null
+                decodeTrack(fields.drop(2))?.let { track -> fields[1] to track }
+            }
+            .groupBy({ it.first }, { it.second })
+        return PlaybackQueueSnapshot(
+            mainQueue = tracksBySection["main"].orEmpty(),
+            originalMainQueue = tracksBySection["original"].orEmpty(),
+            upNextQueue = tracksBySection["upNext"].orEmpty(),
+            queueIndex = flags.getOrNull(0)?.toIntOrNull() ?: -1,
+            shuffleEnabled = flags.getOrNull(1)?.toBooleanStrictOrNull() ?: false,
+            repeatEnabled = flags.getOrNull(2)?.toBooleanStrictOrNull() ?: true,
+            isFmQueue = flags.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
+            shuffleBeforeFm = flags.getOrNull(4)?.takeIf { it.isNotBlank() }?.toBooleanStrictOrNull(),
+        )
+    }
+
+    private fun MutableList<String>.addTracks(section: String, tracks: List<MusicTrack>) {
+        tracks.forEach { track ->
+            add((listOf("track", section) + encodeTrack(track)).joinToString("\t"))
+        }
+    }
+
+    private fun encodeTrack(track: MusicTrack): List<String> = listOf(
+        track.id,
+        track.title,
+        track.artists,
+        track.album,
+        track.source,
+        track.sourceType.name,
+        track.coverUrl.orEmpty(),
+        track.durationMs?.toString().orEmpty(),
+        track.localUri.orEmpty(),
+        track.lyrics.orEmpty(),
+        track.providerId.orEmpty(),
+        track.providerName.orEmpty(),
+        track.isSmartReplacement.toString(),
+        track.originalTitle.orEmpty(),
+        track.originalProviderName.orEmpty(),
+        track.isUnavailable.toString(),
+        track.artistItemId.orEmpty(),
+        track.albumItemId.orEmpty(),
+    ).map(::escape)
+
+    private fun decodeTrack(fields: List<String>): MusicTrack? {
+        if (fields.size < 18) return null
+        return runCatching {
+            MusicTrack(
+                id = unescape(fields[0]),
+                title = unescape(fields[1]),
+                artists = unescape(fields[2]),
+                album = unescape(fields[3]),
+                source = unescape(fields[4]),
+                sourceType = TrackSourceType.valueOf(unescape(fields[5])),
+                coverUrl = unescape(fields[6]).ifBlank { null },
+                durationMs = unescape(fields[7]).toLongOrNull(),
+                localUri = unescape(fields[8]).ifBlank { null },
+                lyrics = unescape(fields[9]).ifBlank { null },
+                providerId = unescape(fields[10]).ifBlank { null },
+                providerName = unescape(fields[11]).ifBlank { null },
+                isSmartReplacement = unescape(fields[12]).toBooleanStrictOrNull() ?: false,
+                originalTitle = unescape(fields[13]).ifBlank { null },
+                originalProviderName = unescape(fields[14]).ifBlank { null },
+                isUnavailable = unescape(fields[15]).toBooleanStrictOrNull() ?: false,
+                artistItemId = unescape(fields[16]).ifBlank { null },
+                albumItemId = unescape(fields[17]).ifBlank { null },
+            )
+        }.getOrNull()
+    }
+
+    private fun escape(value: String): String = buildString {
+        value.forEach { char ->
+            when (char) {
+                '%' -> append("%25")
+                '\t' -> append("%09")
+                '\n' -> append("%0A")
+                '\r' -> append("%0D")
+                else -> append(char)
+            }
+        }
+    }
+
+    private fun unescape(value: String): String {
+        val result = StringBuilder()
+        var index = 0
+        while (index < value.length) {
+            if (value[index] == '%' && index + 2 < value.length) {
+                when (value.substring(index + 1, index + 3)) {
+                    "25" -> {
+                        result.append('%')
+                        index += 3
+                    }
+                    "09" -> {
+                        result.append('\t')
+                        index += 3
+                    }
+                    "0A" -> {
+                        result.append('\n')
+                        index += 3
+                    }
+                    "0D" -> {
+                        result.append('\r')
+                        index += 3
+                    }
+                    else -> {
+                        result.append(value[index])
+                        index += 1
+                    }
+                }
+            } else {
+                result.append(value[index])
+                index += 1
+            }
+        }
+        return result.toString()
+    }
+}
 
 sealed class DownloadState {
     data object NotDownloaded : DownloadState()

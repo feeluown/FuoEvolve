@@ -302,6 +302,8 @@ class AndroidFuoCoreBridge(
             durationMs = optLong("duration_ms").takeIf { it > 0 },
             providerId = id,
             providerName = optString("provider_name").ifBlank { source }.takeIf { it.isNotBlank() },
+            artistItemId = optString("artist_item_id").takeIf { it.isNotBlank() },
+            albumItemId = optString("album_item_id").takeIf { it.isNotBlank() },
         )
     }
 

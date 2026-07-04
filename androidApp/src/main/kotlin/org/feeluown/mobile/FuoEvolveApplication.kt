@@ -30,6 +30,10 @@ class FuoEvolveApplication : PyApplication() {
         AndroidAppSettingsStore(applicationContext)
     }
 
+    private val playbackQueueStore: AndroidPlaybackQueueStore by lazy {
+        AndroidPlaybackQueueStore(applicationContext)
+    }
+
     private val resourceCacheRepository: AndroidResourceCacheRepository by lazy {
         AndroidResourceCacheRepository(applicationContext)
     }
@@ -45,6 +49,7 @@ class FuoEvolveApplication : PyApplication() {
             downloadRepository = downloadRepository,
             playbackEngine = playbackEngine,
             settingsStore = settingsStore,
+            playbackQueueStore = playbackQueueStore,
             resourceCacheRepository = resourceCacheRepository,
             debugLogRepository = debugLogRepository,
             scope = appScope,

@@ -50,6 +50,7 @@ class FuoPlayerController(
     private val downloadRepository: DownloadRepository,
     private val playbackEngine: PlaybackEngine,
     private val settingsStore: AppSettingsStore = NoOpAppSettingsStore,
+    private val playbackQueueStore: PlaybackQueueStore = NoOpPlaybackQueueStore,
     private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository,
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val scope: CoroutineScope,
@@ -168,6 +169,14 @@ class FuoPlayerController(
         private set
     val isDebugLogViewerAvailable: Boolean
         get() = debugLogRepository.isAvailable
+    val isShuffleEnabled: Boolean
+        get() = shuffleEnabled
+    val isRepeatEnabled: Boolean
+        get() = repeatEnabled
+    val isFmQueueActive: Boolean
+        get() = isFmQueue
+    val displayUpNextCount: Int
+        get() = (if (currentUpNextTrack != null) 1 else 0) + upNextQueue.size
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
             isDebugLogOpen ||
@@ -177,9 +186,17 @@ class FuoPlayerController(
             selectedMediaItem != null ||
             selectedPlaylist != null
 
-    private var queue: List<MusicTrack> = emptyList()
-    private var queueIndex: Int = -1
+    private var mainQueue: List<MusicTrack> = emptyList()
+    private var originalMainQueue: List<MusicTrack> = emptyList()
+    private var upNextQueue: List<MusicTrack> = emptyList()
+    private var mainQueueIndex: Int = -1
+    private var currentUpNextTrack: MusicTrack? = null
+    private var currentIsUpNext: Boolean = false
     private var queueFeature: ProviderFeature? = null
+    private var shuffleEnabled: Boolean = false
+    private var repeatEnabled: Boolean = true
+    private var isFmQueue: Boolean = false
+    private var shuffleBeforeFm: Boolean? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
     private var lastEndedTrackId: String? = null
     private var autoAdvanceEligibleTrackId: String? = null
@@ -189,6 +206,8 @@ class FuoPlayerController(
         scope.launch {
             val loadedSettings = runCatching { settingsStore.load() }
             loadedSettings.onSuccess { applySettings(it) }
+            runCatching { playbackQueueStore.load() }
+                .onSuccess { restorePlaybackQueue(it) }
             updateLocalMusicScanSettings()
             updateResourceCacheLimit()
             updateAudioQualityPolicies()
@@ -218,7 +237,7 @@ class FuoPlayerController(
         }
         scope.launch {
             playbackEngine.state.collect { engineState ->
-                val queueTrackId = queue.getOrNull(queueIndex)?.id
+                val queueTrackId = currentQueueTrack()?.id
                 when (engineState.status) {
                     PlayerStatus.Playing -> {
                         autoAdvanceEligibleTrackId = queueTrackId ?: engineState.currentTrack?.id
@@ -241,9 +260,9 @@ class FuoPlayerController(
                     }
                 }
                 playbackState = engineState.copy(
-                    queue = queue,
-                    queueIndex = queueIndex,
-                    currentTrack = queue.getOrNull(queueIndex) ?: engineState.currentTrack,
+                    queue = displayQueue(),
+                    queueIndex = displayQueueIndex(),
+                    currentTrack = currentQueueTrack() ?: engineState.currentTrack,
                 )
             }
         }
@@ -732,6 +751,21 @@ class FuoPlayerController(
         }
     }
 
+    private fun searchTrackText(text: String, providerId: String?) {
+        val keyword = text.trim()
+        if (keyword.isBlank()) {
+            message = "没有可搜索的信息"
+            return
+        }
+        query = keyword
+        if (providerId != null && providers.any { it.providerId == providerId }) {
+            searchScope = SearchScope.Provider
+            selectedSearchProviderId = providerId
+        }
+        isSearchOpen = true
+        search()
+    }
+
     fun refreshHomeContent(section: HomeSection = homeSection) {
         if (section == HomeSection.Mine) {
             refreshActiveMineSection()
@@ -1044,8 +1078,21 @@ class FuoPlayerController(
     }
 
     fun playQueueIndex(index: Int) {
-        val track = queue.getOrNull(index) ?: return
-        play(track, queue, index, queueFeature)
+        val pendingOffset = if (currentUpNextTrack != null) 1 else 0
+        val pendingEnd = pendingOffset + upNextQueue.size
+        when {
+            currentUpNextTrack != null && index == 0 -> currentUpNextTrack?.let {
+                startPlayback(it)
+            }
+            index in pendingOffset until pendingEnd -> {
+                val upNextIndex = index - pendingOffset
+                playUpNextIndex(upNextIndex)
+            }
+            else -> {
+                val mainIndex = index - pendingEnd
+                playMainIndex(mainIndex)
+            }
+        }
     }
 
     fun toggle() {
@@ -1059,28 +1106,52 @@ class FuoPlayerController(
     }
 
     fun next() {
-        if (queue.isEmpty()) return
+        if (currentIsUpNext) {
+            currentUpNextTrack = null
+            currentIsUpNext = false
+            persistPlaybackQueue()
+        }
+        if (upNextQueue.isNotEmpty()) {
+            playUpNextIndex(0)
+            return
+        }
+        if (mainQueue.isEmpty()) return
         val feature = queueFeature
-        if (feature != null && queueIndex >= queue.lastIndex) {
+        if (feature != null && mainQueueIndex >= mainQueue.lastIndex) {
             scope.launch {
-                val nextIndex = queue.size
+                val nextIndex = mainQueue.size
                 val appendedCount = appendFeatureQueue(feature)
                 if (appendedCount > 0 && queueFeature == feature) {
-                    playQueueIndex(nextIndex)
+                    playMainIndex(nextIndex)
                 } else if (queueFeature == feature) {
                     message = "${feature.title} 暂无后续歌曲"
                 }
             }
             return
         }
-        val nextIndex = (queueIndex + 1).floorMod(queue.size)
-        playQueueIndex(nextIndex)
+        val nextIndex = mainQueueIndex + 1
+        if (nextIndex < mainQueue.size) {
+            playMainIndex(nextIndex)
+        } else if (repeatEnabled) {
+            playMainIndex(0)
+        }
     }
 
     fun previous() {
-        if (queue.isEmpty()) return
-        val previousIndex = (queueIndex - 1).floorMod(queue.size)
-        playQueueIndex(previousIndex)
+        if (currentIsUpNext) {
+            currentUpNextTrack = null
+            currentIsUpNext = false
+            persistPlaybackQueue()
+            playMainIndex(mainQueueIndex.coerceAtLeast(0))
+            return
+        }
+        if (mainQueue.isEmpty()) return
+        val previousIndex = mainQueueIndex - 1
+        if (previousIndex >= 0) {
+            playMainIndex(previousIndex)
+        } else if (repeatEnabled) {
+            playMainIndex(mainQueue.lastIndex)
+        }
     }
 
     fun seekTo(positionMs: Long) {
@@ -1100,16 +1171,56 @@ class FuoPlayerController(
     }
 
     fun removeFromQueue(track: MusicTrack) {
-        val index = queue.indexOfFirst { it.id == track.id }
-        if (index < 0) return
-        queue = queue.filterIndexed { currentIndex, _ -> currentIndex != index }
-        queueIndex = when {
-            queue.isEmpty() -> -1
-            index < queueIndex -> queueIndex - 1
-            index == queueIndex -> queueIndex.coerceAtMost(queue.lastIndex)
-            else -> queueIndex
+        if (currentUpNextTrack?.id == track.id) {
+            currentUpNextTrack = null
+            currentIsUpNext = false
+            updatePlaybackQueueState()
+            persistPlaybackQueue()
+            return
         }
-        playbackState = playbackState.copy(queue = queue, queueIndex = queueIndex)
+        val upNextIndex = upNextQueue.indexOfFirst { it.id == track.id }
+        if (upNextIndex >= 0) {
+            upNextQueue = upNextQueue.filterIndexed { index, _ -> index != upNextIndex }
+            updatePlaybackQueueState()
+            persistPlaybackQueue()
+            return
+        }
+        val mainIndex = mainQueue.indexOfFirst { it.id == track.id }
+        if (mainIndex < 0) return
+        mainQueue = mainQueue.filterIndexed { index, _ -> index != mainIndex }
+        originalMainQueue = originalMainQueue.filterNot { it.id == track.id }
+        mainQueueIndex = when {
+            mainQueue.isEmpty() -> -1
+            mainIndex < mainQueueIndex -> mainQueueIndex - 1
+            mainIndex == mainQueueIndex -> mainQueueIndex.coerceAtMost(mainQueue.lastIndex)
+            else -> mainQueueIndex
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+    }
+
+    fun addToUpNext(track: MusicTrack) {
+        upNextQueue = upNextQueue + track
+        message = "已加入接下来播放：${track.title}"
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+    }
+
+    fun toggleShuffle() {
+        if (isFmQueue) return
+        if (shuffleEnabled) {
+            disableShuffle()
+        } else {
+            enableShuffle()
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+    }
+
+    fun toggleRepeat() {
+        repeatEnabled = !repeatEnabled
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
     }
 
     fun download(track: MusicTrack) {
@@ -1133,6 +1244,46 @@ class FuoPlayerController(
                 }
                 .onFailure { setError(it) }
         }
+    }
+
+    fun openTrackArtist(track: MusicTrack) {
+        val artistName = track.artists.substringBefore("·").substringBefore(",").trim()
+        val providerId = track.source.takeIf { it.isNotBlank() }
+        val providerName = track.providerName ?: providerId.orEmpty()
+        val itemId = track.artistItemId
+        if (!itemId.isNullOrBlank() && providerId != null && artistName.isNotBlank()) {
+            openMediaItem(
+                ProviderMediaItem(
+                    id = itemId,
+                    title = artistName,
+                    providerId = providerId,
+                    providerName = providerName,
+                    type = ProviderMediaItemType.Artist,
+                )
+            )
+            return
+        }
+        searchTrackText(artistName.ifBlank { track.artists }, providerId)
+    }
+
+    fun openTrackAlbum(track: MusicTrack) {
+        val albumName = track.album.trim()
+        val providerId = track.source.takeIf { it.isNotBlank() }
+        val providerName = track.providerName ?: providerId.orEmpty()
+        val itemId = track.albumItemId
+        if (!itemId.isNullOrBlank() && providerId != null && albumName.isNotBlank()) {
+            openMediaItem(
+                ProviderMediaItem(
+                    id = itemId,
+                    title = albumName,
+                    providerId = providerId,
+                    providerName = providerName,
+                    type = ProviderMediaItemType.Album,
+                )
+            )
+            return
+        }
+        searchTrackText(albumName, providerId)
     }
 
     private suspend fun refreshProviderCatalog() {
@@ -1226,21 +1377,28 @@ class FuoPlayerController(
         sourceFeature: ProviderFeature? = null,
         skippedUnavailableCount: Int = 0,
     ) {
+        if (skippedUnavailableCount == 0) {
+            replaceMainQueue(sourceQueue, index, sourceFeature)
+        }
+        playMainIndex(index, skippedUnavailableCount)
+    }
+
+    private fun startPlayback(
+        track: MusicTrack,
+        skippedUnavailableCount: Int = 0,
+    ) {
         val requestSerial = ++playRequestSerial
         val playbackTrack = track.preferDownloaded()
-        queue = sourceQueue.mapIndexed { itemIndex, item ->
-            if (itemIndex == index) playbackTrack else item
-        }
-        queueIndex = index
-        queueFeature = sourceFeature
+        updateCurrentTrack(playbackTrack)
         playbackState = playbackState.copy(
             status = PlayerStatus.Loading,
             currentTrack = playbackTrack,
-            queue = queue,
-            queueIndex = queueIndex,
+            queue = displayQueue(),
+            queueIndex = displayQueueIndex(),
             positionMs = 0,
             errorMessage = null,
         )
+        persistPlaybackQueue()
         playbackEngine.prepareLoading(playbackTrack)
         scope.launch playRequest@{
             isLoading = true
@@ -1267,25 +1425,22 @@ class FuoPlayerController(
                     originalProviderName = payload.originalProviderName,
                     isUnavailable = false,
                 )
-                queue = sourceQueue.mapIndexed { itemIndex, item ->
-                    if (itemIndex == index) playableTrack else item
-                }
-                queueIndex = index
-                queueFeature = sourceFeature
+                updateCurrentTrack(playableTrack)
                 playbackEngine.play(playableTrack, payload)
                 playbackState = playbackState.copy(
                     status = PlayerStatus.Loading,
                     currentTrack = playableTrack,
-                    queue = queue,
-                    queueIndex = queueIndex,
+                    queue = displayQueue(),
+                    queueIndex = displayQueueIndex(),
                     lyrics = payload.lyrics,
                     audioQuality = payload.audioQuality,
                 )
+                persistPlaybackQueue()
                 message = "${playableTrack.title} - ${playableTrack.artists}"
                 prefetchFeatureQueueIfNeeded()
             }.onFailure {
                 if (requestSerial != playRequestSerial) return@playRequest
-                if (!skipUnavailableTrack(track, sourceQueue, index, sourceFeature, skippedUnavailableCount, it)) {
+                if (!skipUnavailableTrack(track, skippedUnavailableCount, it)) {
                     setError(it)
                 }
             }
@@ -1298,6 +1453,49 @@ class FuoPlayerController(
     private fun playFirst(sourceQueue: List<MusicTrack>, sourceFeature: ProviderFeature? = null) {
         val track = sourceQueue.firstOrNull() ?: return
         play(track, sourceQueue, 0, sourceFeature)
+    }
+
+    private fun replaceMainQueue(sourceQueue: List<MusicTrack>, index: Int, sourceFeature: ProviderFeature?) {
+        val normalizedIndex = index.coerceIn(0, sourceQueue.lastIndex)
+        val enteringFm = sourceFeature?.isDynamicQueueFeature() == true
+        val restoreShuffle = if (isFmQueue && !enteringFm) shuffleBeforeFm else null
+        if (enteringFm && !isFmQueue) {
+            shuffleBeforeFm = shuffleEnabled
+            shuffleEnabled = false
+        } else if (!enteringFm && restoreShuffle != null) {
+            shuffleEnabled = restoreShuffle
+            shuffleBeforeFm = null
+        }
+        isFmQueue = enteringFm
+        queueFeature = sourceFeature
+        currentUpNextTrack = null
+        currentIsUpNext = false
+        originalMainQueue = emptyList()
+        mainQueue = sourceQueue
+        mainQueueIndex = normalizedIndex
+        if (shuffleEnabled && !enteringFm) {
+            enableShuffle()
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+    }
+
+    private fun playMainIndex(index: Int, skippedUnavailableCount: Int = 0) {
+        val track = mainQueue.getOrNull(index) ?: return
+        currentUpNextTrack = null
+        currentIsUpNext = false
+        mainQueueIndex = index
+        startPlayback(track, skippedUnavailableCount)
+    }
+
+    private fun playUpNextIndex(index: Int) {
+        val track = upNextQueue.getOrNull(index) ?: return
+        upNextQueue = upNextQueue.filterIndexed { itemIndex, _ -> itemIndex != index }
+        currentUpNextTrack = track
+        currentIsUpNext = true
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+        startPlayback(track)
     }
 
     private fun loadFeatureAndPlayAll(feature: ProviderFeature) {
@@ -1340,8 +1538,9 @@ class FuoPlayerController(
 
     private fun prefetchFeatureQueueIfNeeded() {
         val feature = queueFeature ?: return
-        if (queueIndex < 0) return
-        val remaining = queue.size - queueIndex
+        if (currentIsUpNext || upNextQueue.isNotEmpty()) return
+        if (mainQueueIndex < 0) return
+        val remaining = mainQueue.size - mainQueueIndex
         if (remaining <= DYNAMIC_QUEUE_PREFETCH_REMAINING) {
             scope.launch {
                 appendFeatureQueue(feature)
@@ -1370,11 +1569,12 @@ class FuoPlayerController(
                 providerRepository.loadMoreFeatureTracks(feature)
             }
             if (queueFeature != feature) return 0
-            val seenQueueIds = queue.mapTo(mutableSetOf()) { it.id }
+            val seenQueueIds = mainQueue.mapTo(mutableSetOf()) { it.id }
             val newTracks = tracks.filter { seenQueueIds.add(it.id) }
             if (newTracks.isNotEmpty()) {
-                queue = queue + newTracks
-                playbackState = playbackState.copy(queue = queue, queueIndex = queueIndex)
+                mainQueue = mainQueue + newTracks
+                updatePlaybackQueueState()
+                persistPlaybackQueue()
                 if (selectedFeature == feature) {
                     val seenSelectedIds = selectedFeatureTracks.mapTo(mutableSetOf()) { it.id }
                     val newSelectedTracks = newTracks.filter { seenSelectedIds.add(it.id) }
@@ -1421,6 +1621,103 @@ class FuoPlayerController(
             originalTitle = originalTitle,
             originalProviderName = originalProviderName,
         )
+    }
+
+    private fun currentQueueTrack(): MusicTrack? {
+        return if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
+    }
+
+    private fun displayQueue(): List<MusicTrack> {
+        return buildList {
+            currentUpNextTrack?.let { add(it) }
+            addAll(upNextQueue)
+            addAll(mainQueue)
+        }
+    }
+
+    private fun displayQueueIndex(): Int {
+        return when {
+            currentIsUpNext && currentUpNextTrack != null -> 0
+            mainQueueIndex >= 0 -> (if (currentUpNextTrack != null) 1 else 0) + upNextQueue.size + mainQueueIndex
+            else -> -1
+        }
+    }
+
+    private fun updateCurrentTrack(track: MusicTrack) {
+        if (currentIsUpNext) {
+            currentUpNextTrack = track
+        } else if (mainQueueIndex in mainQueue.indices) {
+            mainQueue = mainQueue.mapIndexed { index, item -> if (index == mainQueueIndex) track else item }
+            originalMainQueue = originalMainQueue.map { item -> if (item.id == track.id) track else item }
+        }
+    }
+
+    private fun updatePlaybackQueueState() {
+        playbackState = playbackState.copy(
+            queue = displayQueue(),
+            queueIndex = displayQueueIndex(),
+            currentTrack = currentQueueTrack() ?: playbackState.currentTrack,
+        )
+    }
+
+    private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
+        mainQueue = snapshot.mainQueue
+        originalMainQueue = snapshot.originalMainQueue
+        upNextQueue = snapshot.upNextQueue
+        mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
+        shuffleEnabled = snapshot.shuffleEnabled
+        repeatEnabled = snapshot.repeatEnabled
+        isFmQueue = snapshot.isFmQueue
+        shuffleBeforeFm = snapshot.shuffleBeforeFm
+        currentUpNextTrack = null
+        currentIsUpNext = false
+        playbackState = playbackState.copy(
+            currentTrack = mainQueue.getOrNull(mainQueueIndex),
+            queue = displayQueue(),
+            queueIndex = displayQueueIndex(),
+        )
+    }
+
+    private fun persistPlaybackQueue() {
+        val snapshot = PlaybackQueueSnapshot(
+            mainQueue = mainQueue,
+            originalMainQueue = originalMainQueue,
+            upNextQueue = upNextQueue,
+            queueIndex = mainQueueIndex,
+            shuffleEnabled = shuffleEnabled,
+            repeatEnabled = repeatEnabled,
+            isFmQueue = isFmQueue,
+            shuffleBeforeFm = shuffleBeforeFm,
+        )
+        scope.launch {
+            playbackQueueStore.save(snapshot)
+        }
+    }
+
+    private fun enableShuffle() {
+        if (isFmQueue || mainQueue.size <= 1) {
+            shuffleEnabled = !isFmQueue
+            return
+        }
+        val current = currentQueueTrack()
+        originalMainQueue = if (originalMainQueue.isEmpty()) mainQueue else originalMainQueue
+        val currentInMain = current?.let { track -> mainQueue.firstOrNull { it.id == track.id } }
+        val shuffledRest = mainQueue.filterNot { it.id == currentInMain?.id }.shuffled()
+        mainQueue = listOfNotNull(currentInMain) + shuffledRest
+        mainQueueIndex = currentInMain?.let { 0 } ?: mainQueueIndex.coerceIn(0, mainQueue.lastIndex)
+        shuffleEnabled = true
+    }
+
+    private fun disableShuffle() {
+        val current = currentQueueTrack()
+        if (originalMainQueue.isNotEmpty()) {
+            mainQueue = originalMainQueue
+            mainQueueIndex = current?.let { track -> mainQueue.indexOfFirst { it.id == track.id } }
+                ?.takeIf { it >= 0 }
+                ?: mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
+        }
+        originalMainQueue = emptyList()
+        shuffleEnabled = false
     }
 
     private fun mergeResults(local: List<MusicTrack>, provider: List<MusicTrack>): List<MusicTrack> {
@@ -1570,36 +1867,36 @@ class FuoPlayerController(
 
     private fun skipUnavailableTrack(
         track: MusicTrack,
-        sourceQueue: List<MusicTrack>,
-        index: Int,
-        sourceFeature: ProviderFeature?,
         skippedUnavailableCount: Int,
         throwable: Throwable,
     ): Boolean {
         if (!shouldSkipUnavailable(throwable)) {
             return false
         }
-        val skippedQueue = sourceQueue.mapIndexed { itemIndex, item ->
-            if (itemIndex == index) item.copy(isUnavailable = true) else item
-        }
-        queue = skippedQueue
+        updateCurrentTrack(track.copy(isUnavailable = true))
         playbackState = playbackState.copy(
-            queue = queue,
-            queueIndex = index,
-            currentTrack = queue.getOrNull(index),
+            queue = displayQueue(),
+            queueIndex = displayQueueIndex(),
+            currentTrack = currentQueueTrack(),
         )
-        if (skippedQueue.size <= 1 || skippedUnavailableCount >= skippedQueue.lastIndex) {
+        persistPlaybackQueue()
+        val playableCount = upNextQueue.size + mainQueue.size
+        if (playableCount <= 1 || skippedUnavailableCount >= playableCount) {
             return false
         }
-        val nextIndex = (index + 1).floorMod(skippedQueue.size)
         message = "已跳过不可用资源：${track.title}"
-        play(
-            track = skippedQueue[nextIndex],
-            sourceQueue = skippedQueue,
-            index = nextIndex,
-            sourceFeature = sourceFeature,
-            skippedUnavailableCount = skippedUnavailableCount + 1,
-        )
+        if (upNextQueue.isNotEmpty()) {
+            playUpNextIndex(0)
+        } else {
+            val nextIndex = mainQueueIndex + 1
+            if (nextIndex < mainQueue.size) {
+                playMainIndex(nextIndex, skippedUnavailableCount + 1)
+            } else if (repeatEnabled) {
+                playMainIndex(0, skippedUnavailableCount + 1)
+            } else {
+                return false
+            }
+        }
         return true
     }
 
@@ -1620,8 +1917,6 @@ class FuoPlayerController(
         return text.contains("media not found", ignoreCase = true) ||
             text.contains("MediaNotFound", ignoreCase = true)
     }
-
-    private fun Int.floorMod(size: Int): Int = ((this % size) + size) % size
 
     private fun Int.mbToBytes(): Long = this.toLong() * 1024L * 1024L
 }

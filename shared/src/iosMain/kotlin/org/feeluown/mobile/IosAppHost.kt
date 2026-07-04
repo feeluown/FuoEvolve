@@ -31,6 +31,7 @@ private class IosAppContainer {
     private val downloadRepository = IosDownloadRepository(providerRepository)
     private val playbackEngine = IosNativeAudioEngine(scope)
     private val settingsStore = IosAppSettingsStore()
+    private val playbackQueueStore = IosPlaybackQueueStore()
     private val resourceCacheRepository = IosResourceCacheRepository()
 
     val controller = FuoPlayerController(
@@ -39,6 +40,7 @@ private class IosAppContainer {
         downloadRepository = downloadRepository,
         playbackEngine = playbackEngine,
         settingsStore = settingsStore,
+        playbackQueueStore = playbackQueueStore,
         resourceCacheRepository = resourceCacheRepository,
         scope = scope,
     )

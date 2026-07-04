@@ -1304,6 +1304,8 @@ def song_to_dict(song, library: Library) -> Dict[str, Any]:
         "provider_name": provider_name(library.get(source)),
         "duration_ms": duration_ms(song),
         "cover_url": normalize_image_url(display(song, "pic_url")),
+        "artist_item_id": first_artist_item_id(song),
+        "album_item_id": album_item_id(song),
     }
 
 
@@ -1401,6 +1403,25 @@ def display_album(song) -> str:
     if album is None:
         return ""
     return display(album, "name")
+
+
+def first_artist_item_id(song) -> str:
+    source = getattr(song, "source", "")
+    artists = getattr(song, "artists", []) or []
+    artist = artists[0] if artists else None
+    identifier = getattr(artist, "identifier", "") if artist is not None else ""
+    if source and identifier:
+        return f"artist:{source}:{identifier}"
+    return ""
+
+
+def album_item_id(song) -> str:
+    source = getattr(song, "source", "")
+    album = getattr(song, "album", None)
+    identifier = getattr(album, "identifier", "") if album is not None else ""
+    if source and identifier:
+        return f"album:{source}:{identifier}"
+    return ""
 
 
 def standby_queries(song) -> List[str]:
