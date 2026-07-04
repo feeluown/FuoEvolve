@@ -105,6 +105,7 @@ import androidx.compose.ui.unit.lerp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1666,6 +1667,32 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "最低打分",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = formatSmartReplacementScore(controller.smartReplacementMinScore),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Slider(
+                        value = controller.smartReplacementMinScore.toFloat(),
+                        onValueChange = {
+                            controller.onSmartReplacementMinScoreChange(roundSmartReplacementScore(it.toDouble()))
+                        },
+                        valueRange = 0f..1f,
+                        steps = 19,
+                        enabled = !controller.isLoading,
+                    )
+                }
                 controller.orderedProviders().forEach { provider ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3085,6 +3112,15 @@ private fun formatCacheLimit(value: Int): String {
     } else {
         "${value}MB"
     }
+}
+
+private fun formatSmartReplacementScore(value: Double): String {
+    val hundred = (value.coerceIn(0.0, 1.0) * 100).roundToInt()
+    return "${hundred / 100}.${(hundred % 100).toString().padStart(2, '0')}"
+}
+
+private fun roundSmartReplacementScore(value: Double): Double {
+    return (value.coerceIn(0.0, 1.0) * 20).roundToInt() / 20.0
 }
 
 private fun localTitleSection(title: String): String {

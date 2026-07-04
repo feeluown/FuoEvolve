@@ -41,6 +41,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
             ),
             smartReplacementProviderIds = readStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS),
+            smartReplacementMinScore = preferences.getFloat(
+                KEY_SMART_REPLACEMENT_MIN_SCORE,
+                DEFAULT_SMART_REPLACEMENT_MIN_SCORE.toFloat(),
+            ).toDouble(),
         )
     }
 
@@ -67,6 +71,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
                 .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
                 .putStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS, settings.smartReplacementProviderIds)
+                .putFloat(KEY_SMART_REPLACEMENT_MIN_SCORE, settings.smartReplacementMinScore.toFloat())
                 .apply()
         }
     }
@@ -197,5 +202,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
         private const val KEY_SMART_REPLACEMENT_PROVIDER_IDS = "smart_replacement_provider_ids"
+        private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
     }
 }

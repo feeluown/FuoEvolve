@@ -30,6 +30,10 @@ class IosAppSettingsStore : AppSettingsStore {
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
             cellularAudioQualityPolicy = enumValue(KEY_CELLULAR_AUDIO_QUALITY_POLICY, DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY),
             unavailablePlaybackPolicy = enumValue(KEY_UNAVAILABLE_PLAYBACK_POLICY, DEFAULT_UNAVAILABLE_PLAYBACK_POLICY),
+            smartReplacementMinScore = doubleValue(
+                KEY_SMART_REPLACEMENT_MIN_SCORE,
+                DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+            ),
         )
     }
 
@@ -53,6 +57,7 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setObject(settings.wifiAudioQualityPolicy.name, KEY_WIFI_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.cellularAudioQualityPolicy.name, KEY_CELLULAR_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.unavailablePlaybackPolicy.name, KEY_UNAVAILABLE_PLAYBACK_POLICY)
+            defaults.setDouble(settings.smartReplacementMinScore, KEY_SMART_REPLACEMENT_MIN_SCORE)
             defaults.synchronize()
         }
     }
@@ -66,6 +71,11 @@ class IosAppSettingsStore : AppSettingsStore {
     private fun intValue(key: String, fallback: Int): Int {
         if (defaults.objectForKey(key) == null) return fallback
         return defaults.integerForKey(key).toInt()
+    }
+
+    private fun doubleValue(key: String, fallback: Double): Double {
+        if (defaults.objectForKey(key) == null) return fallback
+        return defaults.doubleForKey(key)
     }
 
     private fun readStringSet(key: String): Set<String> = readStringList(key).toSet()
@@ -146,5 +156,6 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
+        private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
     }
 }

@@ -547,6 +547,7 @@ class FuoMobileBridge:
         audio_select_policy: str = "",
         allow_standby: bool = True,
         standby_provider_ids_json: str = "",
+        standby_min_score: float = 0.55,
     ) -> str:
         song = self._tracks.get(track_id)
         if song is None:
@@ -554,7 +555,8 @@ class FuoMobileBridge:
             self._tracks[track_id] = song
         policy = audio_select_policy or self.app.config.AUDIO_SELECT_POLICY
         standby_provider_ids = parse_provider_ids(standby_provider_ids_json)
-        payload = self._prepare_payload(song, policy, allow_standby, standby_provider_ids)
+        min_score = normalize_standby_min_score(standby_min_score)
+        payload = self._prepare_payload(song, policy, allow_standby, standby_provider_ids, min_score)
         return json.dumps(payload, ensure_ascii=False)
 
     def play(self, track_id: str) -> str:
@@ -935,6 +937,7 @@ class FuoMobileBridge:
         audio_select_policy: str,
         allow_standby: bool,
         standby_provider_ids: Optional[List[str]],
+        standby_min_score: float,
     ) -> Dict[str, Any]:
         try:
             media, quality = self._select_media(song, audio_select_policy)
@@ -944,7 +947,12 @@ class FuoMobileBridge:
                 f"track={song_log_label(song)} allow_standby={allow_standby} policy={audio_select_policy}"
             )
             if allow_standby:
-                standby_payload = self._prepare_standby_payload(song, audio_select_policy, standby_provider_ids)
+                standby_payload = self._prepare_standby_payload(
+                    song,
+                    audio_select_policy,
+                    standby_provider_ids,
+                    standby_min_score,
+                )
                 if standby_payload is not None:
                     return standby_payload
             raise RuntimeError(f"media not found: {song}") from exc
@@ -956,6 +964,7 @@ class FuoMobileBridge:
         song,
         audio_select_policy: str,
         standby_provider_ids: Optional[List[str]],
+        standby_min_score: float,
     ) -> Optional[Dict[str, Any]]:
         source = getattr(song, "source", "")
         provider_ids = standby_provider_ids or self.provider_registry.provider_ids
@@ -968,7 +977,8 @@ class FuoMobileBridge:
             bridge_log(f"standby skipped no source track={song_log_label(song)}")
             return None
         bridge_log(
-            f"standby start track={song_log_label(song)} source_in={source_in} policy={audio_select_policy}"
+            f"standby start track={song_log_label(song)} source_in={source_in} "
+            f"policy={audio_select_policy} min_score={standby_min_score}"
         )
         try:
             standby_list = asyncio.run(
@@ -981,18 +991,18 @@ class FuoMobileBridge:
             )
         except Exception as exc:  # pylint: disable=broad-except
             bridge_log(f"standby failed track={song_log_label(song)} error={exc}")
-            return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
+            return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
         if not standby_list:
             bridge_log(f"standby empty track={song_log_label(song)}")
-            return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
+            return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
         candidates = []
         for standby, _ in standby_list:
             score = standby_score(song, standby)
-            if score >= 0.55:
+            if score >= standby_min_score:
                 candidates.append((score, standby))
         if not candidates:
             bridge_log(f"standby no scored candidates track={song_log_label(song)}")
-            return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
+            return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
         for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True):
             self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
             bridge_log(
@@ -1009,13 +1019,14 @@ class FuoMobileBridge:
             payload = self._payload_from_media(standby, media, quality)
             return self._mark_standby_payload(payload, song, standby, "library", score)
         bridge_log(f"standby scored media empty track={song_log_label(song)} candidates={len(candidates)}")
-        return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
+        return self._prepare_search_standby_payload(song, audio_select_policy, source_in, standby_min_score)
 
     def _prepare_search_standby_payload(
         self,
         song,
         audio_select_policy: str,
         source_in: List[str],
+        standby_min_score: float,
     ) -> Optional[Dict[str, Any]]:
         candidates = []
         seen = set()
@@ -1028,7 +1039,7 @@ class FuoMobileBridge:
                         continue
                     seen.add(key)
                     score = standby_score(song, standby)
-                    if score >= 0.55:
+                    if score >= standby_min_score:
                         bridge_log(
                             f"search standby candidate score={score:.2f} replacement={song_log_label(standby)}"
                         )
@@ -1438,6 +1449,14 @@ def standby_score(origin, standby) -> float:
         if abs(origin_duration - standby_duration) / max(origin_duration, 1) < 0.10:
             score += 0.10
     return score
+
+
+def normalize_standby_min_score(value) -> float:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return 0.55
+    return min(max(score, 0.0), 1.0)
 
 
 def normalize_match_text(value: str) -> str:

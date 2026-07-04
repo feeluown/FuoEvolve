@@ -160,6 +160,8 @@ class FuoPlayerController(
         private set
     var smartReplacementProviderIds by mutableStateOf<Set<String>>(emptySet())
         private set
+    var smartReplacementMinScore by mutableStateOf(DEFAULT_SMART_REPLACEMENT_MIN_SCORE)
+        private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
         private set
     var debugLogError by mutableStateOf<String?>(null)
@@ -624,6 +626,11 @@ class FuoPlayerController(
             return
         }
         smartReplacementProviderIds = current
+        persistSettings()
+    }
+
+    fun onSmartReplacementMinScoreChange(value: Double) {
+        smartReplacementMinScore = value.coerceIn(0.0, 1.0)
         persistSettings()
     }
 
@@ -1244,6 +1251,7 @@ class FuoPlayerController(
                         playbackTrack,
                         unavailablePlaybackPolicy,
                         selectedSmartReplacementProviderIds(),
+                        smartReplacementMinScore,
                     )
                 if (requestSerial != playRequestSerial) return@playRequest
                 val playableTrack = playbackTrack.copy(
@@ -1478,6 +1486,7 @@ class FuoPlayerController(
         cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
         smartReplacementProviderIds = settings.smartReplacementProviderIds
+        smartReplacementMinScore = settings.smartReplacementMinScore.coerceIn(0.0, 1.0)
     }
 
     private fun persistSettings() {
@@ -1502,6 +1511,7 @@ class FuoPlayerController(
             cellularAudioQualityPolicy = cellularAudioQualityPolicy,
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,
             smartReplacementProviderIds = smartReplacementProviderIds,
+            smartReplacementMinScore = smartReplacementMinScore,
         )
         scope.launch {
             settingsStore.save(settings)

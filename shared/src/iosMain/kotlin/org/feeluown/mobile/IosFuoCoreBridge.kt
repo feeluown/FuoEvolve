@@ -30,6 +30,8 @@ class IosFuoCoreBridge : ProviderMusicRepository {
     override suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy,
+        smartReplacementProviderIds: Set<String>,
+        smartReplacementMinScore: Double,
     ): PlaybackPayload = withContext(Dispatchers.Default) {
         pythonUnavailable()
     }

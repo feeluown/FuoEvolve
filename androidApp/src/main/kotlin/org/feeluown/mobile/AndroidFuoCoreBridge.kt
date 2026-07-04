@@ -85,17 +85,19 @@ class AndroidFuoCoreBridge(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy,
         smartReplacementProviderIds: Set<String>,
+        smartReplacementMinScore: Double,
     ): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
             val trackId = track.providerId ?: track.id
             try {
                 val policy = currentAudioQualityPolicy()
-                Log.d(
-                    TAG,
-                    "resolve start trackId=$trackId policy=${policy.policy} " +
-                        "unavailablePolicy=$unavailablePolicy smartReplacementProviderIds=$smartReplacementProviderIds",
-                )
+                    Log.d(
+                        TAG,
+                        "resolve start trackId=$trackId policy=${policy.policy} " +
+                            "unavailablePolicy=$unavailablePolicy smartReplacementProviderIds=$smartReplacementProviderIds " +
+                            "smartReplacementMinScore=$smartReplacementMinScore",
+                    )
                 val raw = requireNotNull(bridge)
                     .callAttr(
                         "resolve",
@@ -103,6 +105,7 @@ class AndroidFuoCoreBridge(
                         policy.policy,
                         unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace,
                         smartReplacementProviderIdsJson(smartReplacementProviderIds),
+                        smartReplacementMinScore,
                     )
                     .toString()
                 JSONObject(raw).toPayload(track).also {

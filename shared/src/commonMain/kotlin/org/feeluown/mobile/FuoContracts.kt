@@ -53,6 +53,7 @@ data class AppSettings(
     val cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
+    val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
 )
 
 data class ProviderHeaderInput(
@@ -68,6 +69,7 @@ val DEFAULT_PROVIDER_ORDER_IDS = listOf("netease", "qqmusic", "bilibili", "ytmus
 val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
+const val DEFAULT_SMART_REPLACEMENT_MIN_SCORE = 0.55
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
@@ -242,6 +244,7 @@ interface ProviderMusicRepository {
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
         smartReplacementProviderIds: Set<String> = emptySet(),
+        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
     ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
