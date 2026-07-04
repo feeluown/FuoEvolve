@@ -1189,6 +1189,8 @@ class FuoMobileBridge:
     ) -> Dict[str, Any]:
         origin_provider = provider_name(self.app.library.get(getattr(origin, "source", "")))
         standby_provider = provider_name(self.app.library.get(getattr(standby, "source", "")))
+        origin_cover = self._get_cover(origin)
+        standby_cover = payload.get("cover_url") or self._get_cover(standby)
         payload.update(
             {
                 "smart_replacement": True,
@@ -1198,17 +1200,21 @@ class FuoMobileBridge:
                 "original_artists": display_artists(origin),
                 "original_source": getattr(origin, "source", ""),
                 "original_provider_name": origin_provider,
+                "original_cover_url": origin_cover,
                 "replacement_id": f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}",
                 "replacement_title": display(standby, "title"),
                 "replacement_artists": display_artists(standby),
                 "replacement_source": getattr(standby, "source", ""),
                 "replacement_provider_name": standby_provider,
+                "replacement_cover_url": standby_cover,
             }
         )
         if score is not None:
             payload["standby_score"] = round(score, 2)
         if use_origin_metadata:
             apply_origin_metadata(payload, song_to_metadata(origin, self.app.library))
+            if origin_cover:
+                payload["cover_url"] = origin_cover
         if use_origin_lyrics:
             origin_lyrics = self._get_lyrics(origin)
             if origin_lyrics:

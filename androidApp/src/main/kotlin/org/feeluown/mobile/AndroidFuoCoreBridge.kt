@@ -320,7 +320,9 @@ class AndroidFuoCoreBridge(
             album = optString("album").ifBlank { track.album },
             source = optString("source").ifBlank { track.source },
             headers = optJSONObject("headers").toStringMap(),
-            coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() }
+                ?: optString("original_cover_url").takeIf { smartReplacement && it.isNotBlank() }
+                ?: track.coverUrl,
             durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
             lyrics = optString("lyrics").takeIf { it.isNotBlank() },
             audioQuality = optString("audio_quality").takeIf { it.isNotBlank() },
@@ -331,6 +333,12 @@ class AndroidFuoCoreBridge(
             isSmartReplacement = smartReplacement,
             originalTitle = optString("original_title").takeIf { smartReplacement && it.isNotBlank() },
             originalProviderName = optString("original_provider_name").takeIf { smartReplacement && it.isNotBlank() },
+            originalCoverUrl = optString("original_cover_url").takeIf { smartReplacement && it.isNotBlank() },
+            replacementTitle = optString("replacement_title").takeIf { smartReplacement && it.isNotBlank() },
+            replacementArtists = optString("replacement_artists").takeIf { smartReplacement && it.isNotBlank() },
+            replacementSource = optString("replacement_source").takeIf { smartReplacement && it.isNotBlank() },
+            replacementProviderName = optString("replacement_provider_name").takeIf { smartReplacement && it.isNotBlank() },
+            replacementCoverUrl = optString("replacement_cover_url").takeIf { smartReplacement && it.isNotBlank() },
             replacementStrategy = optString("standby_strategy").takeIf { smartReplacement && it.isNotBlank() },
             replacementScore = optDouble("standby_score").takeIf { smartReplacement && has("standby_score") },
         )

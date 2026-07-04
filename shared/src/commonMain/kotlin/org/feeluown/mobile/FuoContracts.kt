@@ -100,6 +100,14 @@ data class MusicTrack(
     val isSmartReplacement: Boolean = false,
     val originalTitle: String? = null,
     val originalProviderName: String? = null,
+    val originalCoverUrl: String? = null,
+    val replacementTitle: String? = null,
+    val replacementArtists: String? = null,
+    val replacementSource: String? = null,
+    val replacementProviderName: String? = null,
+    val replacementCoverUrl: String? = null,
+    val replacementStrategy: String? = null,
+    val replacementScore: Double? = null,
     val isUnavailable: Boolean = false,
     val artistItemId: String? = null,
     val albumItemId: String? = null,
@@ -120,6 +128,12 @@ data class PlaybackPayload(
     val isSmartReplacement: Boolean = false,
     val originalTitle: String? = null,
     val originalProviderName: String? = null,
+    val originalCoverUrl: String? = null,
+    val replacementTitle: String? = null,
+    val replacementArtists: String? = null,
+    val replacementSource: String? = null,
+    val replacementProviderName: String? = null,
+    val replacementCoverUrl: String? = null,
     val replacementStrategy: String? = null,
     val replacementScore: Double? = null,
 )
@@ -241,6 +255,14 @@ object PlaybackQueueCodec {
         track.isUnavailable.toString(),
         track.artistItemId.orEmpty(),
         track.albumItemId.orEmpty(),
+        track.originalCoverUrl.orEmpty(),
+        track.replacementTitle.orEmpty(),
+        track.replacementArtists.orEmpty(),
+        track.replacementSource.orEmpty(),
+        track.replacementProviderName.orEmpty(),
+        track.replacementCoverUrl.orEmpty(),
+        track.replacementStrategy.orEmpty(),
+        track.replacementScore?.toString().orEmpty(),
     ).map(::escape)
 
     private fun decodeTrack(fields: List<String>): MusicTrack? {
@@ -262,11 +284,23 @@ object PlaybackQueueCodec {
                 isSmartReplacement = unescape(fields[12]).toBooleanStrictOrNull() ?: false,
                 originalTitle = unescape(fields[13]).ifBlank { null },
                 originalProviderName = unescape(fields[14]).ifBlank { null },
+                originalCoverUrl = fields.unescapedOrNull(18),
+                replacementTitle = fields.unescapedOrNull(19),
+                replacementArtists = fields.unescapedOrNull(20),
+                replacementSource = fields.unescapedOrNull(21),
+                replacementProviderName = fields.unescapedOrNull(22),
+                replacementCoverUrl = fields.unescapedOrNull(23),
+                replacementStrategy = fields.unescapedOrNull(24),
+                replacementScore = fields.unescapedOrNull(25)?.toDoubleOrNull(),
                 isUnavailable = unescape(fields[15]).toBooleanStrictOrNull() ?: false,
                 artistItemId = unescape(fields[16]).ifBlank { null },
                 albumItemId = unescape(fields[17]).ifBlank { null },
             )
         }.getOrNull()
+    }
+
+    private fun List<String>.unescapedOrNull(index: Int): String? {
+        return getOrNull(index)?.let(::unescape)?.ifBlank { null }
     }
 
     private fun escape(value: String): String = buildString {

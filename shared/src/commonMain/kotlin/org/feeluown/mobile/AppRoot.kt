@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
@@ -2860,22 +2861,37 @@ private fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?) {
 
 @Composable
 private fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
+    var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (track != null) {
-            InfoTag(sourceLabel(track, null))
+            if (track.isSmartReplacement) {
+                InfoTag(
+                    text = replacementSourceLabel(track),
+                    onClick = { replacementInfoTrack = track },
+                )
+            } else {
+                InfoTag(sourceLabel(track, null))
+            }
         }
         audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(it.uppercase())
         }
     }
+    replacementInfoTrack?.let { infoTrack ->
+        ReplacementInfoDialog(
+            track = infoTrack,
+            onDismiss = { replacementInfoTrack = null },
+        )
+    }
 }
 
 @Composable
-private fun InfoTag(text: String) {
+private fun InfoTag(text: String, onClick: (() -> Unit)? = null) {
     Surface(
+        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = RoundedCornerShape(50),
@@ -2886,6 +2902,49 @@ private fun InfoTag(text: String) {
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ReplacementInfoDialog(track: MusicTrack, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("替换音频") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReplacementInfoLine("标题", track.replacementTitle ?: track.title)
+                ReplacementInfoLine("歌手", track.replacementArtists ?: track.artists)
+                replacementProviderLabel(track).takeIf { it.isNotBlank() }?.let {
+                    ReplacementInfoLine("来源", it)
+                }
+                track.replacementStrategy?.let {
+                    ReplacementInfoLine("策略", it)
+                }
+                track.replacementScore?.let {
+                    ReplacementInfoLine("匹配度", formatSmartReplacementScore(it))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
+}
+
+@Composable
+private fun ReplacementInfoLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
         )
     }
 }
@@ -3259,6 +3318,21 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
         "不可用".takeIf { track.isUnavailable },
         state,
     ).joinToString(" · ")
+}
+
+private fun replacementSourceLabel(track: MusicTrack): String {
+    val source = replacementProviderLabel(track).ifBlank { "音源" }
+    return "替换来源：$source"
+}
+
+private fun replacementProviderLabel(track: MusicTrack): String {
+    return listOfNotNull(
+        track.replacementProviderName ?: track.providerName,
+        track.replacementSource?.takeIf { it != track.replacementProviderName },
+    )
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString(" · ")
 }
 
 private fun artistAlbumLabel(track: MusicTrack): String {

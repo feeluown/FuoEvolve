@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -50,6 +51,7 @@ class FuoPlaybackService : MediaSessionService() {
                         .build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(commands)
+                        .setAvailablePlayerCommands(playerCommands())
                         .build()
                 }
 
@@ -97,6 +99,17 @@ class FuoPlaybackService : MediaSessionService() {
             putString("local_uri", payload.optString("local_uri"))
             putString("provider_id", payload.optString("provider_id"))
             putString("provider_name", payload.optString("provider_name"))
+            putBoolean("smart_replacement", payload.optBoolean("smart_replacement", false))
+            putString("original_title", payload.optString("original_title"))
+            putString("original_provider_name", payload.optString("original_provider_name"))
+            putString("original_cover_url", payload.optString("original_cover_url"))
+            putString("replacement_title", payload.optString("replacement_title"))
+            putString("replacement_artists", payload.optString("replacement_artists"))
+            putString("replacement_source", payload.optString("replacement_source"))
+            putString("replacement_provider_name", payload.optString("replacement_provider_name"))
+            putString("replacement_cover_url", payload.optString("replacement_cover_url"))
+            putString("replacement_strategy", payload.optString("replacement_strategy"))
+            putDouble("replacement_score", payload.optDouble("replacement_score", 0.0))
             putBoolean("loading", true)
         }
         val mediaItem = MediaItem.Builder()
@@ -120,6 +133,8 @@ class FuoPlaybackService : MediaSessionService() {
                         .setMediaMetadata(mediaItem.mediaMetadata)
                         .build(),
                 )
+            } else {
+                setMediaItem(mediaItem)
             }
         }
     }
@@ -146,6 +161,14 @@ class FuoPlaybackService : MediaSessionService() {
             putBoolean("smart_replacement", payload.optBoolean("smart_replacement", false))
             putString("original_title", payload.optString("original_title"))
             putString("original_provider_name", payload.optString("original_provider_name"))
+            putString("original_cover_url", payload.optString("original_cover_url"))
+            putString("replacement_title", payload.optString("replacement_title"))
+            putString("replacement_artists", payload.optString("replacement_artists"))
+            putString("replacement_source", payload.optString("replacement_source"))
+            putString("replacement_provider_name", payload.optString("replacement_provider_name"))
+            putString("replacement_cover_url", payload.optString("replacement_cover_url"))
+            putString("replacement_strategy", payload.optString("replacement_strategy"))
+            putDouble("replacement_score", payload.optDouble("replacement_score", 0.0))
             putString("lyrics", payload.optString("lyrics"))
             putString("audio_quality", payload.optString("audio_quality"))
         }
@@ -257,6 +280,19 @@ class FuoPlaybackService : MediaSessionService() {
                 .setSlots(CommandButton.SLOT_FORWARD)
                 .build(),
         )
+
+        @OptIn(UnstableApi::class)
+        private fun playerCommands(): Player.Commands {
+            return Player.Commands.Builder()
+                .addAllCommands()
+                .removeAll(
+                    Player.COMMAND_SEEK_TO_PREVIOUS,
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_TO_NEXT,
+                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                )
+                .build()
+        }
     }
 
     interface TransportControls {

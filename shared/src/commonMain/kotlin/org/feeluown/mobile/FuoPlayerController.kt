@@ -1439,6 +1439,14 @@ class FuoPlayerController(
                     isSmartReplacement = payload.isSmartReplacement,
                     originalTitle = payload.originalTitle,
                     originalProviderName = payload.originalProviderName,
+                    originalCoverUrl = payload.originalCoverUrl,
+                    replacementTitle = payload.replacementTitle,
+                    replacementArtists = payload.replacementArtists,
+                    replacementSource = payload.replacementSource,
+                    replacementProviderName = payload.replacementProviderName,
+                    replacementCoverUrl = payload.replacementCoverUrl,
+                    replacementStrategy = payload.replacementStrategy,
+                    replacementScore = payload.replacementScore,
                     isUnavailable = false,
                 )
                 updateCurrentTrack(playableTrack)
@@ -1636,6 +1644,14 @@ class FuoPlayerController(
             isSmartReplacement = isSmartReplacement,
             originalTitle = originalTitle,
             originalProviderName = originalProviderName,
+            originalCoverUrl = originalCoverUrl,
+            replacementTitle = replacementTitle,
+            replacementArtists = replacementArtists,
+            replacementSource = replacementSource,
+            replacementProviderName = replacementProviderName,
+            replacementCoverUrl = replacementCoverUrl,
+            replacementStrategy = replacementStrategy,
+            replacementScore = replacementScore,
         )
     }
 

@@ -184,6 +184,14 @@ class AndroidNativeAudioEngine(
             .put("smart_replacement", track.isSmartReplacement)
             .put("original_title", track.originalTitle ?: "")
             .put("original_provider_name", track.originalProviderName ?: "")
+            .put("original_cover_url", track.originalCoverUrl ?: "")
+            .put("replacement_title", track.replacementTitle ?: "")
+            .put("replacement_artists", track.replacementArtists ?: "")
+            .put("replacement_source", track.replacementSource ?: "")
+            .put("replacement_provider_name", track.replacementProviderName ?: "")
+            .put("replacement_cover_url", track.replacementCoverUrl ?: "")
+            .put("replacement_strategy", track.replacementStrategy ?: "")
+            .put("replacement_score", track.replacementScore ?: 0.0)
             .put("url", url)
             .put("title", title)
             .put("artists", artists)
@@ -234,6 +242,14 @@ class AndroidNativeAudioEngine(
             isSmartReplacement = mediaMetadata.extras?.getBoolean("smart_replacement") ?: false,
             originalTitle = mediaMetadata.extras?.getString("original_title")?.takeIf { it.isNotBlank() },
             originalProviderName = mediaMetadata.extras?.getString("original_provider_name")?.takeIf { it.isNotBlank() },
+            originalCoverUrl = mediaMetadata.extras?.getString("original_cover_url")?.takeIf { it.isNotBlank() },
+            replacementTitle = mediaMetadata.extras?.getString("replacement_title")?.takeIf { it.isNotBlank() },
+            replacementArtists = mediaMetadata.extras?.getString("replacement_artists")?.takeIf { it.isNotBlank() },
+            replacementSource = mediaMetadata.extras?.getString("replacement_source")?.takeIf { it.isNotBlank() },
+            replacementProviderName = mediaMetadata.extras?.getString("replacement_provider_name")?.takeIf { it.isNotBlank() },
+            replacementCoverUrl = mediaMetadata.extras?.getString("replacement_cover_url")?.takeIf { it.isNotBlank() },
+            replacementStrategy = mediaMetadata.extras?.getString("replacement_strategy")?.takeIf { it.isNotBlank() },
+            replacementScore = mediaMetadata.extras?.getDouble("replacement_score")?.takeIf { it > 0.0 },
         )
     }
 }
