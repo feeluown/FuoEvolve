@@ -715,6 +715,85 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun navigateBackClosesPlaylistBeforeFeature() = runTest {
+        val feature = ProviderFeature(
+            id = "netease_daily_songs",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "每日推荐歌曲",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = false,
+        )
+        val playlist = ProviderPlaylist(
+            id = "playlist:netease:1",
+            title = "歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList(), playlistTracks = listOf(providerTrack("provider:1", "First"))),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openFeature(feature)
+            advanceUntilIdle()
+            controller.openPlaylist(playlist)
+            advanceUntilIdle()
+
+            assertEquals(playlist.id, controller.selectedPlaylist?.id)
+            assertEquals(feature.id, controller.selectedFeature?.id)
+
+            assertEquals(true, controller.navigateBack())
+            assertEquals(null, controller.selectedPlaylist)
+            assertEquals(feature.id, controller.selectedFeature?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun navigateBackClosesMediaItemBeforeSearch() = runTest {
+        val mediaItem = ProviderMediaItem(
+            id = "album:netease:1",
+            title = "专辑",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            type = ProviderMediaItemType.Album,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList(), mediaItemTracks = listOf(providerTrack("provider:1", "First"))),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openSearch()
+            controller.openMediaItem(mediaItem)
+            advanceUntilIdle()
+
+            assertEquals(mediaItem.id, controller.selectedMediaItem?.id)
+            assertEquals(true, controller.isSearchOpen)
+
+            assertEquals(true, controller.navigateBack())
+            assertEquals(null, controller.selectedMediaItem)
+            assertEquals(true, controller.isSearchOpen)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun navigateBackClosesQueueBeforeFullPlayer() = runTest {
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {

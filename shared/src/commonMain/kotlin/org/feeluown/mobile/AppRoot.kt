@@ -203,10 +203,10 @@ private fun appDestination(controller: FuoPlayerController): AppDestination {
     return when {
         controller.isDebugLogOpen -> AppDestination.DebugLogs
         controller.isSettingsOpen -> AppDestination.Settings
-        controller.isSearchOpen -> AppDestination.Search
-        controller.selectedFeature != null -> AppDestination.Feature
         controller.selectedMediaItem != null -> AppDestination.MediaItem
         controller.selectedPlaylist != null -> AppDestination.Playlist
+        controller.selectedFeature != null -> AppDestination.Feature
+        controller.isSearchOpen -> AppDestination.Search
         else -> AppDestination.Home
     }
 }

@@ -352,20 +352,20 @@ class FuoPlayerController(
                 closeSettings()
                 true
             }
-            isSearchOpen -> {
-                closeSearch()
-                true
-            }
-            selectedFeature != null -> {
-                closeFeature()
-                true
-            }
             selectedMediaItem != null -> {
                 closeMediaItem()
                 true
             }
             selectedPlaylist != null -> {
                 closePlaylist()
+                true
+            }
+            selectedFeature != null -> {
+                closeFeature()
+                true
+            }
+            isSearchOpen -> {
+                closeSearch()
                 true
             }
             else -> false
