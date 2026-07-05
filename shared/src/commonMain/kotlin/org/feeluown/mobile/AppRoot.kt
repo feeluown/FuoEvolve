@@ -50,6 +50,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Album
@@ -185,6 +186,9 @@ fun AppRoot(
                 exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
             ) {
                 FullPlayer(controller)
+            }
+            controller.localMetadataEditorTrack?.let { track ->
+                LocalMetadataDialog(controller = controller, track = track)
             }
         }
     }
@@ -1332,10 +1336,167 @@ private fun LocalMusicSection(controller: FuoPlayerController, modifier: Modifie
                             onDeleteDownload = { controller.deleteDownload(track) },
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
+                            onEditLocalMetadata = { controller.openLocalMetadataEditor(track) },
                         )
                         HorizontalDivider()
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalMetadataDialog(
+    controller: FuoPlayerController,
+    track: MusicTrack,
+) {
+    var title by remember(track.id, track.title) { mutableStateOf(track.title) }
+    var artists by remember(track.id, track.artists) { mutableStateOf(track.artists) }
+    var album by remember(track.id, track.album) { mutableStateOf(track.album) }
+    AlertDialog(
+        onDismissRequest = controller::closeLocalMetadataEditor,
+        title = { Text("修改元信息") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("标题") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = artists,
+                    onValueChange = { artists = it },
+                    label = { Text("歌手") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = album,
+                    onValueChange = { album = it },
+                    label = { Text("专辑") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (controller.providers.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        controller.orderedProviders().forEach { provider ->
+                            FilterChip(
+                                selected = controller.selectedLocalMetadataProviderId == provider.providerId,
+                                onClick = { controller.onLocalMetadataProviderChange(provider.providerId) },
+                                label = { Text(provider.providerName) },
+                            )
+                        }
+                    }
+                    TextButton(
+                        enabled = !controller.isLoading,
+                        onClick = { controller.searchLocalMetadata(title, artists, album) },
+                    ) {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("搜索补充")
+                    }
+                } else {
+                    Text(
+                        text = "没有可用音源",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                controller.localMetadataSearchMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (controller.localMetadataSearchResults.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp),
+                    ) {
+                        itemsIndexed(
+                            controller.localMetadataSearchResults,
+                            key = { _, item -> item.id },
+                        ) { _, result ->
+                            LocalMetadataSearchResultRow(
+                                track = result,
+                                onApplyMetadata = {
+                                    title = result.title
+                                    artists = result.artists
+                                    album = result.album
+                                    controller.applyProviderMetadata(track, result)
+                                },
+                                onDownloadLyrics = { controller.downloadLocalLyrics(track, result) },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !controller.isLoading,
+                onClick = { controller.saveLocalMetadata(track, title, artists, album) },
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = controller::closeLocalMetadataEditor) {
+                Text("关闭")
+            }
+        },
+    )
+}
+
+@Composable
+private fun LocalMetadataSearchResultRow(
+    track: MusicTrack,
+    onApplyMetadata: () -> Unit,
+    onDownloadLyrics: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CoverBox(track, modifier = Modifier.size(40.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = track.title.ifBlank { "未知歌曲" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = listOf(track.artists, track.album).filter { it.isNotBlank() }.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onApplyMetadata) {
+                Text("使用元信息")
+            }
+            TextButton(onClick = onDownloadLyrics) {
+                Text("下载歌词")
             }
         }
     }
@@ -2651,6 +2812,7 @@ private fun TrackRow(
     onDeleteDownload: () -> Unit,
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
+    onEditLocalMetadata: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -2691,6 +2853,7 @@ private fun TrackRow(
             onDeleteDownload = onDeleteDownload,
             onOpenArtist = onOpenArtist,
             onOpenAlbum = onOpenAlbum,
+            onEditLocalMetadata = onEditLocalMetadata,
         )
     }
 }
@@ -2718,6 +2881,7 @@ private fun TrackAction(
     onDeleteDownload: () -> Unit,
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
+    onEditLocalMetadata: (() -> Unit)?,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -2766,6 +2930,16 @@ private fun TrackAction(
                         },
                     )
                 }
+            }
+            if (onEditLocalMetadata != null) {
+                DropdownMenuItem(
+                    text = { Text("修改元信息") },
+                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onEditLocalMetadata()
+                    },
+                )
             }
             DropdownMenuItem(
                 text = { Text("查看歌手") },

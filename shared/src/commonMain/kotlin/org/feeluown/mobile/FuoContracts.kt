@@ -93,6 +93,12 @@ data class LocalMusicDirectory(
     val trackCount: Int,
 )
 
+data class LocalTrackMetadata(
+    val title: String,
+    val artists: String,
+    val album: String,
+)
+
 data class MusicTrack(
     val id: String,
     val title: String,
@@ -494,6 +500,8 @@ interface LocalMusicRepository {
     suspend fun directories(): List<LocalMusicDirectory>
     suspend fun scan(): List<MusicTrack>
     suspend fun search(keyword: String): List<MusicTrack>
+    suspend fun updateMetadata(track: MusicTrack, metadata: LocalTrackMetadata) = Unit
+    suspend fun saveLyrics(track: MusicTrack, lyrics: String) = Unit
 }
 
 interface DownloadRepository {

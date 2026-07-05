@@ -1628,6 +1628,67 @@ class FuoPlayerControllerTest {
         }
     }
 
+    @Test
+    fun saveLocalMetadataUpdatesRepositoryAndLocalTracks() = runTest {
+        val localTrack = localTrack("local:content://music/1", "Old Title")
+        val local = FakeLocalMusicRepository(tracks = listOf(localTrack))
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.saveLocalMetadata(localTrack, "New Title", "New Artist", "New Album")
+            advanceUntilIdle()
+
+            assertEquals(LocalTrackMetadata("New Title", "New Artist", "New Album"), local.lastMetadata)
+            assertEquals("New Title", controller.localTracks.first().title)
+            assertEquals("New Artist", controller.localTracks.first().artists)
+            assertEquals("New Album", controller.localTracks.first().album)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun downloadLocalLyricsSavesLyricsAndRefreshesLocalTrack() = runTest {
+        val localTrack = localTrack("local:content://music/1", "Local Title")
+        val providerTrack = providerTrack("provider:1", "Provider Title")
+        val provider = FakeProviderRepository(
+            tracks = listOf(providerTrack),
+            resolveHandler = { track, _, _, _, _, _ ->
+                payloadFor(track).copy(lyrics = "[00:01.00]Provider lyric")
+            },
+        )
+        val local = FakeLocalMusicRepository(tracks = listOf(localTrack))
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.downloadLocalLyrics(localTrack, providerTrack)
+            advanceUntilIdle()
+
+            assertEquals("[00:01.00]Provider lyric", local.lastSavedLyrics)
+            assertEquals("[00:01.00]Provider lyric", controller.localTracks.first().lyrics)
+            assertEquals(1, provider.resolveCount)
+            assertEquals(setOf("netease"), provider.lastSmartReplacementProviderIds)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
     private fun providerTrack(id: String, title: String): MusicTrack = MusicTrack(
         id = id,
         title = title,
@@ -1637,6 +1698,16 @@ class FuoPlayerControllerTest {
         sourceType = TrackSourceType.Provider,
         providerId = id,
         providerName = "网易云音乐",
+    )
+
+    private fun localTrack(id: String, title: String): MusicTrack = MusicTrack(
+        id = id,
+        title = title,
+        artists = "Artist",
+        album = "Album",
+        source = "local",
+        sourceType = TrackSourceType.LocalMediaStore,
+        localUri = id.removePrefix("local:"),
     )
 
     private fun payloadFor(track: MusicTrack): PlaybackPayload = PlaybackPayload(
@@ -1789,8 +1860,12 @@ class FuoPlayerControllerTest {
 
     private class FakeLocalMusicRepository(
         private val directories: List<LocalMusicDirectory> = emptyList(),
+        tracks: List<MusicTrack> = emptyList(),
     ) : LocalMusicRepository {
         var lastSettings = LocalMusicScanSettings()
+        var lastMetadata: LocalTrackMetadata? = null
+        var lastSavedLyrics: String? = null
+        private var tracks = tracks
 
         override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
             lastSettings = settings
@@ -1798,9 +1873,35 @@ class FuoPlayerControllerTest {
 
         override suspend fun directories(): List<LocalMusicDirectory> = directories
 
-        override suspend fun scan(): List<MusicTrack> = emptyList()
+        override suspend fun scan(): List<MusicTrack> = tracks
 
-        override suspend fun search(keyword: String): List<MusicTrack> = emptyList()
+        override suspend fun search(keyword: String): List<MusicTrack> = tracks.filter {
+            it.title.contains(keyword, ignoreCase = true) ||
+                it.artists.contains(keyword, ignoreCase = true) ||
+                it.album.contains(keyword, ignoreCase = true)
+        }
+
+        override suspend fun updateMetadata(track: MusicTrack, metadata: LocalTrackMetadata) {
+            lastMetadata = metadata
+            tracks = tracks.map {
+                if (it.id == track.id) {
+                    it.copy(
+                        title = metadata.title,
+                        artists = metadata.artists,
+                        album = metadata.album,
+                    )
+                } else {
+                    it
+                }
+            }
+        }
+
+        override suspend fun saveLyrics(track: MusicTrack, lyrics: String) {
+            lastSavedLyrics = lyrics
+            tracks = tracks.map {
+                if (it.id == track.id) it.copy(lyrics = lyrics) else it
+            }
+        }
     }
 
     private class FakeDownloadRepository(

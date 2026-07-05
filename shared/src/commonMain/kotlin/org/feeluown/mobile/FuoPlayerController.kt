@@ -175,6 +175,14 @@ class FuoPlayerController(
         private set
     var debugLogError by mutableStateOf<String?>(null)
         private set
+    var localMetadataEditorTrack by mutableStateOf<MusicTrack?>(null)
+        private set
+    var selectedLocalMetadataProviderId by mutableStateOf<String?>(null)
+        private set
+    var localMetadataSearchResults by mutableStateOf<List<MusicTrack>>(emptyList())
+        private set
+    var localMetadataSearchMessage by mutableStateOf<String?>(null)
+        private set
     val isDebugLogViewerAvailable: Boolean
         get() = debugLogRepository.isAvailable
     val isShuffleEnabled: Boolean
@@ -741,6 +749,140 @@ class FuoPlayerController(
         localMusicMinDurationSeconds = value
         persistSettings()
         refreshLocalMusic()
+    }
+
+    fun openLocalMetadataEditor(track: MusicTrack) {
+        if (track.sourceType == TrackSourceType.Provider) return
+        localMetadataEditorTrack = track
+        localMetadataSearchResults = emptyList()
+        localMetadataSearchMessage = null
+        selectedLocalMetadataProviderId = selectedLocalMetadataProviderId
+            ?.takeIf { providerId -> providers.any { it.providerId == providerId } }
+            ?: selectedSearchProviderId?.takeIf { providerId -> providers.any { it.providerId == providerId } }
+            ?: providers.firstOrNull()?.providerId
+    }
+
+    fun closeLocalMetadataEditor() {
+        localMetadataEditorTrack = null
+        localMetadataSearchResults = emptyList()
+        localMetadataSearchMessage = null
+    }
+
+    fun onLocalMetadataProviderChange(providerId: String) {
+        selectedLocalMetadataProviderId = providerId
+    }
+
+    fun saveLocalMetadata(track: MusicTrack, title: String, artists: String, album: String) {
+        val metadata = LocalTrackMetadata(
+            title = title.trim().ifBlank { track.title },
+            artists = artists.trim(),
+            album = album.trim(),
+        )
+        scope.launch {
+            isLoading = true
+            message = "正在保存元信息"
+            runCatching {
+                localRepository.updateMetadata(track, metadata)
+                updateLocalMusicScanSettings()
+                localRepository.scan()
+            }.onSuccess {
+                localTracks = it
+                updateLocalTrackCopies(track.id, it.firstOrNull { item -> item.id == track.id } ?: track.copy(
+                    title = metadata.title,
+                    artists = metadata.artists,
+                    album = metadata.album,
+                ))
+                localMetadataEditorTrack = localTracks.firstOrNull { item -> item.id == track.id }
+                    ?: localMetadataEditorTrack
+                message = "已保存元信息：${metadata.title}"
+            }.onFailure {
+                setError(it)
+            }
+            isLoading = false
+        }
+    }
+
+    fun searchLocalMetadata(title: String, artists: String, album: String) {
+        val providerId = selectedLocalMetadataProviderId ?: providers.firstOrNull()?.providerId
+        if (providerId == null) {
+            localMetadataSearchMessage = "没有可用音源"
+            return
+        }
+        val keyword = listOf(title, artists, album)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(" ")
+        if (keyword.isBlank()) {
+            localMetadataSearchMessage = "请输入可搜索的信息"
+            return
+        }
+        selectedLocalMetadataProviderId = providerId
+        scope.launch {
+            isLoading = true
+            localMetadataSearchMessage = "正在搜索元信息"
+            runCatching {
+                withTimeout(25_000) {
+                    providerRepository.search(keyword, providerId)
+                }
+            }.onSuccess {
+                localMetadataSearchResults = it
+                localMetadataSearchMessage = if (it.isEmpty()) "没有搜索结果" else "搜索到 ${it.size} 首"
+            }.onFailure {
+                localMetadataSearchMessage = it.message ?: it::class.simpleName.orEmpty()
+                setError(it)
+            }
+            isLoading = false
+        }
+    }
+
+    fun applyProviderMetadata(track: MusicTrack, providerTrack: MusicTrack) {
+        saveLocalMetadata(track, providerTrack.title, providerTrack.artists, providerTrack.album)
+    }
+
+    fun downloadLocalLyrics(track: MusicTrack, providerTrack: MusicTrack) {
+        val providerId = providerTrack.source.takeIf { it.isNotBlank() } ?: providerTrack.providerId
+        scope.launch {
+            isLoading = true
+            message = "正在下载歌词"
+            runCatching {
+                withTimeout(25_000) {
+                    providerRepository.resolve(
+                        providerTrack.copy(providerId = providerTrack.providerId ?: providerTrack.id),
+                        unavailablePlaybackPolicy,
+                        providerId?.let(::setOf).orEmpty(),
+                        smartReplacementMinScore,
+                        smartReplacementUseOriginalMetadata = false,
+                        smartReplacementUseOriginalLyrics = false,
+                    )
+                }
+            }.onSuccess { payload ->
+                val lyrics = payload.lyrics?.takeIf { it.isNotBlank() }
+                if (lyrics == null) {
+                    message = "未获取到歌词"
+                    localMetadataSearchMessage = "未获取到歌词"
+                } else {
+                    runCatching {
+                        localRepository.saveLyrics(track, lyrics)
+                        updateLocalMusicScanSettings()
+                        localRepository.scan()
+                    }.onSuccess {
+                        localTracks = it
+                        val updatedTrack = it.firstOrNull { item -> item.id == track.id } ?: track.copy(lyrics = lyrics)
+                        updateLocalTrackCopies(track.id, updatedTrack)
+                        localMetadataEditorTrack = updatedTrack
+                        message = "已保存歌词：${track.title}"
+                        localMetadataSearchMessage = "歌词已保存"
+                    }.onFailure {
+                        setError(it)
+                    }
+                }
+            }.onFailure {
+                localMetadataSearchMessage = it.message ?: it::class.simpleName.orEmpty()
+                setError(it)
+            }
+            isLoading = false
+        }
     }
 
     fun search() {
@@ -1708,6 +1850,23 @@ class FuoPlayerController(
             mainQueue = mainQueue.mapIndexed { index, item -> if (index == mainQueueIndex) track else item }
             originalMainQueue = originalMainQueue.map { item -> if (item.id == track.id) track else item }
         }
+    }
+
+    private fun updateLocalTrackCopies(trackId: String, updatedTrack: MusicTrack) {
+        mainQueue = mainQueue.map { if (it.id == trackId) updatedTrack else it }
+        originalMainQueue = originalMainQueue.map { if (it.id == trackId) updatedTrack else it }
+        upNextQueue = upNextQueue.map { if (it.id == trackId) updatedTrack else it }
+        if (currentUpNextTrack?.id == trackId) {
+            currentUpNextTrack = updatedTrack
+        }
+        if (playbackState.currentTrack?.id == trackId) {
+            playbackState = playbackState.copy(
+                currentTrack = updatedTrack,
+                lyrics = updatedTrack.lyrics ?: playbackState.lyrics,
+            )
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
     }
 
     private fun updatePlaybackQueueState() {

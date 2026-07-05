@@ -1,12 +1,15 @@
 package org.feeluown.mobile
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 
@@ -41,11 +44,13 @@ class AndroidLocalMusicRepository(
     override suspend fun scan(): List<MusicTrack> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<MusicTrack>()
         val settings = scanSettings
+        val excludedDirectoryIds = settings.excludedDirectoryIds.normalizedDirectoryIds()
+        val metadataOverrides = metadataOverrides()
         val lyrics = queryLyrics()
         val appLyrics = queryAppLyrics()
         queryAudioRows { row ->
             val directory = directoryInfo(row.relativePath)
-            if (directory.id in settings.excludedDirectoryIds) return@queryAudioRows
+            if (directory.id in excludedDirectoryIds) return@queryAudioRows
             val durationMs = row.durationMs.takeIf { it > 0 }
             if (settings.minDurationSeconds > 0 &&
                 (durationMs == null || durationMs < settings.minDurationSeconds * 1000L)
@@ -57,15 +62,16 @@ class AndroidLocalMusicRepository(
             } else {
                 TrackSourceType.LocalMediaStore
             }
+            val override = metadataOverrides[row.uri.toString()]
             tracks += MusicTrack(
                 id = if (sourceType == TrackSourceType.Downloaded) {
                     "downloaded:${row.uri}"
                 } else {
                     "local:${row.uri}"
                 },
-                title = row.title,
-                artists = row.artist,
-                album = row.album,
+                title = override?.title ?: row.title,
+                artists = override?.artists ?: row.artist,
+                album = override?.album ?: row.album,
                 source = "local",
                 sourceType = sourceType,
                 coverUrl = localCoverUri(row.uri, row.albumId),
@@ -86,6 +92,46 @@ class AndroidLocalMusicRepository(
             it.title.contains(normalized, ignoreCase = true) ||
                 it.artists.contains(normalized, ignoreCase = true) ||
                 it.album.contains(normalized, ignoreCase = true)
+        }
+    }
+
+    override suspend fun updateMetadata(track: MusicTrack, metadata: LocalTrackMetadata) {
+        withContext(Dispatchers.IO) {
+            val key = track.localUri ?: error("无法定位本地音乐文件")
+            val nextMetadata = LocalTrackMetadata(
+                title = metadata.title.ifBlank { track.title },
+                artists = metadata.artists,
+                album = metadata.album,
+            )
+            val overrides = metadataOverrides().toMutableMap()
+            overrides[key] = nextMetadata
+            saveMetadataOverrides(overrides)
+            updateMediaStoreMetadata(key, nextMetadata)
+            cachedTracks = cachedTracks.map {
+                if (it.localUri == key) {
+                    it.copy(
+                        title = nextMetadata.title,
+                        artists = nextMetadata.artists,
+                        album = nextMetadata.album,
+                    )
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
+    override suspend fun saveLyrics(track: MusicTrack, lyrics: String) {
+        withContext(Dispatchers.IO) {
+            val text = lyrics.takeIf { it.isNotBlank() } ?: return@withContext
+            val fileName = lyricFileNameForTrack(track)
+            val target = File(File(context.filesDir, LYRICS_FOLDER), fileName)
+            val directory = requireNotNull(target.parentFile)
+            if (!directory.exists()) directory.mkdirs()
+            target.writeText(text, Charsets.UTF_8)
+            cachedTracks = cachedTracks.map {
+                if (it.id == track.id) it.copy(lyrics = text) else it
+            }
         }
     }
 
@@ -211,6 +257,88 @@ class AndroidLocalMusicRepository(
         }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
+    private fun metadataOverrides(): Map<String, LocalTrackMetadata> {
+        val file = metadataOverrideFile()
+        if (!file.isFile) return emptyMap()
+        return runCatching {
+            val array = JSONArray(file.readText())
+            val result = linkedMapOf<String, LocalTrackMetadata>()
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                val uri = item.optString("uri").takeIf { it.isNotBlank() }
+                if (uri != null) {
+                    result[uri] = LocalTrackMetadata(
+                        title = item.optString("title"),
+                        artists = item.optString("artists"),
+                        album = item.optString("album"),
+                    )
+                }
+            }
+            result
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun saveMetadataOverrides(overrides: Map<String, LocalTrackMetadata>) {
+        val array = JSONArray()
+        overrides.forEach { (uri, metadata) ->
+            array.put(
+                JSONObject()
+                    .put("uri", uri)
+                    .put("title", metadata.title)
+                    .put("artists", metadata.artists)
+                    .put("album", metadata.album)
+            )
+        }
+        metadataOverrideFile().writeText(array.toString())
+    }
+
+    private fun metadataOverrideFile(): File = File(context.filesDir, METADATA_OVERRIDE_FILE)
+
+    private fun updateMediaStoreMetadata(uriString: String, metadata: LocalTrackMetadata) {
+        val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return
+        if (uri.scheme != "content") return
+        runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.TITLE, metadata.title)
+                put(MediaStore.Audio.Media.ARTIST, metadata.artists)
+                put(MediaStore.Audio.Media.ALBUM, metadata.album)
+            }
+            context.contentResolver.update(uri, values, null, null)
+        }
+    }
+
+    private fun lyricFileNameForTrack(track: MusicTrack): String {
+        val displayName = displayNameForTrack(track)
+        val baseName = lyricBaseName(displayName)
+            ?: track.title.takeIf { it.isNotBlank() }
+            ?: "unknown"
+        return "${sanitizeFileName(baseName)}.lrc"
+    }
+
+    private fun displayNameForTrack(track: MusicTrack): String {
+        val uri = track.localUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+        if (uri?.scheme == "file") {
+            return uri.path?.let(::File)?.name.orEmpty().ifBlank { track.title }
+        }
+        if (uri?.scheme == "content") {
+            runCatching {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                    null,
+                    null,
+                    null,
+                )
+            }.getOrNull()?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val column = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                    if (column >= 0) return cursor.getString(column).orEmpty().ifBlank { track.title }
+                }
+            }
+        }
+        return track.title
+    }
+
     private fun directoryInfo(relativePath: String): LocalMusicDirectory {
         val normalized = relativePath.trim('/').ifBlank { OTHER_DIRECTORY_ID }
         val name = if (normalized == OTHER_DIRECTORY_ID) "其他媒体库" else normalized
@@ -224,6 +352,7 @@ class AndroidLocalMusicRepository(
     private companion object {
         private const val FEELUOWN_FOLDER = "FeelUOwn"
         private const val LYRICS_FOLDER = "lyrics"
+        private const val METADATA_OVERRIDE_FILE = "local_music_metadata.json"
         private const val OTHER_DIRECTORY_ID = "__other__"
     }
 }
@@ -269,6 +398,18 @@ private fun lyricBaseName(fileName: String): String? {
 
 private fun File.runCatchingReadText(): String? {
     return runCatching { readText() }.getOrNull()?.takeIf { it.isNotBlank() }
+}
+
+private fun Set<String>.normalizedDirectoryIds(): Set<String> {
+    return flatMap { id ->
+        val trimmed = id.trim('/')
+        if (trimmed.isBlank()) listOf(id) else listOf(id, trimmed)
+    }.toSet()
+}
+
+private fun sanitizeFileName(value: String): String {
+    val sanitized = value.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
+    return sanitized.ifBlank { "unknown" }.take(80)
 }
 
 private fun albumArtUri(albumId: Long): String? {
