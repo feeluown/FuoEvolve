@@ -39,16 +39,16 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Package debug app
+      - name: Package debug app bundle
         run: |
           mkdir -p build/artifacts
-          ditto -c -k --keepParent \
-            build/ios-ci/Build/Products/Debug-iphonesimulator/FuoEvolve.app \
-            build/artifacts/FuoEvolve-debug-ios-simulator.zip
+          tar -cf build/artifacts/FuoEvolve-debug-ios-simulator.tar \
+            -C build/ios-ci/Build/Products/Debug-iphonesimulator \
+            FuoEvolve.app
 
       - name: Upload debug app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuo-evolve-ios-debug-${{ github.sha }}
-          path: build/artifacts/FuoEvolve-debug-ios-simulator.zip
+          path: build/artifacts/FuoEvolve-debug-ios-simulator.tar
+          archive: false
           if-no-files-found: error
