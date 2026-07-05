@@ -128,6 +128,7 @@ fun AppRoot(
     onRequestAudioPermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    appVersionInfo: String? = null,
 ) {
     FuoEvolveTheme(
         themeMode = controller.themeMode,
@@ -178,7 +179,12 @@ fun AppRoot(
                         onRequestAudioPermission = onRequestAudioPermission,
                     )
                     AppDestination.DebugLogs -> DebugLogScreen(controller)
-                    AppDestination.Settings -> SettingsScreen(controller, onOpenProviderWebLogin, onLogoutProvider)
+                    AppDestination.Settings -> SettingsScreen(
+                        controller,
+                        onOpenProviderWebLogin,
+                        onLogoutProvider,
+                        appVersionInfo,
+                    )
                     AppDestination.Search -> SearchScreen(controller)
                     AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
                     AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
@@ -1579,6 +1585,7 @@ private fun SettingsScreen(
     controller: FuoPlayerController,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    appVersionInfo: String?,
 ) {
     val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
@@ -1635,9 +1642,23 @@ private fun SettingsScreen(
                 if (controller.isDebugLogViewerAvailable) {
                     DebugSettingsPanel(controller)
                 }
+                VersionInfoFooter(appVersionInfo)
             }
         }
     }
+}
+
+@Composable
+private fun VersionInfoFooter(appVersionInfo: String?) {
+    if (appVersionInfo.isNullOrBlank()) return
+    Text(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        text = appVersionInfo,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

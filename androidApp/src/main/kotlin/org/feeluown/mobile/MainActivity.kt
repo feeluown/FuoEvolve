@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             AppRoot(
                 controller = controller,
                 hasAudioPermission = hasAudioPermission,
+                appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                 onRequestAudioPermission = {
                     permissionLauncher.launch(audioPermissions())
                 },

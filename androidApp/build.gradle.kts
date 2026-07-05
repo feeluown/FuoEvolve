@@ -24,6 +24,19 @@ val configuredBuildPython = providers.environmentVariable("FUO_BUILD_PYTHON").or
 val pypiFeelUOwnSource = "https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz"
 val feelUOwnSource = providers.environmentVariable("FUO_FEELUOWN_SOURCE").orNull
     ?: pypiFeelUOwnSource
+fun gitOutput(vararg args: String): String? = runCatching {
+    val output = providers.exec {
+        workingDir = rootProject.projectDir
+        commandLine("git", *args)
+    }.standardOutput.asText.get().trim()
+    output.takeIf { it.isNotBlank() }
+}.getOrNull()
+val gitVersionName = gitOutput("describe", "--tags", "--always", "--dirty")
+    ?: "0.1.0"
+val gitVersionCode = gitOutput("rev-list", "--count", "HEAD")
+    ?.toIntOrNull()
+    ?.takeIf { it > 0 }
+    ?: 1
 val fuoSigningStoreFile = signingValue("FUO_SIGNING_STORE_FILE", "fuo.signing.storeFile")
 val fuoSigningStorePassword = signingValue("FUO_SIGNING_STORE_PASSWORD", "fuo.signing.storePassword")
 val fuoSigningKeyAlias = signingValue("FUO_SIGNING_KEY_ALIAS", "fuo.signing.keyAlias")
@@ -51,12 +64,16 @@ android {
         applicationId = "org.feeluown.mobile"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = gitVersionCode
+        versionName = gitVersionName
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
