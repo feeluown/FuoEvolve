@@ -1646,37 +1646,58 @@ private fun SettingsScreen(
                 if (controller.isDebugLogViewerAvailable) {
                     DebugSettingsPanel(controller)
                 }
-                AppInfoFooter(appVersionInfo)
+                AppInfoPanel(appVersionInfo)
             }
         }
     }
 }
 
 @Composable
-private fun AppInfoFooter(appVersionInfo: String?) {
+private fun AppInfoPanel(appVersionInfo: String?) {
     val uriHandler = LocalUriHandler.current
-    Column(
+    Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
     ) {
-        SourceLinkButton(
-            text = "源代码",
-            onClick = { uriHandler.openUri(FUO_EVOLVE_SOURCE_URL) },
-        )
-        SourceLinkButton(
-            text = "FeelUOwn 主项目",
-            onClick = { uriHandler.openUri(FEELUOWN_SOURCE_URL) },
-        )
-        appVersionInfo?.takeIf { it.isNotBlank() }?.let {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Text(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                text = it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "应用信息",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            appVersionInfo?.takeIf { it.isNotBlank() }?.let { versionInfo ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "版本号",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(16.dp))
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = versionInfo.removePrefix("版本 "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            SourceLinkButton(
+                text = "源代码",
+                onClick = { uriHandler.openUri(FUO_EVOLVE_SOURCE_URL) },
+            )
+            SourceLinkButton(
+                text = "FeelUOwn 主项目",
+                onClick = { uriHandler.openUri(FEELUOWN_SOURCE_URL) },
             )
         }
     }

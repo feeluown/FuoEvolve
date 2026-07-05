@@ -50,6 +50,12 @@ class BilibiliStandbyTest(unittest.TestCase):
 
         self.assertAlmostEqual(0.40, standby_score(origin, standby))
 
+    def test_bilibili_score_keeps_original_keyword_versions(self):
+        origin = song("netease", "晴天 Remix", ["周杰伦"])
+        standby = song("bilibili", "周杰伦 晴天 REMIX", [])
+
+        self.assertAlmostEqual(0.60, standby_score(origin, standby))
+
     def test_other_provider_keeps_existing_score_path(self):
         origin = song("netease", "晴天", ["周杰伦"])
         standby = song("qqmusic", "晴天", ["周杰伦"])

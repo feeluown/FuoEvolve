@@ -1674,7 +1674,10 @@ def bilibili_standby_score(origin, standby) -> float:
         score += 0.20
     if any(keyword in standby_title for keyword in BILIBILI_STANDBY_BONUS_KEYWORDS):
         score += 0.10
-    if any(keyword in standby_title for keyword in BILIBILI_STANDBY_PENALTY_KEYWORDS):
+    if (
+        not any(keyword in origin_title for keyword in BILIBILI_STANDBY_PENALTY_KEYWORDS)
+        and any(keyword in standby_title for keyword in BILIBILI_STANDBY_PENALTY_KEYWORDS)
+    ):
         score -= 0.20
     return apply_duration_penalty(score, origin, standby)
 
@@ -1734,7 +1737,7 @@ def unique_texts(values: List[str]) -> List[str]:
 
 
 BILIBILI_STANDBY_BONUS_KEYWORDS = ("mv", "hires")
-BILIBILI_STANDBY_PENALTY_KEYWORDS = ("翻唱", "翻自", "翻弹", "翻奏", "cover")
+BILIBILI_STANDBY_PENALTY_KEYWORDS = ("cover", "翻唱", "remix")
 MAX_DURATION_PENALTY = 0.30
 
 
