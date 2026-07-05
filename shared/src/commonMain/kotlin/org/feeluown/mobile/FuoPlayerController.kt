@@ -222,6 +222,8 @@ class FuoPlayerController(
     private var autoAdvanceEligibleTrackId: String? = null
     private var playRequestSerial: Long = 0
     private var localMusicRefreshSerial: Long = 0
+    private var playbackParts: List<PlaybackPart> = emptyList()
+    private var currentPartIndex: Int = -1
 
     init {
         scope.launch {
@@ -284,6 +286,8 @@ class FuoPlayerController(
                     queue = displayQueue(),
                     queueIndex = displayQueueIndex(),
                     currentTrack = currentQueueTrack() ?: engineState.currentTrack,
+                    playbackParts = playbackParts,
+                    currentPartIndex = currentPartIndex,
                 )
             }
         }
@@ -1298,6 +1302,11 @@ class FuoPlayerController(
         }
     }
 
+    fun playPlaybackPart(index: Int) {
+        if (index !in playbackParts.indices) return
+        currentQueueTrack()?.let { startPlayback(it, requestedPartIndex = index) }
+    }
+
     fun toggle() {
         when (playbackState.status) {
             PlayerStatus.Playing -> playbackEngine.pause()
@@ -1312,6 +1321,7 @@ class FuoPlayerController(
     }
 
     fun next() {
+        if (playPlaybackPartOffset(1)) return
         if (currentIsUpNext) {
             currentUpNextTrack = null
             currentIsUpNext = false
@@ -1344,6 +1354,7 @@ class FuoPlayerController(
     }
 
     fun previous() {
+        if (playPlaybackPartOffset(-1)) return
         if (currentIsUpNext) {
             currentUpNextTrack = null
             currentIsUpNext = false
@@ -1594,9 +1605,15 @@ class FuoPlayerController(
     private fun startPlayback(
         track: MusicTrack,
         skippedUnavailableCount: Int = 0,
+        requestedPartIndex: Int? = null,
     ) {
         val requestSerial = ++playRequestSerial
         val playbackTrack = track.preferDownloaded()
+        val isPlaybackPartRequest = requestedPartIndex != null && playbackParts.isNotEmpty()
+        if (!isPlaybackPartRequest) {
+            playbackParts = emptyList()
+            currentPartIndex = -1
+        }
         updateCurrentTrack(playbackTrack)
         playbackState = playbackState.copy(
             status = PlayerStatus.Loading,
@@ -1604,6 +1621,8 @@ class FuoPlayerController(
             queue = displayQueue(),
             queueIndex = displayQueueIndex(),
             positionMs = 0,
+            playbackParts = playbackParts,
+            currentPartIndex = if (isPlaybackPartRequest) requestedPartIndex ?: -1 else -1,
             errorMessage = null,
         )
         persistPlaybackQueue()
@@ -1612,9 +1631,13 @@ class FuoPlayerController(
             isLoading = true
             message = "正在播放：${track.title}"
             runCatching {
-                val payload = playbackTrack.toPayload()
+                val partTrack = requestedPartIndex
+                    ?.let { index -> playbackParts.getOrNull(index) }
+                    ?.toTrack(playbackTrack)
+                val resolveTrack = partTrack ?: playbackTrack
+                val payload = resolveTrack.toPayload()
                     ?: providerRepository.resolve(
-                        playbackTrack,
+                        resolveTrack,
                         unavailablePlaybackPolicy,
                         selectedSmartReplacementProviderIds(),
                         smartReplacementMinScore,
@@ -1622,13 +1645,23 @@ class FuoPlayerController(
                         smartReplacementUseOriginalLyrics,
                     )
                 if (requestSerial != playRequestSerial) return@playRequest
+                val nextParts = payload.parts
+                val nextPartIndex = when {
+                    nextParts.isEmpty() -> -1
+                    payload.currentPartIndex in nextParts.indices -> payload.currentPartIndex
+                    requestedPartIndex != null && requestedPartIndex in nextParts.indices -> requestedPartIndex
+                    else -> -1
+                }
+                playbackParts = nextParts
+                currentPartIndex = nextPartIndex
+                val isMultipartPlayback = playbackParts.isNotEmpty()
                 val playableTrack = playbackTrack.copy(
-                    title = payload.title.ifBlank { playbackTrack.title },
+                    title = if (isMultipartPlayback) playbackTrack.title else payload.title.ifBlank { playbackTrack.title },
                     artists = payload.artists.ifBlank { playbackTrack.artists },
                     album = payload.album.ifBlank { playbackTrack.album },
                     source = payload.source.ifBlank { playbackTrack.source },
                     coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
-                    durationMs = payload.durationMs ?: playbackTrack.durationMs,
+                    durationMs = if (isMultipartPlayback) playbackTrack.durationMs else payload.durationMs ?: playbackTrack.durationMs,
                     providerName = payload.providerName ?: playbackTrack.providerName,
                     isSmartReplacement = payload.isSmartReplacement,
                     originalTitle = payload.originalTitle,
@@ -1652,9 +1685,16 @@ class FuoPlayerController(
                     queueIndex = displayQueueIndex(),
                     lyrics = payload.lyrics,
                     audioQuality = payload.audioQuality,
+                    playbackParts = playbackParts,
+                    currentPartIndex = currentPartIndex,
                 )
                 persistPlaybackQueue()
-                message = "${playableTrack.title} - ${playableTrack.artists}"
+                val partLabel = currentPlaybackPartLabel()
+                message = if (partLabel != null) {
+                    "${playableTrack.title} · $partLabel"
+                } else {
+                    "${playableTrack.title} - ${playableTrack.artists}"
+                }
                 prefetchFeatureQueueIfNeeded()
             }.onFailure {
                 if (requestSerial != playRequestSerial) return@playRequest
@@ -1863,6 +1903,28 @@ class FuoPlayerController(
         )
     }
 
+    private fun PlaybackPart.toTrack(parent: MusicTrack): MusicTrack {
+        return parent.copy(
+            id = id,
+            title = title.ifBlank { parent.title },
+            durationMs = durationMs ?: parent.durationMs,
+            providerId = id,
+        )
+    }
+
+    private fun playPlaybackPartOffset(offset: Int): Boolean {
+        if (playbackParts.isEmpty() || currentPartIndex < 0) return false
+        val nextPartIndex = currentPartIndex + offset
+        if (nextPartIndex !in playbackParts.indices) return false
+        currentQueueTrack()?.let { startPlayback(it, requestedPartIndex = nextPartIndex) } ?: return false
+        return true
+    }
+
+    private fun currentPlaybackPartLabel(): String? {
+        val part = playbackParts.getOrNull(currentPartIndex) ?: return null
+        return "第 ${currentPartIndex + 1}P · ${part.title.ifBlank { "未命名分段" }}"
+    }
+
     private fun currentQueueTrack(): MusicTrack? {
         return if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
     }
@@ -1917,6 +1979,8 @@ class FuoPlayerController(
             queue = displayQueue(),
             queueIndex = displayQueueIndex(),
             currentTrack = currentQueueTrack() ?: playbackState.currentTrack,
+            playbackParts = playbackParts,
+            currentPartIndex = currentPartIndex,
         )
     }
 
@@ -1931,10 +1995,14 @@ class FuoPlayerController(
         shuffleBeforeFm = snapshot.shuffleBeforeFm
         currentUpNextTrack = null
         currentIsUpNext = false
+        playbackParts = emptyList()
+        currentPartIndex = -1
         playbackState = playbackState.copy(
             currentTrack = mainQueue.getOrNull(mainQueueIndex),
             queue = displayQueue(),
             queueIndex = displayQueueIndex(),
+            playbackParts = playbackParts,
+            currentPartIndex = currentPartIndex,
         )
     }
 

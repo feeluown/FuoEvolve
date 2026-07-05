@@ -394,6 +394,8 @@ class AndroidFuoCoreBridge(
             replacementCoverUrl = optString("replacement_cover_url").takeIf { smartReplacement && it.isNotBlank() },
             replacementStrategy = optString("standby_strategy").takeIf { smartReplacement && it.isNotBlank() },
             replacementScore = optDouble("standby_score").takeIf { smartReplacement && has("standby_score") },
+            parts = optJSONArray("parts").toPlaybackParts(),
+            currentPartIndex = optInt("current_part_index", -1),
         )
     }
 
@@ -439,6 +441,18 @@ class AndroidFuoCoreBridge(
             .mapNotNull { raw -> runCatching { ProviderLoginMode.valueOf(raw) }.getOrNull() }
             .toSet()
             .ifEmpty { setOf(ProviderLoginMode.WebView, ProviderLoginMode.Cookie) }
+    }
+
+    private fun JSONArray?.toPlaybackParts(): List<PlaybackPart> {
+        if (this == null) return emptyList()
+        return List(length()) { index ->
+            val item = getJSONObject(index)
+            PlaybackPart(
+                id = item.optString("id"),
+                title = item.optString("title"),
+                durationMs = item.optLong("duration_ms").takeIf { it > 0 },
+            )
+        }.filter { it.id.isNotBlank() }
     }
 
     private fun JSONObject?.toStringMap(): Map<String, String> {

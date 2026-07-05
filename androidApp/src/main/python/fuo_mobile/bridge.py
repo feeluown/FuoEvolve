@@ -905,7 +905,13 @@ class FuoMobileBridge:
         provider = self._get_provider(provider_id)
         if not hasattr(provider, "song_get"):
             raise RuntimeError(f"provider does not support song_get: {provider_id}")
-        return provider.song_get(identifier)
+        song = provider.song_get(identifier)
+        if provider_id == "bilibili" and identifier.startswith("paged_"):
+            for child in getattr(song, "children", None) or []:
+                if getattr(child, "identifier", "") == identifier:
+                    self._tracks[track_id] = child
+                    return child
+        return song
 
     def _remember_song(self, song) -> Dict[str, Any]:
         track = song_to_dict(song, self.app.library)
@@ -1037,7 +1043,7 @@ class FuoMobileBridge:
         standby_use_origin_lyrics: bool,
     ) -> Dict[str, Any]:
         try:
-            media, quality = self._select_media(song, audio_select_policy)
+            playback_song, media, quality, parts, current_part_index = self._select_media(song, audio_select_policy)
         except MediaNotFound as exc:
             bridge_log(
                 "media not found "
@@ -1055,7 +1061,7 @@ class FuoMobileBridge:
                 if standby_payload is not None:
                     return standby_payload
             raise RuntimeError(f"media not found: {song}") from exc
-        payload = self._payload_from_media(song, media, quality)
+        payload = self._payload_from_media(playback_song, media, quality, parts, current_part_index)
         return payload
 
     def _prepare_standby_payload(
@@ -1132,13 +1138,16 @@ class FuoMobileBridge:
                 f"replacement={song_log_label(standby)}"
             )
             try:
-                media, quality = self._select_media(standby, audio_select_policy)
+                playback_standby, media, quality, parts, current_part_index = self._select_media(
+                    standby,
+                    audio_select_policy,
+                )
             except MediaNotFound:
                 bridge_log(
                     f"standby candidate media not found score={score:.2f} replacement={song_log_label(standby)}"
                 )
                 continue
-            payload = self._payload_from_media(standby, media, quality)
+            payload = self._payload_from_media(playback_standby, media, quality, parts, current_part_index)
             return self._mark_standby_payload(
                 payload,
                 song,
@@ -1188,7 +1197,10 @@ class FuoMobileBridge:
             return None
         for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True)[:8]:
             try:
-                media, quality = self._select_media(standby, audio_select_policy)
+                playback_standby, media, quality, parts, current_part_index = self._select_media(
+                    standby,
+                    audio_select_policy,
+                )
             except MediaNotFound:
                 bridge_log(
                     f"search standby candidate media not found score={score:.2f} replacement={song_log_label(standby)}"
@@ -1199,7 +1211,7 @@ class FuoMobileBridge:
                 f"search standby selected score={score:.2f} "
                 f"origin={song_log_label(song)} replacement={song_log_label(standby)}"
             )
-            payload = self._payload_from_media(standby, media, quality)
+            payload = self._payload_from_media(playback_standby, media, quality, parts, current_part_index)
             return self._mark_standby_payload(
                 payload,
                 song,
@@ -1215,17 +1227,70 @@ class FuoMobileBridge:
     def _select_media(self, song, audio_select_policy: str):
         provider = self.app.library.get(getattr(song, "source", ""))
         if provider is not None and isinstance(provider, SupportsSongMultiQuality):
+            playback_song = song
+            parts = []
             try:
-                media, quality = provider.song_select_media(song, audio_select_policy)
-            except MediaNotFound:
-                refreshed_song = self._refresh_song_for_media_retry(song, provider)
-                if refreshed_song is None:
-                    raise
-                media, quality = provider.song_select_media(refreshed_song, audio_select_policy)
-                song = refreshed_song
-            self._tracks[f"{getattr(song, 'source', '')}:{getattr(song, 'identifier', '')}"] = song
-            return media, getattr(quality, "value", str(quality)).upper()
-        return self.app.library.song_prepare_media(song, audio_select_policy), ""
+                media, quality = provider.song_select_media(playback_song, audio_select_policy)
+            except MediaNotFound as exc:
+                parts = self._bilibili_parts_for_song(playback_song, provider)
+                child_song = self._bilibili_first_child_for_media_retry(playback_song, provider, exc, parts)
+                if child_song is not None:
+                    playback_song = child_song
+                    media, quality = provider.song_select_media(playback_song, audio_select_policy)
+                else:
+                    refreshed_song = self._refresh_song_for_media_retry(playback_song, provider)
+                    if refreshed_song is None:
+                        raise
+                    playback_song = refreshed_song
+                    media, quality = provider.song_select_media(playback_song, audio_select_policy)
+            if str(getattr(playback_song, "identifier", "")).startswith("paged_"):
+                parts = parts or self._bilibili_parts_for_song(playback_song, provider)
+            self._tracks[
+                f"{getattr(playback_song, 'source', '')}:{getattr(playback_song, 'identifier', '')}"
+            ] = playback_song
+            return (
+                playback_song,
+                media,
+                getattr(quality, "value", str(quality)).upper(),
+                parts,
+                playback_part_index(playback_song, parts),
+            )
+        return song, self.app.library.song_prepare_media(song, audio_select_policy), "", [], -1
+
+    def _bilibili_first_child_for_media_retry(self, song, provider, exc: MediaNotFound, parts: List[Any]):
+        if (
+            getattr(exc, "reason", None) is not MediaNotFound.Reason.check_children
+            or getattr(song, "source", "") != "bilibili"
+            or str(getattr(song, "identifier", "")).startswith("paged_")
+        ):
+            return None
+        children = parts or self._bilibili_parts_for_song(song, provider)
+        if not children:
+            return None
+        child_song = children[0]
+        bridge_log(
+            f"bilibili media retry first child parent={song_log_label(song)} "
+            f"child={song_log_label(child_song)}"
+        )
+        return child_song
+
+    def _bilibili_parts_for_song(self, song, provider) -> List[Any]:
+        if getattr(song, "source", "") != "bilibili":
+            return []
+        detail_song = song
+        parts = getattr(detail_song, "children", None) or []
+        if not parts and hasattr(provider, "song_get"):
+            try:
+                detail_song = provider.song_get(getattr(song, "identifier", ""))
+            except Exception as detail_exc:  # pylint: disable=broad-except
+                bridge_log(f"bilibili parts lookup failed track={song_log_label(song)} error={detail_exc}")
+                return []
+            parts = getattr(detail_song, "children", None) or []
+        if len(parts) <= 1:
+            return []
+        for part in parts:
+            self._tracks[f"{getattr(part, 'source', '')}:{getattr(part, 'identifier', '')}"] = part
+        return list(parts)
 
     def _refresh_song_for_media_retry(self, song, provider):
         source = getattr(song, "source", "")
@@ -1246,12 +1311,23 @@ class FuoMobileBridge:
         bridge_log(f"netease media retry track={song_log_label(retry_song)}")
         return retry_song
 
-    def _payload_from_media(self, song, media: Media, quality: str) -> Dict[str, Any]:
+    def _payload_from_media(
+        self,
+        song,
+        media: Media,
+        quality: str,
+        parts: Optional[List[Any]] = None,
+        current_part_index: int = -1,
+    ) -> Dict[str, Any]:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
+        parts = parts or []
         if getattr(song, "source", "") == "bilibili":
             headers = payload.setdefault("headers", {})
             headers.setdefault("Referer", "https://www.bilibili.com/")
             headers.setdefault("User-Agent", BILIBILI_MEDIA_USER_AGENT)
+            if parts:
+                payload["parts"] = [playback_part_to_dict(part) for part in parts]
+                payload["current_part_index"] = current_part_index
         if quality:
             payload["audio_quality"] = quality
         cover = self._get_cover(song)
@@ -1468,6 +1544,28 @@ def song_to_dict(song, library: Library) -> Dict[str, Any]:
         "artist_item_id": first_artist_item_id(song),
         "album_item_id": album_item_id(song),
     }
+
+
+def playback_part_to_dict(song) -> Dict[str, Any]:
+    source = getattr(song, "source", "")
+    identifier = getattr(song, "identifier", "")
+    return {
+        "id": f"{source}:{identifier}",
+        "title": display(song, "title"),
+        "duration_ms": duration_ms(song),
+    }
+
+
+def playback_part_index(song, parts: List[Any]) -> int:
+    if not parts:
+        return -1
+    identifier = getattr(song, "identifier", "")
+    for index, part in enumerate(parts):
+        if getattr(part, "identifier", "") == identifier:
+            return index
+    if getattr(song, "source", "") == "bilibili" and not str(identifier).startswith("paged_"):
+        return 0
+    return -1
 
 
 def song_to_metadata(song, library: Library) -> Dict[str, Any]:
