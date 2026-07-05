@@ -54,6 +54,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 false,
             ),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
+            materialStyle = enumValue(KEY_MATERIAL_STYLE, MaterialStyle.MaterialYou),
+            themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
         )
     }
 
@@ -87,6 +89,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 )
                 .putBoolean(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, settings.smartReplacementUseOriginalLyrics)
                 .putString(KEY_LYRIC_FONT_SIZE, settings.lyricFontSize.name)
+                .putString(KEY_MATERIAL_STYLE, settings.materialStyle.name)
+                .putString(KEY_THEME_MODE, settings.themeMode.name)
                 .apply()
         }
     }
@@ -221,5 +225,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
+        private const val KEY_MATERIAL_STYLE = "material_style"
+        private const val KEY_THEME_MODE = "theme_mode"
     }
 }

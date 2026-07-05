@@ -15,6 +15,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -93,6 +94,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,6 +107,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -126,7 +130,10 @@ fun AppRoot(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
-    MaterialTheme {
+    FuoEvolveTheme(
+        materialStyle = controller.materialStyle,
+        themeMode = controller.themeMode,
+    ) {
         val destination = appDestination(controller)
         val currentFeature = controller.selectedFeature
         val currentPlaylist = controller.selectedPlaylist
@@ -193,6 +200,48 @@ fun AppRoot(
         }
     }
 }
+
+@Composable
+private fun FuoEvolveTheme(
+    materialStyle: MaterialStyle,
+    themeMode: ThemeMode,
+    content: @Composable () -> Unit,
+) {
+    val systemDark = isSystemInDarkTheme()
+    MaterialTheme(
+        colorScheme = materialColorScheme(materialStyle, resolvedDarkTheme(themeMode, systemDark)),
+        content = content,
+    )
+}
+
+internal fun resolvedDarkTheme(themeMode: ThemeMode, systemDark: Boolean): Boolean {
+    return when (themeMode) {
+        ThemeMode.System -> systemDark
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
+}
+
+private fun materialColorScheme(materialStyle: MaterialStyle, darkTheme: Boolean) =
+    when (materialStyle) {
+        MaterialStyle.MaterialYou -> if (darkTheme) darkColorScheme() else lightColorScheme()
+        MaterialStyle.Expressive -> expressiveColorScheme(darkTheme)
+    }
+
+private fun expressiveColorScheme(darkTheme: Boolean) =
+    if (darkTheme) {
+        darkColorScheme(
+            onPrimaryContainer = Color(234, 221, 255),
+            onSecondaryContainer = Color(232, 222, 248),
+            onTertiaryContainer = Color(232, 222, 248),
+        )
+    } else {
+        lightColorScheme(
+            onPrimaryContainer = Color(79, 55, 139),
+            onSecondaryContainer = Color(74, 68, 88),
+            onTertiaryContainer = Color(74, 68, 88),
+        )
+    }
 
 private enum class AppDestination {
     Home,
@@ -2009,6 +2058,44 @@ private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                         ),
                     ) {
                         Text(size.label)
+                    }
+                }
+            }
+            Text(
+                text = "Material 风格",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                MaterialStyle.entries.forEachIndexed { index, style ->
+                    SegmentedButton(
+                        selected = controller.materialStyle == style,
+                        onClick = { controller.onMaterialStyleChange(style) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = MaterialStyle.entries.size,
+                        ),
+                    ) {
+                        Text(style.label)
+                    }
+                }
+            }
+            Text(
+                text = "外观模式",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                ThemeMode.entries.forEachIndexed { index, mode ->
+                    SegmentedButton(
+                        selected = controller.themeMode == mode,
+                        onClick = { controller.onThemeModeChange(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = ThemeMode.entries.size,
+                        ),
+                    ) {
+                        Text(mode.label)
                     }
                 }
             }

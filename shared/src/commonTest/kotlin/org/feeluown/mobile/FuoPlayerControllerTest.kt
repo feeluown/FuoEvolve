@@ -1103,6 +1103,8 @@ class FuoPlayerControllerTest {
                 smartReplacementUseOriginalMetadata = true,
                 smartReplacementUseOriginalLyrics = true,
                 lyricFontSize = LyricFontSize.Large,
+                materialStyle = MaterialStyle.Expressive,
+                themeMode = ThemeMode.Dark,
             ),
         )
         val provider = FakeProviderRepository(emptyList())
@@ -1148,6 +1150,8 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.smartReplacementUseOriginalMetadata)
             assertEquals(true, controller.smartReplacementUseOriginalLyrics)
             assertEquals(LyricFontSize.Large, controller.lyricFontSize)
+            assertEquals(MaterialStyle.Expressive, controller.materialStyle)
+            assertEquals(ThemeMode.Dark, controller.themeMode)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, provider.lastCellularAudioQualityPolicy)
 
@@ -1167,6 +1171,8 @@ class FuoPlayerControllerTest {
             controller.onSmartReplacementUseOriginalMetadataChange(false)
             controller.onSmartReplacementUseOriginalLyricsChange(false)
             controller.onLyricFontSizeChange(LyricFontSize.Medium)
+            controller.onMaterialStyleChange(MaterialStyle.MaterialYou)
+            controller.onThemeModeChange(ThemeMode.Light)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
@@ -1191,11 +1197,21 @@ class FuoPlayerControllerTest {
             assertEquals(false, store.saved.smartReplacementUseOriginalMetadata)
             assertEquals(false, store.saved.smartReplacementUseOriginalLyrics)
             assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
+            assertEquals(MaterialStyle.MaterialYou, store.saved.materialStyle)
+            assertEquals(ThemeMode.Light, store.saved.themeMode)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
         } finally {
             controllerScope.cancel()
         }
+    }
+
+    @Test
+    fun themeModeResolvesSystemAndOverrides() {
+        assertEquals(false, resolvedDarkTheme(ThemeMode.System, systemDark = false))
+        assertEquals(true, resolvedDarkTheme(ThemeMode.System, systemDark = true))
+        assertEquals(false, resolvedDarkTheme(ThemeMode.Light, systemDark = true))
+        assertEquals(true, resolvedDarkTheme(ThemeMode.Dark, systemDark = false))
     }
 
     @Test
