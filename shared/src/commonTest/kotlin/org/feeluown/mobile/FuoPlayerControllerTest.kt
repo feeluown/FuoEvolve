@@ -1103,8 +1103,8 @@ class FuoPlayerControllerTest {
                 smartReplacementUseOriginalMetadata = true,
                 smartReplacementUseOriginalLyrics = true,
                 lyricFontSize = LyricFontSize.Large,
-                materialStyle = MaterialStyle.Expressive,
                 themeMode = ThemeMode.Dark,
+                themeColorScheme = ThemeColorScheme.OceanBlue,
             ),
         )
         val provider = FakeProviderRepository(emptyList())
@@ -1150,8 +1150,8 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.smartReplacementUseOriginalMetadata)
             assertEquals(true, controller.smartReplacementUseOriginalLyrics)
             assertEquals(LyricFontSize.Large, controller.lyricFontSize)
-            assertEquals(MaterialStyle.Expressive, controller.materialStyle)
             assertEquals(ThemeMode.Dark, controller.themeMode)
+            assertEquals(ThemeColorScheme.OceanBlue, controller.themeColorScheme)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, provider.lastCellularAudioQualityPolicy)
 
@@ -1171,8 +1171,8 @@ class FuoPlayerControllerTest {
             controller.onSmartReplacementUseOriginalMetadataChange(false)
             controller.onSmartReplacementUseOriginalLyricsChange(false)
             controller.onLyricFontSizeChange(LyricFontSize.Medium)
-            controller.onMaterialStyleChange(MaterialStyle.MaterialYou)
             controller.onThemeModeChange(ThemeMode.Light)
+            controller.onThemeColorSchemeChange(ThemeColorScheme.FuoGreen)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
@@ -1197,8 +1197,8 @@ class FuoPlayerControllerTest {
             assertEquals(false, store.saved.smartReplacementUseOriginalMetadata)
             assertEquals(false, store.saved.smartReplacementUseOriginalLyrics)
             assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
-            assertEquals(MaterialStyle.MaterialYou, store.saved.materialStyle)
             assertEquals(ThemeMode.Light, store.saved.themeMode)
+            assertEquals(ThemeColorScheme.FuoGreen, store.saved.themeColorScheme)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
         } finally {

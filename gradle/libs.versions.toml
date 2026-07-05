@@ -1,7 +1,7 @@
 [versions]
 agp = "8.7.3"
 chaquopy = "17.0.0"
-compose = "1.7.3"
+compose = "1.9.3"
 kotlin = "2.1.20"
 media3 = "1.5.1"
 activityCompose = "1.10.1"
@@ -18,6 +18,7 @@ jellyfin-media3-ffmpeg-decoder = { module = "org.jellyfin.media3:media3-ffmpeg-d
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+compose-material3-expressive = { module = "org.jetbrains.compose.material3:material3", version = "1.9.0-alpha04" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -28,7 +28,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.animation)
-            implementation(compose.material3)
+            implementation(libs.compose.material3.expressive)
             implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.coroutines.core)
         }
