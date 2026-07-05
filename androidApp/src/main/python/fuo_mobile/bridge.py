@@ -1169,9 +1169,9 @@ class FuoMobileBridge:
     ) -> Optional[Dict[str, Any]]:
         candidates = []
         seen = set()
-        for query in standby_queries(song):
-            bridge_log(f"search standby query track={song_log_label(song)} query={query} source_in={source_in}")
-            for result in self.app.library.search(query, type_in=[SearchType.so], source_in=source_in):
+        for query, query_source_in in standby_searches(song, source_in):
+            bridge_log(f"search standby query track={song_log_label(song)} query={query} source_in={query_source_in}")
+            for result in self.app.library.search(query, type_in=[SearchType.so], source_in=query_source_in):
                 for standby in read_models(getattr(result, "songs", []) or [], limit=10):
                     key = (getattr(standby, "source", ""), getattr(standby, "identifier", ""))
                     if key in seen or key == (getattr(song, "source", ""), getattr(song, "identifier", "")):
@@ -1606,7 +1606,30 @@ def standby_queries(song) -> List[str]:
     return unique_texts(queries)
 
 
+def bilibili_standby_queries(song) -> List[str]:
+    title = display(song, "title").strip()
+    artists = display_artists(song).strip()
+    if title and artists:
+        return [f"{title} {artists}"]
+    if title:
+        return [title]
+    return []
+
+
+def standby_searches(song, source_in: List[str]) -> List[tuple]:
+    searches = []
+    other_source_in = [source for source in source_in if source != "bilibili"]
+    if other_source_in:
+        searches.extend((query, other_source_in) for query in standby_queries(song))
+    if "bilibili" in source_in:
+        searches.extend((query, ["bilibili"]) for query in bilibili_standby_queries(song))
+    return searches
+
+
 def standby_score(origin, standby) -> float:
+    if getattr(standby, "source", "") == "bilibili":
+        return bilibili_standby_score(origin, standby)
+
     origin_title = normalize_match_text(display(origin, "title"))
     standby_title = normalize_match_text(display(standby, "title"))
     if not origin_title or not standby_title:
@@ -1643,6 +1666,24 @@ def standby_score(origin, standby) -> float:
     return score
 
 
+def bilibili_standby_score(origin, standby) -> float:
+    origin_title = normalize_match_text(display(origin, "title"))
+    standby_title = normalize_match_text(display(standby, "title"))
+    if not origin_title or not standby_title:
+        return 0.0
+
+    score = 0.0
+    if origin_title in standby_title:
+        score += 0.40
+    if any(artist in standby_title for artist in artist_match_texts(origin)):
+        score += 0.20
+    if any(keyword in standby_title for keyword in BILIBILI_STANDBY_BONUS_KEYWORDS):
+        score += 0.10
+    if any(keyword in standby_title for keyword in BILIBILI_STANDBY_PENALTY_KEYWORDS):
+        score -= 0.20
+    return score
+
+
 def normalize_standby_min_score(value) -> float:
     try:
         score = float(value)
@@ -1656,6 +1697,28 @@ def normalize_match_text(value: str) -> str:
     return "".join(char for char in normalized if char.isalnum())
 
 
+def artist_match_texts(song) -> List[str]:
+    values = []
+    for artist in getattr(song, "artists", []) or []:
+        values.append(display(artist, "name"))
+    values.extend(split_artist_names(display_artists(song)))
+    return unique_texts(
+        normalized
+        for normalized in (normalize_match_text(value) for value in values)
+        if normalized
+    )
+
+
+def split_artist_names(value: str) -> List[str]:
+    parts = [value or ""]
+    for separator in (" / ", "/", "、", ",", "，", ";", "；", "&", "+", "＋"):
+        next_parts = []
+        for part in parts:
+            next_parts.extend(part.split(separator))
+        parts = next_parts
+    return [part.strip() for part in parts if part.strip()]
+
+
 def unique_texts(values: List[str]) -> List[str]:
     result = []
     seen = set()
@@ -1664,6 +1727,10 @@ def unique_texts(values: List[str]) -> List[str]:
             seen.add(value)
             result.append(value)
     return result
+
+
+BILIBILI_STANDBY_BONUS_KEYWORDS = ("mv", "hires")
+BILIBILI_STANDBY_PENALTY_KEYWORDS = ("翻唱", "翻自", "翻弹", "翻奏", "cover")
 
 
 def provider_name(provider) -> str:
