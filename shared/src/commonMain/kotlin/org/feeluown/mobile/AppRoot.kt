@@ -3629,24 +3629,32 @@ private fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier:
 
 @Composable
 private fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
+    val queue = controller.playbackState.queue
+    val currentCount = if (controller.playbackState.queueIndex == 0 && queue.isNotEmpty()) 1 else 0
     val upNextCount = controller.displayUpNextCount
     LazyColumn(
         modifier = modifier,
     ) {
-        if (upNextCount > 0) {
-            item(key = "queue-section-up-next") {
+        itemsIndexed(queue, key = { _, item -> item.id }) { index, track ->
+            if (index == 0 && currentCount == 1) {
                 Text(
-                    text = "接下来播放",
+                    text = "当前播放",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
                 )
             }
-        }
-        itemsIndexed(controller.playbackState.queue, key = { _, item -> item.id }) { index, track ->
-            if (index == upNextCount && index > 0) {
+            if (index == currentCount && upNextCount > 0) {
                 Text(
-                    text = "主队列",
+                    text = "接下来播放",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+                )
+            }
+            if (index == currentCount + upNextCount && index < queue.size && index > 0) {
+                Text(
+                    text = "队列后续",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),

@@ -17,6 +17,7 @@ class AndroidLocalMusicRepository(
     private val context: Context,
 ) : LocalMusicRepository {
     private var cachedTracks: List<MusicTrack> = emptyList()
+    @Volatile
     private var scanSettings = LocalMusicScanSettings()
 
     override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
