@@ -2861,7 +2861,7 @@ private fun FullPlayer(controller: FuoPlayerController) {
     }
     Surface(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val visualHeight = (maxHeight * 0.42f).coerceAtMost(360.dp)
+            val visualHeight = (maxHeight * 0.48f).coerceAtMost(430.dp)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
