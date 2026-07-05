@@ -169,6 +169,8 @@ class FuoPlayerController(
         private set
     var smartReplacementUseOriginalLyrics by mutableStateOf(false)
         private set
+    var lyricFontSize by mutableStateOf(LyricFontSize.Small)
+        private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
         private set
     var debugLogError by mutableStateOf<String?>(null)
@@ -669,6 +671,11 @@ class FuoPlayerController(
         persistSettings()
     }
 
+    fun onLyricFontSizeChange(value: LyricFontSize) {
+        lyricFontSize = value
+        persistSettings()
+    }
+
     fun onQueryChange(value: String) {
         query = value
     }
@@ -1127,8 +1134,11 @@ class FuoPlayerController(
     fun toggle() {
         when (playbackState.status) {
             PlayerStatus.Playing -> playbackEngine.pause()
-            PlayerStatus.Paused, PlayerStatus.Idle, PlayerStatus.Ended -> {
+            PlayerStatus.Paused -> {
                 if (playbackState.currentTrack != null) playbackEngine.resume()
+            }
+            PlayerStatus.Idle, PlayerStatus.Ended -> {
+                (currentQueueTrack() ?: playbackState.currentTrack)?.let(::startPlayback)
             }
             else -> Unit
         }
@@ -1834,6 +1844,7 @@ class FuoPlayerController(
         smartReplacementMinScore = settings.smartReplacementMinScore.coerceIn(0.0, 1.0)
         smartReplacementUseOriginalMetadata = settings.smartReplacementUseOriginalMetadata
         smartReplacementUseOriginalLyrics = settings.smartReplacementUseOriginalLyrics
+        lyricFontSize = settings.lyricFontSize
     }
 
     private fun persistSettings() {
@@ -1861,6 +1872,7 @@ class FuoPlayerController(
             smartReplacementMinScore = smartReplacementMinScore,
             smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
             smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
+            lyricFontSize = lyricFontSize,
         )
         scope.launch {
             settingsStore.save(settings)

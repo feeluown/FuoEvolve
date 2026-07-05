@@ -1102,6 +1102,7 @@ class FuoPlayerControllerTest {
                 unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip,
                 smartReplacementUseOriginalMetadata = true,
                 smartReplacementUseOriginalLyrics = true,
+                lyricFontSize = LyricFontSize.Large,
             ),
         )
         val provider = FakeProviderRepository(emptyList())
@@ -1146,6 +1147,7 @@ class FuoPlayerControllerTest {
             assertEquals(UnavailablePlaybackPolicy.Skip, controller.unavailablePlaybackPolicy)
             assertEquals(true, controller.smartReplacementUseOriginalMetadata)
             assertEquals(true, controller.smartReplacementUseOriginalLyrics)
+            assertEquals(LyricFontSize.Large, controller.lyricFontSize)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, provider.lastCellularAudioQualityPolicy)
 
@@ -1164,6 +1166,7 @@ class FuoPlayerControllerTest {
             controller.onUnavailablePlaybackPolicyChange(UnavailablePlaybackPolicy.SmartReplace)
             controller.onSmartReplacementUseOriginalMetadataChange(false)
             controller.onSmartReplacementUseOriginalLyricsChange(false)
+            controller.onLyricFontSizeChange(LyricFontSize.Medium)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
@@ -1187,6 +1190,7 @@ class FuoPlayerControllerTest {
             assertEquals(UnavailablePlaybackPolicy.SmartReplace, store.saved.unavailablePlaybackPolicy)
             assertEquals(false, store.saved.smartReplacementUseOriginalMetadata)
             assertEquals(false, store.saved.smartReplacementUseOriginalLyrics)
+            assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
         } finally {
@@ -1411,6 +1415,45 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.isShuffleEnabled)
             assertEquals(false, controller.isRepeatEnabled)
             assertEquals(null, engine.lastTrack)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun restoredQueueToggleStartsCurrentTrackFromBeginning() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val queueStore = FakePlaybackQueueStore(
+            PlaybackQueueSnapshot(
+                mainQueue = tracks,
+                queueIndex = 0,
+            ),
+        )
+        val provider = FakeProviderRepository(tracks)
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                playbackQueueStore = queueStore,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.toggle()
+            advanceUntilIdle()
+
+            assertEquals("provider:1", engine.lastTrack?.id)
+            assertEquals(1, provider.resolveCount)
+            assertEquals(0, engine.resumeCount)
+            assertEquals(0, controller.playbackState.positionMs)
+            assertEquals(0, controller.playbackState.queueIndex)
         } finally {
             controllerScope.cancel()
         }
@@ -1778,6 +1821,7 @@ class FuoPlayerControllerTest {
         override val state = mutableState
         var lastTrack: MusicTrack? = null
         var lastPayload: PlaybackPayload? = null
+        var resumeCount = 0
 
         override fun prepareLoading(track: MusicTrack) {
             mutableState.value = PlaybackState(
@@ -1812,6 +1856,7 @@ class FuoPlayerControllerTest {
         }
 
         override fun resume() {
+            resumeCount += 1
             mutableState.value = mutableState.value.copy(status = PlayerStatus.Playing)
         }
 

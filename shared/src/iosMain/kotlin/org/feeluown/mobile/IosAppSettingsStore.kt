@@ -36,6 +36,7 @@ class IosAppSettingsStore : AppSettingsStore {
             ),
             smartReplacementUseOriginalMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA, false),
             smartReplacementUseOriginalLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, false),
+            lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
         )
     }
 
@@ -62,6 +63,7 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setDouble(settings.smartReplacementMinScore, KEY_SMART_REPLACEMENT_MIN_SCORE)
             defaults.setBool(settings.smartReplacementUseOriginalMetadata, KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA)
             defaults.setBool(settings.smartReplacementUseOriginalLyrics, KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS)
+            defaults.setObject(settings.lyricFontSize.name, KEY_LYRIC_FONT_SIZE)
             defaults.synchronize()
         }
     }
@@ -168,5 +170,6 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
         private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
+        private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
     }
 }

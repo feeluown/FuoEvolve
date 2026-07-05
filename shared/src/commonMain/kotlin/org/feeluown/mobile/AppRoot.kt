@@ -18,6 +18,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -1460,6 +1461,7 @@ private fun SettingsScreen(
                 )
                 AudioQualitySettingsPanel(controller)
                 PlaybackPolicySettingsPanel(controller)
+                PlayerDisplaySettingsPanel(controller)
                 LocalMusicScanSettingsPanel(controller)
                 CacheSettingsPanel(controller)
                 if (controller.isDebugLogViewerAvailable) {
@@ -1807,6 +1809,45 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                                 controller.onSmartReplacementProviderEnabledChange(provider.providerId, it)
                             },
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "播放显示",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "歌词字号",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                LyricFontSize.entries.forEachIndexed { index, size ->
+                    SegmentedButton(
+                        selected = controller.lyricFontSize == size,
+                        onClick = { controller.onLyricFontSizeChange(size) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = LyricFontSize.entries.size,
+                        ),
+                    ) {
+                        Text(size.label)
                     }
                 }
             }
@@ -2808,9 +2849,19 @@ private fun MiniPlayer(controller: FuoPlayerController) {
 private fun FullPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
     val currentTrack = state.currentTrack
-    var visualTab by remember(currentTrack?.id) { mutableStateOf(PlayerVisualTab.Cover) }
+    val pagerState = rememberPagerState(
+        initialPage = PlayerVisualTab.Cover.ordinal,
+        pageCount = { PlayerVisualTab.entries.size },
+    )
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(currentTrack?.id) {
+        if (pagerState.currentPage != PlayerVisualTab.Cover.ordinal) {
+            pagerState.scrollToPage(PlayerVisualTab.Cover.ordinal)
+        }
+    }
     Surface(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val visualHeight = (maxHeight * 0.42f).coerceAtMost(360.dp)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -2837,33 +2888,27 @@ private fun FullPlayer(controller: FuoPlayerController) {
                         Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
                     }
                 }
-                TabRow(selectedTabIndex = visualTab.ordinal) {
+                TabRow(selectedTabIndex = pagerState.currentPage.coerceIn(0, PlayerVisualTab.entries.lastIndex)) {
                     PlayerVisualTab.entries.forEach { tab ->
                         Tab(
-                            selected = visualTab == tab,
-                            onClick = { visualTab = tab },
+                            selected = pagerState.currentPage == tab.ordinal,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
                             text = { Text(tab.title) },
                         )
                     }
                 }
-                AnimatedContent(
-                    targetState = visualTab,
+                HorizontalPager(
+                    state = pagerState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    transitionSpec = {
-                        (fadeIn(tween(160)) + slideInHorizontally(tween(180)) { it / 8 })
-                            .togetherWith(fadeOut(tween(120)) + slideOutHorizontally(tween(160)) { -it / 8 })
-                            .using(SizeTransform(clip = false))
-                    },
-                ) { tab ->
-                    when (tab) {
-                        PlayerVisualTab.Cover -> CoverBox(
-                            track = currentTrack ?: emptyDisplayTrack(),
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        .height(visualHeight),
+                    pageSpacing = 16.dp,
+                ) { page ->
+                    when (PlayerVisualTab.entries[page]) {
+                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
                         PlayerVisualTab.Lyrics -> LyricsPanel(
                             state = state,
+                            fontSize = controller.lyricFontSize,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -2892,6 +2937,19 @@ private fun FullPlayer(controller: FuoPlayerController) {
             }
             QueueBottomSheet(controller)
         }
+    }
+}
+
+@Composable
+private fun PlayerCoverPage(track: MusicTrack?) {
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        CoverBox(
+            track = track ?: emptyDisplayTrack(),
+            modifier = Modifier.size(minOf(maxWidth, maxHeight)),
+        )
     }
 }
 
@@ -3244,10 +3302,25 @@ private fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
 }
 
 @Composable
-private fun LyricsPanel(state: PlaybackState, modifier: Modifier) {
+private fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifier) {
     val lines = remember(state.lyrics) { parseLrc(state.lyrics) }
     val listState = rememberLazyListState()
     val currentIndex = currentLyricIndex(lines, state.positionMs)
+    val activeStyle = when (fontSize) {
+        LyricFontSize.Small -> MaterialTheme.typography.titleMedium
+        LyricFontSize.Medium -> MaterialTheme.typography.titleLarge
+        LyricFontSize.Large -> MaterialTheme.typography.headlineSmall
+    }
+    val inactiveStyle = when (fontSize) {
+        LyricFontSize.Small -> MaterialTheme.typography.bodyMedium
+        LyricFontSize.Medium -> MaterialTheme.typography.bodyLarge
+        LyricFontSize.Large -> MaterialTheme.typography.titleMedium
+    }
+    val linePadding = when (fontSize) {
+        LyricFontSize.Small -> 6.dp
+        LyricFontSize.Medium -> 7.dp
+        LyricFontSize.Large -> 8.dp
+    }
 
     LaunchedEffect(currentIndex, lines.size) {
         if (currentIndex >= 0) {
@@ -3269,12 +3342,12 @@ private fun LyricsPanel(state: PlaybackState, modifier: Modifier) {
                 val active = index == currentIndex
                 Text(
                     text = line.text,
-                    style = if (active) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                    style = if (active) activeStyle else inactiveStyle,
                     color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = linePadding),
                 )
             }
         }

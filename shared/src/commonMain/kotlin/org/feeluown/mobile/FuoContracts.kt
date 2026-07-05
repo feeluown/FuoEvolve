@@ -32,6 +32,14 @@ enum class UnavailablePlaybackPolicy(
     Skip("跳过"),
 }
 
+enum class LyricFontSize(
+    val label: String,
+) {
+    Small("小"),
+    Medium("中"),
+    Large("大"),
+}
+
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
@@ -56,6 +64,7 @@ data class AppSettings(
     val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
     val smartReplacementUseOriginalMetadata: Boolean = false,
     val smartReplacementUseOriginalLyrics: Boolean = false,
+    val lyricFontSize: LyricFontSize = LyricFontSize.Small,
 )
 
 data class ProviderHeaderInput(
