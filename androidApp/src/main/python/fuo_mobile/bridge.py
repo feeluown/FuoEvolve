@@ -1658,12 +1658,7 @@ def standby_score(origin, standby) -> float:
     if origin_album and standby_album and origin_album == standby_album:
         score += 0.10
 
-    origin_duration = duration_ms(origin)
-    standby_duration = duration_ms(standby)
-    if origin_duration and standby_duration:
-        if abs(origin_duration - standby_duration) / max(origin_duration, 1) < 0.10:
-            score += 0.10
-    return score
+    return apply_duration_penalty(score, origin, standby)
 
 
 def bilibili_standby_score(origin, standby) -> float:
@@ -1681,7 +1676,16 @@ def bilibili_standby_score(origin, standby) -> float:
         score += 0.10
     if any(keyword in standby_title for keyword in BILIBILI_STANDBY_PENALTY_KEYWORDS):
         score -= 0.20
-    return score
+    return apply_duration_penalty(score, origin, standby)
+
+
+def apply_duration_penalty(score: float, origin, standby) -> float:
+    origin_duration = duration_ms(origin)
+    standby_duration = duration_ms(standby)
+    if origin_duration and standby_duration:
+        diff_ratio = abs(origin_duration - standby_duration) / max(origin_duration, 1)
+        score -= min(diff_ratio * MAX_DURATION_PENALTY, MAX_DURATION_PENALTY)
+    return max(score, 0.0)
 
 
 def normalize_standby_min_score(value) -> float:
@@ -1731,6 +1735,7 @@ def unique_texts(values: List[str]) -> List[str]:
 
 BILIBILI_STANDBY_BONUS_KEYWORDS = ("mv", "hires")
 BILIBILI_STANDBY_PENALTY_KEYWORDS = ("翻唱", "翻自", "翻弹", "翻奏", "cover")
+MAX_DURATION_PENALTY = 0.30
 
 
 def provider_name(provider) -> str:
@@ -1748,16 +1753,45 @@ def song_log_label(song) -> str:
 
 
 def duration_ms(song) -> int:
-    duration = getattr(song, "duration", None) or getattr(song, "duration_ms", None)
+    duration = parse_duration_ms(getattr(song, "duration", None))
+    if duration:
+        return duration
+    return parse_duration_ms(getattr(song, "duration_ms", None))
+
+
+def parse_duration_ms(duration) -> int:
     if not duration:
         return 0
+    if isinstance(duration, str):
+        duration = duration.strip()
+        if not duration:
+            return 0
+        if ":" in duration:
+            return parse_duration_text_ms(duration)
     try:
-        value = int(duration)
+        value = float(duration)
     except (TypeError, ValueError):
         return 0
+    if value <= 0:
+        return 0
     if value < 10_000:
-        return value * 1000
-    return value
+        return int(value * 1000)
+    return int(value)
+
+
+def parse_duration_text_ms(duration: str) -> int:
+    parts = duration.split(":")
+    if len(parts) not in (2, 3):
+        return 0
+    try:
+        seconds = float(parts[-1])
+        minutes = int(parts[-2])
+        hours = int(parts[0]) if len(parts) == 3 else 0
+    except (TypeError, ValueError):
+        return 0
+    if hours < 0 or minutes < 0 or seconds < 0:
+        return 0
+    return int((hours * 3600 + minutes * 60 + seconds) * 1000)
 
 
 def play_count(model) -> int:

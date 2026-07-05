@@ -48,8 +48,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -77,6 +79,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,6 +111,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -1642,24 +1646,66 @@ private fun SettingsScreen(
                 if (controller.isDebugLogViewerAvailable) {
                     DebugSettingsPanel(controller)
                 }
-                VersionInfoFooter(appVersionInfo)
+                AppInfoFooter(appVersionInfo)
             }
         }
     }
 }
 
 @Composable
-private fun VersionInfoFooter(appVersionInfo: String?) {
-    if (appVersionInfo.isNullOrBlank()) return
-    Text(
+private fun AppInfoFooter(appVersionInfo: String?) {
+    val uriHandler = LocalUriHandler.current
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp),
-        text = appVersionInfo,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        SourceLinkButton(
+            text = "源代码",
+            onClick = { uriHandler.openUri(FUO_EVOLVE_SOURCE_URL) },
+        )
+        SourceLinkButton(
+            text = "FeelUOwn 主项目",
+            onClick = { uriHandler.openUri(FEELUOWN_SOURCE_URL) },
+        )
+        appVersionInfo?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
+
+@Composable
+private fun SourceLinkButton(
+    text: String,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+    ) {
+        Icon(Icons.Filled.Code, contentDescription = null)
+        Spacer(Modifier.size(8.dp))
+        Text(
+            modifier = Modifier.weight(1f),
+            text = text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.size(8.dp))
+        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+    }
+}
+
+private const val FUO_EVOLVE_SOURCE_URL = "https://github.com/feeluown/FuoEvolve"
+private const val FEELUOWN_SOURCE_URL = "https://github.com/feeluown/FeelUOwn"
 
 @Composable
 private fun ProviderSwitchPanel(
@@ -1800,6 +1846,7 @@ private fun ProviderLoginPanel(
                             selected = activeLoginMode == mode,
                             onClick = { controller.onProviderLoginModeChange(mode) },
                             shape = SegmentedButtonDefaults.itemShape(index = index, count = supportedLoginModes.size),
+                            colors = settingsSegmentedButtonColors(),
                         ) {
                             Text(mode.label())
                         }
@@ -1882,6 +1929,24 @@ private fun ProviderLoginMode.label(): String = when (this) {
 }
 
 @Composable
+private fun settingsSegmentedButtonColors() = SegmentedButtonDefaults.colors(
+    activeContainerColor = MaterialTheme.colorScheme.primary,
+    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+    activeBorderColor = MaterialTheme.colorScheme.primary,
+    inactiveContainerColor = MaterialTheme.colorScheme.surface,
+    inactiveContentColor = MaterialTheme.colorScheme.onSurface,
+    inactiveBorderColor = MaterialTheme.colorScheme.outline,
+)
+
+@Composable
+private fun settingsFilterChipColors() = FilterChipDefaults.filterChipColors(
+    selectedContainerColor = MaterialTheme.colorScheme.primary,
+    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+    containerColor = MaterialTheme.colorScheme.surface,
+    labelColor = MaterialTheme.colorScheme.onSurface,
+)
+
+@Composable
 private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1911,6 +1976,7 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                             index = index,
                             count = UnavailablePlaybackPolicy.entries.size,
                         ),
+                        colors = settingsSegmentedButtonColors(),
                     ) {
                         Text(policy.label)
                     }
@@ -2036,6 +2102,7 @@ private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                             index = index,
                             count = LyricFontSize.entries.size,
                         ),
+                        colors = settingsSegmentedButtonColors(),
                     ) {
                         Text(size.label)
                     }
@@ -2055,6 +2122,7 @@ private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                             index = index,
                             count = ThemeMode.entries.size,
                         ),
+                        colors = settingsSegmentedButtonColors(),
                     ) {
                         Text(mode.label)
                     }
@@ -2184,6 +2252,7 @@ private fun AudioQualityRow(
                     selected = selected == policy,
                     onClick = { onSelect(policy) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = AudioQualityPolicy.entries.size),
+                    colors = settingsSegmentedButtonColors(),
                 ) {
                     Text(policy.label)
                 }
@@ -2283,6 +2352,7 @@ private fun LocalMusicDurationFilterRow(
                     selected = selected == seconds,
                     onClick = { onSelect(seconds) },
                     label = { Text(if (seconds == 0) "不过滤" else "${seconds} 秒") },
+                    colors = settingsFilterChipColors(),
                 )
             }
         }
