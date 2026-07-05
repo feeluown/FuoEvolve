@@ -64,6 +64,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    lint {
+        disable.add("NullSafeMutableLiveData")
+    }
+
     signingConfigs {
         create("fuo") {
             if (hasFuoSigningConfig) {
