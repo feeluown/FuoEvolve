@@ -2861,14 +2861,14 @@ private fun FullPlayer(controller: FuoPlayerController) {
     }
     Surface(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val visualHeight = (maxHeight * 0.48f).coerceAtMost(430.dp)
+            val visualHeight = (maxHeight * 0.42f).coerceAtMost(360.dp)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 20.dp),
+                    .padding(bottom = 36.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Row(
@@ -2913,6 +2913,7 @@ private fun FullPlayer(controller: FuoPlayerController) {
                         )
                     }
                 }
+                Spacer(Modifier.weight(1f))
                 PlayerTitleBlock(currentTrack, state.audioQuality)
                 Text(
                     text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
