@@ -171,9 +171,9 @@ class FuoPlayerController(
         private set
     var lyricFontSize by mutableStateOf(LyricFontSize.Small)
         private set
-    var materialStyle by mutableStateOf(MaterialStyle.MaterialYou)
-        private set
     var themeMode by mutableStateOf(ThemeMode.System)
+        private set
+    var themeColorScheme by mutableStateOf(ThemeColorScheme.Dynamic)
         private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
         private set
@@ -688,13 +688,13 @@ class FuoPlayerController(
         persistSettings()
     }
 
-    fun onMaterialStyleChange(value: MaterialStyle) {
-        materialStyle = value
+    fun onThemeModeChange(value: ThemeMode) {
+        themeMode = value
         persistSettings()
     }
 
-    fun onThemeModeChange(value: ThemeMode) {
-        themeMode = value
+    fun onThemeColorSchemeChange(value: ThemeColorScheme) {
+        themeColorScheme = value
         persistSettings()
     }
 
@@ -2018,8 +2018,8 @@ class FuoPlayerController(
         smartReplacementUseOriginalMetadata = settings.smartReplacementUseOriginalMetadata
         smartReplacementUseOriginalLyrics = settings.smartReplacementUseOriginalLyrics
         lyricFontSize = settings.lyricFontSize
-        materialStyle = settings.materialStyle
         themeMode = settings.themeMode
+        themeColorScheme = settings.themeColorScheme
     }
 
     private fun persistSettings() {
@@ -2048,8 +2048,8 @@ class FuoPlayerController(
             smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
             smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
             lyricFontSize = lyricFontSize,
-            materialStyle = materialStyle,
             themeMode = themeMode,
+            themeColorScheme = themeColorScheme,
         )
         scope.launch {
             settingsStore.save(settings)

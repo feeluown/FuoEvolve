@@ -40,6 +40,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -81,6 +82,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -94,8 +96,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -107,7 +107,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -131,8 +130,8 @@ fun AppRoot(
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     FuoEvolveTheme(
-        materialStyle = controller.materialStyle,
         themeMode = controller.themeMode,
+        themeColorScheme = controller.themeColorScheme,
     ) {
         val destination = appDestination(controller)
         val currentFeature = controller.selectedFeature
@@ -201,48 +200,6 @@ fun AppRoot(
     }
 }
 
-@Composable
-private fun FuoEvolveTheme(
-    materialStyle: MaterialStyle,
-    themeMode: ThemeMode,
-    content: @Composable () -> Unit,
-) {
-    val systemDark = isSystemInDarkTheme()
-    MaterialTheme(
-        colorScheme = materialColorScheme(materialStyle, resolvedDarkTheme(themeMode, systemDark)),
-        content = content,
-    )
-}
-
-internal fun resolvedDarkTheme(themeMode: ThemeMode, systemDark: Boolean): Boolean {
-    return when (themeMode) {
-        ThemeMode.System -> systemDark
-        ThemeMode.Light -> false
-        ThemeMode.Dark -> true
-    }
-}
-
-private fun materialColorScheme(materialStyle: MaterialStyle, darkTheme: Boolean) =
-    when (materialStyle) {
-        MaterialStyle.MaterialYou -> if (darkTheme) darkColorScheme() else lightColorScheme()
-        MaterialStyle.Expressive -> expressiveColorScheme(darkTheme)
-    }
-
-private fun expressiveColorScheme(darkTheme: Boolean) =
-    if (darkTheme) {
-        darkColorScheme(
-            onPrimaryContainer = Color(234, 221, 255),
-            onSecondaryContainer = Color(232, 222, 248),
-            onTertiaryContainer = Color(232, 222, 248),
-        )
-    } else {
-        lightColorScheme(
-            onPrimaryContainer = Color(79, 55, 139),
-            onSecondaryContainer = Color(74, 68, 88),
-            onTertiaryContainer = Color(74, 68, 88),
-        )
-    }
-
 private enum class AppDestination {
     Home,
     Feature,
@@ -293,7 +250,7 @@ private fun HomeScreen(
                         Icon(Icons.Filled.Search, contentDescription = "搜索")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                 ),
             )
@@ -394,6 +351,7 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
 }
 
 @Composable
+@Suppress("DEPRECATION")
 private fun HomeSectionTabs(
     sections: List<Pair<HomeSection, String>>,
     selectedIndex: Int,
@@ -2028,6 +1986,7 @@ private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
 
 @Composable
 private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
+    val darkTheme = resolvedDarkTheme(controller.themeMode, isSystemInDarkTheme())
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -2062,25 +2021,6 @@ private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                 }
             }
             Text(
-                text = "Material 风格",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                MaterialStyle.entries.forEachIndexed { index, style ->
-                    SegmentedButton(
-                        selected = controller.materialStyle == style,
-                        onClick = { controller.onMaterialStyleChange(style) },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = MaterialStyle.entries.size,
-                        ),
-                    ) {
-                        Text(style.label)
-                    }
-                }
-            }
-            Text(
                 text = "外观模式",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2099,7 +2039,78 @@ private fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                     }
                 }
             }
+            Text(
+                text = "配色方案",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeColorScheme.entries.chunked(2).forEach { rowSchemes ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        rowSchemes.forEach { scheme ->
+                            ThemeColorSchemeOption(
+                                modifier = Modifier.weight(1f),
+                                scheme = scheme,
+                                selected = controller.themeColorScheme == scheme,
+                                darkTheme = darkTheme,
+                                onClick = { controller.onThemeColorSchemeChange(scheme) },
+                            )
+                        }
+                        if (rowSchemes.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ThemeColorSchemeOption(
+    modifier: Modifier,
+    scheme: ThemeColorScheme,
+    selected: Boolean,
+    darkTheme: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = MaterialTheme.shapes.medium
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(18.dp)
+                .clip(CircleShape)
+                .background(themePreviewColor(scheme, darkTheme)),
+        )
+        Text(
+            modifier = Modifier.weight(1f),
+            text = scheme.label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -2705,7 +2716,7 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
             }
             if (isArtist) {
                 val tabs = listOf("歌曲", "专辑")
-                TabRow(selectedTabIndex = selectedTabIndex) {
+                PrimaryTabRow(selectedTabIndex = selectedTabIndex) {
                     tabs.forEachIndexed { index, title ->
                         Tab(
                             selected = selectedTabIndex == index,
@@ -3149,7 +3160,7 @@ private fun FullPlayer(controller: FuoPlayerController) {
                         Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
                     }
                 }
-                TabRow(selectedTabIndex = pagerState.currentPage.coerceIn(0, PlayerVisualTab.entries.lastIndex)) {
+                PrimaryTabRow(selectedTabIndex = pagerState.currentPage.coerceIn(0, PlayerVisualTab.entries.lastIndex)) {
                     PlayerVisualTab.entries.forEach { tab ->
                         Tab(
                             selected = pagerState.currentPage == tab.ordinal,

@@ -37,8 +37,8 @@ class IosAppSettingsStore : AppSettingsStore {
             smartReplacementUseOriginalMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA, false),
             smartReplacementUseOriginalLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, false),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
-            materialStyle = enumValue(KEY_MATERIAL_STYLE, MaterialStyle.MaterialYou),
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
+            themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
     }
 
@@ -66,8 +66,8 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setBool(settings.smartReplacementUseOriginalMetadata, KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA)
             defaults.setBool(settings.smartReplacementUseOriginalLyrics, KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS)
             defaults.setObject(settings.lyricFontSize.name, KEY_LYRIC_FONT_SIZE)
-            defaults.setObject(settings.materialStyle.name, KEY_MATERIAL_STYLE)
             defaults.setObject(settings.themeMode.name, KEY_THEME_MODE)
+            defaults.setObject(settings.themeColorScheme.name, KEY_THEME_COLOR_SCHEME)
             defaults.synchronize()
         }
     }
@@ -175,7 +175,7 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
-        private const val KEY_MATERIAL_STYLE = "material_style"
         private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_THEME_COLOR_SCHEME = "theme_color_scheme"
     }
 }

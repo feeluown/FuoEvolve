@@ -40,19 +40,24 @@ enum class LyricFontSize(
     Large("大"),
 }
 
-enum class MaterialStyle(
-    val label: String,
-) {
-    MaterialYou("Material You"),
-    Expressive("Expressive"),
-}
-
 enum class ThemeMode(
     val label: String,
 ) {
     System("跟随系统"),
     Light("亮色"),
     Dark("暗色"),
+}
+
+enum class ThemeColorScheme(
+    val label: String,
+) {
+    Dynamic("动态颜色"),
+    ExpressiveDefault("Expressive 默认"),
+    FuoGreen("青绿"),
+    OceanBlue("海蓝"),
+    Violet("紫罗兰"),
+    Rose("蔷薇"),
+    Amber("琥珀"),
 }
 
 data class AppSettings(
@@ -80,8 +85,8 @@ data class AppSettings(
     val smartReplacementUseOriginalMetadata: Boolean = false,
     val smartReplacementUseOriginalLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
-    val materialStyle: MaterialStyle = MaterialStyle.MaterialYou,
     val themeMode: ThemeMode = ThemeMode.System,
+    val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
 
 data class ProviderHeaderInput(
