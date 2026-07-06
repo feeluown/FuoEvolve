@@ -148,6 +148,7 @@ data class MusicTrack(
     val isUnavailable: Boolean = false,
     val artistItemId: String? = null,
     val albumItemId: String? = null,
+    val providerUrl: String? = null,
 )
 
 data class PlaybackPart(
@@ -458,6 +459,7 @@ data class ProviderPlaylist(
     val coverUrl: String? = null,
     val description: String = "",
     val playCount: Long? = null,
+    val providerUrl: String? = null,
 )
 
 enum class ProviderMediaItemType {
@@ -473,6 +475,7 @@ data class ProviderMediaItem(
     val type: ProviderMediaItemType,
     val coverUrl: String? = null,
     val description: String = "",
+    val providerUrl: String? = null,
 )
 
 data class ProviderContentSection(
@@ -501,6 +504,9 @@ interface ProviderMusicRepository {
     suspend fun updateEnabledProviders(providerIds: Set<String>) = Unit
     suspend fun providers(): List<ProviderInfo>
     suspend fun search(keyword: String, providerId: String? = null): List<MusicTrack>
+    suspend fun trackDetail(trackId: String): MusicTrack {
+        throw UnsupportedOperationException("provider does not support track detail: $trackId")
+    }
     suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,

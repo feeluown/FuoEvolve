@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.Manifest
 import android.app.Activity.RESULT_OK
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +23,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val fuoApplication = application as FuoEvolveApplication
+        val launchSharedText = sharedTextFromIntent(intent)
 
         setContent {
             var hasAudioPermission by remember { mutableStateOf(hasAudioPermission()) }
@@ -63,6 +65,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            LaunchedEffect(Unit) {
+                launchSharedText?.let(controller::openSharedResource)
+            }
+
             AppRoot(
                 controller = controller,
                 hasAudioPermission = hasAudioPermission,
@@ -81,7 +87,16 @@ class MainActivity : ComponentActivity() {
                     ProviderWebLoginActivity.clearWebLoginState()
                     controller.logoutProvider(provider.providerId)
                 },
+                onShareText = ::shareText,
             )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedTextFromIntent(intent)?.let {
+            (application as FuoEvolveApplication).controller.openSharedResource(it)
         }
     }
 
@@ -100,5 +115,20 @@ class MainActivity : ComponentActivity() {
             )
             else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
+    }
+
+    private fun shareText(text: String) {
+        val sendIntent = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, text)
+        startActivity(Intent.createChooser(sendIntent, "分享"))
+    }
+
+    private fun sharedTextFromIntent(intent: Intent?): String? {
+        return when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.dataString
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+            else -> null
+        }?.takeIf { it.isNotBlank() }
     }
 }

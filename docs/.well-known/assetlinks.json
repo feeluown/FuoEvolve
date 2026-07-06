@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "org.feeluown.mobile",
+      "sha256_cert_fingerprints": [
+        "8D:8B:E4:5A:04:CF:32:42:C1:3B:43:36:1C:9F:FA:1C:A8:FB:2F:39:D1:A4:3C:E3:5B:EA:DF:A8:DB:FE:FB:74"
+      ]
+    }
+  }
+]
