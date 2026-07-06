@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -100,6 +101,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -107,13 +109,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -124,6 +129,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
+private val LocalShareHandler = staticCompositionLocalOf<(SharePayload) -> Unit> { {} }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppRoot(
@@ -132,6 +139,7 @@ fun AppRoot(
     onRequestAudioPermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    onShareText: (String) -> Unit = {},
     appVersionInfo: String? = null,
 ) {
     FuoEvolveTheme(
@@ -140,15 +148,24 @@ fun AppRoot(
     ) {
         val destination = appDestination(controller)
         val currentFeature = controller.selectedFeature
+        val currentTrack = controller.selectedTrack
         val currentPlaylist = controller.selectedPlaylist
         val currentMediaItem = controller.selectedMediaItem
+        var sharePayload by remember { mutableStateOf<SharePayload?>(null) }
+        val clipboardManager = LocalClipboardManager.current
         var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
+        var lastTrack by remember { mutableStateOf<MusicTrack?>(null) }
         var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
         var lastMediaItem by remember { mutableStateOf<ProviderMediaItem?>(null) }
 
         LaunchedEffect(currentFeature) {
             if (currentFeature != null) {
                 lastFeature = currentFeature
+            }
+        }
+        LaunchedEffect(currentTrack) {
+            if (currentTrack != null) {
+                lastTrack = currentTrack
             }
         }
         LaunchedEffect(currentPlaylist) {
@@ -162,6 +179,7 @@ fun AppRoot(
             }
         }
 
+        CompositionLocalProvider(LocalShareHandler provides { sharePayload = it }) {
         Box(modifier = Modifier.fillMaxSize()) {
             AnimatedContent(
                 targetState = destination,
@@ -191,6 +209,7 @@ fun AppRoot(
                     )
                     AppDestination.Search -> SearchScreen(controller)
                     AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
+                    AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
                     AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
                     AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                 }
@@ -206,6 +225,21 @@ fun AppRoot(
             controller.localMetadataEditorTrack?.let { track ->
                 LocalMetadataDialog(controller = controller, track = track)
             }
+            sharePayload?.let { payload ->
+                ShareResourceDialog(
+                    payload = payload,
+                    onDismiss = { sharePayload = null },
+                    onShare = { text ->
+                        sharePayload = null
+                        onShareText(text)
+                    },
+                    onCopy = { text ->
+                        clipboardManager.setText(AnnotatedString(text))
+                        sharePayload = null
+                    },
+                )
+            }
+        }
         }
     }
 }
@@ -213,6 +247,7 @@ fun AppRoot(
 private enum class AppDestination {
     Home,
     Feature,
+    Track,
     Playlist,
     Search,
     Settings,
@@ -224,6 +259,7 @@ private fun appDestination(controller: FuoPlayerController): AppDestination {
     return when {
         controller.isDebugLogOpen -> AppDestination.DebugLogs
         controller.isSettingsOpen -> AppDestination.Settings
+        controller.selectedTrack != null -> AppDestination.Track
         controller.selectedMediaItem != null -> AppDestination.MediaItem
         controller.selectedPlaylist != null -> AppDestination.Playlist
         controller.selectedFeature != null -> AppDestination.Feature
@@ -892,6 +928,93 @@ private fun PlayAllButton(onClick: () -> Unit, enabled: Boolean = true) {
 }
 
 @Composable
+private fun ShareTextButton(payload: SharePayload?) {
+    val onShare = LocalShareHandler.current
+    TextButton(
+        onClick = { if (payload != null) onShare(payload) },
+        enabled = payload != null,
+    ) {
+        Icon(
+            Icons.Filled.Share,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.size(4.dp))
+        Text("分享")
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShareResourceDialog(
+    payload: SharePayload,
+    onDismiss: () -> Unit,
+    onShare: (String) -> Unit,
+    onCopy: (String) -> Unit,
+) {
+    var mode by remember(payload) { mutableStateOf(ShareMode.FullText) }
+    val modes = listOf(
+        ShareMode.FullText to "完整文本",
+        ShareMode.FuoLink to "Fuo 链接",
+        ShareMode.ProviderLink to "原站链接",
+    )
+    val content = payload.content(mode)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("分享${payload.resource.type.displayName}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    modes.forEachIndexed { index, (itemMode, label) ->
+                        SegmentedButton(
+                            selected = mode == itemMode,
+                            onClick = { mode = itemMode },
+                            enabled = itemMode != ShareMode.ProviderLink || payload.providerUrl != null,
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
+                        ) {
+                            Text(label)
+                        }
+                    }
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text(
+                        modifier = Modifier.padding(12.dp),
+                        text = content ?: "当前 provider 不支持原站链接",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { content?.let(onShare) },
+                enabled = content != null,
+            ) {
+                Text("分享")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = { content?.let(onCopy) },
+                    enabled = content != null,
+                ) {
+                    Text("复制")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+            }
+        },
+    )
+}
+
+@Composable
 private fun ProviderDetailHeader(
     track: MusicTrack,
     title: String,
@@ -971,6 +1094,7 @@ private fun ProviderPlaylist.toDisplayTrack(): MusicTrack {
         sourceType = TrackSourceType.Provider,
         coverUrl = coverUrl,
         providerName = providerName,
+        providerUrl = providerUrl,
     )
 }
 
@@ -984,6 +1108,7 @@ private fun ProviderMediaItem.toDisplayTrack(): MusicTrack {
         sourceType = TrackSourceType.Provider,
         coverUrl = coverUrl,
         providerName = providerName,
+        providerUrl = providerUrl,
     )
 }
 
@@ -2668,8 +2793,85 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController, feature: Prov
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
+    val displayTrack = controller.selectedTrack ?: track ?: return
+    val sharePayload = displayTrack.toSharePayload()
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = displayTrack.title.ifBlank { "歌曲" },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = controller::closeTrack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    val onShare = LocalShareHandler.current
+                    IconButton(
+                        onClick = { if (sharePayload != null) onShare(sharePayload) },
+                        enabled = sharePayload != null,
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = "分享")
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            if (controller.playbackState.currentTrack != null) {
+                MiniPlayer(controller)
+            }
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            LoadingIndicator(controller.isLoading)
+            ProviderDetailHeader(
+                track = displayTrack,
+                title = displayTrack.title.ifBlank { "未知歌曲" },
+                subtitle = buildList {
+                    if (displayTrack.artists.isNotBlank()) add(displayTrack.artists)
+                    if (displayTrack.album.isNotBlank()) add("《${displayTrack.album}》")
+                    add(displayTrack.providerName ?: displayTrack.source)
+                }.joinToString(" · "),
+                description = "",
+                action = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = controller::playSelectedTrack) {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.size(4.dp))
+                            Text("播放")
+                        }
+                        ShareTextButton(sharePayload)
+                    }
+                },
+            )
+            if (controller.selectedTrackError != null) {
+                ProviderContentMessage(controller.selectedTrackError.orEmpty())
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPlaylist?) {
     val displayPlaylist = controller.selectedPlaylist ?: playlist ?: return
+    val sharePayload = displayPlaylist.toSharePayload()
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -2683,6 +2885,15 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
                 navigationIcon = {
                     IconButton(onClick = controller::closePlaylist) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    val onShare = LocalShareHandler.current
+                    IconButton(
+                        onClick = { if (sharePayload != null) onShare(sharePayload) },
+                        enabled = sharePayload != null,
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = "分享")
                     }
                 },
             )
@@ -2712,10 +2923,15 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
                 description = displayPlaylist.description,
                 action = if (controller.selectedPlaylistTracks.isNotEmpty()) {
                     {
-                        PlayAllButton(onClick = controller::playAllFromSelectedPlaylist)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PlayAllButton(onClick = controller::playAllFromSelectedPlaylist)
+                            ShareTextButton(sharePayload)
+                        }
                     }
                 } else {
-                    null
+                    {
+                        ShareTextButton(sharePayload)
+                    }
                 },
             )
             if (controller.selectedPlaylistError != null) {
@@ -2763,6 +2979,7 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
 private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMediaItem?) {
     val displayItem = controller.selectedMediaItem ?: item ?: return
     val isArtist = displayItem.type == ProviderMediaItemType.Artist
+    val sharePayload = displayItem.toSharePayload()
     var selectedTabIndex by remember(displayItem.id) { mutableStateOf(0) }
     Scaffold(
         topBar = {
@@ -2779,6 +2996,15 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
                 navigationIcon = {
                     IconButton(onClick = controller::closeMediaItem) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    val onShare = LocalShareHandler.current
+                    IconButton(
+                        onClick = { if (sharePayload != null) onShare(sharePayload) },
+                        enabled = sharePayload != null,
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = "分享")
                     }
                 },
             )
@@ -2809,10 +3035,15 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
                 description = displayItem.description,
                 action = if (controller.selectedMediaItemTracks.isNotEmpty()) {
                     {
-                        PlayAllButton(onClick = controller::playAllFromSelectedMediaItem)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PlayAllButton(onClick = controller::playAllFromSelectedMediaItem)
+                            ShareTextButton(sharePayload)
+                        }
                     }
                 } else {
-                    null
+                    {
+                        ShareTextButton(sharePayload)
+                    }
                 },
             )
             if (controller.selectedMediaItemError != null) {
@@ -3024,6 +3255,8 @@ private fun TrackRow(
     onOpenAlbum: () -> Unit,
     onEditLocalMetadata: (() -> Unit)? = null,
 ) {
+    val onShare = LocalShareHandler.current
+    val sharePayload = track.toSharePayload()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -3064,6 +3297,7 @@ private fun TrackRow(
             onOpenArtist = onOpenArtist,
             onOpenAlbum = onOpenAlbum,
             onEditLocalMetadata = onEditLocalMetadata,
+            onShare = sharePayload?.let { payload -> { onShare(payload) } },
         )
     }
 }
@@ -3092,6 +3326,7 @@ private fun TrackAction(
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
     onEditLocalMetadata: (() -> Unit)?,
+    onShare: (() -> Unit)?,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -3169,6 +3404,16 @@ private fun TrackAction(
                     onOpenAlbum()
                 },
             )
+            if (onShare != null) {
+                DropdownMenuItem(
+                    text = { Text("分享") },
+                    leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onShare()
+                    },
+                )
+            }
         }
     }
 }

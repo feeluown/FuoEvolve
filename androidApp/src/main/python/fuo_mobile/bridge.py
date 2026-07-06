@@ -541,6 +541,13 @@ class FuoMobileBridge:
                 tracks.append(track)
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
+    def track_detail(self, track_id: str) -> str:
+        song = self._tracks.get(track_id)
+        if song is None:
+            song = self._song_from_track_id(track_id)
+            self._tracks[track_id] = song
+        return json.dumps({"track": self._remember_song(song)}, ensure_ascii=False)
+
     def resolve(
         self,
         track_id: str,
@@ -1467,6 +1474,7 @@ def song_to_dict(song, library: Library) -> Dict[str, Any]:
         "cover_url": normalize_image_url(display(song, "pic_url")),
         "artist_item_id": first_artist_item_id(song),
         "album_item_id": album_item_id(song),
+        "provider_url": song_provider_url(song, library),
     }
 
 
@@ -1504,6 +1512,7 @@ def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:
         "cover_url": normalize_image_url(display(playlist, "cover")),
         "description": display(playlist, "description") or display(playlist, "creator_name"),
         "play_count": play_count(playlist),
+        "provider_url": provider_web_url(source, "playlist", identifier),
     }
 
 
@@ -1518,6 +1527,7 @@ def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]
         "type": "Artist" if item_type == "artist" else "Album",
         "cover_url": normalize_image_url(display(item, "pic_url") or display(item, "cover") or display(item, "cover_url")),
         "description": display(item, "description") or display(item, "artists_name"),
+        "provider_url": provider_web_url(source, item_type, identifier),
     }
 
 
@@ -1555,6 +1565,44 @@ def normalize_image_url(url: Optional[str]) -> str:
     if value.startswith("http://qpic.y.qq.com/") or value.startswith("http://y.gtimg.cn/"):
         return "https://" + value[len("http://"):]
     return value
+
+
+def song_provider_url(song, library: Library) -> str:
+    try:
+        url = library.song_get_web_url(song)
+        if url:
+            return str(url)
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return provider_web_url(getattr(song, "source", ""), "song", getattr(song, "identifier", ""))
+
+
+def provider_web_url(source: str, resource_type: str, identifier: str) -> str:
+    if not source or not identifier:
+        return ""
+    if source == "netease":
+        path = {
+            "song": "song",
+            "playlist": "playlist",
+            "artist": "artist",
+            "album": "album",
+        }.get(resource_type)
+        return f"https://y.music.163.com/m/{path}?id={identifier}" if path else ""
+    if source == "qqmusic":
+        path = {
+            "song": "songDetail",
+            "artist": "singer",
+            "album": "albumDetail",
+        }.get(resource_type)
+        return f"https://y.qq.com/n/ryqq/{path}/{identifier}" if path else ""
+    if source == "ytmusic":
+        if resource_type == "song":
+            return f"https://music.youtube.com/watch?v={identifier}"
+        if resource_type == "playlist":
+            return f"https://music.youtube.com/playlist?list={identifier}"
+    if source == "bilibili" and resource_type == "song":
+        return f"https://www.bilibili.com/video/{identifier}"
+    return ""
 
 
 def display_artists(song) -> str:

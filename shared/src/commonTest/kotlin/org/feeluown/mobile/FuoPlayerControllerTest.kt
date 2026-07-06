@@ -11,9 +11,115 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FuoPlayerControllerTest {
+    @Test
+    fun providerTrackSharePayloadUsesFuoUriAndProviderUrl() {
+        val track = providerTrack("netease:1811961337", "Igallta").copy(
+            artists = "Se-U-Ra",
+            album = "Igallta",
+            providerUrl = "https://y.music.163.com/m/song?id=1811961337",
+        )
+
+        val payload = track.toSharePayload()
+
+        assertEquals("fuo://netease/songs/1811961337", payload?.fuoUri)
+        assertEquals("https://y.music.163.com/m/song?id=1811961337", payload?.content(ShareMode.ProviderLink))
+        assertEquals("fuo://netease/songs/1811961337", payload?.content(ShareMode.FuoLink))
+        assertEquals(
+            "《Igallta》 - Se-U-Ra，来自专辑《Igallta》\n" +
+                "来源：网易云音乐\n" +
+                "点击 https://y.music.163.com/m/song?id=1811961337 一起听\n" +
+                "或复制到 FuoEvolve：\n" +
+                "fuo://netease/songs/1811961337",
+            payload?.content(ShareMode.FullText),
+        )
+    }
+
+    @Test
+    fun sharePayloadWithoutProviderUrlDisablesProviderLinkOnly() {
+        val payload = ProviderPlaylist(
+            id = "playlist:netease:123",
+            title = "每日推荐",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        ).toSharePayload()
+
+        assertEquals("fuo://netease/playlists/123", payload?.fuoUri)
+        assertNull(payload?.content(ShareMode.ProviderLink))
+    }
+
+    @Test
+    fun parseSharedResourceSupportsCanonicalAndShortSongUris() {
+        val canonical = parseSharedResource("复制到 FuoEvolve：fuo://netease/albums/456")
+        val shortSong = parseSharedResource("fuo://netease/1811961337")
+
+        assertEquals(ShareResourceType.Album, canonical?.type)
+        assertEquals("netease", canonical?.providerId)
+        assertEquals("456", canonical?.identifier)
+        assertEquals(ShareResourceType.Song, shortSong?.type)
+        assertEquals("1811961337", shortSong?.identifier)
+    }
+
+    @Test
+    fun openSharedSongEnablesProviderAndLoadsTrack() = runTest {
+        val providerTrack = providerTrack("qqmusic:abc", "Shared Song").copy(
+            source = "qqmusic",
+            providerName = "QQ 音乐",
+        )
+        val provider = FakeProviderRepository(listOf(providerTrack))
+        val settings = FakeSettingsStore(AppSettings(enabledProviderIds = setOf("netease")))
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = settings,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openSharedResource("fuo://qqmusic/songs/abc")
+            advanceUntilIdle()
+
+            assertEquals("qqmusic:abc", provider.lastTrackDetailId)
+            assertEquals("Shared Song", controller.selectedTrack?.title)
+            assertEquals(setOf("netease", "qqmusic"), provider.lastEnabledProviderIds)
+            assertEquals(setOf("netease", "qqmusic"), settings.saved.enabledProviderIds)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun invalidSharedResourceDoesNotNavigate() = runTest {
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openSharedResource("hello")
+            advanceUntilIdle()
+
+            assertNull(controller.selectedTrack)
+            assertNull(controller.selectedPlaylist)
+            assertNull(controller.selectedMediaItem)
+            assertEquals("无法识别分享链接", controller.message)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
     @Test
     fun downloadedProviderTrackUsesLocalPayload() = runTest {
         val provider = FakeProviderRepository(listOf(providerTrack("provider:1", "First")))
@@ -1920,6 +2026,7 @@ class FuoPlayerControllerTest {
         var lastSmartReplacementMinScore: Double? = null
         var lastSmartReplacementUseOriginalMetadata: Boolean? = null
         var lastSmartReplacementUseOriginalLyrics: Boolean? = null
+        var lastTrackDetailId: String? = null
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
         val loadedMediaItemIds = mutableListOf<String>()
@@ -1937,6 +2044,11 @@ class FuoPlayerControllerTest {
             availableProviderInfos.filter { it.providerId in enabledProviderIds }
 
         override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = tracks
+
+        override suspend fun trackDetail(trackId: String): MusicTrack {
+            lastTrackDetailId = trackId
+            return tracks.firstOrNull { it.id == trackId } ?: throw RuntimeException("track not found: $trackId")
+        }
 
         override suspend fun resolve(
             track: MusicTrack,

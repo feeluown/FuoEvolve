@@ -81,6 +81,22 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun trackDetail(trackId: String): MusicTrack {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "trackDetail start trackId=$trackId")
+                val raw = requireNotNull(bridge).callAttr("track_detail", trackId).toString()
+                JSONObject(raw).getJSONObject("track").toTrack().also {
+                    Log.d(TAG, "trackDetail done trackId=$trackId title=${it.title}")
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "trackDetail failed trackId=$trackId", throwable)
+                throw throwable
+            }
+        }
+    }
+
     override suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy,
@@ -311,6 +327,7 @@ class AndroidFuoCoreBridge(
             coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
             description = optString("description"),
             playCount = optLong("play_count").takeIf { it > 0 },
+            providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
         )
     }
 
@@ -332,6 +349,7 @@ class AndroidFuoCoreBridge(
             type = ProviderMediaItemType.valueOf(optString("type")),
             coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
             description = optString("description"),
+            providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
         )
     }
 
@@ -361,6 +379,7 @@ class AndroidFuoCoreBridge(
             providerName = optString("provider_name").ifBlank { source }.takeIf { it.isNotBlank() },
             artistItemId = optString("artist_item_id").takeIf { it.isNotBlank() },
             albumItemId = optString("album_item_id").takeIf { it.isNotBlank() },
+            providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
         )
     }
 

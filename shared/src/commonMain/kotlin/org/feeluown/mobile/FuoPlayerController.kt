@@ -101,6 +101,10 @@ class FuoPlayerController(
         private set
     var selectedMediaItemError by mutableStateOf<String?>(null)
         private set
+    var selectedTrack by mutableStateOf<MusicTrack?>(null)
+        private set
+    var selectedTrackError by mutableStateOf<String?>(null)
+        private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var query by mutableStateOf("")
@@ -203,6 +207,7 @@ class FuoPlayerController(
             isSettingsOpen ||
             isSearchOpen ||
             selectedFeature != null ||
+            selectedTrack != null ||
             selectedMediaItem != null ||
             selectedPlaylist != null
 
@@ -368,6 +373,10 @@ class FuoPlayerController(
             }
             isSettingsOpen -> {
                 closeSettings()
+                true
+            }
+            selectedTrack != null -> {
+                closeTrack()
                 true
             }
             selectedMediaItem != null -> {
@@ -1120,6 +1129,83 @@ class FuoPlayerController(
         selectedFeatureError = null
     }
 
+    fun openTrackDetail(track: MusicTrack) {
+        if (track.sourceType != TrackSourceType.Provider) return
+        selectedTrack = track
+        selectedTrackError = null
+    }
+
+    fun openSharedResource(text: String) {
+        val resource = parseSharedResource(text)
+        if (resource == null) {
+            message = "无法识别分享链接"
+            return
+        }
+        scope.launch {
+            if (availableProviders.isEmpty()) {
+                runCatching { refreshProviderCatalog() }
+                    .onFailure {
+                        setError(it)
+                        return@launch
+                    }
+            }
+            val knownProviderIds = availableProviders.map { it.providerId }.toSet()
+            if (knownProviderIds.isNotEmpty() && resource.providerId !in knownProviderIds) {
+                message = "未找到 provider：${resource.providerId}"
+                return@launch
+            }
+            if (resource.providerId !in enabledProviderIds && resource.providerId in knownProviderIds) {
+                enabledProviderIds = enabledProviderIds + resource.providerId
+                persistSettings()
+                runCatching {
+                    providerRepository.updateEnabledProviders(enabledProviderIds)
+                    refreshProviderCatalog()
+                }.onFailure {
+                    setError(it)
+                    return@launch
+                }
+            }
+            when (resource.type) {
+                ShareResourceType.Song -> openSharedTrack(resource)
+                ShareResourceType.Playlist -> openPlaylist(resource.toProviderPlaylist())
+                ShareResourceType.Artist,
+                ShareResourceType.Album -> openMediaItem(resource.toProviderMediaItem())
+            }
+        }
+    }
+
+    private suspend fun openSharedTrack(resource: ShareResourceRef) {
+        val placeholder = MusicTrack(
+            id = resource.toProviderTrackId(),
+            title = resource.title,
+            artists = resource.artists,
+            album = resource.album,
+            source = resource.providerId,
+            sourceType = TrackSourceType.Provider,
+            providerName = resource.providerName,
+        )
+        selectedTrack = placeholder
+        selectedTrackError = null
+        isLoading = true
+        message = "正在加载：${resource.providerId}"
+        runCatching { providerRepository.trackDetail(resource.toProviderTrackId()) }
+            .onSuccess {
+                selectedTrack = it
+                selectedTrackError = null
+                message = it.title.ifBlank { "歌曲已加载" }
+            }
+            .onFailure {
+                selectedTrackError = it.message ?: "资源加载失败"
+                message = "资源加载失败"
+            }
+        isLoading = false
+    }
+
+    fun closeTrack() {
+        selectedTrack = null
+        selectedTrackError = null
+    }
+
     fun openPlaylist(playlist: ProviderPlaylist) {
         selectedPlaylist = playlist
         selectedPlaylistTracks = emptyList()
@@ -1271,6 +1357,11 @@ class FuoPlayerController(
 
     fun playAllFromSelectedMediaItem() {
         playFirst(selectedMediaItemTracks)
+    }
+
+    fun playSelectedTrack() {
+        val track = selectedTrack ?: return
+        play(track, listOf(track), 0)
     }
 
     fun playQueueIndex(index: Int) {
@@ -1544,9 +1635,11 @@ class FuoPlayerController(
         minePlaylistSections = emptyList()
         mineFavoritePlaylistSections = emptyList()
         selectedFeature = null
+        selectedTrack = null
         selectedPlaylist = null
         selectedMediaItem = null
         selectedFeatureTracks = emptyList()
+        selectedTrackError = null
         selectedPlaylistTracks = emptyList()
         selectedMediaItemTracks = emptyList()
         selectedMediaItemAlbums = emptyList()
