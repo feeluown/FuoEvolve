@@ -5,8 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -227,6 +229,8 @@ class FuoPlayerController(
     private var autoAdvanceEligibleTrackId: String? = null
     private var playRequestSerial: Long = 0
     private var localMusicRefreshSerial: Long = 0
+    private var hasLocalMusicPermission: Boolean = false
+    private var pendingLocalMusicMediaRefresh: Job? = null
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
 
@@ -296,6 +300,18 @@ class FuoPlayerController(
                 )
             }
         }
+        scope.launch {
+            localRepository.mediaChangeEvents.collect {
+                pendingLocalMusicMediaRefresh?.cancel()
+                pendingLocalMusicMediaRefresh = launch {
+                    delay(750)
+                    if (hasLocalMusicPermission && localRepository.isDatabaseReady()) {
+                        val showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic
+                        refreshLocalMusic(forceRefresh = true, showLoading = showLoading)
+                    }
+                }
+            }
+        }
     }
 
     fun authStateFor(provider: ProviderInfo): ProviderAuthState {
@@ -328,23 +344,92 @@ class FuoPlayerController(
         }
     }
 
+    fun onLocalMusicPermissionChange(hasPermission: Boolean) {
+        val wasGranted = hasLocalMusicPermission
+        hasLocalMusicPermission = hasPermission
+        if (hasPermission && !wasGranted && homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic) {
+            ensureLocalMusic()
+        }
+    }
+
+    fun ensureLocalMusic() {
+        if (!hasLocalMusicPermission) return
+        refreshLocalMusic(forceRefresh = false, showLoading = true)
+    }
+
     fun refreshLocalMusic() {
+        if (!hasLocalMusicPermission) {
+            message = "允许访问音频后可加载本地音乐"
+            return
+        }
+        refreshLocalMusic(forceRefresh = true, showLoading = true)
+    }
+
+    private fun refreshLocalMusic(forceRefresh: Boolean, showLoading: Boolean) {
+        val refreshSerial = ++localMusicRefreshSerial
+        scope.launch {
+            if (showLoading) {
+                isLoading = true
+                message = if (forceRefresh) "正在刷新本地音乐库" else "正在加载本地音乐"
+            }
+            val result = runCatching {
+                updateLocalMusicScanSettings()
+                val databaseReady = localRepository.isDatabaseReady()
+                val databaseStale = databaseReady && localRepository.isDatabaseStale()
+                val shouldRefresh = forceRefresh || !databaseReady || databaseStale
+                if (showLoading) {
+                    message = when {
+                        !databaseReady -> "正在建立本地音乐库"
+                        shouldRefresh -> "正在更新本地音乐库"
+                        else -> "正在加载本地音乐"
+                    }
+                }
+                val tracks = if (shouldRefresh) {
+                    localRepository.refreshDatabase()
+                } else {
+                    localRepository.tracks()
+                }
+                localMusicDirectories = localRepository.directories()
+                tracks
+            }
+            if (refreshSerial == localMusicRefreshSerial) {
+                result
+                    .onSuccess {
+                        localTracks = it
+                        if (showLoading) {
+                            message = if (it.isEmpty()) "未发现本地音乐" else "本地音乐 ${it.size} 首"
+                        }
+                    }
+                    .onFailure {
+                        if (showLoading) {
+                            setError(it)
+                        }
+                    }
+            }
+            if (showLoading) isLoading = false
+        }
+    }
+
+    private fun reloadLocalMusic() {
+        if (!hasLocalMusicPermission) return
         val refreshSerial = ++localMusicRefreshSerial
         scope.launch {
             isLoading = true
-            message = "正在扫描本地音乐"
+            message = "正在更新本地音乐筛选"
             val result = runCatching {
                 updateLocalMusicScanSettings()
+                val tracks = localRepository.tracks()
                 localMusicDirectories = localRepository.directories()
-                localRepository.scan()
+                tracks
             }
-            if (refreshSerial != localMusicRefreshSerial) return@launch
-            result
-                .onSuccess {
-                    localTracks = it
-                    message = if (it.isEmpty()) "未发现本地音乐" else "本地音乐 ${it.size} 首"
-                }
-                .onFailure { setError(it) }
+            if (refreshSerial == localMusicRefreshSerial) {
+                result
+                    .onSuccess {
+                        localTracks = it
+                        message = if (it.isEmpty()) "未发现本地音乐" else "本地音乐 ${it.size} 首"
+                    }
+                    .onFailure { setError(it) }
+            }
             isLoading = false
         }
     }
@@ -752,7 +837,7 @@ class FuoPlayerController(
             MineSection.Playlists -> if (minePlaylistSections.isEmpty()) refreshMinePlaylistContent()
             MineSection.Artists,
             MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
-            MineSection.LocalMusic -> if (localTracks.isEmpty()) refreshLocalMusic()
+            MineSection.LocalMusic -> ensureLocalMusic()
         }
     }
 
@@ -773,13 +858,13 @@ class FuoPlayerController(
             excludedLocalMusicDirectoryIds + directoryId
         }
         persistSettings()
-        refreshLocalMusic()
+        reloadLocalMusic()
     }
 
     fun onLocalMusicMinDurationChange(value: Int) {
         localMusicMinDurationSeconds = value
         persistSettings()
-        refreshLocalMusic()
+        reloadLocalMusic()
     }
 
     fun openLocalMetadataEditor(track: MusicTrack) {
@@ -815,7 +900,7 @@ class FuoPlayerController(
             runCatching {
                 localRepository.updateMetadata(track, metadata)
                 updateLocalMusicScanSettings()
-                localRepository.scan()
+                localRepository.refreshDatabase()
             }.onSuccess {
                 localTracks = it
                 updateLocalTrackCopies(track.id, it.firstOrNull { item -> item.id == track.id } ?: track.copy(
@@ -893,11 +978,11 @@ class FuoPlayerController(
                     message = "未获取到歌词"
                     localMetadataSearchMessage = "未获取到歌词"
                 } else {
-                    runCatching {
-                        localRepository.saveLyrics(track, lyrics)
-                        updateLocalMusicScanSettings()
-                        localRepository.scan()
-                    }.onSuccess {
+                        runCatching {
+                            localRepository.saveLyrics(track, lyrics)
+                            updateLocalMusicScanSettings()
+                            localRepository.refreshDatabase()
+                        }.onSuccess {
                         localTracks = it
                         val updatedTrack = it.firstOrNull { item -> item.id == track.id } ?: track.copy(lyrics = lyrics)
                         updateLocalTrackCopies(track.id, updatedTrack)
@@ -1066,7 +1151,7 @@ class FuoPlayerController(
             }
             MineSection.Artists,
             MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
-            MineSection.LocalMusic -> if (localTracks.isEmpty()) refreshLocalMusic()
+            MineSection.LocalMusic -> ensureLocalMusic()
         }
     }
 
@@ -1075,7 +1160,7 @@ class FuoPlayerController(
             MineSection.Playlists -> refreshMinePlaylistContent()
             MineSection.Artists,
             MineSection.Albums -> refreshMineContent()
-            MineSection.LocalMusic -> refreshLocalMusic()
+            MineSection.LocalMusic -> ensureLocalMusic()
         }
     }
 
@@ -1536,7 +1621,9 @@ class FuoPlayerController(
         scope.launch {
             runCatching { downloadRepository.download(track) }
                 .onSuccess {
-                    refreshLocalMusic()
+                    if (hasLocalMusicPermission) {
+                        refreshLocalMusic(forceRefresh = true, showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic)
+                    }
                     message = "已下载：${track.title}"
                 }
                 .onFailure { setError(it) }
@@ -1547,7 +1634,9 @@ class FuoPlayerController(
         scope.launch {
             runCatching { downloadRepository.deleteDownloaded(track) }
                 .onSuccess {
-                    refreshLocalMusic()
+                    if (hasLocalMusicPermission) {
+                        refreshLocalMusic(forceRefresh = true, showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic)
+                    }
                     message = "已删除下载：${track.title}"
                 }
                 .onFailure { setError(it) }

@@ -296,17 +296,24 @@ private fun HomeScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!hasAudioPermission) {
-                PermissionPanel(onRequestAudioPermission)
-            }
             LoadingIndicator(controller.isLoading)
-            HomeSectionPager(controller, Modifier.weight(1f))
+            HomeSectionPager(
+                controller = controller,
+                hasAudioPermission = hasAudioPermission,
+                onRequestAudioPermission = onRequestAudioPermission,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
 
 @Composable
-private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier) {
+private fun HomeSectionPager(
+    controller: FuoPlayerController,
+    hasAudioPermission: Boolean,
+    onRequestAudioPermission: () -> Unit,
+    modifier: Modifier,
+) {
     val sections = listOf(
         HomeSection.Recommend to "推荐",
         HomeSection.Music to "探索",
@@ -371,6 +378,8 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
                 )
                 HomeSection.Mine -> MineHomeSection(
                     controller = controller,
+                    hasAudioPermission = hasAudioPermission,
+                    onRequestAudioPermission = onRequestAudioPermission,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1070,7 +1079,12 @@ private fun EmptyProviderContentHint(title: String) {
 }
 
 @Composable
-private fun MineHomeSection(controller: FuoPlayerController, modifier: Modifier) {
+private fun MineHomeSection(
+    controller: FuoPlayerController,
+    hasAudioPermission: Boolean,
+    onRequestAudioPermission: () -> Unit,
+    modifier: Modifier,
+) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1086,6 +1100,7 @@ private fun MineHomeSection(controller: FuoPlayerController, modifier: Modifier)
                 fontWeight = FontWeight.SemiBold,
             )
             IconButton(
+                enabled = controller.mineSection != MineSection.LocalMusic || hasAudioPermission,
                 onClick = {
                     when (controller.mineSection) {
                         MineSection.Playlists -> controller.refreshMinePlaylistContent()
@@ -1118,6 +1133,8 @@ private fun MineHomeSection(controller: FuoPlayerController, modifier: Modifier)
             )
             MineSection.LocalMusic -> LocalMusicSection(
                 controller = controller,
+                hasAudioPermission = hasAudioPermission,
+                onRequestAudioPermission = onRequestAudioPermission,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -1317,7 +1334,18 @@ private fun MineMediaItemsSection(
 }
 
 @Composable
-private fun LocalMusicSection(controller: FuoPlayerController, modifier: Modifier) {
+private fun LocalMusicSection(
+    controller: FuoPlayerController,
+    hasAudioPermission: Boolean,
+    onRequestAudioPermission: () -> Unit,
+    modifier: Modifier,
+) {
+    LaunchedEffect(hasAudioPermission) {
+        controller.onLocalMusicPermissionChange(hasAudioPermission)
+        if (hasAudioPermission) {
+            controller.ensureLocalMusic()
+        }
+    }
     val displayTracks = remember(controller.localTracks, controller.localMusicViewMode) {
         when (controller.localMusicViewMode) {
             LocalMusicViewMode.All -> controller.localTracks.sortedWith(
@@ -1359,6 +1387,10 @@ private fun LocalMusicSection(controller: FuoPlayerController, modifier: Modifie
                     Icon(Icons.Filled.Refresh, contentDescription = "刷新本地音乐")
                 }
             }
+        }
+        if (!hasAudioPermission) {
+            PermissionPanel(onRequestAudioPermission)
+            return@Column
         }
         LocalMusicViewModeTabs(controller)
         LazyColumn(

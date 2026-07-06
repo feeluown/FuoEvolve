@@ -1,11 +1,13 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -1305,6 +1307,8 @@ class FuoPlayerControllerTest {
             )
 
             advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
+            advanceUntilIdle()
 
             assertEquals(HomeSection.Mine, controller.homeSection)
             assertEquals(MineSection.LocalMusic, controller.mineSection)
@@ -1387,7 +1391,7 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun staleLocalMusicRefreshDoesNotOverrideLatestDirectoryFilter() = runTest {
+    fun staleLocalMusicRefreshDoesNotOverrideLatestRefresh() = runTest {
         val staleScan = CompletableDeferred<List<MusicTrack>>()
         val filteredScan = CompletableDeferred<List<MusicTrack>>()
         val local = DeferredScanLocalMusicRepository(
@@ -1405,22 +1409,169 @@ class FuoPlayerControllerTest {
             )
 
             advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
             controller.refreshLocalMusic()
             advanceUntilIdle()
-            controller.onLocalMusicDirectoryEnabledChange("Blocked/", enabled = false)
+            controller.refreshLocalMusic()
             advanceUntilIdle()
 
             filteredScan.complete(listOf(localTrack("local:content://music/allowed", "Allowed")))
             advanceUntilIdle()
 
-            assertEquals(setOf("Blocked/"), controller.excludedLocalMusicDirectoryIds)
             assertEquals(listOf("Allowed"), controller.localTracks.map { it.title })
 
             staleScan.complete(listOf(localTrack("local:content://music/blocked", "Blocked")))
             advanceUntilIdle()
 
             assertEquals(listOf("Allowed"), controller.localTracks.map { it.title })
-            assertEquals(LocalMusicScanSettings(setOf("Blocked/"), 0), local.lastSettings)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun localMusicTabWithoutPermissionDoesNotReadOrRefreshDatabase() = runTest {
+        val local = FakeLocalMusicRepository(databaseReady = false)
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onHomeSectionChange(HomeSection.Mine)
+            controller.onMineSectionChange(MineSection.LocalMusic)
+            advanceUntilIdle()
+
+            assertEquals(0, local.refreshDatabaseCount)
+            assertEquals(0, local.tracksReadCount)
+            assertEquals(emptyList(), controller.localTracks)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun firstLocalMusicEntryWithPermissionRefreshesDatabaseOnce() = runTest {
+        val local = FakeLocalMusicRepository(
+            tracks = listOf(localTrack("local:content://music/1", "Local")),
+            databaseReady = false,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
+            controller.onHomeSectionChange(HomeSection.Mine)
+            controller.onMineSectionChange(MineSection.LocalMusic)
+            advanceUntilIdle()
+            controller.ensureLocalMusic()
+            advanceUntilIdle()
+
+            assertEquals(1, local.refreshDatabaseCount)
+            assertEquals(listOf("Local"), controller.localTracks.map { it.title })
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun readyLocalMusicDatabaseReadsTracksWithoutRefresh() = runTest {
+        val local = FakeLocalMusicRepository(
+            tracks = listOf(localTrack("local:content://music/1", "Cached")),
+            databaseReady = true,
+            databaseStale = false,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
+            controller.onMineSectionChange(MineSection.LocalMusic)
+            advanceUntilIdle()
+
+            assertEquals(0, local.refreshDatabaseCount)
+            assertEquals(1, local.tracksReadCount)
+            assertEquals(listOf("Cached"), controller.localTracks.map { it.title })
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun localMusicFilterChangesOnlyReadDatabase() = runTest {
+        val local = FakeLocalMusicRepository(
+            tracks = listOf(localTrack("local:content://music/1", "Cached")),
+            databaseReady = true,
+            databaseStale = false,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
+            controller.onMineSectionChange(MineSection.LocalMusic)
+            advanceUntilIdle()
+            controller.onLocalMusicMinDurationChange(60)
+            advanceUntilIdle()
+
+            assertEquals(0, local.refreshDatabaseCount)
+            assertEquals(LocalMusicScanSettings(emptySet(), 60), local.lastSettings)
+            assertEquals(2, local.tracksReadCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun mediaChangeRefreshesInitializedLocalMusicDatabase() = runTest {
+        val local = FakeLocalMusicRepository(
+            tracks = listOf(localTrack("local:content://music/1", "Cached")),
+            databaseReady = true,
+            databaseStale = false,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
+            local.emitMediaChange()
+            advanceTimeBy(750)
+            advanceUntilIdle()
+
+            assertEquals(1, local.refreshDatabaseCount)
         } finally {
             controllerScope.cancel()
         }
@@ -2211,19 +2362,43 @@ class FuoPlayerControllerTest {
     private class FakeLocalMusicRepository(
         private val directories: List<LocalMusicDirectory> = emptyList(),
         tracks: List<MusicTrack> = emptyList(),
+        var databaseReady: Boolean = true,
+        var databaseStale: Boolean = false,
     ) : LocalMusicRepository {
+        private val mutableMediaChangeEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        override val mediaChangeEvents = mutableMediaChangeEvents
         var lastSettings = LocalMusicScanSettings()
         var lastMetadata: LocalTrackMetadata? = null
         var lastSavedLyrics: String? = null
+        var tracksReadCount = 0
+        var refreshDatabaseCount = 0
         private var tracks = tracks
+
+        fun emitMediaChange() {
+            mutableMediaChangeEvents.tryEmit(Unit)
+        }
 
         override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
             lastSettings = settings
         }
 
+        override suspend fun isDatabaseReady(): Boolean = databaseReady
+
+        override suspend fun isDatabaseStale(): Boolean = databaseStale
+
         override suspend fun directories(): List<LocalMusicDirectory> = directories
 
-        override suspend fun scan(): List<MusicTrack> = tracks
+        override suspend fun tracks(): List<MusicTrack> {
+            tracksReadCount += 1
+            return tracks
+        }
+
+        override suspend fun refreshDatabase(): List<MusicTrack> {
+            refreshDatabaseCount += 1
+            databaseReady = true
+            databaseStale = false
+            return tracks
+        }
 
         override suspend fun search(keyword: String): List<MusicTrack> = tracks.filter {
             it.title.contains(keyword, ignoreCase = true) ||
@@ -2260,14 +2435,22 @@ class FuoPlayerControllerTest {
     ) : LocalMusicRepository {
         private val pendingScans = ArrayDeque(scans)
         var lastSettings = LocalMusicScanSettings()
+        var databaseReady: Boolean = true
+        var databaseStale: Boolean = false
 
         override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
             lastSettings = settings
         }
 
+        override suspend fun isDatabaseReady(): Boolean = databaseReady
+
+        override suspend fun isDatabaseStale(): Boolean = databaseStale
+
         override suspend fun directories(): List<LocalMusicDirectory> = directories
 
-        override suspend fun scan(): List<MusicTrack> {
+        override suspend fun tracks(): List<MusicTrack> = emptyList()
+
+        override suspend fun refreshDatabase(): List<MusicTrack> {
             return pendingScans.removeFirst().await()
         }
 
