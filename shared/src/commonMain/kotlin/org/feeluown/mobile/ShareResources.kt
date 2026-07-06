@@ -108,8 +108,6 @@ fun ShareResourceRef.toSharePayload(): SharePayload {
         add("来源：$providerName")
         add("点击 $appLinkUrl 用 FuoEvolve 打开")
         providerUrl?.takeIf { it.isNotBlank() }?.let { add("点击 $it 一起听") }
-        add("或复制到 FuoEvolve：")
-        add(fuoUri)
     }.joinToString("\n")
     return SharePayload(
         resource = this,

@@ -36,9 +36,7 @@ class FuoPlayerControllerTest {
             "《Igallta》 - Se-U-Ra，来自专辑《Igallta》\n" +
                 "来源：网易云音乐\n" +
                 "点击 https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337 用 FuoEvolve 打开\n" +
-                "点击 https://y.music.163.com/m/song?id=1811961337 一起听\n" +
-                "或复制到 FuoEvolve：\n" +
-                "fuo://netease/songs/1811961337",
+                "点击 https://y.music.163.com/m/song?id=1811961337 一起听",
             payload?.content(ShareMode.FullText),
         )
     }

@@ -114,11 +114,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -151,8 +149,6 @@ fun AppRoot(
         val currentTrack = controller.selectedTrack
         val currentPlaylist = controller.selectedPlaylist
         val currentMediaItem = controller.selectedMediaItem
-        var sharePayload by remember { mutableStateOf<SharePayload?>(null) }
-        val clipboardManager = LocalClipboardManager.current
         var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
         var lastTrack by remember { mutableStateOf<MusicTrack?>(null) }
         var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
@@ -179,7 +175,7 @@ fun AppRoot(
             }
         }
 
-        CompositionLocalProvider(LocalShareHandler provides { sharePayload = it }) {
+        CompositionLocalProvider(LocalShareHandler provides { onShareText(it.text) }) {
         Box(modifier = Modifier.fillMaxSize()) {
             AnimatedContent(
                 targetState = destination,
@@ -224,20 +220,6 @@ fun AppRoot(
             }
             controller.localMetadataEditorTrack?.let { track ->
                 LocalMetadataDialog(controller = controller, track = track)
-            }
-            sharePayload?.let { payload ->
-                ShareResourceDialog(
-                    payload = payload,
-                    onDismiss = { sharePayload = null },
-                    onShare = { text ->
-                        sharePayload = null
-                        onShareText(text)
-                    },
-                    onCopy = { text ->
-                        clipboardManager.setText(AnnotatedString(text))
-                        sharePayload = null
-                    },
-                )
             }
         }
         }
@@ -942,76 +924,6 @@ private fun ShareTextButton(payload: SharePayload?) {
         Spacer(Modifier.size(4.dp))
         Text("分享")
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ShareResourceDialog(
-    payload: SharePayload,
-    onDismiss: () -> Unit,
-    onShare: (String) -> Unit,
-    onCopy: (String) -> Unit,
-) {
-    var mode by remember(payload) { mutableStateOf(ShareMode.FullText) }
-    val modes = listOf(
-        ShareMode.FullText to "完整文本",
-        ShareMode.FuoLink to "FuoEvolve 链接",
-        ShareMode.ProviderLink to "原站链接",
-    )
-    val content = payload.content(mode)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("分享${payload.resource.type.displayName}") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    modes.forEachIndexed { index, (itemMode, label) ->
-                        SegmentedButton(
-                            selected = mode == itemMode,
-                            onClick = { mode = itemMode },
-                            enabled = itemMode != ShareMode.ProviderLink || payload.providerUrl != null,
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-                        ) {
-                            Text(label)
-                        }
-                    }
-                }
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Text(
-                        modifier = Modifier.padding(12.dp),
-                        text = content ?: "当前 provider 不支持原站链接",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { content?.let(onShare) },
-                enabled = content != null,
-            ) {
-                Text("分享")
-            }
-        },
-        dismissButton = {
-            Row {
-                TextButton(
-                    onClick = { content?.let(onCopy) },
-                    enabled = content != null,
-                ) {
-                    Text("复制")
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("取消")
-                }
-            }
-        },
-    )
 }
 
 @Composable
