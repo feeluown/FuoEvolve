@@ -29,13 +29,14 @@ data class ShareResourceRef(
 
 data class SharePayload(
     val resource: ShareResourceRef,
+    val appLinkUrl: String,
     val fuoUri: String,
     val providerUrl: String?,
     val text: String,
 ) {
     fun content(mode: ShareMode): String? = when (mode) {
         ShareMode.FullText -> text
-        ShareMode.FuoLink -> fuoUri
+        ShareMode.FuoLink -> appLinkUrl
         ShareMode.ProviderLink -> providerUrl
     }
 }
@@ -89,6 +90,7 @@ fun ProviderMediaItem.toSharePayload(): SharePayload? {
 
 fun ShareResourceRef.toSharePayload(): SharePayload {
     val fuoUri = "fuo://$providerId/${type.namespace}/$identifier"
+    val appLinkUrl = "$FUO_EVOLVE_PAGES_BASE_URL/$providerId/${type.namespace}/$identifier"
     val titleLine = when (type) {
         ShareResourceType.Song -> buildString {
             append("《")
@@ -104,12 +106,14 @@ fun ShareResourceRef.toSharePayload(): SharePayload {
     val text = buildList {
         add(titleLine)
         add("来源：$providerName")
+        add("点击 $appLinkUrl 用 FuoEvolve 打开")
         providerUrl?.takeIf { it.isNotBlank() }?.let { add("点击 $it 一起听") }
         add("或复制到 FuoEvolve：")
         add(fuoUri)
     }.joinToString("\n")
     return SharePayload(
         resource = this,
+        appLinkUrl = appLinkUrl,
         fuoUri = fuoUri,
         providerUrl = providerUrl?.takeIf { it.isNotBlank() },
         text = text,
@@ -117,7 +121,9 @@ fun ShareResourceRef.toSharePayload(): SharePayload {
 }
 
 fun parseSharedResource(text: String): ShareResourceRef? {
-    val match = FUO_URI_REGEX.find(text) ?: return null
+    val appLinkMatch = FUO_EVOLVE_PAGES_REGEX.find(text)
+    val fuoMatch = FUO_URI_REGEX.find(text)
+    val match = appLinkMatch ?: fuoMatch ?: return null
     val providerId = match.groupValues[1]
     val namespace = match.groupValues[2].ifBlank { ShareResourceType.Song.namespace }
     val identifier = match.groupValues[3]
@@ -165,7 +171,11 @@ fun ShareResourceRef.toProviderMediaItem(): ProviderMediaItem {
     )
 }
 
+const val FUO_EVOLVE_PAGES_BASE_URL = "https://feeluown.github.io/FuoEvolve/r"
+
 private val FUO_URI_REGEX = Regex("""fuo://([A-Za-z0-9_]+)/(?:(songs|playlists|artists|albums)/)?([A-Za-z0-9_-]+)""")
+private val FUO_EVOLVE_PAGES_REGEX =
+    Regex("""https://feeluown\.github\.io/FuoEvolve/r/([A-Za-z0-9_]+)/(songs|playlists|artists|albums)/([A-Za-z0-9_-]+)""")
 
 private fun providerIdentifier(id: String, providerId: String, prefix: String? = null): String? {
     if (id.isBlank() || providerId.isBlank()) return null

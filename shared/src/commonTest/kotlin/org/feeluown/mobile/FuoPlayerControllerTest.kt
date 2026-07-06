@@ -26,11 +26,16 @@ class FuoPlayerControllerTest {
         val payload = track.toSharePayload()
 
         assertEquals("fuo://netease/songs/1811961337", payload?.fuoUri)
+        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337", payload?.appLinkUrl)
         assertEquals("https://y.music.163.com/m/song?id=1811961337", payload?.content(ShareMode.ProviderLink))
-        assertEquals("fuo://netease/songs/1811961337", payload?.content(ShareMode.FuoLink))
+        assertEquals(
+            "https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337",
+            payload?.content(ShareMode.FuoLink),
+        )
         assertEquals(
             "《Igallta》 - Se-U-Ra，来自专辑《Igallta》\n" +
                 "来源：网易云音乐\n" +
+                "点击 https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337 用 FuoEvolve 打开\n" +
                 "点击 https://y.music.163.com/m/song?id=1811961337 一起听\n" +
                 "或复制到 FuoEvolve：\n" +
                 "fuo://netease/songs/1811961337",
@@ -48,19 +53,24 @@ class FuoPlayerControllerTest {
         ).toSharePayload()
 
         assertEquals("fuo://netease/playlists/123", payload?.fuoUri)
+        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/playlists/123", payload?.content(ShareMode.FuoLink))
         assertNull(payload?.content(ShareMode.ProviderLink))
     }
 
     @Test
-    fun parseSharedResourceSupportsCanonicalAndShortSongUris() {
+    fun parseSharedResourceSupportsCanonicalShortSongAndAppLinkUris() {
         val canonical = parseSharedResource("复制到 FuoEvolve：fuo://netease/albums/456")
         val shortSong = parseSharedResource("fuo://netease/1811961337")
+        val appLink = parseSharedResource("https://feeluown.github.io/FuoEvolve/r/qqmusic/songs/abc")
 
         assertEquals(ShareResourceType.Album, canonical?.type)
         assertEquals("netease", canonical?.providerId)
         assertEquals("456", canonical?.identifier)
         assertEquals(ShareResourceType.Song, shortSong?.type)
         assertEquals("1811961337", shortSong?.identifier)
+        assertEquals(ShareResourceType.Song, appLink?.type)
+        assertEquals("qqmusic", appLink?.providerId)
+        assertEquals("abc", appLink?.identifier)
     }
 
     @Test

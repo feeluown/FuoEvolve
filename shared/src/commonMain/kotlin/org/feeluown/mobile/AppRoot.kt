@@ -955,7 +955,7 @@ private fun ShareResourceDialog(
     var mode by remember(payload) { mutableStateOf(ShareMode.FullText) }
     val modes = listOf(
         ShareMode.FullText to "完整文本",
-        ShareMode.FuoLink to "Fuo 链接",
+        ShareMode.FuoLink to "FuoEvolve 链接",
         ShareMode.ProviderLink to "原站链接",
     )
     val content = payload.content(mode)
