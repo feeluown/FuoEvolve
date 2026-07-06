@@ -16,3 +16,4 @@ androidApp/src/main/python/**/__pycache__/
 signing/
 *.jks
 *.keystore
+__pycache__
