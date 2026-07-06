@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -511,6 +512,9 @@ fun QueueBottomSheet(controller: FuoPlayerController) {
 
 @Composable
 fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean = false) {
+    var showClearConfirmDialog by remember { mutableStateOf(false) }
+    val queueSize = controller.playbackState.queue.size
+
     Surface(
         modifier = if (sidePanel) {
             Modifier
@@ -548,11 +552,21 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    text = "${controller.playbackState.queue.size} 首",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "$queueSize 首",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (queueSize > 1) {
+                        IconButton(onClick = { showClearConfirmDialog = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "清空队列")
+                        }
+                    }
+                }
             }
             QueueList(
                 controller = controller,
@@ -567,6 +581,27 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
                 },
             )
         }
+    }
+
+    if (showClearConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmDialog = false },
+            title = { Text("清空播放队列") },
+            text = { Text("确定要清空播放队列吗？当前播放的歌曲将保留。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirmDialog = false
+                    controller.clearQueue()
+                }) {
+                    Text("清空")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmDialog = false }) {
+                    Text("取消")
+                }
+            },
+        )
     }
 }
 

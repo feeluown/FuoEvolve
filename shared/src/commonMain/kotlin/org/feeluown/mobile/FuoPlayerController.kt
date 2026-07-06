@@ -1592,6 +1592,26 @@ class FuoPlayerController(
         persistPlaybackQueue()
     }
 
+    fun clearQueue() {
+        val currentTrack = currentQueueTrack()
+        mainQueue = emptyList()
+        originalMainQueue = emptyList()
+        upNextQueue = emptyList()
+        currentUpNextTrack = null
+        currentIsUpNext = false
+        mainQueueIndex = -1
+        queueFeature = null
+        isFmQueue = false
+        shuffleBeforeFm = null
+        if (currentTrack != null) {
+            mainQueue = listOf(currentTrack)
+            mainQueueIndex = 0
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+        message = if (currentTrack != null) "已清空播放队列" else "播放队列已清空"
+    }
+
     fun addToUpNext(track: MusicTrack) {
         upNextQueue = upNextQueue + track
         message = "已加入接下来播放：${track.title}"
