@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import android.Manifest
 import android.app.Activity.RESULT_OK
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -12,12 +13,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,6 +37,12 @@ class MainActivity : ComponentActivity() {
                 hasAudioPermission = hasAudioPermission()
             }
             val controller = fuoApplication.controller
+            val systemDark = LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+                Configuration.UI_MODE_NIGHT_YES
+            val darkTheme = resolveDarkTheme(controller.themeMode, systemDark)
+            SideEffect {
+                configureSystemBars(darkTheme)
+            }
             var pendingWebLoginProviderId by rememberSaveable { mutableStateOf<String?>(null) }
             val webLoginLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.StartActivityForResult(),
@@ -116,6 +126,21 @@ class MainActivity : ComponentActivity() {
             .setType("text/plain")
             .putExtra(Intent.EXTRA_TEXT, text)
         startActivity(Intent.createChooser(sendIntent, "分享"))
+    }
+
+    private fun configureSystemBars(darkTheme: Boolean) {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+
+    private fun resolveDarkTheme(themeMode: ThemeMode, systemDark: Boolean): Boolean {
+        return when (themeMode) {
+            ThemeMode.System -> systemDark
+            ThemeMode.Light -> false
+            ThemeMode.Dark -> true
+        }
     }
 
     private fun sharedTextFromIntent(intent: Intent?): String? {

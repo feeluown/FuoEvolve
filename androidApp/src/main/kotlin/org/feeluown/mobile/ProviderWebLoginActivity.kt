@@ -23,6 +23,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowCompat
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -49,7 +50,9 @@ class ProviderWebLoginActivity : Activity() {
         cookieManager().setAcceptCookie(true)
         val userAgent = loginUserAgent()
         val useMobileViewport = providerId == "bilibili"
-        val colors = webLoginColors()
+        val darkTheme = webLoginDarkTheme()
+        val colors = webLoginColors(darkTheme)
+        configureSystemBars(darkTheme)
 
         statusView = TextView(this).apply {
             text = "完成登录后会自动获取 Cookie"
@@ -166,17 +169,12 @@ class ProviderWebLoginActivity : Activity() {
         }
     }
 
-    private fun webLoginColors(): WebLoginColors {
+    private fun webLoginColors(darkTheme: Boolean): WebLoginColors {
         val preferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val themeMode = enumValue(
-            preferences.getString(KEY_THEME_MODE, null),
-            ThemeMode.System,
-        )
         val scheme = enumValue(
             preferences.getString(KEY_THEME_COLOR_SCHEME, null),
             ThemeColorScheme.Dynamic,
         )
-        val darkTheme = resolvedDarkTheme(themeMode)
         if (scheme == ThemeColorScheme.Dynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return dynamicWebLoginColors(darkTheme)
         }
@@ -235,6 +233,22 @@ class ProviderWebLoginActivity : Activity() {
             }
             ThemeMode.Light -> false
             ThemeMode.Dark -> true
+        }
+    }
+
+    private fun webLoginDarkTheme(): Boolean {
+        val preferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val themeMode = enumValue(
+            preferences.getString(KEY_THEME_MODE, null),
+            ThemeMode.System,
+        )
+        return resolvedDarkTheme(themeMode)
+    }
+
+    private fun configureSystemBars(darkTheme: Boolean) {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
         }
     }
 
