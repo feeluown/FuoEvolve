@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +37,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
@@ -100,6 +105,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -128,6 +134,13 @@ import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 private val LocalShareHandler = staticCompositionLocalOf<(SharePayload) -> Unit> { {} }
+private val LocalAppLayoutInfo = staticCompositionLocalOf { AppLayoutInfo() }
+
+private data class AppLayoutInfo(
+    val isLandscape: Boolean = false,
+    val useWideLayout: Boolean = false,
+    val gridColumns: Int = 3,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -144,84 +157,103 @@ fun AppRoot(
         themeMode = controller.themeMode,
         themeColorScheme = controller.themeColorScheme,
     ) {
-        val destination = appDestination(controller)
-        val currentFeature = controller.selectedFeature
-        val currentTrack = controller.selectedTrack
-        val currentPlaylist = controller.selectedPlaylist
-        val currentMediaItem = controller.selectedMediaItem
-        var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
-        var lastTrack by remember { mutableStateOf<MusicTrack?>(null) }
-        var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
-        var lastMediaItem by remember { mutableStateOf<ProviderMediaItem?>(null) }
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val layoutInfo = remember(maxWidth, maxHeight) {
+                val isLandscape = maxWidth > maxHeight
+                AppLayoutInfo(
+                    isLandscape = isLandscape,
+                    useWideLayout = isLandscape && maxWidth >= 640.dp,
+                    gridColumns = when {
+                        maxWidth >= 980.dp -> 6
+                        maxWidth >= 760.dp -> 5
+                        maxWidth >= 640.dp -> 4
+                        else -> 3
+                    },
+                )
+            }
 
-        LaunchedEffect(currentFeature) {
-            if (currentFeature != null) {
-                lastFeature = currentFeature
-            }
-        }
-        LaunchedEffect(currentTrack) {
-            if (currentTrack != null) {
-                lastTrack = currentTrack
-            }
-        }
-        LaunchedEffect(currentPlaylist) {
-            if (currentPlaylist != null) {
-                lastPlaylist = currentPlaylist
-            }
-        }
-        LaunchedEffect(currentMediaItem) {
-            if (currentMediaItem != null) {
-                lastMediaItem = currentMediaItem
-            }
-        }
+            val destination = appDestination(controller)
+            val currentFeature = controller.selectedFeature
+            val currentTrack = controller.selectedTrack
+            val currentPlaylist = controller.selectedPlaylist
+            val currentMediaItem = controller.selectedMediaItem
+            var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
+            var lastTrack by remember { mutableStateOf<MusicTrack?>(null) }
+            var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
+            var lastMediaItem by remember { mutableStateOf<ProviderMediaItem?>(null) }
 
-        CompositionLocalProvider(LocalShareHandler provides { onShareText(it.text) }) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
-                targetState = destination,
-                modifier = Modifier.fillMaxSize(),
-                transitionSpec = {
-                    val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                    (slideInHorizontally(animationSpec = tween(220)) { it / 5 * direction } + fadeIn(tween(180)))
-                        .togetherWith(
-                            slideOutHorizontally(animationSpec = tween(180)) { -it / 6 * direction } +
-                                fadeOut(tween(160)),
-                        )
-                        .using(SizeTransform(clip = false))
-                },
-            ) { target ->
-                when (target) {
-                    AppDestination.Home -> HomeScreen(
-                        controller = controller,
-                        hasAudioPermission = hasAudioPermission,
-                        onRequestAudioPermission = onRequestAudioPermission,
-                    )
-                    AppDestination.DebugLogs -> DebugLogScreen(controller)
-                    AppDestination.Settings -> SettingsScreen(
-                        controller,
-                        onOpenProviderWebLogin,
-                        onLogoutProvider,
-                        appVersionInfo,
-                    )
-                    AppDestination.Search -> SearchScreen(controller)
-                    AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
-                    AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
-                    AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
-                    AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
+            LaunchedEffect(currentFeature) {
+                if (currentFeature != null) {
+                    lastFeature = currentFeature
                 }
             }
-            AnimatedVisibility(
-                visible = controller.isFullPlayerOpen,
-                modifier = Modifier.fillMaxSize(),
-                enter = slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(180)),
-                exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
+            LaunchedEffect(currentTrack) {
+                if (currentTrack != null) {
+                    lastTrack = currentTrack
+                }
+            }
+            LaunchedEffect(currentPlaylist) {
+                if (currentPlaylist != null) {
+                    lastPlaylist = currentPlaylist
+                }
+            }
+            LaunchedEffect(currentMediaItem) {
+                if (currentMediaItem != null) {
+                    lastMediaItem = currentMediaItem
+                }
+            }
+
+            CompositionLocalProvider(
+                LocalShareHandler provides { onShareText(it.text) },
+                LocalAppLayoutInfo provides layoutInfo,
             ) {
-                FullPlayer(controller)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AnimatedContent(
+                        targetState = destination,
+                        modifier = Modifier.fillMaxSize(),
+                        transitionSpec = {
+                            val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                            (slideInHorizontally(animationSpec = tween(220)) { it / 5 * direction } + fadeIn(tween(180)))
+                                .togetherWith(
+                                    slideOutHorizontally(animationSpec = tween(180)) { -it / 6 * direction } +
+                                        fadeOut(tween(160)),
+                                )
+                                .using(SizeTransform(clip = false))
+                        },
+                    ) { target ->
+                        when (target) {
+                            AppDestination.Home -> HomeScreen(
+                                controller = controller,
+                                hasAudioPermission = hasAudioPermission,
+                                onRequestAudioPermission = onRequestAudioPermission,
+                            )
+                            AppDestination.DebugLogs -> DebugLogScreen(controller)
+                            AppDestination.Settings -> SettingsScreen(
+                                controller,
+                                onOpenProviderWebLogin,
+                                onLogoutProvider,
+                                appVersionInfo,
+                            )
+                            AppDestination.Search -> SearchScreen(controller)
+                            AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
+                            AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
+                            AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
+                            AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = controller.isFullPlayerOpen,
+                        modifier = Modifier.fillMaxSize(),
+                        enter = slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(180)),
+                        exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
+                    ) {
+                        FullPlayer(controller)
+                    }
+                    controller.localMetadataEditorTrack?.let { track ->
+                        LocalMetadataDialog(controller = controller, track = track)
+                    }
+                }
             }
-            controller.localMetadataEditorTrack?.let { track ->
-                LocalMetadataDialog(controller = controller, track = track)
-            }
-        }
         }
     }
 }
@@ -264,24 +296,27 @@ private fun HomeScreen(
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
 ) {
+    val layoutInfo = LocalAppLayoutInfo.current
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("FeelUOwn") },
-                navigationIcon = {
-                    IconButton(onClick = { controller.openSettings() }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "设置")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = controller::openSearch) {
-                        Icon(Icons.Filled.Search, contentDescription = "搜索")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
+            if (!layoutInfo.useWideLayout) {
+                CenterAlignedTopAppBar(
+                    title = { Text("FeelUOwn") },
+                    navigationIcon = {
+                        IconButton(onClick = { controller.openSettings() }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "设置")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = controller::openSearch) {
+                            Icon(Icons.Filled.Search, contentDescription = "搜索")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                )
+            }
         },
         bottomBar = {
             if (controller.playbackState.currentTrack != null) {
@@ -293,8 +328,8 @@ private fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) 6.dp else 12.dp),
         ) {
             LoadingIndicator(controller.isLoading)
             HomeSectionPager(
@@ -344,6 +379,52 @@ private fun HomeSectionPager(
             }
     }
 
+    if (LocalAppLayoutInfo.current.useWideLayout) {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            HomeSectionRail(
+                sections = sections,
+                selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
+                onSettings = { controller.openSettings() },
+                onSearch = controller::openSearch,
+                onClick = { index, section ->
+                    if (section != controller.homeSection || index != pagerState.currentPage) {
+                        scope.launch { pagerState.animateScrollToPage(index) }
+                    }
+                },
+            )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                pageSpacing = 16.dp,
+            ) { page ->
+                when (sections[page].first) {
+                    HomeSection.Recommend -> ProviderContentHomeSection(
+                        controller = controller,
+                        section = HomeSection.Recommend,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    HomeSection.Music -> ProviderContentHomeSection(
+                        controller = controller,
+                        section = HomeSection.Music,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    HomeSection.Mine -> MineHomeSection(
+                        controller = controller,
+                        hasAudioPermission = hasAudioPermission,
+                        onRequestAudioPermission = onRequestAudioPermission,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+        return
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -388,6 +469,77 @@ private fun HomeSectionPager(
 }
 
 @Composable
+private fun HomeSectionRail(
+    sections: List<Pair<HomeSection, String>>,
+    selectedIndex: Int,
+    onSettings: () -> Unit,
+    onSearch: () -> Unit,
+    onClick: (Int, HomeSection) -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .width(64.dp)
+            .fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = "设置")
+            }
+            Spacer(Modifier.weight(1f))
+            sections.forEachIndexed { index, (section, label) ->
+                val selected = index == selectedIndex
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onClick(index, section) }
+                        .padding(vertical = 4.dp),
+                    color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                    contentColor = if (selected) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(homeSectionIcon(section), contentDescription = label)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onSearch) {
+                Icon(Icons.Filled.Search, contentDescription = "搜索")
+            }
+        }
+    }
+}
+
+private fun homeSectionIcon(section: HomeSection): ImageVector {
+    return when (section) {
+        HomeSection.Recommend -> Icons.Filled.PlayArrow
+        HomeSection.Music -> Icons.Filled.Album
+        HomeSection.Mine -> Icons.Filled.Person
+    }
+}
+
+@Composable
 @Suppress("DEPRECATION")
 private fun HomeSectionTabs(
     sections: List<Pair<HomeSection, String>>,
@@ -425,11 +577,23 @@ private fun HomeSectionTabs(
                 selected = index == selectedIndex,
                 onClick = { onClick(index, section) },
                 text = {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = homeSectionIcon(section),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
             )
         }
@@ -456,6 +620,7 @@ private fun EmptyHomeSection(modifier: Modifier, title: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderContentHomeSection(
     controller: FuoPlayerController,
@@ -474,123 +639,115 @@ private fun ProviderContentHomeSection(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            IconButton(onClick = { controller.refreshHomeContent(section) }) {
-                Icon(Icons.Filled.Refresh, contentDescription = "刷新$title")
-            }
-        }
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = controller.isLoading,
+            onRefresh = { controller.refreshHomeContent(section) },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (sections.isEmpty()) {
-                item {
-                    EmptyProviderContentHint(title)
-                }
-            } else {
-                val dailySongSections = visibleSections.filter { it.feature.isDailySongs() }
-                val privateFmSections = visibleSections.filter { it.feature.isPrivateFm() }
-                val otherSections = visibleSections.filterNot {
-                    it.feature.isDailySongs() || it.feature.isPrivateFm()
-                }
-                if (dailySongSections.isNotEmpty()) {
-                    item(key = "header:daily-songs") {
-                        ProviderFeatureHeader(
-                            feature = dailySongSections.first().feature,
-                            providerLabel = dailySongSections
-                                .map { it.feature.providerName }
-                                .distinct()
-                                .joinToString(" / "),
-                        )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (sections.isEmpty()) {
+                    item {
+                        EmptyProviderContentHint(title)
                     }
-                    item(key = "daily-songs-grid") {
-                        ProviderFeatureCoverGrid(
-                            features = dailySongSections.map { it.feature },
-                            onClick = controller::openFeature,
-                        )
+                } else {
+                    val dailySongSections = visibleSections.filter { it.feature.isDailySongs() }
+                    val privateFmSections = visibleSections.filter { it.feature.isPrivateFm() }
+                    val otherSections = visibleSections.filterNot {
+                        it.feature.isDailySongs() || it.feature.isPrivateFm()
                     }
-                }
-                if (privateFmSections.isNotEmpty()) {
-                    item(key = "header:private-fm") {
-                        ProviderFeatureHeader(
-                            feature = privateFmSections.first().feature,
-                            providerLabel = privateFmSections
-                                .map { it.feature.providerName }
-                                .distinct()
-                                .joinToString(" / "),
-                        )
-                    }
-                    item(key = "private-fm-grid") {
-                        PrivateFmGrid(
-                            sections = privateFmSections,
-                            enabled = !controller.isLoading,
-                            onClick = { section -> controller.playAllFromFeature(section.feature.id) },
-                        )
-                    }
-                }
-                otherSections.forEach { contentSection ->
-                    item(key = "header:${contentSection.feature.id}") {
-                        ProviderFeatureHeader(
-                            feature = contentSection.feature,
-                            onPlayAll = if (contentSection.tracks.isNotEmpty()) {
-                                { controller.playAllFromFeature(contentSection.feature.id) }
-                            } else {
-                                null
-                            },
-                        )
-                    }
-                    when {
-                        contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
-                            ProviderContentMessage(contentSection.errorMessage)
+                    if (dailySongSections.isNotEmpty()) {
+                        item(key = "header:daily-songs") {
+                            ProviderFeatureHeader(
+                                feature = dailySongSections.first().feature,
+                                providerLabel = dailySongSections
+                                    .map { it.feature.providerName }
+                                    .distinct()
+                                    .joinToString(" / "),
+                            )
                         }
-                        contentSection.tracks.isNotEmpty() -> {
-                            itemsIndexed(
-                                contentSection.tracks,
-                                key = { _, item -> "${contentSection.feature.id}:${item.id}" },
-                            ) { index, track ->
-                                TrackRow(
-                                    track = track,
-                                    downloadState = controller.downloadStates[track.id],
-                                    onClick = { controller.playFromFeature(contentSection.feature.id, index) },
-                                    onAddToUpNext = { controller.addToUpNext(track) },
-                                    onDownload = { controller.download(track) },
-                                    onDeleteDownload = { controller.deleteDownload(track) },
-                                    onOpenArtist = { controller.openTrackArtist(track) },
-                                    onOpenAlbum = { controller.openTrackAlbum(track) },
-                                )
-                                HorizontalDivider()
+                        item(key = "daily-songs-grid") {
+                            ProviderFeatureCoverGrid(
+                                features = dailySongSections.map { it.feature },
+                                onClick = controller::openFeature,
+                            )
+                        }
+                    }
+                    if (privateFmSections.isNotEmpty()) {
+                        item(key = "header:private-fm") {
+                            ProviderFeatureHeader(
+                                feature = privateFmSections.first().feature,
+                                providerLabel = privateFmSections
+                                    .map { it.feature.providerName }
+                                    .distinct()
+                                    .joinToString(" / "),
+                            )
+                        }
+                        item(key = "private-fm-grid") {
+                            PrivateFmGrid(
+                                sections = privateFmSections,
+                                enabled = !controller.isLoading,
+                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
+                            )
+                        }
+                    }
+                    otherSections.forEach { contentSection ->
+                        item(key = "header:${contentSection.feature.id}") {
+                            ProviderFeatureHeader(
+                                feature = contentSection.feature,
+                                onPlayAll = if (contentSection.tracks.isNotEmpty()) {
+                                    { controller.playAllFromFeature(contentSection.feature.id) }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                        when {
+                            contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+                                ProviderContentMessage(contentSection.errorMessage)
+                            }
+                            contentSection.tracks.isNotEmpty() -> {
+                                itemsIndexed(
+                                    contentSection.tracks,
+                                    key = { _, item -> "${contentSection.feature.id}:${item.id}" },
+                                ) { index, track ->
+                                    TrackRow(
+                                        track = track,
+                                        downloadState = controller.downloadStates[track.id],
+                                        onClick = { controller.playFromFeature(contentSection.feature.id, index) },
+                                        onAddToUpNext = { controller.addToUpNext(track) },
+                                        onDownload = { controller.download(track) },
+                                        onDeleteDownload = { controller.deleteDownload(track) },
+                                        onOpenArtist = { controller.openTrackArtist(track) },
+                                        onOpenAlbum = { controller.openTrackAlbum(track) },
+                                    )
+                                    HorizontalDivider()
+                                }
+                            }
+                            contentSection.playlists.isNotEmpty() -> {
+                                item(key = "playlists:${contentSection.feature.id}") {
+                                    ProviderPlaylistGrid(
+                                        playlists = contentSection.playlists,
+                                        onClick = controller::openPlaylist,
+                                    )
+                                }
+                            }
+                            else -> item(key = "empty:${contentSection.feature.id}") {
+                                ProviderContentMessage("暂无内容")
                             }
                         }
-                        contentSection.playlists.isNotEmpty() -> {
-                            item(key = "playlists:${contentSection.feature.id}") {
-                                ProviderPlaylistGrid(
-                                    playlists = contentSection.playlists,
-                                    onClick = controller::openPlaylist,
-                                )
-                            }
-                        }
-                        else -> item(key = "empty:${contentSection.feature.id}") {
-                            ProviderContentMessage("暂无内容")
-                        }
                     }
-                }
-                if (lockedProviders.isNotEmpty()) {
-                    item(key = "locked-providers:${section.name}") {
-                        ProviderLockedSummary(
-                            providers = lockedProviders,
-                            onClick = { controller.openSettings(it.providerId) },
-                        )
+                    if (lockedProviders.isNotEmpty()) {
+                        item(key = "locked-providers:${section.name}") {
+                            ProviderLockedSummary(
+                                providers = lockedProviders,
+                                onClick = { controller.openSettings(it.providerId) },
+                            )
+                        }
                     }
                 }
             }
@@ -603,14 +760,17 @@ private fun ProviderFeatureCoverGrid(
     features: List<ProviderFeature>,
     onClick: (ProviderFeature) -> Unit,
 ) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns
+    val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        features.chunked(3).forEach { row ->
+        features.chunked(columns).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 row.forEach { feature ->
                     ProviderFeatureCoverCard(
@@ -619,7 +779,7 @@ private fun ProviderFeatureCoverGrid(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                repeat(3 - row.size) {
+                repeat(columns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -633,10 +793,11 @@ private fun ProviderFeatureCoverCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
             track = feature.toDisplayTrack(),
@@ -644,11 +805,11 @@ private fun ProviderFeatureCoverCard(
                 .fillMaxWidth()
                 .aspectRatio(1f),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
         Text(
             text = feature.title.ifBlank { "推荐" },
             style = MaterialTheme.typography.titleSmall,
-            maxLines = 2,
+            maxLines = if (isWideLayout) 1 else 2,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
@@ -667,14 +828,17 @@ private fun PrivateFmGrid(
     enabled: Boolean,
     onClick: (ProviderContentSection) -> Unit,
 ) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns
+    val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        sections.chunked(3).forEach { row ->
+        sections.chunked(columns).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 row.forEach { section ->
                     PrivateFmButton(
@@ -684,7 +848,7 @@ private fun PrivateFmGrid(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                repeat(3 - row.size) {
+                repeat(columns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -699,10 +863,11 @@ private fun PrivateFmButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Surface(
         modifier = modifier
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -710,16 +875,16 @@ private fun PrivateFmButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .padding(12.dp),
+                .padding(if (isWideLayout) 8.dp else 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             Icon(
                 Icons.Filled.PlayArrow,
                 contentDescription = "播放${section.feature.providerName}私人 FM",
-                modifier = Modifier.size(32.dp),
+                modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
             Text(
                 text = section.feature.providerName,
                 style = MaterialTheme.typography.titleSmall,
@@ -742,14 +907,17 @@ private fun ProviderPlaylistGrid(
     playlists: List<ProviderPlaylist>,
     onClick: (ProviderPlaylist) -> Unit,
 ) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns
+    val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        playlists.chunked(3).forEach { row ->
+        playlists.chunked(columns).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 row.forEach { playlist ->
                     ProviderPlaylistCard(
@@ -758,7 +926,7 @@ private fun ProviderPlaylistGrid(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                repeat(3 - row.size) {
+                repeat(columns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -772,10 +940,11 @@ private fun ProviderPlaylistCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
             track = playlist.toDisplayTrack(),
@@ -783,11 +952,11 @@ private fun ProviderPlaylistCard(
                 .fillMaxWidth()
                 .aspectRatio(1f),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
         Text(
             text = playlist.title.ifBlank { "未命名歌单" },
             style = MaterialTheme.typography.titleSmall,
-            maxLines = 2,
+            maxLines = if (isWideLayout) 1 else 2,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
@@ -808,14 +977,17 @@ private fun ProviderMediaItemGrid(
     items: List<ProviderMediaItem>,
     onClick: (ProviderMediaItem) -> Unit,
 ) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns
+    val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        items.chunked(3).forEach { row ->
+        items.chunked(columns).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 row.forEach { item ->
                     ProviderMediaItemCard(
@@ -824,7 +996,7 @@ private fun ProviderMediaItemGrid(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                repeat(3 - row.size) {
+                repeat(columns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -838,10 +1010,11 @@ private fun ProviderMediaItemCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
             track = item.toDisplayTrack(),
@@ -849,11 +1022,11 @@ private fun ProviderMediaItemCard(
                 .fillMaxWidth()
                 .aspectRatio(1f),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
         Text(
             text = item.title.ifBlank { if (item.type == ProviderMediaItemType.Artist) "未知歌手" else "未知专辑" },
             style = MaterialTheme.typography.titleSmall,
-            maxLines = 2,
+            maxLines = if (isWideLayout) 1 else 2,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
@@ -1078,6 +1251,7 @@ private fun EmptyProviderContentHint(title: String) {
     ProviderContentMessage("$title 暂无内容")
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MineHomeSection(
     controller: FuoPlayerController,
@@ -1085,93 +1259,134 @@ private fun MineHomeSection(
     onRequestAudioPermission: () -> Unit,
     modifier: Modifier,
 ) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val refreshMineContent = {
+        when (controller.mineSection) {
+            MineSection.Playlists -> controller.refreshMinePlaylistContent()
+            MineSection.Artists,
+            MineSection.Albums -> controller.refreshMineContent()
+            MineSection.LocalMusic -> if (hasAudioPermission) controller.refreshLocalMusic() else Unit
+        }
+    }
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isWideLayout) 6.dp else 12.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        MineSectionChips(
+            controller = controller,
+            includeSecondary = isWideLayout,
+        )
+        PullToRefreshBox(
+            isRefreshing = controller.isLoading,
+            onRefresh = refreshMineContent,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
         ) {
-            Text(
-                text = "我的",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            IconButton(
-                enabled = controller.mineSection != MineSection.LocalMusic || hasAudioPermission,
-                onClick = {
-                    when (controller.mineSection) {
-                        MineSection.Playlists -> controller.refreshMinePlaylistContent()
-                        MineSection.Artists,
-                        MineSection.Albums -> controller.refreshMineContent()
-                        MineSection.LocalMusic -> controller.refreshLocalMusic()
-                    }
-                },
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = "刷新我的")
+            when (controller.mineSection) {
+                MineSection.Playlists -> MinePlaylistsSection(
+                    controller = controller,
+                    showFilter = !isWideLayout,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                MineSection.Artists -> MineMediaItemsSection(
+                    controller = controller,
+                    contentType = ProviderContentType.Artists,
+                    title = "歌手",
+                    modifier = Modifier.fillMaxSize(),
+                )
+                MineSection.Albums -> MineMediaItemsSection(
+                    controller = controller,
+                    contentType = ProviderContentType.Albums,
+                    title = "专辑",
+                    modifier = Modifier.fillMaxSize(),
+                )
+                MineSection.LocalMusic -> LocalMusicSection(
+                    controller = controller,
+                    hasAudioPermission = hasAudioPermission,
+                    onRequestAudioPermission = onRequestAudioPermission,
+                    showModeFilter = !isWideLayout,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-        }
-        MineSectionChips(controller)
-        when (controller.mineSection) {
-            MineSection.Playlists -> MinePlaylistsSection(
-                controller = controller,
-                modifier = Modifier.weight(1f),
-            )
-            MineSection.Artists -> MineMediaItemsSection(
-                controller = controller,
-                contentType = ProviderContentType.Artists,
-                title = "歌手",
-                modifier = Modifier.weight(1f),
-            )
-            MineSection.Albums -> MineMediaItemsSection(
-                controller = controller,
-                contentType = ProviderContentType.Albums,
-                title = "专辑",
-                modifier = Modifier.weight(1f),
-            )
-            MineSection.LocalMusic -> LocalMusicSection(
-                controller = controller,
-                hasAudioPermission = hasAudioPermission,
-                onRequestAudioPermission = onRequestAudioPermission,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 }
 
 @Composable
-private fun MineSectionChips(controller: FuoPlayerController) {
+private fun MineSectionChips(
+    controller: FuoPlayerController,
+    includeSecondary: Boolean,
+) {
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilterChip(
+        CompactFilterChip(
             selected = controller.mineSection == MineSection.Playlists,
             onClick = { controller.onMineSectionChange(MineSection.Playlists) },
-            label = { Text("歌单") },
+            label = "歌单",
         )
-        FilterChip(
+        CompactFilterChip(
             selected = controller.mineSection == MineSection.Artists,
             onClick = { controller.onMineSectionChange(MineSection.Artists) },
-            label = { Text("歌手") },
+            label = "歌手",
         )
-        FilterChip(
+        CompactFilterChip(
             selected = controller.mineSection == MineSection.Albums,
             onClick = { controller.onMineSectionChange(MineSection.Albums) },
-            label = { Text("专辑") },
+            label = "专辑",
         )
-        FilterChip(
+        CompactFilterChip(
             selected = controller.mineSection == MineSection.LocalMusic,
             onClick = { controller.onMineSectionChange(MineSection.LocalMusic) },
-            label = { Text("本地") },
+            label = "本地",
         )
+        if (includeSecondary) {
+            when (controller.mineSection) {
+                MineSection.Playlists -> {
+                    Spacer(Modifier.width(12.dp))
+                    PlaylistFilterChips(controller)
+                }
+                MineSection.LocalMusic -> {
+                    Spacer(Modifier.width(12.dp))
+                    LocalMusicViewModeTabs(controller)
+                }
+                MineSection.Artists,
+                MineSection.Albums -> Unit
+            }
+        }
     }
 }
 
 @Composable
-private fun MinePlaylistsSection(controller: FuoPlayerController, modifier: Modifier) {
+private fun CompactFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        modifier = Modifier.height(32.dp),
+        shape = CircleShape,
+    )
+}
+
+@Composable
+private fun MinePlaylistsSection(
+    controller: FuoPlayerController,
+    showFilter: Boolean,
+    modifier: Modifier,
+) {
     val userSections = controller.minePlaylistSections
     val favoriteSections = controller.mineFavoritePlaylistSections
     val sections = when (controller.playlistFilter) {
@@ -1189,7 +1404,9 @@ private fun MinePlaylistsSection(controller: FuoPlayerController, modifier: Modi
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        PlaylistFilterChips(controller)
+        if (showFilter) {
+            PlaylistFilterChips(controller)
+        }
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -1219,24 +1436,21 @@ private fun MinePlaylistsSection(controller: FuoPlayerController, modifier: Modi
 
 @Composable
 private fun PlaylistFilterChips(controller: FuoPlayerController) {
-    Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        FilterChip(
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        CompactFilterChip(
             selected = controller.playlistFilter == PlaylistFilter.All,
             onClick = { controller.onPlaylistFilterChange(PlaylistFilter.All) },
-            label = { Text("全部") },
+            label = "全部",
         )
-        FilterChip(
+        CompactFilterChip(
             selected = controller.playlistFilter == PlaylistFilter.UserPlaylists,
             onClick = { controller.onPlaylistFilterChange(PlaylistFilter.UserPlaylists) },
-            label = { Text("用户歌单") },
+            label = "用户",
         )
-        FilterChip(
+        CompactFilterChip(
             selected = controller.playlistFilter == PlaylistFilter.FavoritePlaylists,
             onClick = { controller.onPlaylistFilterChange(PlaylistFilter.FavoritePlaylists) },
-            label = { Text("收藏歌单") },
+            label = "收藏",
         )
     }
 }
@@ -1338,6 +1552,7 @@ private fun LocalMusicSection(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    showModeFilter: Boolean,
     modifier: Modifier,
 ) {
     LaunchedEffect(hasAudioPermission) {
@@ -1365,34 +1580,72 @@ private fun LocalMusicSection(
             )
         }
     }
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isWideLayout) 6.dp else 12.dp),
     ) {
+        if (!hasAudioPermission) {
+            PermissionPanel(onRequestAudioPermission)
+            return@Column
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "本地音乐",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (displayTracks.isNotEmpty()) {
-                    PlayAllButton(onClick = { controller.playAllLocalTracks(displayTracks) })
-                }
-                IconButton(onClick = controller::refreshLocalMusic) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "刷新本地音乐")
-                }
+            if (showModeFilter) {
+                LocalMusicViewModeTabs(controller)
+            } else {
+                Spacer(Modifier)
+            }
+            if (displayTracks.isNotEmpty()) {
+                PlayAllButton(onClick = { controller.playAllLocalTracks(displayTracks) })
             }
         }
-        if (!hasAudioPermission) {
-            PermissionPanel(onRequestAudioPermission)
+        val groups = remember(displayTracks, controller.localMusicViewMode) {
+            when (controller.localMusicViewMode) {
+                LocalMusicViewMode.All -> displayTracks.groupBy { localTitleSection(it.title) }
+                LocalMusicViewMode.Artist -> displayTracks.groupBy { normalizedGroupName(it.artists, "未知歌手") }
+                LocalMusicViewMode.Album -> displayTracks.groupBy { normalizedGroupName(it.album, "未知专辑") }
+            }
+        }
+        if (isWideLayout) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (displayTracks.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        EmptyLocalMusicHint()
+                    }
+                } else {
+                    groups.forEach { (section, tracks) ->
+                        item(key = "section:$section", span = { GridItemSpan(maxLineSpan) }) {
+                            LocalMusicSectionHeader(title = section, count = tracks.size)
+                        }
+                        items(tracks, key = { it.id }) { track ->
+                            TrackRow(
+                                track = track,
+                                downloadState = controller.downloadStates[track.id],
+                                onClick = { controller.playLocalTrack(track, displayTracks) },
+                                onAddToUpNext = { controller.addToUpNext(track) },
+                                onDownload = { controller.download(track) },
+                                onDeleteDownload = { controller.deleteDownload(track) },
+                                onOpenArtist = { controller.openTrackArtist(track) },
+                                onOpenAlbum = { controller.openTrackAlbum(track) },
+                                onEditLocalMetadata = { controller.openLocalMetadataEditor(track) },
+                            )
+                        }
+                    }
+                }
+            }
             return@Column
         }
-        LocalMusicViewModeTabs(controller)
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -1403,11 +1656,6 @@ private fun LocalMusicSection(
                     EmptyLocalMusicHint()
                 }
             } else {
-                val groups = when (controller.localMusicViewMode) {
-                    LocalMusicViewMode.All -> displayTracks.groupBy { localTitleSection(it.title) }
-                    LocalMusicViewMode.Artist -> displayTracks.groupBy { normalizedGroupName(it.artists, "未知歌手") }
-                    LocalMusicViewMode.Album -> displayTracks.groupBy { normalizedGroupName(it.album, "未知专辑") }
-                }
                 groups.forEach { (section, tracks) ->
                     item(key = "section:$section") {
                         LocalMusicSectionHeader(title = section, count = tracks.size)
@@ -1444,7 +1692,16 @@ private fun LocalMetadataDialog(
         onDismissRequest = controller::closeLocalMetadataEditor,
         title = { Text("修改元信息") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = if (LocalAppLayoutInfo.current.useWideLayout) {
+                    Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState())
+                } else {
+                    Modifier
+                },
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 TextField(
                     value = title,
                     onValueChange = { title = it },
@@ -1596,15 +1853,13 @@ private fun LocalMusicViewModeTabs(controller: FuoPlayerController) {
         LocalMusicViewMode.Artist to "歌手",
         LocalMusicViewMode.Album to "专辑",
     )
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        modes.forEachIndexed { index, (mode, label) ->
-            SegmentedButton(
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        modes.forEach { (mode, label) ->
+            CompactFilterChip(
                 selected = controller.localMusicViewMode == mode,
                 onClick = { controller.onLocalMusicViewModeChange(mode) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-            ) {
-                Text(label)
-            }
+                label = label,
+            )
         }
     }
 }
@@ -1662,6 +1917,7 @@ private fun SettingsScreen(
 ) {
     val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
+    val layoutInfo = LocalAppLayoutInfo.current
     LaunchedEffect(loginProviderId, controller.providers) {
         if (loginProviderId != null && loginProvider == null) {
             controller.closeSettingsProviderLogin()
@@ -1682,27 +1938,74 @@ private fun SettingsScreen(
                         },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+                        }
                 },
             )
         },
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (loginProvider != null) {
+        if (loginProvider != null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
                 ProviderLoginPanel(
                     controller = controller,
                     provider = loginProvider,
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
                     onLogoutProvider = onLogoutProvider,
                 )
-            } else {
+            }
+        } else if (layoutInfo.useWideLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    ProviderSwitchPanel(
+                        controller = controller,
+                        onOpenProviderLogin = { provider -> controller.openSettingsProviderLogin(provider.providerId) },
+                    )
+                    AudioQualitySettingsPanel(controller)
+                    PlaybackPolicySettingsPanel(controller)
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    PlayerDisplaySettingsPanel(controller)
+                    LocalMusicScanSettingsPanel(controller)
+                    CacheSettingsPanel(controller)
+                    if (controller.isDebugLogViewerAvailable) {
+                        DebugSettingsPanel(controller)
+                    }
+                    AppInfoPanel(appVersionInfo)
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
                 ProviderSwitchPanel(
                     controller = controller,
                     onOpenProviderLogin = { provider -> controller.openSettingsProviderLogin(provider.providerId) },
@@ -2669,6 +2972,70 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController, feature: Prov
             }
         },
     ) { paddingValues ->
+        if (LocalAppLayoutInfo.current.useWideLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(280.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CoverBox(
+                        track = feature.toDisplayTrack(),
+                        modifier = Modifier.size(160.dp),
+                    )
+                    Text(
+                        text = feature.title.ifBlank { "推荐" },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = listOf(feature.providerName, "${controller.selectedFeatureTracks.size} 首")
+                            .joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (controller.selectedFeatureTracks.isNotEmpty()) {
+                        PlayAllButton(onClick = controller::playAllFromSelectedFeature)
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    LoadingIndicator(controller.isLoading)
+                    if (controller.selectedFeatureError != null) {
+                        ProviderContentMessage(controller.selectedFeatureError.orEmpty())
+                    } else if (controller.isLoading && controller.selectedFeatureTracks.isEmpty()) {
+                        Text(
+                            text = controller.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    SelectedFeatureTrackList(
+                        controller = controller,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    )
+                }
+            }
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -2735,6 +3102,18 @@ private fun ProviderFeatureScreen(controller: FuoPlayerController, feature: Prov
     }
 }
 
+@Composable
+private fun SelectedFeatureTrackList(controller: FuoPlayerController, modifier: Modifier) {
+    TrackCollectionList(
+        controller = controller,
+        tracks = controller.selectedFeatureTracks,
+        emptyMessage = "暂无歌曲",
+        showEmpty = !controller.isLoading && controller.selectedFeatureError == null,
+        modifier = modifier,
+        onClick = controller::playFromSelectedFeature,
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
@@ -2772,6 +3151,61 @@ private fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTra
             }
         },
     ) { paddingValues ->
+        if (LocalAppLayoutInfo.current.useWideLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                CoverBox(
+                    track = displayTrack,
+                    modifier = Modifier.size(220.dp),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    LoadingIndicator(controller.isLoading)
+                    Text(
+                        text = displayTrack.title.ifBlank { "未知歌曲" },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = buildList {
+                            if (displayTrack.artists.isNotBlank()) add(displayTrack.artists)
+                            if (displayTrack.album.isNotBlank()) add("《${displayTrack.album}》")
+                            add(displayTrack.providerName ?: displayTrack.source)
+                        }.joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = controller::playSelectedTrack) {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.size(4.dp))
+                            Text("播放")
+                        }
+                        ShareTextButton(sharePayload)
+                    }
+                    if (controller.selectedTrackError != null) {
+                        ProviderContentMessage(controller.selectedTrackError.orEmpty())
+                    }
+                }
+            }
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -2848,6 +3282,85 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
             }
         },
     ) { paddingValues ->
+        if (LocalAppLayoutInfo.current.useWideLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(300.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CoverBox(
+                        track = displayPlaylist.toDisplayTrack(),
+                        modifier = Modifier.size(168.dp),
+                    )
+                    Text(
+                        text = displayPlaylist.title.ifBlank { "未命名歌单" },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = buildList {
+                            add(displayPlaylist.providerName)
+                            displayPlaylist.playCount?.let { add(formatPlayCount(it)) }
+                            add("${controller.selectedPlaylistTracks.size} 首")
+                        }.joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (displayPlaylist.description.isNotBlank()) {
+                        Text(
+                            text = displayPlaylist.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (controller.selectedPlaylistTracks.isNotEmpty()) {
+                            PlayAllButton(onClick = controller::playAllFromSelectedPlaylist)
+                        }
+                        ShareTextButton(sharePayload)
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    LoadingIndicator(controller.isLoading)
+                    if (controller.selectedPlaylistError != null) {
+                        ProviderContentMessage(controller.selectedPlaylistError.orEmpty())
+                    } else if (controller.isLoading && controller.selectedPlaylistTracks.isEmpty()) {
+                        Text(
+                            text = controller.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    SelectedPlaylistTrackList(
+                        controller = controller,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    )
+                }
+            }
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -2918,6 +3431,18 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
     }
 }
 
+@Composable
+private fun SelectedPlaylistTrackList(controller: FuoPlayerController, modifier: Modifier) {
+    TrackCollectionList(
+        controller = controller,
+        tracks = controller.selectedPlaylistTracks,
+        emptyMessage = "歌单暂无歌曲",
+        showEmpty = !controller.isLoading && controller.selectedPlaylistError == null,
+        modifier = modifier,
+        onClick = controller::playFromSelectedPlaylist,
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMediaItem?) {
@@ -2959,6 +3484,100 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
             }
         },
     ) { paddingValues ->
+        if (LocalAppLayoutInfo.current.useWideLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(300.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CoverBox(
+                        track = displayItem.toDisplayTrack(),
+                        modifier = Modifier.size(168.dp),
+                    )
+                    Text(
+                        text = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = buildList {
+                            add(displayItem.providerName)
+                            add(if (isArtist) "歌手" else "专辑")
+                            add("${controller.selectedMediaItemTracks.size} 首")
+                            if (isArtist) add("${controller.selectedMediaItemAlbums.size} 张专辑")
+                        }.joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (displayItem.description.isNotBlank()) {
+                        Text(
+                            text = displayItem.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (controller.selectedMediaItemTracks.isNotEmpty()) {
+                            PlayAllButton(onClick = controller::playAllFromSelectedMediaItem)
+                        }
+                        ShareTextButton(sharePayload)
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    LoadingIndicator(controller.isLoading)
+                    if (controller.selectedMediaItemError != null) {
+                        ProviderContentMessage(controller.selectedMediaItemError.orEmpty())
+                    } else if (controller.isLoading && controller.selectedMediaItemTracks.isEmpty()) {
+                        Text(
+                            text = controller.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (isArtist) {
+                        val tabs = listOf("歌曲", "专辑")
+                        PrimaryTabRow(selectedTabIndex = selectedTabIndex) {
+                            tabs.forEachIndexed { index, title ->
+                                Tab(
+                                    selected = selectedTabIndex == index,
+                                    onClick = { selectedTabIndex = index },
+                                    text = { Text(title) },
+                                )
+                            }
+                        }
+                    }
+                    SelectedMediaItemContent(
+                        controller = controller,
+                        isArtist = isArtist,
+                        selectedTabIndex = selectedTabIndex,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    )
+                }
+            }
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -3058,7 +3677,177 @@ private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: Provi
 }
 
 @Composable
+private fun SelectedMediaItemContent(
+    controller: FuoPlayerController,
+    isArtist: Boolean,
+    selectedTabIndex: Int,
+    modifier: Modifier,
+) {
+    if (isArtist && selectedTabIndex == 1) {
+        LazyColumn(modifier = modifier) {
+            if (controller.selectedMediaItemAlbums.isEmpty() && !controller.isLoading && controller.selectedMediaItemError == null) {
+                item {
+                    ProviderContentMessage("暂无专辑")
+                }
+            } else {
+                item {
+                    ProviderMediaItemGrid(
+                        items = controller.selectedMediaItemAlbums,
+                        onClick = controller::openMediaItem,
+                    )
+                }
+            }
+        }
+        return
+    }
+    TrackCollectionList(
+        controller = controller,
+        tracks = controller.selectedMediaItemTracks,
+        emptyMessage = "暂无歌曲",
+        showEmpty = !controller.isLoading && controller.selectedMediaItemError == null,
+        modifier = modifier,
+        onClick = controller::playFromSelectedMediaItem,
+    )
+}
+
+@Composable
+private fun TrackCollectionList(
+    controller: FuoPlayerController,
+    tracks: List<MusicTrack>,
+    emptyMessage: String,
+    showEmpty: Boolean,
+    modifier: Modifier,
+    onClick: (Int) -> Unit,
+) {
+    if (LocalAppLayoutInfo.current.useWideLayout) {
+        val indexedTracks = remember(tracks) { tracks.mapIndexed { index, track -> index to track } }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (tracks.isEmpty() && showEmpty) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    ProviderContentMessage(emptyMessage)
+                }
+            } else {
+                items(indexedTracks, key = { it.second.id }) { (index, track) ->
+                    TrackRow(
+                        track = track,
+                        downloadState = controller.downloadStates[track.id],
+                        onClick = { onClick(index) },
+                        onAddToUpNext = { controller.addToUpNext(track) },
+                        onDownload = { controller.download(track) },
+                        onDeleteDownload = { controller.deleteDownload(track) },
+                        onOpenArtist = { controller.openTrackArtist(track) },
+                        onOpenAlbum = { controller.openTrackAlbum(track) },
+                    )
+                }
+            }
+        }
+        return
+    }
+    LazyColumn(modifier = modifier) {
+        if (tracks.isEmpty() && showEmpty) {
+            item {
+                ProviderContentMessage(emptyMessage)
+            }
+        } else {
+            itemsIndexed(tracks, key = { _, item -> item.id }) { index, track ->
+                TrackRow(
+                    track = track,
+                    downloadState = controller.downloadStates[track.id],
+                    onClick = { onClick(index) },
+                    onAddToUpNext = { controller.addToUpNext(track) },
+                    onDownload = { controller.download(track) },
+                    onDeleteDownload = { controller.deleteDownload(track) },
+                    onOpenArtist = { controller.openTrackArtist(track) },
+                    onOpenAlbum = { controller.openTrackAlbum(track) },
+                )
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+@Composable
 private fun SearchScreen(controller: FuoPlayerController) {
+    if (LocalAppLayoutInfo.current.useWideLayout) {
+        Scaffold { paddingValues ->
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(320.dp)
+                        .fillMaxHeight(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 48.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TextField(
+                            modifier = Modifier.fillMaxWidth(),
+                            value = controller.query,
+                            onValueChange = controller::onQueryChange,
+                            singleLine = true,
+                            placeholder = { Text("歌曲、歌手或专辑") },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { controller.search() }),
+                        )
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !controller.isLoading,
+                            onClick = controller::search,
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = "搜索")
+                        }
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            SearchScopeChip(controller, SearchScope.All, "全部")
+                            SearchScopeChip(controller, SearchScope.Local, "本地")
+                            controller.providers.forEach { provider ->
+                                SearchProviderChip(controller, provider)
+                            }
+                        }
+                    }
+                    TextButton(
+                        modifier = Modifier.align(Alignment.BottomStart),
+                        onClick = controller::closeSearch,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Spacer(Modifier.size(4.dp))
+                        Text("返回")
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    LoadingIndicator(controller.isLoading)
+                    SearchResultList(
+                        controller = controller,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    )
+                }
+            }
+        }
+        return
+    }
     Scaffold(
         topBar = {
             Surface(
@@ -3151,17 +3940,42 @@ private fun SearchScreen(controller: FuoPlayerController) {
 }
 
 @Composable
-private fun EmptySearchHint(query: String) {
+private fun SearchResultList(controller: FuoPlayerController, modifier: Modifier) {
+    LazyColumn(modifier = modifier) {
+        if (controller.searchResults.isEmpty()) {
+            item {
+                EmptySearchHint(controller.query, compactTop = true)
+            }
+        } else {
+            itemsIndexed(controller.searchResults, key = { _, item -> item.id }) { index, track ->
+                TrackRow(
+                    track = track,
+                    downloadState = controller.downloadStates[track.id],
+                    onClick = { controller.playFromSearch(index) },
+                    onAddToUpNext = { controller.addToUpNext(track) },
+                    onDownload = { controller.download(track) },
+                    onDeleteDownload = { controller.deleteDownload(track) },
+                    onOpenArtist = { controller.openTrackArtist(track) },
+                    onOpenAlbum = { controller.openTrackAlbum(track) },
+                )
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptySearchHint(query: String, compactTop: Boolean = false) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 24.dp),
+            .padding(top = if (compactTop) 0.dp else 24.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
     ) {
         Text(
             modifier = Modifier.padding(16.dp),
-            text = if (query.isBlank()) "输入关键词搜索音乐" else "没有搜索结果",
+            text = if (query.isBlank()) "输入关键词查找音乐" else "没有结果",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -3366,6 +4180,7 @@ private fun TrackAction(
 private fun MiniPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
     val isLoadingAudio = state.status == PlayerStatus.Loading
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -3375,11 +4190,13 @@ private fun MiniPlayer(controller: FuoPlayerController) {
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = if (isWideLayout) 6.dp else 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                state.currentTrack?.let { CoverBox(it) }
+                state.currentTrack?.let {
+                    CoverBox(it, modifier = Modifier.size(if (isWideLayout) 40.dp else 48.dp))
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = state.currentTrack?.title ?: "未播放",
@@ -3431,6 +4248,113 @@ private fun FullPlayer(controller: FuoPlayerController) {
         if (pagerState.currentPage != PlayerVisualTab.Cover.ordinal) {
             pagerState.scrollToPage(PlayerVisualTab.Cover.ordinal)
         }
+    }
+    if (LocalAppLayoutInfo.current.useWideLayout) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = controller::closeFullPlayer) {
+                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起播放器")
+                        }
+                        Text(
+                            text = "正在播放",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        IconButton(onClick = controller::toggleQueue) {
+                            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            PrimaryTabRow(
+                                selectedTabIndex = pagerState.currentPage.coerceIn(
+                                    0,
+                                    PlayerVisualTab.entries.lastIndex,
+                                ),
+                            ) {
+                                PlayerVisualTab.entries.forEach { tab ->
+                                    Tab(
+                                        selected = pagerState.currentPage == tab.ordinal,
+                                        onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
+                                        text = { Text(tab.title) },
+                                    )
+                                }
+                            }
+                            HorizontalPager(
+                                state = pagerState,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                pageSpacing = 16.dp,
+                            ) { page ->
+                                when (PlayerVisualTab.entries[page]) {
+                                    PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
+                                    PlayerVisualTab.Lyrics -> LyricsPanel(
+                                        state = state,
+                                        fontSize = controller.lyricFontSize,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                            }
+                        }
+                        Column(
+                            modifier = Modifier
+                                .width(360.dp)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
+                            Text(
+                                text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            ProgressBlock(state, controller::seekTo)
+                            PlayerControls(
+                                state = state,
+                                modifier = Modifier.fillMaxWidth(),
+                                onPrevious = controller::previous,
+                                onToggle = controller::toggle,
+                                onNext = controller::next,
+                                shuffleEnabled = controller.isShuffleEnabled,
+                                repeatEnabled = controller.isRepeatEnabled,
+                                shuffleAvailable = !controller.isFmQueueActive,
+                                onShuffle = controller::toggleShuffle,
+                                onRepeat = controller::toggleRepeat,
+                            )
+                        }
+                    }
+                }
+                QueueBottomSheet(controller)
+            }
+        }
+        return
     }
     Surface(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -3649,9 +4573,10 @@ private fun ReplacementInfoLine(label: String, value: String) {
 
 @Composable
 private fun QueueBottomSheet(controller: FuoPlayerController) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Box(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.BottomCenter,
+        contentAlignment = if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter,
     ) {
         AnimatedVisibility(
             visible = controller.isQueueOpen,
@@ -3668,26 +4593,47 @@ private fun QueueBottomSheet(controller: FuoPlayerController) {
         }
         AnimatedVisibility(
             visible = controller.isQueueOpen,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(animationSpec = tween(220)) { it } + fadeIn(tween(160)),
-            exit = slideOutVertically(animationSpec = tween(180)) { it } + fadeOut(tween(140)),
+            modifier = Modifier.align(if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter),
+            enter = if (isWideLayout) {
+                slideInHorizontally(animationSpec = tween(220)) { it } + fadeIn(tween(160))
+            } else {
+                slideInVertically(animationSpec = tween(220)) { it } + fadeIn(tween(160))
+            },
+            exit = if (isWideLayout) {
+                slideOutHorizontally(animationSpec = tween(180)) { it } + fadeOut(tween(140))
+            } else {
+                slideOutVertically(animationSpec = tween(180)) { it } + fadeOut(tween(140))
+            },
         ) {
-            QueueBottomSheetContent(controller)
+            QueueBottomSheetContent(controller, sidePanel = isWideLayout)
         }
     }
 }
 
 @Composable
-private fun QueueBottomSheetContent(controller: FuoPlayerController) {
+private fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean = false) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 460.dp)
-            .navigationBarsPadding()
-            .clickable { },
+        modifier = if (sidePanel) {
+            Modifier
+                .width(380.dp)
+                .fillMaxHeight()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .clickable { }
+        } else {
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 460.dp)
+                .navigationBarsPadding()
+                .clickable { }
+        },
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp,
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+        shape = if (sidePanel) {
+            RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)
+        } else {
+            RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+        },
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -3711,9 +4657,15 @@ private fun QueueBottomSheetContent(controller: FuoPlayerController) {
             }
             QueueList(
                 controller = controller,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 380.dp),
+                modifier = if (sidePanel) {
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp)
+                },
             )
         }
     }
