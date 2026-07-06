@@ -3298,7 +3298,7 @@ private fun FullPlayer(controller: FuoPlayerController) {
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                PlayerTitleBlock(currentTrack, state.audioQuality)
+                PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
                 Text(
                     text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
                     style = MaterialTheme.typography.bodyLarge,
@@ -3344,10 +3344,10 @@ private enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
-private fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?) {
+private fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?, partLabel: String?) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
             text = track?.title ?: "未播放",
@@ -3355,6 +3355,15 @@ private fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        partLabel?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         PlayerInfoTags(track, audioQuality)
     }
 }
@@ -3742,6 +3751,8 @@ private fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier:
 @Composable
 private fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
     val queue = controller.playbackState.queue
+    val playbackParts = controller.playbackState.playbackParts
+    val currentPartIndex = controller.playbackState.currentPartIndex
     val currentCount = if (controller.playbackState.queueIndex == 0 && queue.isNotEmpty()) 1 else 0
     val upNextCount = controller.displayUpNextCount
     LazyColumn(
@@ -3818,9 +3829,86 @@ private fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
                     Icon(Icons.Filled.RemoveCircleOutline, contentDescription = "从队列移除")
                 }
             }
+            if (isCurrent && playbackParts.isNotEmpty()) {
+                PlaybackPartList(
+                    parts = playbackParts,
+                    currentPartIndex = currentPartIndex,
+                    onPartClick = controller::playPlaybackPart,
+                )
+            }
             HorizontalDivider()
         }
     }
+}
+
+@Composable
+private fun PlaybackPartList(
+    parts: List<PlaybackPart>,
+    currentPartIndex: Int,
+    onPartClick: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 56.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = "分 P 列表",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        parts.forEachIndexed { index, part ->
+            val selected = index == currentPartIndex
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPartClick(index) },
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                contentColor = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                shape = RoundedCornerShape(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "P${index + 1}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                    Text(
+                        text = part.title.ifBlank { "未命名分段" },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    part.durationMs?.takeIf { it > 0 }?.let {
+                        Text(
+                            text = formatMs(it),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun currentPlaybackPartLabel(state: PlaybackState): String? {
+    val part = state.playbackParts.getOrNull(state.currentPartIndex) ?: return null
+    return "第 ${state.currentPartIndex + 1}P · ${part.title.ifBlank { "未命名分段" }}"
 }
 
 private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): String {

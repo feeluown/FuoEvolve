@@ -47,6 +47,8 @@ class AndroidNativeAudioEngine(
             bufferedMs = 0,
             lyrics = track.lyrics,
             audioQuality = null,
+            playbackParts = emptyList(),
+            currentPartIndex = -1,
             errorMessage = null,
         )
         connectController()
@@ -61,6 +63,8 @@ class AndroidNativeAudioEngine(
             durationMs = payload.durationMs ?: 0,
             lyrics = payload.lyrics,
             audioQuality = payload.audioQuality,
+            playbackParts = payload.parts,
+            currentPartIndex = payload.currentPartIndex,
             errorMessage = null,
         )
         FuoPlaybackService.play(context, payload.toJson(track))

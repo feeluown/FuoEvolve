@@ -150,6 +150,12 @@ data class MusicTrack(
     val albumItemId: String? = null,
 )
 
+data class PlaybackPart(
+    val id: String,
+    val title: String,
+    val durationMs: Long? = null,
+)
+
 data class PlaybackPayload(
     val url: String,
     val title: String,
@@ -173,6 +179,8 @@ data class PlaybackPayload(
     val replacementCoverUrl: String? = null,
     val replacementStrategy: String? = null,
     val replacementScore: Double? = null,
+    val parts: List<PlaybackPart> = emptyList(),
+    val currentPartIndex: Int = -1,
 )
 
 enum class PlayerStatus {
@@ -200,6 +208,8 @@ data class PlaybackState(
     val playMode: PlayMode = PlayMode.ListLoop,
     val lyrics: String? = null,
     val audioQuality: String? = null,
+    val playbackParts: List<PlaybackPart> = emptyList(),
+    val currentPartIndex: Int = -1,
     val errorMessage: String? = null,
 )
 

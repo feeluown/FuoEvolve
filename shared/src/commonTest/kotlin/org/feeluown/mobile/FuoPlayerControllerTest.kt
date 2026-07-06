@@ -224,6 +224,66 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun multiPartTrackPlaysPartsInOrderBeforeMainQueueNextWhenShuffleIsEnabled() = runTest {
+        val parent = providerTrack("bilibili:BV1xx", "Multi Part").copy(
+            source = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val other = providerTrack("provider:2", "Second")
+        val parts = listOf(
+            PlaybackPart("bilibili:paged_BV1xx__1", "P1", 60_000),
+            PlaybackPart("bilibili:paged_BV1xx__2", "P2", 70_000),
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(parent, other),
+            resolveHandler = { track, _, _, _, _, _ ->
+                val partIndex = parts.indexOfFirst { it.id == track.id }.takeIf { it >= 0 } ?: 0
+                PlaybackPayload(
+                    url = "https://example.com/${parts[partIndex].id}.m4s",
+                    title = parts[partIndex].title,
+                    artists = parent.artists,
+                    album = parent.album,
+                    source = parent.source,
+                    providerName = parent.providerName,
+                    durationMs = parts[partIndex].durationMs,
+                    parts = parts,
+                    currentPartIndex = partIndex,
+                )
+            },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.toggleShuffle()
+            controller.playLocalTrack(parent, listOf(parent, other))
+            advanceUntilIdle()
+
+            assertEquals("bilibili:BV1xx", engine.lastTrack?.id)
+            assertEquals(0, controller.playbackState.currentPartIndex)
+            assertEquals(parts, controller.playbackState.playbackParts)
+
+            engine.emitEnded(engine.lastTrack ?: parent)
+            advanceUntilIdle()
+
+            assertEquals("bilibili:BV1xx", engine.lastTrack?.id)
+            assertEquals("https://example.com/bilibili:paged_BV1xx__2.m4s", engine.lastPayload?.url)
+            assertEquals(1, controller.playbackState.currentPartIndex)
+            assertEquals("bilibili:BV1xx", controller.playbackState.queue.first().id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun staleEndedWhileNextTrackIsLoadingDoesNotSkipAgain() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
