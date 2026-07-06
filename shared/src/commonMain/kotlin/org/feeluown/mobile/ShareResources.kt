@@ -91,23 +91,31 @@ fun ProviderMediaItem.toSharePayload(): SharePayload? {
 fun ShareResourceRef.toSharePayload(): SharePayload {
     val fuoUri = "fuo://$providerId/${type.namespace}/$identifier"
     val appLinkUrl = "$FUO_EVOLVE_PAGES_BASE_URL/$providerId/${type.namespace}/$identifier"
+    val introLine = when (type) {
+        ShareResourceType.Song -> "分享一首歌："
+        ShareResourceType.Playlist -> "分享一个歌单："
+        ShareResourceType.Artist -> "分享一位歌手："
+        ShareResourceType.Album -> "分享一张专辑："
+    }
     val titleLine = when (type) {
         ShareResourceType.Song -> buildString {
             append("《")
             append(title)
             append("》")
             if (artists.isNotBlank()) append(" - ").append(artists)
-            if (album.isNotBlank()) append("，来自专辑《").append(album).append("》")
+            if (album.isNotBlank()) append("（专辑：").append(album).append("）")
         }
-        ShareResourceType.Playlist -> "分享歌单《$title》"
-        ShareResourceType.Artist -> "分享歌手 $title"
-        ShareResourceType.Album -> "分享专辑《$title》"
+        ShareResourceType.Playlist -> "《$title》"
+        ShareResourceType.Artist -> title
+        ShareResourceType.Album -> "《$title》"
     }
+    val openVerb = if (type == ShareResourceType.Song) "打开收听" else "打开查看"
+    val providerVerb = if (type == ShareResourceType.Song) "收听" else "查看"
     val text = buildList {
+        add(introLine)
         add(titleLine)
-        add("来源：$providerName")
-        add("点击 $appLinkUrl 用 FuoEvolve 打开")
-        providerUrl?.takeIf { it.isNotBlank() }?.let { add("点击 $it 一起听") }
+        add("$openVerb：$appLinkUrl")
+        providerUrl?.takeIf { it.isNotBlank() }?.let { add("也可以在$providerName$providerVerb：$it") }
     }.joinToString("\n")
     return SharePayload(
         resource = this,

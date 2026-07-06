@@ -33,10 +33,10 @@ class FuoPlayerControllerTest {
             payload?.content(ShareMode.FuoLink),
         )
         assertEquals(
-            "《Igallta》 - Se-U-Ra，来自专辑《Igallta》\n" +
-                "来源：网易云音乐\n" +
-                "点击 https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337 用 FuoEvolve 打开\n" +
-                "点击 https://y.music.163.com/m/song?id=1811961337 一起听",
+            "分享一首歌：\n" +
+                "《Igallta》 - Se-U-Ra（专辑：Igallta）\n" +
+                "打开收听：https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337\n" +
+                "也可以在网易云音乐收听：https://y.music.163.com/m/song?id=1811961337",
             payload?.content(ShareMode.FullText),
         )
     }
@@ -53,6 +53,12 @@ class FuoPlayerControllerTest {
         assertEquals("fuo://netease/playlists/123", payload?.fuoUri)
         assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/playlists/123", payload?.content(ShareMode.FuoLink))
         assertNull(payload?.content(ShareMode.ProviderLink))
+        assertEquals(
+            "分享一个歌单：\n" +
+                "《每日推荐》\n" +
+                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123",
+            payload?.content(ShareMode.FullText),
+        )
     }
 
     @Test
