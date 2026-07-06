@@ -59,12 +59,6 @@ class MainActivity : ComponentActivity() {
                 controller.navigateBack()
             }
 
-            LaunchedEffect(hasAudioPermission) {
-                if (hasAudioPermission) {
-                    controller.refreshLocalMusic()
-                }
-            }
-
             LaunchedEffect(Unit) {
                 launchSharedText?.let(controller::openSharedResource)
             }

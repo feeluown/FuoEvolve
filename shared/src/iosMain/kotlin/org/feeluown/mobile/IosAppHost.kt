@@ -50,6 +50,7 @@ private class IosAppContainer {
 
     fun requestAudioPermission() {
         localRepository.requestPermission {
+            controller.onLocalMusicPermissionChange(true)
             controller.refreshLocalMusic()
         }
     }

@@ -1,7 +1,9 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 enum class TrackSourceType {
     Provider,
@@ -534,9 +536,15 @@ interface ProviderMusicRepository {
 }
 
 interface LocalMusicRepository {
+    val mediaChangeEvents: Flow<Unit>
+        get() = emptyFlow()
+
     suspend fun updateScanSettings(settings: LocalMusicScanSettings)
+    suspend fun isDatabaseReady(): Boolean = false
+    suspend fun isDatabaseStale(): Boolean = true
     suspend fun directories(): List<LocalMusicDirectory>
-    suspend fun scan(): List<MusicTrack>
+    suspend fun tracks(): List<MusicTrack>
+    suspend fun refreshDatabase(): List<MusicTrack>
     suspend fun search(keyword: String): List<MusicTrack>
     suspend fun updateMetadata(track: MusicTrack, metadata: LocalTrackMetadata) = Unit
     suspend fun saveLyrics(track: MusicTrack, lyrics: String) = Unit
