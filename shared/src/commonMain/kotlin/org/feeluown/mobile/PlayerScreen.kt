@@ -178,77 +178,88 @@ fun FullPlayer(controller: FuoPlayerController) {
                             Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
                         }
                     }
-                    Row(
+                    BoxWithConstraints(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
-                        Column(
+                        val visualPaneWidth = (maxHeight * 0.88f)
+                            .coerceAtLeast(280.dp)
+                            .coerceAtMost(maxWidth * 0.58f)
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                .fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
-                            PrimaryTabRow(
-                                selectedTabIndex = pagerState.currentPage.coerceIn(
-                                    0,
-                                    PlayerVisualTab.entries.lastIndex,
-                                ),
+                            Column(
+                                modifier = Modifier
+                                    .width(visualPaneWidth)
+                                    .fillMaxHeight(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                PlayerVisualTab.entries.forEach { tab ->
-                                    Tab(
-                                        selected = pagerState.currentPage == tab.ordinal,
-                                        onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
-                                        text = { Text(tab.title) },
-                                    )
+                                PrimaryTabRow(
+                                    selectedTabIndex = pagerState.currentPage.coerceIn(
+                                        0,
+                                        PlayerVisualTab.entries.lastIndex,
+                                    ),
+                                ) {
+                                    PlayerVisualTab.entries.forEach { tab ->
+                                        Tab(
+                                            selected = pagerState.currentPage == tab.ordinal,
+                                            onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
+                                            text = { Text(tab.title) },
+                                        )
+                                    }
+                                }
+                                HorizontalPager(
+                                    state = pagerState,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth(),
+                                    pageSpacing = 16.dp,
+                                ) { page ->
+                                    when (PlayerVisualTab.entries[page]) {
+                                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
+                                        PlayerVisualTab.Lyrics -> LyricsPanel(
+                                            state = state,
+                                            fontSize = controller.lyricFontSize,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
                                 }
                             }
-                            HorizontalPager(
-                                state = pagerState,
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .fillMaxWidth(),
-                                pageSpacing = 16.dp,
-                            ) { page ->
-                                when (PlayerVisualTab.entries[page]) {
-                                    PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
-                                    PlayerVisualTab.Lyrics -> LyricsPanel(
-                                        state = state,
-                                        fontSize = controller.lyricFontSize,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                }
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
+                                Text(
+                                    text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                ProgressBlock(state, controller::seekTo)
+                                PlayerControls(
+                                    state = state,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onPrevious = controller::previous,
+                                    onToggle = controller::toggle,
+                                    onNext = controller::next,
+                                    shuffleEnabled = controller.isShuffleEnabled,
+                                    shuffleAvailable = !controller.isFmQueueActive,
+                                    onShuffle = controller::toggleShuffle,
+                                    extraAction = currentTrack?.let { track ->
+                                        {
+                                            NowPlayingTrackAction(controller = controller, track = track)
+                                        }
+                                    },
+                                )
                             }
-                        }
-                        Column(
-                            modifier = Modifier
-                                .width(360.dp)
-                                .fillMaxHeight()
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
-                            Text(
-                                text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            ProgressBlock(state, controller::seekTo)
-                            PlayerControls(
-                                state = state,
-                                modifier = Modifier.fillMaxWidth(),
-                                onPrevious = controller::previous,
-                                onToggle = controller::toggle,
-                                onNext = controller::next,
-                                shuffleEnabled = controller.isShuffleEnabled,
-                                repeatMode = controller.repeatMode,
-                                shuffleAvailable = !controller.isFmQueueActive,
-                                onShuffle = controller::toggleShuffle,
-                                onRepeat = controller::toggleRepeat,
-                            )
                         }
                     }
                 }
@@ -328,15 +339,41 @@ fun FullPlayer(controller: FuoPlayerController) {
                     onToggle = controller::toggle,
                     onNext = controller::next,
                     shuffleEnabled = controller.isShuffleEnabled,
-                    repeatMode = controller.repeatMode,
                     shuffleAvailable = !controller.isFmQueueActive,
                     onShuffle = controller::toggleShuffle,
-                    onRepeat = controller::toggleRepeat,
+                    extraAction = currentTrack?.let { track ->
+                        {
+                            NowPlayingTrackAction(controller = controller, track = track)
+                        }
+                    },
                 )
             }
             QueueBottomSheet(controller)
         }
     }
+}
+
+@Composable
+fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
+    val onShare = LocalShareHandler.current
+    val sharePayload = track.toSharePayload()
+    TrackAction(
+        track = track,
+        downloadState = controller.downloadStates[track.id],
+        onAddToUpNext = { controller.addToUpNext(track) },
+        onDownload = { controller.download(track) },
+        onDeleteDownload = { controller.deleteDownload(track) },
+        onOpenArtist = { controller.openTrackArtist(track) },
+        onOpenAlbum = { controller.openTrackAlbum(track) },
+        onEditLocalMetadata = if (track.sourceType == TrackSourceType.LocalMediaStore) {
+            { controller.openLocalMetadataEditor(track) }
+        } else {
+            null
+        },
+        onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+        onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
+        onShare = sharePayload?.let { payload -> { onShare(payload) } },
+    )
 }
 
 @Composable
@@ -543,6 +580,10 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            QueueRepeatModeHeader(
+                repeatMode = controller.repeatMode,
+                onRepeat = controller::toggleRepeat,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -606,6 +647,59 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
     }
 }
 
+@Composable
+fun QueueRepeatModeHeader(repeatMode: RepeatMode, onRepeat: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "播放模式",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = repeatMode.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RepeatModeControlButton(
+                repeatMode = repeatMode,
+                onRepeat = onRepeat,
+                size = 40.dp,
+                iconSize = 22.dp,
+            )
+        }
+    }
+}
+
+@Composable
+fun RepeatModeControlButton(
+    repeatMode: RepeatMode,
+    onRepeat: () -> Unit,
+    size: androidx.compose.ui.unit.Dp = 44.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
+) {
+    val repeatIcon = when (repeatMode) {
+        RepeatMode.OFF -> Icons.Filled.Repeat
+        RepeatMode.QUEUE -> Icons.Filled.Repeat
+        RepeatMode.SINGLE -> Icons.Filled.RepeatOne
+    }
+    RoundControlButton(
+        imageVector = repeatIcon,
+        contentDescription = repeatMode.label,
+        onClick = onRepeat,
+        size = size,
+        iconSize = iconSize,
+        selected = repeatMode != RepeatMode.OFF,
+    )
+}
+
 fun emptyDisplayTrack() = MusicTrack(
     id = "empty",
     title = "FeelUOwn",
@@ -628,6 +722,7 @@ fun PlayerControls(
     shuffleAvailable: Boolean = true,
     onShuffle: (() -> Unit)? = null,
     onRepeat: (() -> Unit)? = null,
+    extraAction: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.animateContentSize(animationSpec = tween(220)),
@@ -667,19 +762,11 @@ fun PlayerControls(
             size = if (compact) 44.dp else 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
-        if (!compact && onRepeat != null) {
-            val repeatIcon = when (repeatMode) {
-                RepeatMode.OFF -> Icons.Filled.Repeat
-                RepeatMode.QUEUE -> Icons.Filled.Repeat
-                RepeatMode.SINGLE -> Icons.Filled.RepeatOne
-            }
-            RoundControlButton(
-                imageVector = repeatIcon,
-                contentDescription = repeatMode.label,
-                onClick = onRepeat,
-                size = 44.dp,
-                iconSize = 24.dp,
-                selected = repeatMode != RepeatMode.OFF,
+        when {
+            !compact && extraAction != null -> extraAction()
+            !compact && onRepeat != null -> RepeatModeControlButton(
+                repeatMode = repeatMode,
+                onRepeat = onRepeat,
             )
         }
     }
