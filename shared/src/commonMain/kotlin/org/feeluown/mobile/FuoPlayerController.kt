@@ -267,6 +267,7 @@ class FuoPlayerController(
     private var appendQueueFeatureTask: Deferred<Int>? = null
     private var lastEndedTrackId: String? = null
     private var autoAdvanceEligibleTrackId: String? = null
+    private var lastRecoveredPlaybackErrorKey: String? = null
     private var playRequestSerial: Long = 0
     private var localMusicRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
@@ -310,10 +311,12 @@ class FuoPlayerController(
         scope.launch {
             playbackEngine.state.collect { engineState ->
                 val queueTrackId = currentQueueTrack()?.id
+                var shouldAutoAdvance = false
                 when (engineState.status) {
                     PlayerStatus.Playing -> {
                         autoAdvanceEligibleTrackId = queueTrackId ?: engineState.currentTrack?.id
                         lastEndedTrackId = null
+                        lastRecoveredPlaybackErrorKey = null
                     }
                     PlayerStatus.Ended -> {
                         val endedTrackId = queueTrackId
@@ -324,7 +327,7 @@ class FuoPlayerController(
                         ) {
                             autoAdvanceEligibleTrackId = null
                             lastEndedTrackId = endedTrackId
-                            next()
+                            shouldAutoAdvance = true
                         }
                     }
                     else -> {
@@ -338,6 +341,11 @@ class FuoPlayerController(
                     playbackParts = playbackParts,
                     currentPartIndex = currentPartIndex,
                 )
+                if (shouldAutoAdvance) {
+                    next()
+                } else if (engineState.status == PlayerStatus.Error) {
+                    recoverPlaybackEngineError(engineState)
+                }
             }
         }
         scope.launch {
@@ -2726,6 +2734,55 @@ class FuoPlayerController(
         }
         playbackState = playbackState.copy(status = PlayerStatus.Error, errorMessage = message)
         isLoading = false
+    }
+
+    private fun recoverPlaybackEngineError(engineState: PlaybackState) {
+        val failedTrack = engineState.currentTrack ?: currentQueueTrack() ?: return
+        val activeTrackId = currentQueueTrack()?.id ?: playbackState.currentTrack?.id
+        if (activeTrackId != null && activeTrackId != failedTrack.id) return
+        val errorMessage = engineState.errorMessage.orEmpty()
+        val recoveryKey = "$playRequestSerial:${failedTrack.id}:$errorMessage"
+        if (lastRecoveredPlaybackErrorKey == recoveryKey) return
+        lastRecoveredPlaybackErrorKey = recoveryKey
+        message = if (errorMessage.isBlank()) {
+            "播放失败：${failedTrack.title}"
+        } else {
+            "播放失败：${failedTrack.title}（$errorMessage）"
+        }
+        if (!shouldRecoverPlaybackEngineError(failedTrack)) return
+        val playableCount = upNextQueue.size + mainQueue.size
+        if (playableCount <= 1 || _repeatMode == RepeatMode.SINGLE) return
+        updateCurrentTrack(failedTrack.copy(isUnavailable = true))
+        playbackState = playbackState.copy(
+            queue = displayQueue(),
+            queueIndex = displayQueueIndex(),
+            currentTrack = currentQueueTrack(),
+        )
+        persistPlaybackQueue()
+        message = "播放失败，已切换下一首：${failedTrack.title}"
+        if (currentIsUpNext) {
+            currentUpNextTrack = null
+            currentIsUpNext = false
+            persistPlaybackQueue()
+        }
+        if (upNextQueue.isNotEmpty()) {
+            playUpNextIndex(0)
+            return
+        }
+        val nextIndex = mainQueueIndex + 1
+        if (nextIndex < mainQueue.size) {
+            playMainIndex(nextIndex)
+        } else if (_repeatMode == RepeatMode.QUEUE) {
+            playMainIndex(0)
+        }
+    }
+
+    private fun shouldRecoverPlaybackEngineError(track: MusicTrack): Boolean {
+        return track.sourceType == TrackSourceType.Provider &&
+            (
+                unavailablePlaybackPolicy == UnavailablePlaybackPolicy.Skip ||
+                    unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace
+                )
     }
 
     private fun skipUnavailableTrack(

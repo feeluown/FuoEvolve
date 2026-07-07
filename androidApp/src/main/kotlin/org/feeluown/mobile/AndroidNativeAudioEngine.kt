@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -28,6 +29,8 @@ class AndroidNativeAudioEngine(
     private var controllerConnecting = false
     private var playRequestSerial: Long = 0
     private var loadingWatchdog: Job? = null
+    private var playbackRetryJob: Job? = null
+    private var playbackRetryAttempt = 0
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
 
@@ -44,6 +47,8 @@ class AndroidNativeAudioEngine(
     override fun prepareLoading(track: MusicTrack) {
         playRequestSerial += 1
         cancelLoadingWatchdog()
+        cancelPlaybackRetry()
+        playbackRetryAttempt = 0
         currentPayload = null
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
@@ -63,6 +68,8 @@ class AndroidNativeAudioEngine(
     override fun play(track: MusicTrack, payload: PlaybackPayload) {
         val requestSerial = ++playRequestSerial
         cancelLoadingWatchdog()
+        cancelPlaybackRetry()
+        playbackRetryAttempt = 0
         currentPayload = payload
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
@@ -90,6 +97,7 @@ class AndroidNativeAudioEngine(
 
     override fun pause() {
         cancelLoadingWatchdog()
+        cancelPlaybackRetry()
         mediaController?.pause()
         FuoPlaybackService.pause(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
@@ -104,6 +112,7 @@ class AndroidNativeAudioEngine(
 
     override fun stop() {
         cancelLoadingWatchdog()
+        cancelPlaybackRetry()
         mediaController?.stop()
         FuoPlaybackService.stop(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Idle, positionMs = 0)
@@ -136,16 +145,31 @@ class AndroidNativeAudioEngine(
 
                                 override fun onPlayerError(error: PlaybackException) {
                                     cancelLoadingWatchdog()
-                                    mutableState.value = mutableState.value.copy(
-                                        status = PlayerStatus.Error,
-                                        errorMessage = error.message ?: error.errorCodeName,
+                                    val track = mutableState.value.currentTrack
+                                    val payload = currentPayload
+                                    val message = playbackErrorMessage(error)
+                                    Log.e(
+                                        TAG,
+                                        "playback error trackId=${track?.id.orEmpty()} " +
+                                            "source=${track?.source.orEmpty()} url=${payload?.url?.summarizePlaybackUrl().orEmpty()} " +
+                                            "code=${error.errorCodeName} retryAttempt=$playbackRetryAttempt",
+                                        error,
                                     )
+                                    if (track != null && payload != null && shouldRetryPlaybackError(payload, error)) {
+                                        retryPlayback(track, payload, message)
+                                    } else {
+                                        mutableState.value = mutableState.value.copy(
+                                            status = PlayerStatus.Error,
+                                            errorMessage = message,
+                                        )
+                                    }
                                 }
                             })
                             updateFromController(connectedController, connectedController.playbackState)
                         }
                     }
                     .onFailure { throwable ->
+                        Log.e(TAG, "connect media controller failed", throwable)
                         mutableState.value = mutableState.value.copy(
                             status = PlayerStatus.Error,
                             errorMessage = throwable.message ?: "无法连接播放器服务",
@@ -193,7 +217,8 @@ class AndroidNativeAudioEngine(
             val controller = mediaController
             Log.w(
                 TAG,
-                "playback loading timeout trackId=$trackId state=${controller?.playbackState} isPlaying=${controller?.isPlaying}",
+                "playback loading timeout trackId=$trackId state=${controller?.playbackState} " +
+                    "isPlaying=${controller?.isPlaying} url=${currentPayload?.url?.summarizePlaybackUrl().orEmpty()}",
             )
             runCatching {
                 controller?.stop()
@@ -209,6 +234,37 @@ class AndroidNativeAudioEngine(
     private fun cancelLoadingWatchdog() {
         loadingWatchdog?.cancel()
         loadingWatchdog = null
+    }
+
+    private fun cancelPlaybackRetry() {
+        playbackRetryJob?.cancel()
+        playbackRetryJob = null
+    }
+
+    private fun retryPlayback(track: MusicTrack, payload: PlaybackPayload, errorMessage: String) {
+        playbackRetryAttempt += 1
+        val requestSerial = playRequestSerial
+        mutableState.value = mutableState.value.copy(
+            status = PlayerStatus.Loading,
+            errorMessage = "播放中断，正在重试：$errorMessage",
+        )
+        playbackRetryJob = scope.launch {
+            delay(PLAYBACK_RETRY_DELAY_MS)
+            if (requestSerial != playRequestSerial) return@launch
+            Log.w(
+                TAG,
+                "retry playback trackId=${track.id} attempt=$playbackRetryAttempt url=${payload.url.summarizePlaybackUrl()}",
+            )
+            runCatching { FuoPlaybackService.play(context, payload.toJson(track)) }
+                .onSuccess { startLoadingWatchdog(requestSerial, track.id) }
+                .onFailure { throwable ->
+                    Log.e(TAG, "retry playback service failed trackId=${track.id}", throwable)
+                    mutableState.value = mutableState.value.copy(
+                        status = PlayerStatus.Error,
+                        errorMessage = throwable.message ?: "重试播放失败",
+                    )
+                }
+        }
     }
 
     private fun updatePosition() {
@@ -259,6 +315,40 @@ class AndroidNativeAudioEngine(
             .toString()
     }
 
+    private fun shouldRetryPlaybackError(payload: PlaybackPayload, error: PlaybackException): Boolean {
+        if (playbackRetryAttempt >= MAX_PLAYBACK_RETRY_ATTEMPTS || !payload.url.isRemoteUrl()) {
+            return false
+        }
+        val codeName = error.errorCodeName
+        return codeName.contains("IO_NETWORK", ignoreCase = true) ||
+            codeName.contains("IO_UNSPECIFIED", ignoreCase = true) ||
+            codeName.contains("TIMEOUT", ignoreCase = true)
+    }
+
+    private fun playbackErrorMessage(error: PlaybackException): String {
+        return listOf(error.errorCodeName, error.message)
+            .filterNot { it.isNullOrBlank() }
+            .joinToString(": ")
+            .ifBlank { "播放失败" }
+    }
+
+    private fun String.isRemoteUrl(): Boolean {
+        val scheme = runCatching { Uri.parse(this).scheme }.getOrNull()
+        return scheme == "http" || scheme == "https"
+    }
+
+    private fun String.summarizePlaybackUrl(): String {
+        val uri = runCatching { Uri.parse(this) }.getOrNull() ?: return "<invalid>"
+        val scheme = uri.scheme.orEmpty()
+        val host = uri.host.orEmpty()
+        val path = uri.path.orEmpty()
+        return if (host.isBlank()) {
+            "$scheme:$path"
+        } else {
+            "$scheme://$host$path"
+        }
+    }
+
     private fun MediaItem.toMusicTrack(): MusicTrack? {
         val metadata = mediaMetadata
         val title = metadata.title?.toString().orEmpty()
@@ -294,5 +384,7 @@ class AndroidNativeAudioEngine(
     private companion object {
         private const val TAG = "FuoAudioEngine"
         private const val PLAYBACK_START_TIMEOUT_MS = 30_000L
+        private const val PLAYBACK_RETRY_DELAY_MS = 1_000L
+        private const val MAX_PLAYBACK_RETRY_ATTEMPTS = 1
     }
 }

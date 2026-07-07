@@ -9,6 +9,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -34,6 +35,21 @@ class FuoPlaybackService : MediaSessionService() {
         val exoPlayer = ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
             .build()
+            .also { player ->
+                player.addListener(object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        val item = player.currentMediaItem
+                        Log.e(
+                            TAG,
+                            "exo playback error trackId=${item?.mediaId.orEmpty()} " +
+                                "source=${item?.mediaMetadata?.extras?.getString("source").orEmpty()} " +
+                                "url=${item?.localConfiguration?.uri?.toString()?.summarizePlaybackUrl().orEmpty()} " +
+                                "code=${error.errorCodeName} state=${player.playbackState}",
+                            error,
+                        )
+                    }
+                })
+            }
         player = exoPlayer
         mediaSession = MediaSession.Builder(this, QueueCommandPlayer(exoPlayer))
             .setCallback(object : MediaSession.Callback {
@@ -58,9 +74,10 @@ class FuoPlaybackService : MediaSessionService() {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_PLAY -> runCatching {
-                playPayload(intent.getStringExtra(EXTRA_PAYLOAD) ?: error("Missing playback payload"))
+                val rawPayload = intent.getStringExtra(EXTRA_PAYLOAD) ?: error("Missing playback payload")
+                playPayload(rawPayload)
             }.onFailure { throwable ->
-                Log.e(TAG, "play payload failed", throwable)
+                Log.e(TAG, "play payload failed ${intent.getStringExtra(EXTRA_PAYLOAD)?.playbackPayloadSummary().orEmpty()}", throwable)
                 player?.stop()
             }
             ACTION_PAUSE -> player?.pause()
@@ -123,6 +140,12 @@ class FuoPlaybackService : MediaSessionService() {
             .build()
 
         val headers = payload.optJSONObject("headers").toStringMap()
+        Log.i(
+            TAG,
+            "play payload trackId=${payload.optString("track_id")} " +
+                "source=${payload.optString("source")} url=${url.summarizePlaybackUrl()} " +
+                "headerKeys=${headers.keys.joinToString(prefix = "[", postfix = "]")}",
+        )
         val httpFactory = DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(headers)
             .setConnectTimeoutMs(15_000)
@@ -159,6 +182,26 @@ class FuoPlaybackService : MediaSessionService() {
     private fun String.isRemoteUrl(): Boolean {
         val scheme = Uri.parse(this).scheme
         return scheme == "http" || scheme == "https"
+    }
+
+    private fun String.playbackPayloadSummary(): String {
+        return runCatching {
+            val payload = JSONObject(this)
+            "trackId=${payload.optString("track_id")} source=${payload.optString("source")} " +
+                "url=${payload.optString("url").summarizePlaybackUrl()}"
+        }.getOrDefault("payload=<invalid>")
+    }
+
+    private fun String.summarizePlaybackUrl(): String {
+        val uri = runCatching { Uri.parse(this) }.getOrNull() ?: return "<invalid>"
+        val scheme = uri.scheme.orEmpty()
+        val host = uri.host.orEmpty()
+        val path = uri.path.orEmpty()
+        return if (host.isBlank()) {
+            "$scheme:$path"
+        } else {
+            "$scheme://$host$path"
+        }
     }
 
     @OptIn(UnstableApi::class)

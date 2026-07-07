@@ -700,6 +700,46 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun playbackEngineErrorSkipsToNextProviderTrack() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val provider = FakeProviderRepository(tracks)
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                settingsStore = FakeSettingsStore(
+                    AppSettings(unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("song")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            engine.emitError(tracks[0], "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED")
+            advanceUntilIdle()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals("provider:2", controller.playbackState.currentTrack?.id)
+            assertEquals(PlayerStatus.Playing, controller.playbackState.status)
+            assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun smartReplacementMarksUnavailableAndPlaysNextTrackWhenResolveMediaIsMissing() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -2958,6 +2998,14 @@ class FuoPlayerControllerTest {
             mutableState.value = mutableState.value.copy(
                 status = PlayerStatus.Ended,
                 currentTrack = track,
+            )
+        }
+
+        fun emitError(track: MusicTrack, message: String) {
+            mutableState.value = mutableState.value.copy(
+                status = PlayerStatus.Error,
+                currentTrack = track,
+                errorMessage = message,
             )
         }
 
