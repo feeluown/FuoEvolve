@@ -175,10 +175,12 @@ fun AppRoot(
             val destination = appDestination(controller)
             val currentFeature = controller.selectedFeature
             val currentTrack = controller.selectedTrack
+            val currentVideo = controller.selectedVideo
             val currentPlaylist = controller.selectedPlaylist
             val currentMediaItem = controller.selectedMediaItem
             var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
             var lastTrack by remember { mutableStateOf<MusicTrack?>(null) }
+            var lastVideo by remember { mutableStateOf<ProviderVideo?>(null) }
             var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
             var lastMediaItem by remember { mutableStateOf<ProviderMediaItem?>(null) }
 
@@ -190,6 +192,11 @@ fun AppRoot(
             LaunchedEffect(currentTrack) {
                 if (currentTrack != null) {
                     lastTrack = currentTrack
+                }
+            }
+            LaunchedEffect(currentVideo) {
+                if (currentVideo != null) {
+                    lastVideo = currentVideo
                 }
             }
             LaunchedEffect(currentPlaylist) {
@@ -237,6 +244,7 @@ fun AppRoot(
                             AppDestination.Search -> SearchScreen(controller)
                             AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
                             AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
+                            AppDestination.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
                             AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
                             AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                         }
@@ -342,6 +350,7 @@ private enum class AppDestination {
     Home,
     Feature,
     Track,
+    Video,
     Playlist,
     Search,
     Settings,
@@ -353,6 +362,7 @@ private fun appDestination(controller: FuoPlayerController): AppDestination {
     return when {
         controller.isDebugLogOpen -> AppDestination.DebugLogs
         controller.isSettingsOpen -> AppDestination.Settings
+        controller.selectedVideo != null -> AppDestination.Video
         controller.selectedTrack != null -> AppDestination.Track
         controller.selectedMediaItem != null -> AppDestination.MediaItem
         controller.selectedPlaylist != null -> AppDestination.Playlist

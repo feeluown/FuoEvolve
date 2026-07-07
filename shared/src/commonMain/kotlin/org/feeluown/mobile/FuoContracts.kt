@@ -532,6 +532,34 @@ data class ProviderMediaItem(
     val providerUrl: String? = null,
 )
 
+data class ProviderVideo(
+    val id: String,
+    val title: String,
+    val artists: String = "",
+    val providerId: String,
+    val providerName: String,
+    val coverUrl: String? = null,
+    val durationMs: Long? = null,
+    val providerUrl: String? = null,
+)
+
+data class ProviderComment(
+    val id: String,
+    val userName: String,
+    val content: String,
+    val likedCount: Long = 0,
+    val timeSeconds: Long = 0,
+)
+
+data class ProviderSearchResults(
+    val tracks: List<MusicTrack> = emptyList(),
+    val playlists: List<ProviderPlaylist> = emptyList(),
+    val artists: List<ProviderMediaItem> = emptyList(),
+    val albums: List<ProviderMediaItem> = emptyList(),
+    val videos: List<ProviderVideo> = emptyList(),
+    val errorMessage: String? = null,
+)
+
 data class ProviderContentSection(
     val feature: ProviderFeature,
     val tracks: List<MusicTrack> = emptyList(),
@@ -552,12 +580,23 @@ data class ProviderMediaItemDetail(
     val albums: List<ProviderMediaItem> = emptyList(),
 )
 
+data class VideoPlaybackPayload(
+    val video: ProviderVideo,
+    val url: String = "",
+    val videoUrl: String = "",
+    val audioUrl: String = "",
+    val headers: Map<String, String> = emptyMap(),
+    val quality: String? = null,
+)
+
 interface ProviderMusicRepository {
     suspend fun initialize()
     suspend fun availableProviders(): List<ProviderInfo> = providers()
     suspend fun updateEnabledProviders(providerIds: Set<String>) = Unit
     suspend fun providers(): List<ProviderInfo>
     suspend fun search(keyword: String, providerId: String? = null): List<MusicTrack>
+    suspend fun searchAll(keyword: String, providerId: String? = null): ProviderSearchResults =
+        ProviderSearchResults(tracks = search(keyword, providerId))
     suspend fun trackDetail(trackId: String): MusicTrack {
         throw UnsupportedOperationException("provider does not support track detail: $trackId")
     }
@@ -591,6 +630,12 @@ interface ProviderMusicRepository {
     suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         ProviderMediaItemDetail(item, mediaItemTracks(item))
     suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack>
+    suspend fun similarTracks(track: MusicTrack): List<MusicTrack> = emptyList()
+    suspend fun hotComments(track: MusicTrack): List<ProviderComment> = emptyList()
+    suspend fun trackVideo(track: MusicTrack): ProviderVideo? = null
+    suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload {
+        throw UnsupportedOperationException("provider does not support video playback: ${video.id}")
+    }
     suspend fun resourceState(resourceType: String, resourceId: String): ProviderResourceState =
         ProviderResourceState(providerId = "", resourceId = resourceId)
     suspend fun setResourceFavorite(resourceType: String, resourceId: String, favorite: Boolean): ProviderMutationResult =

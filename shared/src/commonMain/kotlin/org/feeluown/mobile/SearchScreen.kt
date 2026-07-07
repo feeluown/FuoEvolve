@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,6 +107,7 @@ fun SearchScreen(controller: FuoPlayerController) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     LoadingIndicator(controller.isLoading)
+                    ProviderSearchTabs(controller)
                     SearchResultList(
                         controller = controller,
                         modifier = Modifier
@@ -179,31 +181,13 @@ fun SearchScreen(controller: FuoPlayerController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             LoadingIndicator(controller.isLoading)
+            ProviderSearchTabs(controller)
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                if (controller.searchResults.isEmpty()) {
-                    item {
-                        EmptySearchHint(controller.query)
-                    }
-                } else {
-                    itemsIndexed(controller.searchResults, key = { _, item -> item.id }) { index, track ->
-                        TrackRow(
-                            track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playFromSearch(index) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
-                        )
-                        HorizontalDivider()
-                    }
-                }
+                searchResultItems(controller)
             }
         }
     }
@@ -212,27 +196,175 @@ fun SearchScreen(controller: FuoPlayerController) {
 @Composable
 fun SearchResultList(controller: FuoPlayerController, modifier: Modifier) {
     LazyColumn(modifier = modifier) {
-        if (controller.searchResults.isEmpty()) {
-            item {
-                EmptySearchHint(controller.query, compactTop = true)
-            }
-        } else {
-            itemsIndexed(controller.searchResults, key = { _, item -> item.id }) { index, track ->
-                TrackRow(
-                    track = track,
-                    downloadState = controller.downloadStates[track.id],
-                    onClick = { controller.playFromSearch(index) },
-                    onAddToUpNext = { controller.addToUpNext(track) },
-                    onDownload = { controller.download(track) },
-                    onDeleteDownload = { controller.deleteDownload(track) },
-                    onOpenArtist = { controller.openTrackArtist(track) },
-                    onOpenAlbum = { controller.openTrackAlbum(track) },
-                    onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
-                )
-                HorizontalDivider()
-            }
+        searchResultItems(controller, compactTop = true)
+    }
+}
+
+@Composable
+private fun ProviderSearchTabs(controller: FuoPlayerController) {
+    if (controller.searchScope == SearchScope.Local) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ProviderSearchTab.entries.forEach { tab ->
+            FilterChip(
+                selected = controller.providerSearchTab == tab,
+                onClick = { controller.onProviderSearchTabChange(tab) },
+                label = { Text(tab.label(controller)) },
+            )
         }
     }
+    controller.providerSearchResults.errorMessage?.let {
+        Text(
+            text = it,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
+    controller: FuoPlayerController,
+    compactTop: Boolean = false,
+) {
+    when (controller.providerSearchTab.takeIf { controller.searchScope != SearchScope.Local } ?: ProviderSearchTab.Songs) {
+        ProviderSearchTab.Songs -> {
+            if (controller.searchResults.isEmpty()) {
+                item { EmptySearchHint(controller.query, compactTop = compactTop) }
+            } else {
+                itemsIndexed(controller.searchResults, key = { _, item -> item.id }) { index, track ->
+                    TrackRow(
+                        track = track,
+                        downloadState = controller.downloadStates[track.id],
+                        onClick = { controller.playFromSearch(index) },
+                        onAddToUpNext = { controller.addToUpNext(track) },
+                        onDownload = { controller.download(track) },
+                        onDeleteDownload = { controller.deleteDownload(track) },
+                        onOpenArtist = { controller.openTrackArtist(track) },
+                        onOpenAlbum = { controller.openTrackAlbum(track) },
+                        onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
+        ProviderSearchTab.Artists -> mediaItems(controller.providerSearchResults.artists, "没有歌手结果", controller)
+        ProviderSearchTab.Albums -> mediaItems(controller.providerSearchResults.albums, "没有专辑结果", controller)
+        ProviderSearchTab.Playlists -> playlists(controller.providerSearchResults.playlists, controller)
+        ProviderSearchTab.Videos -> videos(controller.providerSearchResults.videos, controller)
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.mediaItems(
+    items: List<ProviderMediaItem>,
+    emptyMessage: String,
+    controller: FuoPlayerController,
+) {
+    if (items.isEmpty()) {
+        item { ProviderContentMessage(emptyMessage) }
+    } else {
+        itemsIndexed(items, key = { _, item -> item.id }) { _, item ->
+            ProviderSearchRow(
+                title = item.title,
+                subtitle = listOf(item.type.name, item.providerName).joinToString(" · "),
+                coverUrl = item.coverUrl,
+                onClick = { controller.openMediaItem(item) },
+            )
+            HorizontalDivider()
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.playlists(
+    playlists: List<ProviderPlaylist>,
+    controller: FuoPlayerController,
+) {
+    if (playlists.isEmpty()) {
+        item { ProviderContentMessage("没有歌单结果") }
+    } else {
+        itemsIndexed(playlists, key = { _, item -> item.id }) { _, playlist ->
+            ProviderSearchRow(
+                title = playlist.title,
+                subtitle = playlist.providerName,
+                coverUrl = playlist.coverUrl,
+                onClick = { controller.openPlaylist(playlist) },
+            )
+            HorizontalDivider()
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.videos(
+    videos: List<ProviderVideo>,
+    controller: FuoPlayerController,
+) {
+    if (videos.isEmpty()) {
+        item { ProviderContentMessage("没有视频结果") }
+    } else {
+        itemsIndexed(videos, key = { _, item -> item.id }) { _, video ->
+            ProviderSearchRow(
+                title = video.title,
+                subtitle = listOf(video.artists, video.providerName).filter { it.isNotBlank() }.joinToString(" · "),
+                coverUrl = video.coverUrl,
+                onClick = { controller.openVideo(video) },
+            )
+            HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun ProviderSearchRow(
+    title: String,
+    subtitle: String,
+    coverUrl: String?,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CoverBox(
+            track = MusicTrack(
+                id = title,
+                title = title,
+                artists = "",
+                album = "",
+                source = "",
+                sourceType = TrackSourceType.Provider,
+                coverUrl = coverUrl,
+            ),
+            modifier = Modifier.size(48.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title.ifBlank { "未命名" },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private fun ProviderSearchTab.label(controller: FuoPlayerController): String = when (this) {
+    ProviderSearchTab.Songs -> "歌曲 ${controller.searchResults.size}"
+    ProviderSearchTab.Artists -> "歌手 ${controller.providerSearchResults.artists.size}"
+    ProviderSearchTab.Albums -> "专辑 ${controller.providerSearchResults.albums.size}"
+    ProviderSearchTab.Playlists -> "歌单 ${controller.providerSearchResults.playlists.size}"
+    ProviderSearchTab.Videos -> "视频 ${controller.providerSearchResults.videos.size}"
 }
 
 @Composable

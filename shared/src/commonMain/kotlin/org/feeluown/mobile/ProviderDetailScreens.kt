@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -297,11 +298,23 @@ fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
                             Spacer(Modifier.size(4.dp))
                             Text("播放")
                         }
+                        if (controller.selectedTrackVideo != null) {
+                            TextButton(onClick = controller::openSelectedTrackVideo) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.size(4.dp))
+                                Text("播放 MV")
+                            }
+                        }
                         ShareTextButton(sharePayload)
                     }
                     if (controller.selectedTrackError != null) {
                         ProviderContentMessage(controller.selectedTrackError.orEmpty())
                     }
+                    TrackRelatedContent(controller)
                 }
             }
             return@Scaffold
@@ -310,7 +323,8 @@ fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             LoadingIndicator(controller.isLoading)
@@ -334,12 +348,143 @@ fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
                             Spacer(Modifier.size(4.dp))
                             Text("播放")
                         }
+                        if (controller.selectedTrackVideo != null) {
+                            TextButton(onClick = controller::openSelectedTrackVideo) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.size(4.dp))
+                                Text("播放 MV")
+                            }
+                        }
                         ShareTextButton(sharePayload)
                     }
                 },
             )
             if (controller.selectedTrackError != null) {
                 ProviderContentMessage(controller.selectedTrackError.orEmpty())
+            }
+            TrackRelatedContent(controller)
+        }
+    }
+}
+
+@Composable
+private fun TrackRelatedContent(controller: FuoPlayerController) {
+    controller.selectedTrackRelatedError?.let {
+        ProviderContentMessage(it)
+    }
+    if (controller.selectedTrackSimilar.isNotEmpty()) {
+        Text(
+            text = "相似歌曲",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        controller.selectedTrackSimilar.take(6).forEachIndexed { index, track ->
+            TrackRow(
+                track = track,
+                downloadState = controller.downloadStates[track.id],
+                onClick = { controller.playSelectedTrackSimilar(index) },
+                onAddToUpNext = { controller.addToUpNext(track) },
+                onDownload = { controller.download(track) },
+                onDeleteDownload = { controller.deleteDownload(track) },
+                onOpenArtist = { controller.openTrackArtist(track) },
+                onOpenAlbum = { controller.openTrackAlbum(track) },
+                onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+            )
+            HorizontalDivider()
+        }
+    }
+    if (controller.selectedTrackComments.isNotEmpty()) {
+        Text(
+            text = "热评",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        controller.selectedTrackComments.take(5).forEach { comment ->
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = comment.userName.ifBlank { "匿名用户" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = comment.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            HorizontalDivider()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) {
+    val displayVideo = controller.selectedVideo ?: video ?: return
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = displayVideo.title.ifBlank { "视频" },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = controller::closeVideo) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            if (controller.playbackState.currentTrack != null) {
+                MiniPlayer(controller)
+            }
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PlatformVideoPlayer(
+                payload = controller.selectedVideoPayload,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f),
+            )
+            Text(
+                text = displayVideo.title.ifBlank { "未命名视频" },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = listOf(displayVideo.artists, displayVideo.providerName, controller.selectedVideoPayload?.quality.orEmpty())
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (controller.isLoading && controller.selectedVideoPayload == null) {
+                LoadingIndicator(true)
+            }
+            controller.selectedVideoError?.let {
+                ProviderContentMessage(it)
             }
         }
     }

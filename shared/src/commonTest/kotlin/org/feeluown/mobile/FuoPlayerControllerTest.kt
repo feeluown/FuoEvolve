@@ -169,6 +169,86 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun providerSearchAllStoresTypedResults() = runTest {
+        val song = providerTrack("netease:1", "Song")
+        val playlist = ProviderPlaylist("playlist:netease:10", "Playlist", "netease", "网易云音乐")
+        val artist = ProviderMediaItem("artist:netease:20", "Artist", "netease", "网易云音乐", ProviderMediaItemType.Artist)
+        val album = ProviderMediaItem("album:netease:30", "Album", "netease", "网易云音乐", ProviderMediaItemType.Album)
+        val video = ProviderVideo("video:netease:40", "MV", providerId = "netease", providerName = "网易云音乐")
+        val provider = FakeProviderRepository(
+            tracks = listOf(song),
+            searchResults = ProviderSearchResults(
+                tracks = listOf(song),
+                playlists = listOf(playlist),
+                artists = listOf(artist),
+                albums = listOf(album),
+                videos = listOf(video),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("song")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+
+            assertEquals(listOf(song), controller.searchResults)
+            assertEquals(listOf(playlist), controller.providerSearchResults.playlists)
+            assertEquals(listOf(artist), controller.providerSearchResults.artists)
+            assertEquals(listOf(album), controller.providerSearchResults.albums)
+            assertEquals(listOf(video), controller.providerSearchResults.videos)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun openTrackDetailLoadsRelatedContentAndVideo() = runTest {
+        val song = providerTrack("netease:1", "Song")
+        val similar = providerTrack("netease:2", "Similar")
+        val comment = ProviderComment("comment1", "Listener", "Nice", likedCount = 8)
+        val video = ProviderVideo("video:netease:40", "MV", providerId = "netease", providerName = "网易云音乐")
+        val provider = FakeProviderRepository(
+            tracks = listOf(song, similar),
+            similarTracks = listOf(similar),
+            comments = listOf(comment),
+            trackVideo = video,
+            videoPayload = VideoPlaybackPayload(video = video, url = "https://example.com/mv.mp4"),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openTrackDetail(song)
+            advanceUntilIdle()
+            controller.openSelectedTrackVideo()
+            advanceUntilIdle()
+
+            assertEquals(listOf(similar), controller.selectedTrackSimilar)
+            assertEquals(listOf(comment), controller.selectedTrackComments)
+            assertEquals(video, controller.selectedTrackVideo)
+            assertEquals("https://example.com/mv.mp4", controller.selectedVideoPayload?.url)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun smartReplacementPayloadUpdatesCurrentPlaybackTrack() = runTest {
         val origin = providerTrack("provider:1", "First")
         val provider = FakeProviderRepository(
@@ -2557,6 +2637,11 @@ class FuoPlayerControllerTest {
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
         private val playlistTargets: List<ProviderPlaylist> = emptyList(),
         private val capabilities: List<ProviderCapabilities> = emptyList(),
+        private val searchResults: ProviderSearchResults? = null,
+        private val similarTracks: List<MusicTrack> = emptyList(),
+        private val comments: List<ProviderComment> = emptyList(),
+        private val trackVideo: ProviderVideo? = null,
+        private val videoPayload: VideoPlaybackPayload? = null,
         private val resolveFailures: Set<String> = emptySet(),
         private val resolveHandler: (
             suspend (MusicTrack, UnavailablePlaybackPolicy, Set<String>, Double, Boolean, Boolean) -> PlaybackPayload
@@ -2608,6 +2693,9 @@ class FuoPlayerControllerTest {
             availableProviderInfos.filter { it.providerId in enabledProviderIds }
 
         override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = tracks
+
+        override suspend fun searchAll(keyword: String, providerId: String?): ProviderSearchResults =
+            searchResults ?: ProviderSearchResults(tracks = tracks)
 
         override suspend fun trackDetail(trackId: String): MusicTrack {
             lastTrackDetailId = trackId
@@ -2716,6 +2804,15 @@ class FuoPlayerControllerTest {
             loadedMediaItemIds += item.id
             return mediaItemTracks
         }
+
+        override suspend fun similarTracks(track: MusicTrack): List<MusicTrack> = similarTracks
+
+        override suspend fun hotComments(track: MusicTrack): List<ProviderComment> = comments
+
+        override suspend fun trackVideo(track: MusicTrack): ProviderVideo? = trackVideo
+
+        override suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload =
+            videoPayload ?: VideoPlaybackPayload(video = video, url = "https://example.com/${video.id}.mp4")
     }
 
     private class FakeLocalMusicRepository(

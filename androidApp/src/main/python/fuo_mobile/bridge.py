@@ -514,6 +514,7 @@ class FuoMobileBridge:
         self._tracks: Dict[str, Any] = {}
         self._playlists: Dict[str, Any] = {}
         self._media_items: Dict[str, Any] = {}
+        self._videos: Dict[str, Any] = {}
         self._restore_saved_logins()
 
     def providers(self) -> str:
@@ -548,12 +549,126 @@ class FuoMobileBridge:
                 tracks.append(track)
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
+    def search_all(self, keyword: str, provider_id: str = "") -> str:
+        tracks = []
+        playlists = []
+        artists = []
+        albums = []
+        videos = []
+        errors = []
+        if provider_id == "bilibili":
+            provider = self._get_provider(provider_id)
+            if provider.get_current_user_or_none() is None:
+                return json.dumps(
+                    {
+                        "tracks": [],
+                        "playlists": [],
+                        "artists": [],
+                        "albums": [],
+                        "videos": [],
+                        "error_message": "登录后搜索哔哩哔哩",
+                    },
+                    ensure_ascii=False,
+                )
+        source_in = [provider_id] if provider_id else None
+        for search_type in (SearchType.so, SearchType.ar, SearchType.al, SearchType.pl, SearchType.vi):
+            try:
+                results = self.app.library.search(keyword, type_in=[search_type], source_in=source_in)
+                for result in results:
+                    err_msg = getattr(result, "err_msg", "")
+                    if err_msg:
+                        errors.append(err_msg)
+                    for song in getattr(result, "songs", []) or []:
+                        tracks.append(self._remember_song(song))
+                    for playlist in getattr(result, "playlists", []) or []:
+                        playlists.append(self._remember_playlist(playlist))
+                    for artist in getattr(result, "artists", []) or []:
+                        artists.append(self._remember_media_item(artist, "artist"))
+                    for album in getattr(result, "albums", []) or []:
+                        albums.append(self._remember_media_item(album, "album"))
+                    for video in getattr(result, "videos", []) or []:
+                        videos.append(self._remember_video(video))
+            except Exception as exc:
+                if is_unsupported_search_type(exc):
+                    continue
+                message = str(exc) or exc.__class__.__name__
+                errors.append(message)
+                bridge_log(f"search_all skipped type={search_type} provider_id={provider_id}: {message}")
+        return json.dumps(
+            {
+                "tracks": tracks,
+                "playlists": playlists,
+                "artists": artists,
+                "albums": albums,
+                "videos": videos,
+                "error_message": "\n".join(unique_texts(errors)),
+            },
+            ensure_ascii=False,
+        )
+
     def track_detail(self, track_id: str) -> str:
         song = self._tracks.get(track_id)
         if song is None:
             song = self._song_from_track_id(track_id)
             self._tracks[track_id] = song
         return json.dumps({"track": self._remember_song(song)}, ensure_ascii=False)
+
+    def similar_tracks(self, track_id: str) -> str:
+        song = self._song_for_operation(track_id)
+        provider_id = getattr(song, "source", "")
+        provider = self._get_provider(provider_id)
+        similar = getattr(provider, "song_list_similar", None)
+        if similar is None:
+            return json.dumps({"tracks": []}, ensure_ascii=False)
+        try:
+            songs = read_models(similar(song), limit=30)
+        except Exception as exc:
+            return json.dumps({"tracks": [], "error_message": str(exc) or exc.__class__.__name__}, ensure_ascii=False)
+        return json.dumps({"tracks": [self._remember_song(item) for item in songs]}, ensure_ascii=False)
+
+    def hot_comments(self, track_id: str) -> str:
+        song = self._song_for_operation(track_id)
+        provider_id = getattr(song, "source", "")
+        provider = self._get_provider(provider_id)
+        comments = getattr(provider, "song_list_hot_comments", None)
+        if comments is None:
+            return json.dumps({"comments": []}, ensure_ascii=False)
+        try:
+            items = read_models(comments(song), limit=20)
+        except Exception as exc:
+            return json.dumps({"comments": [], "error_message": str(exc) or exc.__class__.__name__}, ensure_ascii=False)
+        return json.dumps({"comments": [comment_to_dict(item) for item in items]}, ensure_ascii=False)
+
+    def track_video(self, track_id: str) -> str:
+        song = self._song_for_operation(track_id)
+        provider_id = getattr(song, "source", "")
+        provider = self._get_provider(provider_id)
+        get_video = getattr(provider, "song_get_mv", None)
+        if get_video is None:
+            return json.dumps({"video": None}, ensure_ascii=False)
+        try:
+            video = get_video(song)
+        except Exception as exc:
+            return json.dumps({"video": None, "error_message": str(exc) or exc.__class__.__name__}, ensure_ascii=False)
+        if video is None:
+            return json.dumps({"video": None}, ensure_ascii=False)
+        return json.dumps({"video": self._remember_video(video)}, ensure_ascii=False)
+
+    def video_payload(self, video_id: str, video_select_policy: str = "") -> str:
+        video = self._video_from_id(video_id)
+        provider = self._get_provider(getattr(video, "source", ""))
+        media = None
+        quality = None
+        if hasattr(provider, "video_select_media"):
+            media, quality = provider.video_select_media(video, video_select_policy or None)
+        elif hasattr(provider, "video_get_media"):
+            qualities = provider.video_list_quality(video) if hasattr(provider, "video_list_quality") else []
+            selected_quality = qualities[0] if qualities else None
+            media = provider.video_get_media(video, selected_quality)
+            quality = selected_quality
+        if media is None:
+            raise RuntimeError("empty video media")
+        return json.dumps(video_media_to_payload(video, media, quality, self.app.library), ensure_ascii=False)
 
     def resolve(
         self,
@@ -967,6 +1082,21 @@ class FuoMobileBridge:
         self._media_items[item_id] = item
         return item
 
+    def _video_from_id(self, video_id: str):
+        video = self._videos.get(video_id)
+        if video is not None:
+            return video
+        try:
+            _, provider_id, identifier = video_id.split(":", 2)
+        except ValueError as exc:
+            raise RuntimeError(f"invalid video id: {video_id}") from exc
+        provider = self._get_provider(provider_id)
+        if not hasattr(provider, "video_get"):
+            raise RuntimeError(f"provider does not support video_get: {provider_id}")
+        video = provider.video_get(identifier)
+        self._videos[video_id] = video
+        return video
+
     def _media_item_detail_from_id(self, item_id: str):
         item_type, provider_id, identifier = self._parse_media_item_id(item_id)
         provider = self._get_provider(provider_id)
@@ -1015,6 +1145,11 @@ class FuoMobileBridge:
     def _remember_media_item(self, item, item_type: str) -> Dict[str, Any]:
         data = media_item_to_dict(item, item_type, self.app.library)
         self._media_items[data["id"]] = item
+        return data
+
+    def _remember_video(self, video) -> Dict[str, Any]:
+        data = video_to_dict(video, self.app.library)
+        self._videos[data["id"]] = video
         return data
 
     def _save_login(self, provider_id: str, user, cookies: Dict[str, str]) -> None:
@@ -1635,6 +1770,10 @@ def read_models(value, limit: int = 50) -> List[Any]:
         return []
 
 
+def is_unsupported_search_type(exc: Exception) -> bool:
+    return isinstance(exc, (KeyError, ValueError))
+
+
 def model_declares_field(model, field: str) -> bool:
     model_fields = getattr(model.__class__, "model_fields", None)
     if model_fields is not None:
@@ -1736,6 +1875,32 @@ def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]
     }
 
 
+def video_to_dict(video, library: Library) -> Dict[str, Any]:
+    source = getattr(video, "source", "")
+    identifier = getattr(video, "identifier", "")
+    return {
+        "id": f"video:{source}:{identifier}",
+        "title": display(video, "title"),
+        "artists": display(video, "artists_name") or display_artists(video),
+        "provider_id": source,
+        "provider_name": provider_name(library.get(source)),
+        "cover_url": normalize_image_url(display(video, "cover") or display(video, "pic_url")),
+        "duration_ms": duration_ms(video),
+        "provider_url": provider_web_url(source, "video", identifier),
+    }
+
+
+def comment_to_dict(comment) -> Dict[str, Any]:
+    user = getattr(comment, "user", None)
+    return {
+        "id": display(comment, "identifier"),
+        "user_name": display(user, "name") or display(comment, "user_name"),
+        "content": display(comment, "content"),
+        "liked_count": int(getattr(comment, "liked_count", 0) or 0),
+        "time": int(getattr(comment, "time", 0) or 0),
+    }
+
+
 def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     metadata = metadata or {}
     if media is None:
@@ -1751,6 +1916,19 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
         "cover_url": normalize_image_url(metadata.get("cover_url", "")),
         "duration_ms": metadata.get("duration_ms", 0),
         "lyrics": metadata.get("lyrics", ""),
+    }
+
+
+def video_media_to_payload(video, media: Media, quality, library: Library) -> Dict[str, Any]:
+    video_data = video_to_dict(video, library)
+    manifest = getattr(media, "manifest", None)
+    return {
+        "video": video_data,
+        "url": getattr(media, "url", "") or "",
+        "video_url": getattr(manifest, "video_url", "") if manifest is not None else "",
+        "audio_url": getattr(manifest, "audio_url", "") if manifest is not None else "",
+        "headers": dict(getattr(media, "http_headers", {}) or {}),
+        "quality": str(quality or ""),
     }
 
 
@@ -1791,9 +1969,12 @@ def provider_web_url(source: str, resource_type: str, identifier: str) -> str:
             "playlist": "playlist",
             "artist": "artist",
             "album": "album",
+            "video": "mv",
         }.get(resource_type)
         return f"https://y.music.163.com/m/{path}?id={identifier}" if path else ""
     if source == "qqmusic":
+        if resource_type == "video":
+            return f"https://y.qq.com/n/ryqq/mv/{identifier}"
         path = {
             "song": "songDetail",
             "artist": "singer",
@@ -1801,11 +1982,11 @@ def provider_web_url(source: str, resource_type: str, identifier: str) -> str:
         }.get(resource_type)
         return f"https://y.qq.com/n/ryqq/{path}/{identifier}" if path else ""
     if source == "ytmusic":
-        if resource_type == "song":
+        if resource_type in ("song", "video"):
             return f"https://music.youtube.com/watch?v={identifier}"
         if resource_type == "playlist":
             return f"https://music.youtube.com/playlist?list={identifier}"
-    if source == "bilibili" and resource_type == "song":
+    if source == "bilibili" and resource_type in ("song", "video"):
         return f"https://www.bilibili.com/video/{identifier}"
     return ""
 

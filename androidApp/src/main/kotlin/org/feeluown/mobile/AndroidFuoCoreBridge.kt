@@ -81,6 +81,26 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun searchAll(keyword: String, providerId: String?): ProviderSearchResults {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "searchAll start keyword=$keyword providerId=$providerId")
+                val raw = requireNotNull(bridge).callAttr("search_all", keyword, providerId.orEmpty()).toString()
+                JSONObject(raw).toSearchResults().also {
+                    Log.d(
+                        TAG,
+                        "searchAll done tracks=${it.tracks.size} playlists=${it.playlists.size} " +
+                            "artists=${it.artists.size} albums=${it.albums.size} videos=${it.videos.size}",
+                    )
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "searchAll failed keyword=$keyword providerId=$providerId", throwable)
+                throw throwable
+            }
+        }
+    }
+
     override suspend fun trackDetail(trackId: String): MusicTrack {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -314,6 +334,40 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun similarTracks(track: MusicTrack): List<MusicTrack> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("similar_tracks", track.providerId ?: track.id).toString()
+            val array = JSONObject(raw).getJSONArray("tracks")
+            List(array.length()) { index -> array.getJSONObject(index).toTrack() }
+        }
+    }
+
+    override suspend fun hotComments(track: MusicTrack): List<ProviderComment> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("hot_comments", track.providerId ?: track.id).toString()
+            val array = JSONObject(raw).getJSONArray("comments")
+            List(array.length()) { index -> array.getJSONObject(index).toProviderComment() }
+        }
+    }
+
+    override suspend fun trackVideo(track: MusicTrack): ProviderVideo? {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("track_video", track.providerId ?: track.id).toString()
+            JSONObject(raw).optJSONObject("video")?.toProviderVideo()
+        }
+    }
+
+    override suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("video_payload", video.id, "").toString()
+            JSONObject(raw).toVideoPlaybackPayload(video)
+        }
+    }
+
     private fun JSONObject.toProviderInfo(): ProviderInfo {
         val providerId = optString("provider_id")
         return ProviderInfo(
@@ -321,6 +375,22 @@ class AndroidFuoCoreBridge(
             providerName = optString("provider_name").ifBlank { providerId },
             loginConfig = optJSONObject("login_config")?.toLoginConfig(),
             supportedLoginModes = optJSONArray("login_modes").toLoginModes(),
+        )
+    }
+
+    private fun JSONObject.toSearchResults(): ProviderSearchResults {
+        val tracksArray = optJSONArray("tracks") ?: JSONArray()
+        val playlistsArray = optJSONArray("playlists") ?: JSONArray()
+        val artistsArray = optJSONArray("artists") ?: JSONArray()
+        val albumsArray = optJSONArray("albums") ?: JSONArray()
+        val videosArray = optJSONArray("videos") ?: JSONArray()
+        return ProviderSearchResults(
+            tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
+            playlists = List(playlistsArray.length()) { index -> playlistsArray.getJSONObject(index).toPlaylist() },
+            artists = List(artistsArray.length()) { index -> artistsArray.getJSONObject(index).toMediaItem() },
+            albums = List(albumsArray.length()) { index -> albumsArray.getJSONObject(index).toMediaItem() },
+            videos = List(videosArray.length()) { index -> videosArray.getJSONObject(index).toProviderVideo() },
+            errorMessage = optString("error_message").takeIf { it.isNotBlank() },
         )
     }
 
@@ -409,6 +479,30 @@ class AndroidFuoCoreBridge(
         )
     }
 
+    private fun JSONObject.toProviderVideo(): ProviderVideo {
+        val providerId = optString("provider_id")
+        return ProviderVideo(
+            id = getString("id"),
+            title = optString("title"),
+            artists = optString("artists"),
+            providerId = providerId,
+            providerName = optString("provider_name").ifBlank { providerId },
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
+            durationMs = optLong("duration_ms").takeIf { it > 0 },
+            providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun JSONObject.toProviderComment(): ProviderComment {
+        return ProviderComment(
+            id = optString("id"),
+            userName = optString("user_name"),
+            content = optString("content"),
+            likedCount = optLong("liked_count"),
+            timeSeconds = optLong("time"),
+        )
+    }
+
     private fun JSONObject.toMediaItemDetail(fallbackItem: ProviderMediaItem): ProviderMediaItemDetail {
         val tracksArray = optJSONArray("tracks") ?: JSONArray()
         val albumsArray = optJSONArray("albums") ?: JSONArray()
@@ -416,6 +510,17 @@ class AndroidFuoCoreBridge(
             item = optJSONObject("item")?.toMediaItem() ?: fallbackItem,
             tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
             albums = List(albumsArray.length()) { index -> albumsArray.getJSONObject(index).toMediaItem() },
+        )
+    }
+
+    private fun JSONObject.toVideoPlaybackPayload(fallbackVideo: ProviderVideo): VideoPlaybackPayload {
+        return VideoPlaybackPayload(
+            video = optJSONObject("video")?.toProviderVideo() ?: fallbackVideo,
+            url = optString("url"),
+            videoUrl = optString("video_url"),
+            audioUrl = optString("audio_url"),
+            headers = optJSONObject("headers").toStringMap(),
+            quality = optString("quality").takeIf { it.isNotBlank() },
         )
     }
 

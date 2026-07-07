@@ -4,6 +4,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from feeluown.library import SearchType
+from feeluown.media import Media
+
 
 SRC_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SRC_ROOT / "main" / "python"))
@@ -17,6 +20,22 @@ class _Library:
 
     def get(self, source):
         return self.provider if source == self.provider.identifier else None
+
+    def search(self, keyword, type_in=None, source_in=None):
+        search_type = type_in[0]
+        if source_in and self.provider.identifier not in source_in:
+            return []
+        if search_type == SearchType.so:
+            return [SimpleNamespace(songs=[self.provider.song])]
+        if search_type == SearchType.pl:
+            return [SimpleNamespace(playlists=[self.provider.playlist])]
+        if search_type == SearchType.ar:
+            return [SimpleNamespace(artists=[self.provider.artist])]
+        if search_type == SearchType.al:
+            return [SimpleNamespace(albums=[self.provider.album])]
+        if search_type == SearchType.vi:
+            return [SimpleNamespace(videos=[self.provider.video])]
+        return []
 
 
 class _Provider:
@@ -36,6 +55,31 @@ class _Provider:
             source=self.identifier,
             identifier="playlist1",
             name="Mine",
+        )
+        self.artist = SimpleNamespace(
+            source=self.identifier,
+            identifier="artist1",
+            name="Artist",
+        )
+        self.album = SimpleNamespace(
+            source=self.identifier,
+            identifier="album1",
+            name="Album",
+        )
+        self.video = SimpleNamespace(
+            source=self.identifier,
+            identifier="video1",
+            title="MV",
+            artists_name="Artist",
+            cover="https://example.com/mv.jpg",
+            duration=123,
+        )
+        self.comment = SimpleNamespace(
+            identifier="comment1",
+            user=SimpleNamespace(name="Listener"),
+            content="Nice",
+            liked_count=12,
+            time=34,
         )
         self.added = []
         self.removed = []
@@ -64,6 +108,24 @@ class _Provider:
         self.removed.append((playlist.identifier, song.identifier))
         return True
 
+    def song_list_similar(self, song):
+        return [SimpleNamespace(
+            source=self.identifier,
+            identifier="song2",
+            title="Similar",
+            artists=[],
+            album=None,
+        )]
+
+    def song_list_hot_comments(self, song):
+        return [self.comment]
+
+    def song_get_mv(self, song):
+        return self.video
+
+    def video_select_media(self, video, policy=None):
+        return Media("https://example.com/video.mp4"), "sd"
+
 
 class ProviderOperationBridgeTest(unittest.TestCase):
     def bridge(self, provider):
@@ -71,6 +133,7 @@ class ProviderOperationBridgeTest(unittest.TestCase):
         bridge._tracks = {}
         bridge._playlists = {}
         bridge._media_items = {}
+        bridge._videos = {}
         bridge.app = SimpleNamespace(library=_Library(provider))
         bridge._get_provider = lambda provider_id: provider
         return bridge
@@ -123,6 +186,51 @@ class ProviderOperationBridgeTest(unittest.TestCase):
 
         self.assertFalse(payload["success"])
         self.assertEqual([], provider.added)
+
+    def test_search_all_returns_supported_result_types(self):
+        provider = _Provider()
+        bridge = self.bridge(provider)
+
+        payload = json.loads(bridge.search_all("keyword"))
+
+        self.assertEqual(["Song"], [item["title"] for item in payload["tracks"]])
+        self.assertEqual(["Mine"], [item["title"] for item in payload["playlists"]])
+        self.assertEqual(["Artist"], [item["title"] for item in payload["artists"]])
+        self.assertEqual(["Album"], [item["title"] for item in payload["albums"]])
+        self.assertEqual(["MV"], [item["title"] for item in payload["videos"]])
+
+    def test_search_all_reports_bilibili_login_gate_when_selected(self):
+        provider = _Provider(logged_in=False)
+        provider.identifier = "bilibili"
+        bridge = self.bridge(provider)
+
+        payload = json.loads(bridge.search_all("keyword", "bilibili"))
+
+        self.assertEqual("登录后搜索哔哩哔哩", payload["error_message"])
+        self.assertEqual([], payload["tracks"])
+
+    def test_track_related_operations(self):
+        provider = _Provider()
+        bridge = self.bridge(provider)
+        bridge._tracks["netease:song1"] = provider.song
+
+        similar = json.loads(bridge.similar_tracks("netease:song1"))
+        comments = json.loads(bridge.hot_comments("netease:song1"))
+        video = json.loads(bridge.track_video("netease:song1"))
+
+        self.assertEqual(["Similar"], [item["title"] for item in similar["tracks"]])
+        self.assertEqual("Listener", comments["comments"][0]["user_name"])
+        self.assertEqual("MV", video["video"]["title"])
+
+    def test_video_payload_returns_media_url(self):
+        provider = _Provider()
+        bridge = self.bridge(provider)
+        bridge._videos["video:netease:video1"] = provider.video
+
+        payload = json.loads(bridge.video_payload("video:netease:video1"))
+
+        self.assertEqual("https://example.com/video.mp4", payload["url"])
+        self.assertEqual("MV", payload["video"]["title"])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,14 @@ enum class SearchScope {
     All,
 }
 
+enum class ProviderSearchTab {
+    Songs,
+    Artists,
+    Albums,
+    Playlists,
+    Videos,
+}
+
 enum class HomeSection {
     Recommend,
     Music,
@@ -112,6 +120,20 @@ class FuoPlayerController(
         private set
     var selectedTrackError by mutableStateOf<String?>(null)
         private set
+    var selectedTrackSimilar by mutableStateOf<List<MusicTrack>>(emptyList())
+        private set
+    var selectedTrackComments by mutableStateOf<List<ProviderComment>>(emptyList())
+        private set
+    var selectedTrackVideo by mutableStateOf<ProviderVideo?>(null)
+        private set
+    var selectedTrackRelatedError by mutableStateOf<String?>(null)
+        private set
+    var selectedVideo by mutableStateOf<ProviderVideo?>(null)
+        private set
+    var selectedVideoPayload by mutableStateOf<VideoPlaybackPayload?>(null)
+        private set
+    var selectedVideoError by mutableStateOf<String?>(null)
+        private set
     var playlistTargetTrack by mutableStateOf<MusicTrack?>(null)
         private set
     var playlistOperationTargets by mutableStateOf<List<ProviderPlaylist>>(emptyList())
@@ -133,6 +155,10 @@ class FuoPlayerController(
     var providerLoginMode by mutableStateOf(ProviderLoginMode.WebView)
         private set
     var searchResults by mutableStateOf<List<MusicTrack>>(emptyList())
+        private set
+    var providerSearchResults by mutableStateOf(ProviderSearchResults())
+        private set
+    var providerSearchTab by mutableStateOf(ProviderSearchTab.Songs)
         private set
     var homeSection by mutableStateOf(HomeSection.Recommend)
         private set
@@ -223,6 +249,7 @@ class FuoPlayerController(
             isSearchOpen ||
             selectedFeature != null ||
             selectedTrack != null ||
+            selectedVideo != null ||
             selectedMediaItem != null ||
             selectedPlaylist != null
 
@@ -475,6 +502,10 @@ class FuoPlayerController(
             }
             isSettingsOpen -> {
                 closeSettings()
+                true
+            }
+            selectedVideo != null -> {
+                closeVideo()
                 true
             }
             selectedTrack != null -> {
@@ -852,6 +883,10 @@ class FuoPlayerController(
         if (query.isNotBlank()) search()
     }
 
+    fun onProviderSearchTabChange(value: ProviderSearchTab) {
+        providerSearchTab = value
+    }
+
     fun onHomeSectionChange(value: HomeSection) {
         homeSection = value
         persistSettings()
@@ -1037,6 +1072,7 @@ class FuoPlayerController(
         val keyword = query.trim()
         if (keyword.isEmpty()) {
             searchResults = emptyList()
+            providerSearchResults = ProviderSearchResults()
             message = "请输入关键词"
             return
         }
@@ -1046,17 +1082,40 @@ class FuoPlayerController(
             runCatching {
                 withTimeout(25_000) {
                     when (searchScope) {
-                        SearchScope.Local -> localRepository.search(keyword)
-                        SearchScope.Provider -> providerRepository.search(keyword, selectedSearchProviderId)
-                        SearchScope.All -> mergeResults(
-                            localRepository.search(keyword),
-                            providerRepository.search(keyword),
-                        )
+                        SearchScope.Local -> {
+                            val local = localRepository.search(keyword)
+                            providerSearchResults = ProviderSearchResults()
+                            local
+                        }
+                        SearchScope.Provider -> {
+                            val provider = providerRepository.searchAll(keyword, selectedSearchProviderId)
+                            providerSearchResults = provider
+                            provider.tracks
+                        }
+                        SearchScope.All -> {
+                            val local = localRepository.search(keyword)
+                            val provider = providerRepository.searchAll(keyword)
+                            providerSearchResults = provider
+                            mergeResults(local, provider.tracks)
+                        }
                     }
                 }
             }.onSuccess {
                 searchResults = it
-                message = if (it.isEmpty()) "没有搜索结果" else "搜索到 ${it.size} 首"
+                val total = when (searchScope) {
+                    SearchScope.Local -> it.size
+                    SearchScope.Provider,
+                    SearchScope.All -> providerSearchResults.totalCount() + if (searchScope == SearchScope.All) {
+                        localOnlyCount(it, providerSearchResults.tracks)
+                    } else {
+                        0
+                    }
+                }
+                message = when {
+                    total == 0 && providerSearchResults.errorMessage != null -> providerSearchResults.errorMessage.orEmpty()
+                    total == 0 -> "没有搜索结果"
+                    else -> "搜索到 $total 项"
+                }
             }.onFailure {
                 setError(it)
             }
@@ -1254,6 +1313,11 @@ class FuoPlayerController(
         if (track.sourceType != TrackSourceType.Provider) return
         selectedTrack = track
         selectedTrackError = null
+        selectedTrackSimilar = emptyList()
+        selectedTrackComments = emptyList()
+        selectedTrackVideo = null
+        selectedTrackRelatedError = null
+        loadSelectedTrackRelated(track)
     }
 
     fun openSharedResource(text: String) {
@@ -1314,6 +1378,7 @@ class FuoPlayerController(
                 selectedTrack = it
                 selectedTrackError = null
                 message = it.title.ifBlank { "歌曲已加载" }
+                loadSelectedTrackRelated(it)
             }
             .onFailure {
                 selectedTrackError = it.message ?: "资源加载失败"
@@ -1325,6 +1390,74 @@ class FuoPlayerController(
     fun closeTrack() {
         selectedTrack = null
         selectedTrackError = null
+        selectedTrackSimilar = emptyList()
+        selectedTrackComments = emptyList()
+        selectedTrackVideo = null
+        selectedTrackRelatedError = null
+    }
+
+    private fun loadSelectedTrackRelated(track: MusicTrack) {
+        scope.launch {
+            val related = withTimeoutOrNull(20_000) {
+                runCatching {
+                    val similar = async { providerRepository.similarTracks(track) }
+                    val comments = async { providerRepository.hotComments(track) }
+                    val video = async { providerRepository.trackVideo(track) }
+                    Triple(similar.await(), comments.await(), video.await())
+                }
+            }
+            if (selectedTrack?.id != track.id) return@launch
+            if (related == null) {
+                selectedTrackRelatedError = "播放周边加载超时"
+            } else {
+                related
+                    .onSuccess {
+                        selectedTrackSimilar = it.first
+                        selectedTrackComments = it.second
+                        selectedTrackVideo = it.third
+                        selectedTrackRelatedError = null
+                    }
+                    .onFailure {
+                        selectedTrackRelatedError = it.message ?: it::class.simpleName.orEmpty()
+                    }
+            }
+        }
+    }
+
+    fun openVideo(video: ProviderVideo) {
+        selectedVideo = video
+        selectedVideoPayload = null
+        selectedVideoError = null
+        scope.launch {
+            isLoading = true
+            message = "正在加载视频：${video.title}"
+            runCatching {
+                withTimeout(25_000) {
+                    providerRepository.videoPlaybackPayload(video)
+                }
+            }.onSuccess {
+                if (selectedVideo?.id == video.id) {
+                    selectedVideo = it.video
+                    selectedVideoPayload = it
+                    selectedVideoError = null
+                    message = "正在播放视频：${it.video.title}"
+                }
+            }.onFailure {
+                selectedVideoError = it.message ?: it::class.simpleName.orEmpty()
+                message = "视频加载失败"
+            }
+            isLoading = false
+        }
+    }
+
+    fun openSelectedTrackVideo() {
+        selectedTrackVideo?.let(::openVideo)
+    }
+
+    fun closeVideo() {
+        selectedVideo = null
+        selectedVideoPayload = null
+        selectedVideoError = null
     }
 
     fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
@@ -1575,6 +1708,11 @@ class FuoPlayerController(
     fun playSelectedTrack() {
         val track = selectedTrack ?: return
         play(track, listOf(track), 0)
+    }
+
+    fun playSelectedTrackSimilar(index: Int) {
+        val track = selectedTrackSimilar.getOrNull(index) ?: return
+        play(track, selectedTrackSimilar, index)
     }
 
     fun playQueueIndex(index: Int) {
@@ -2465,6 +2603,16 @@ class FuoPlayerController(
 
     private fun ProviderFeature.isDynamicQueueFeature(): Boolean {
         return id.endsWith("_radio")
+    }
+
+    private fun ProviderSearchResults.totalCount(): Int {
+        return tracks.size + playlists.size + artists.size + albums.size + videos.size
+    }
+
+    private fun localOnlyCount(allTracks: List<MusicTrack>, providerTracks: List<MusicTrack>): Int {
+        if (providerTracks.isEmpty()) return allTracks.size
+        val providerIds = providerTracks.map { it.id }.toSet()
+        return allTracks.count { it.id !in providerIds }
     }
 
     private fun applySettings(settings: AppSettings) {
