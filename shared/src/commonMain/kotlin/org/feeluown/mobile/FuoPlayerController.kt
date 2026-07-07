@@ -53,6 +53,7 @@ enum class LocalMusicViewMode {
 }
 
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
+private const val LIST_PREFETCH_REMAINING = 8
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
 class FuoPlayerController(
@@ -100,11 +101,15 @@ class FuoPlayerController(
         private set
     var selectedPlaylistTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
+    var selectedPlaylistTracksHasMore by mutableStateOf(false)
+        private set
     var selectedPlaylistError by mutableStateOf<String?>(null)
         private set
     var selectedFeature by mutableStateOf<ProviderFeature?>(null)
         private set
     var selectedFeatureTracks by mutableStateOf<List<MusicTrack>>(emptyList())
+        private set
+    var selectedFeatureTracksHasMore by mutableStateOf(false)
         private set
     var selectedFeatureError by mutableStateOf<String?>(null)
         private set
@@ -112,7 +117,11 @@ class FuoPlayerController(
         private set
     var selectedMediaItemTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
+    var selectedMediaItemTracksHasMore by mutableStateOf(false)
+        private set
     var selectedMediaItemAlbums by mutableStateOf<List<ProviderMediaItem>>(emptyList())
+        private set
+    var selectedMediaItemAlbumsHasMore by mutableStateOf(false)
         private set
     var selectedMediaItemError by mutableStateOf<String?>(null)
         private set
@@ -265,6 +274,14 @@ class FuoPlayerController(
     private var isFmQueue: Boolean = false
     private var shuffleBeforeFm: Boolean? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
+    private var selectedFeatureTracksNextOffset = 0
+    private var selectedFeatureLoadMoreJob: Job? = null
+    private var selectedPlaylistTracksNextOffset = 0
+    private var selectedPlaylistLoadMoreJob: Job? = null
+    private var selectedMediaItemTracksNextOffset = 0
+    private var selectedMediaItemAlbumsNextOffset = 0
+    private var selectedMediaItemTracksLoadMoreJob: Job? = null
+    private var selectedMediaItemAlbumsLoadMoreJob: Job? = null
     private var lastEndedTrackId: String? = null
     private var autoAdvanceEligibleTrackId: String? = null
     private var lastRecoveredPlaybackErrorKey: String? = null
@@ -1169,7 +1186,7 @@ class FuoPlayerController(
                         } else if (feature.isDeferredHomeFeature()) {
                             ProviderContentSection(feature)
                         } else {
-                            runCatching { providerRepository.loadFeature(feature) }
+                            runCatching { providerRepository.loadFeaturePage(feature, offset = 0) }
                                 .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
                         }
                     }.sortedSectionsByOrder()
@@ -1236,7 +1253,7 @@ class FuoPlayerController(
                 if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
                     ProviderContentSection(feature, isLoginRequired = true)
                 } else {
-                    runCatching { providerRepository.loadFeature(feature) }
+                    runCatching { providerRepository.loadFeaturePage(feature, offset = 0) }
                         .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
                 }
             }.sortedSectionsByOrder()
@@ -1275,11 +1292,14 @@ class FuoPlayerController(
     fun openFeature(feature: ProviderFeature) {
         selectedFeature = feature
         selectedFeatureTracks = emptyList()
+        selectedFeatureTracksNextOffset = 0
+        selectedFeatureTracksHasMore = false
+        selectedFeatureLoadMoreJob = null
         selectedFeatureError = null
         scope.launch {
             isLoading = true
             message = "正在加载：${feature.title}"
-            val deferred = scope.async { providerRepository.loadFeature(feature) }
+            val deferred = scope.async { providerRepository.loadFeaturePage(feature, offset = 0) }
             val result = withTimeoutOrNull(30_000) {
                 runCatching { deferred.await() }
             }
@@ -1291,6 +1311,8 @@ class FuoPlayerController(
                 result.onSuccess { section ->
                     if (selectedFeature == feature) {
                         selectedFeatureTracks = section.tracks
+                        selectedFeatureTracksNextOffset = section.nextOffset
+                        selectedFeatureTracksHasMore = section.hasMore
                         selectedFeatureError = when {
                             section.isLoginRequired -> "登录后显示 ${section.feature.providerName} 的个性化内容"
                             section.errorMessage != null -> section.errorMessage
@@ -1314,6 +1336,9 @@ class FuoPlayerController(
     fun closeFeature() {
         selectedFeature = null
         selectedFeatureTracks = emptyList()
+        selectedFeatureTracksNextOffset = 0
+        selectedFeatureTracksHasMore = false
+        selectedFeatureLoadMoreJob = null
         selectedFeatureError = null
     }
 
@@ -1562,11 +1587,14 @@ class FuoPlayerController(
         selectedPlaylist = playlist
         selectedPlaylistCategory = category
         selectedPlaylistTracks = emptyList()
+        selectedPlaylistTracksNextOffset = 0
+        selectedPlaylistTracksHasMore = false
+        selectedPlaylistLoadMoreJob = null
         selectedPlaylistError = null
         scope.launch {
             isLoading = true
             message = "正在加载：${playlist.title}"
-            val deferred = scope.async { providerRepository.playlistDetail(playlist) }
+            val deferred = scope.async { providerRepository.playlistDetailPage(playlist, offset = 0) }
             val result = withTimeoutOrNull(30_000) {
                 runCatching { deferred.await() }
             }
@@ -1579,6 +1607,8 @@ class FuoPlayerController(
                     if (selectedPlaylist?.id == playlist.id) {
                         selectedPlaylist = detail.playlist
                         selectedPlaylistTracks = detail.tracks
+                        selectedPlaylistTracksNextOffset = detail.tracksNextOffset
+                        selectedPlaylistTracksHasMore = detail.tracksHasMore
                         selectedPlaylistError = null
                         message = if (detail.tracks.isEmpty()) {
                             "歌单暂无歌曲"
@@ -1599,18 +1629,29 @@ class FuoPlayerController(
         selectedPlaylist = null
         selectedPlaylistCategory = null
         selectedPlaylistTracks = emptyList()
+        selectedPlaylistTracksNextOffset = 0
+        selectedPlaylistTracksHasMore = false
+        selectedPlaylistLoadMoreJob = null
         selectedPlaylistError = null
     }
 
     fun openMediaItem(item: ProviderMediaItem) {
         selectedMediaItem = item
         selectedMediaItemTracks = emptyList()
+        selectedMediaItemTracksNextOffset = 0
+        selectedMediaItemTracksHasMore = false
         selectedMediaItemAlbums = emptyList()
+        selectedMediaItemAlbumsNextOffset = 0
+        selectedMediaItemAlbumsHasMore = false
+        selectedMediaItemTracksLoadMoreJob = null
+        selectedMediaItemAlbumsLoadMoreJob = null
         selectedMediaItemError = null
         scope.launch {
             isLoading = true
             message = "正在加载：${item.title}"
-            val deferred = scope.async { providerRepository.mediaItemDetail(item) }
+            val deferred = scope.async {
+                providerRepository.mediaItemDetailPage(item, tracksOffset = 0, albumsOffset = 0)
+            }
             val result = withTimeoutOrNull(30_000) {
                 runCatching { deferred.await() }
             }
@@ -1623,7 +1664,11 @@ class FuoPlayerController(
                     if (selectedMediaItem?.id == item.id) {
                         selectedMediaItem = detail.item
                         selectedMediaItemTracks = detail.tracks
+                        selectedMediaItemTracksNextOffset = detail.tracksNextOffset
+                        selectedMediaItemTracksHasMore = detail.tracksHasMore
                         selectedMediaItemAlbums = detail.albums
+                        selectedMediaItemAlbumsNextOffset = detail.albumsNextOffset
+                        selectedMediaItemAlbumsHasMore = detail.albumsHasMore
                         selectedMediaItemError = null
                         val loadedParts = buildList {
                             if (detail.tracks.isNotEmpty()) add("${detail.tracks.size} 首")
@@ -1643,8 +1688,247 @@ class FuoPlayerController(
     fun closeMediaItem() {
         selectedMediaItem = null
         selectedMediaItemTracks = emptyList()
+        selectedMediaItemTracksNextOffset = 0
+        selectedMediaItemTracksHasMore = false
         selectedMediaItemAlbums = emptyList()
+        selectedMediaItemAlbumsNextOffset = 0
+        selectedMediaItemAlbumsHasMore = false
+        selectedMediaItemTracksLoadMoreJob = null
+        selectedMediaItemAlbumsLoadMoreJob = null
         selectedMediaItemError = null
+    }
+
+    fun prefetchSelectedFeatureIfNeeded(visibleIndex: Int) {
+        if (selectedFeatureTracks.size - visibleIndex <= LIST_PREFETCH_REMAINING) {
+            loadMoreSelectedFeatureTracks()
+        }
+    }
+
+    fun prefetchSelectedPlaylistIfNeeded(visibleIndex: Int) {
+        if (selectedPlaylistTracks.size - visibleIndex <= LIST_PREFETCH_REMAINING) {
+            loadMoreSelectedPlaylistTracks()
+        }
+    }
+
+    fun prefetchSelectedMediaItemTracksIfNeeded(visibleIndex: Int) {
+        if (selectedMediaItemTracks.size - visibleIndex <= LIST_PREFETCH_REMAINING) {
+            loadMoreSelectedMediaItemTracks()
+        }
+    }
+
+    fun prefetchSelectedMediaItemAlbumsIfNeeded(visibleIndex: Int) {
+        if (selectedMediaItemAlbums.size - visibleIndex <= LIST_PREFETCH_REMAINING) {
+            loadMoreSelectedMediaItemAlbums()
+        }
+    }
+
+    private fun loadMoreSelectedFeatureTracks() {
+        val feature = selectedFeature ?: return
+        if (feature.isDynamicQueueFeature() || !selectedFeatureTracksHasMore) return
+        if (selectedFeatureLoadMoreJob?.isActive == true) return
+        selectedFeatureLoadMoreJob = scope.launch {
+            appendSelectedFeatureTracksPage()
+        }
+    }
+
+    private suspend fun appendSelectedFeatureTracksPage(): Boolean {
+        val feature = selectedFeature ?: return false
+        if (feature.isDynamicQueueFeature() || !selectedFeatureTracksHasMore) return false
+        val offset = selectedFeatureTracksNextOffset
+        return runCatching {
+            withTimeout(30_000) {
+                providerRepository.loadFeaturePage(feature, offset)
+            }
+        }.fold(
+            onSuccess = { section ->
+                if (selectedFeature != feature) return false
+                val seenIds = selectedFeatureTracks.mapTo(mutableSetOf()) { it.id }
+                val newTracks = section.tracks.filter { seenIds.add(it.id) }
+                if (newTracks.isNotEmpty()) {
+                    selectedFeatureTracks = selectedFeatureTracks + newTracks
+                    updateHomeFeatureSection(
+                        section.copy(
+                            tracks = selectedFeatureTracks,
+                            nextOffset = section.nextOffset,
+                            hasMore = section.hasMore,
+                        ),
+                    )
+                }
+                selectedFeatureTracksNextOffset = section.nextOffset
+                selectedFeatureTracksHasMore = section.hasMore
+                section.nextOffset != offset || newTracks.isNotEmpty()
+            },
+            onFailure = {
+                selectedFeatureError = it.message ?: it::class.simpleName.orEmpty()
+                false
+            },
+        )
+    }
+
+    private fun loadMoreSelectedPlaylistTracks() {
+        if (selectedPlaylist == null || !selectedPlaylistTracksHasMore) return
+        if (selectedPlaylistLoadMoreJob?.isActive == true) return
+        selectedPlaylistLoadMoreJob = scope.launch {
+            appendSelectedPlaylistTracksPage()
+        }
+    }
+
+    private suspend fun appendSelectedPlaylistTracksPage(): Boolean {
+        val playlist = selectedPlaylist ?: return false
+        if (!selectedPlaylistTracksHasMore) return false
+        val offset = selectedPlaylistTracksNextOffset
+        return runCatching {
+            withTimeout(30_000) {
+                providerRepository.playlistDetailPage(playlist, offset)
+            }
+        }.fold(
+            onSuccess = { detail ->
+                if (selectedPlaylist?.id != playlist.id) return false
+                val seenIds = selectedPlaylistTracks.mapTo(mutableSetOf()) { it.id }
+                val newTracks = detail.tracks.filter { seenIds.add(it.id) }
+                selectedPlaylist = detail.playlist
+                if (newTracks.isNotEmpty()) {
+                    selectedPlaylistTracks = selectedPlaylistTracks + newTracks
+                }
+                selectedPlaylistTracksNextOffset = detail.tracksNextOffset
+                selectedPlaylistTracksHasMore = detail.tracksHasMore
+                selectedPlaylistError = null
+                detail.tracksNextOffset != offset || newTracks.isNotEmpty()
+            },
+            onFailure = {
+                selectedPlaylistError = it.message ?: it::class.simpleName.orEmpty()
+                false
+            },
+        )
+    }
+
+    private fun loadMoreSelectedMediaItemTracks() {
+        if (selectedMediaItem == null || !selectedMediaItemTracksHasMore) return
+        if (selectedMediaItemTracksLoadMoreJob?.isActive == true) return
+        selectedMediaItemTracksLoadMoreJob = scope.launch {
+            appendSelectedMediaItemTracksPage()
+        }
+    }
+
+    private suspend fun appendSelectedMediaItemTracksPage(): Boolean {
+        val item = selectedMediaItem ?: return false
+        if (!selectedMediaItemTracksHasMore) return false
+        val offset = selectedMediaItemTracksNextOffset
+        return runCatching {
+            withTimeout(30_000) {
+                providerRepository.mediaItemDetailPage(item, offset, selectedMediaItemAlbumsNextOffset)
+            }
+        }.fold(
+            onSuccess = { detail ->
+                if (selectedMediaItem?.id != item.id) return false
+                val seenIds = selectedMediaItemTracks.mapTo(mutableSetOf()) { it.id }
+                val newTracks = detail.tracks.filter { seenIds.add(it.id) }
+                selectedMediaItem = detail.item
+                if (newTracks.isNotEmpty()) {
+                    selectedMediaItemTracks = selectedMediaItemTracks + newTracks
+                }
+                selectedMediaItemTracksNextOffset = detail.tracksNextOffset
+                selectedMediaItemTracksHasMore = detail.tracksHasMore
+                selectedMediaItemError = null
+                detail.tracksNextOffset != offset || newTracks.isNotEmpty()
+            },
+            onFailure = {
+                selectedMediaItemError = it.message ?: it::class.simpleName.orEmpty()
+                false
+            },
+        )
+    }
+
+    private fun loadMoreSelectedMediaItemAlbums() {
+        if (selectedMediaItem == null || !selectedMediaItemAlbumsHasMore) return
+        if (selectedMediaItemAlbumsLoadMoreJob?.isActive == true) return
+        selectedMediaItemAlbumsLoadMoreJob = scope.launch {
+            appendSelectedMediaItemAlbumsPage()
+        }
+    }
+
+    private suspend fun appendSelectedMediaItemAlbumsPage(): Boolean {
+        val item = selectedMediaItem ?: return false
+        if (!selectedMediaItemAlbumsHasMore) return false
+        val offset = selectedMediaItemAlbumsNextOffset
+        return runCatching {
+            withTimeout(30_000) {
+                providerRepository.mediaItemDetailPage(item, selectedMediaItemTracksNextOffset, offset)
+            }
+        }.fold(
+            onSuccess = { detail ->
+                if (selectedMediaItem?.id != item.id) return false
+                val seenIds = selectedMediaItemAlbums.mapTo(mutableSetOf()) { it.id }
+                val newAlbums = detail.albums.filter { seenIds.add(it.id) }
+                selectedMediaItem = detail.item
+                if (newAlbums.isNotEmpty()) {
+                    selectedMediaItemAlbums = selectedMediaItemAlbums + newAlbums
+                }
+                selectedMediaItemAlbumsNextOffset = detail.albumsNextOffset
+                selectedMediaItemAlbumsHasMore = detail.albumsHasMore
+                selectedMediaItemError = null
+                detail.albumsNextOffset != offset || newAlbums.isNotEmpty()
+            },
+            onFailure = {
+                selectedMediaItemError = it.message ?: it::class.simpleName.orEmpty()
+                false
+            },
+        )
+    }
+
+    private suspend fun ensureAllSelectedFeatureTracks() {
+        selectedFeatureLoadMoreJob?.join()
+        while (selectedFeatureTracksHasMore) {
+            if (!appendSelectedFeatureTracksPage()) break
+        }
+    }
+
+    private suspend fun ensureAllSelectedPlaylistTracks() {
+        selectedPlaylistLoadMoreJob?.join()
+        while (selectedPlaylistTracksHasMore) {
+            if (!appendSelectedPlaylistTracksPage()) break
+        }
+    }
+
+    private suspend fun ensureAllSelectedMediaItemTracks() {
+        selectedMediaItemTracksLoadMoreJob?.join()
+        while (selectedMediaItemTracksHasMore) {
+            if (!appendSelectedMediaItemTracksPage()) break
+        }
+    }
+
+    private suspend fun loadCompleteFeatureSection(section: ProviderContentSection): ProviderContentSection {
+        var nextOffset = section.nextOffset
+        var hasMore = section.hasMore
+        var currentSection = section
+        var tracks = section.tracks
+        val seenIds = tracks.mapTo(mutableSetOf()) { it.id }
+        while (hasMore) {
+            val pageResult = runCatching {
+                withTimeout(30_000) {
+                    providerRepository.loadFeaturePage(section.feature, nextOffset)
+                }
+            }
+            if (pageResult.isFailure) {
+                setError(pageResult.exceptionOrNull() ?: RuntimeException("加载失败"))
+                break
+            }
+            val page = pageResult.getOrThrow()
+            val newTracks = page.tracks.filter { seenIds.add(it.id) }
+            if (newTracks.isNotEmpty()) {
+                tracks = tracks + newTracks
+            }
+            val progressed = page.nextOffset != nextOffset || newTracks.isNotEmpty()
+            nextOffset = page.nextOffset
+            hasMore = page.hasMore
+            currentSection = page
+            if (!progressed) break
+        }
+        return currentSection.copy(
+            tracks = tracks,
+            nextOffset = nextOffset,
+            hasMore = hasMore,
+        )
     }
 
     fun playFromLocal(index: Int) {
@@ -1681,8 +1965,17 @@ class FuoPlayerController(
         val feature = section?.feature ?: return
         if (section.tracks.isEmpty() && feature.isDynamicQueueFeature()) {
             loadFeatureAndPlayAll(feature)
+        } else if (feature.isDynamicQueueFeature()) {
+            playFirst(section.tracks, feature)
         } else {
-            playFirst(section.tracks, feature.takeIf { it.isDynamicQueueFeature() })
+            scope.launch {
+                isLoading = true
+                message = "正在加载完整列表：${feature.title}"
+                val completeSection = loadCompleteFeatureSection(section)
+                updateHomeFeatureSection(completeSection)
+                playFirst(completeSection.tracks)
+                isLoading = false
+            }
         }
     }
 
@@ -1692,7 +1985,14 @@ class FuoPlayerController(
     }
 
     fun playAllFromSelectedPlaylist() {
-        playFirst(selectedPlaylistTracks)
+        val playlist = selectedPlaylist ?: return
+        scope.launch {
+            isLoading = true
+            message = "正在加载完整歌单：${playlist.title}"
+            ensureAllSelectedPlaylistTracks()
+            playFirst(selectedPlaylistTracks)
+            isLoading = false
+        }
     }
 
     fun playFromSelectedFeature(index: Int) {
@@ -1701,7 +2001,18 @@ class FuoPlayerController(
     }
 
     fun playAllFromSelectedFeature() {
-        playFirst(selectedFeatureTracks, selectedFeature?.takeIf { it.isDynamicQueueFeature() })
+        val feature = selectedFeature ?: return
+        if (feature.isDynamicQueueFeature()) {
+            playFirst(selectedFeatureTracks, feature)
+            return
+        }
+        scope.launch {
+            isLoading = true
+            message = "正在加载完整列表：${feature.title}"
+            ensureAllSelectedFeatureTracks()
+            playFirst(selectedFeatureTracks)
+            isLoading = false
+        }
     }
 
     fun playFromSelectedMediaItem(index: Int) {
@@ -1710,7 +2021,14 @@ class FuoPlayerController(
     }
 
     fun playAllFromSelectedMediaItem() {
-        playFirst(selectedMediaItemTracks)
+        val item = selectedMediaItem ?: return
+        scope.launch {
+            isLoading = true
+            message = "正在加载完整列表：${item.title}"
+            ensureAllSelectedMediaItemTracks()
+            playFirst(selectedMediaItemTracks)
+            isLoading = false
+        }
     }
 
     fun playSelectedTrack() {
@@ -2056,10 +2374,22 @@ class FuoPlayerController(
         selectedPlaylistCategory = null
         selectedMediaItem = null
         selectedFeatureTracks = emptyList()
+        selectedFeatureTracksNextOffset = 0
+        selectedFeatureTracksHasMore = false
+        selectedFeatureLoadMoreJob = null
         selectedTrackError = null
         selectedPlaylistTracks = emptyList()
+        selectedPlaylistTracksNextOffset = 0
+        selectedPlaylistTracksHasMore = false
+        selectedPlaylistLoadMoreJob = null
         selectedMediaItemTracks = emptyList()
+        selectedMediaItemTracksNextOffset = 0
+        selectedMediaItemTracksHasMore = false
         selectedMediaItemAlbums = emptyList()
+        selectedMediaItemAlbumsNextOffset = 0
+        selectedMediaItemAlbumsHasMore = false
+        selectedMediaItemTracksLoadMoreJob = null
+        selectedMediaItemAlbumsLoadMoreJob = null
         closePlaylistTargetPicker()
     }
 

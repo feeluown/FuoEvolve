@@ -113,6 +113,7 @@ val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
 const val DEFAULT_SMART_REPLACEMENT_MIN_SCORE = 0.55
+const val PROVIDER_PAGE_SIZE = 60
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
@@ -514,6 +515,7 @@ data class ProviderPlaylist(
     val description: String = "",
     val playCount: Long? = null,
     val providerUrl: String? = null,
+    val trackCount: Int? = null,
 )
 
 enum class ProviderMediaItemType {
@@ -530,6 +532,8 @@ data class ProviderMediaItem(
     val coverUrl: String? = null,
     val description: String = "",
     val providerUrl: String? = null,
+    val trackCount: Int? = null,
+    val albumCount: Int? = null,
 )
 
 data class ProviderVideo(
@@ -567,17 +571,25 @@ data class ProviderContentSection(
     val mediaItems: List<ProviderMediaItem> = emptyList(),
     val isLoginRequired: Boolean = false,
     val errorMessage: String? = null,
+    val nextOffset: Int = 0,
+    val hasMore: Boolean = false,
 )
 
 data class ProviderPlaylistDetail(
     val playlist: ProviderPlaylist,
     val tracks: List<MusicTrack> = emptyList(),
+    val tracksNextOffset: Int = 0,
+    val tracksHasMore: Boolean = false,
 )
 
 data class ProviderMediaItemDetail(
     val item: ProviderMediaItem,
     val tracks: List<MusicTrack> = emptyList(),
     val albums: List<ProviderMediaItem> = emptyList(),
+    val tracksNextOffset: Int = 0,
+    val tracksHasMore: Boolean = false,
+    val albumsNextOffset: Int = 0,
+    val albumsHasMore: Boolean = false,
 )
 
 data class VideoPlaybackPayload(
@@ -618,9 +630,19 @@ interface ProviderMusicRepository {
     suspend fun providerCapabilities(): List<ProviderCapabilities> = emptyList()
     suspend fun features(): List<ProviderFeature>
     suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
+    suspend fun loadFeaturePage(
+        feature: ProviderFeature,
+        offset: Int,
+        limit: Int = PROVIDER_PAGE_SIZE,
+    ): ProviderContentSection = loadFeature(feature)
     suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> = loadFeature(feature).tracks
     suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail =
         ProviderPlaylistDetail(playlist, playlistTracks(playlist))
+    suspend fun playlistDetailPage(
+        playlist: ProviderPlaylist,
+        offset: Int,
+        limit: Int = PROVIDER_PAGE_SIZE,
+    ): ProviderPlaylistDetail = playlistDetail(playlist)
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>
     suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> = emptyList()
     suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult =
@@ -629,6 +651,12 @@ interface ProviderMusicRepository {
         ProviderMutationResult(false, "provider does not support playlist remove song")
     suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         ProviderMediaItemDetail(item, mediaItemTracks(item))
+    suspend fun mediaItemDetailPage(
+        item: ProviderMediaItem,
+        tracksOffset: Int,
+        albumsOffset: Int,
+        limit: Int = PROVIDER_PAGE_SIZE,
+    ): ProviderMediaItemDetail = mediaItemDetail(item)
     suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack>
     suspend fun similarTracks(track: MusicTrack): List<MusicTrack> = emptyList()
     suspend fun hotComments(track: MusicTrack): List<ProviderComment> = emptyList()
