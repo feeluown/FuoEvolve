@@ -365,6 +365,14 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
         onDeleteDownload = { controller.deleteDownload(track) },
         onOpenArtist = { controller.openTrackArtist(track) },
         onOpenAlbum = { controller.openTrackAlbum(track) },
+        onOpenDetail = if (track.sourceType == TrackSourceType.Provider) {
+            {
+                controller.closeFullPlayer()
+                controller.openTrackDetail(track)
+            }
+        } else {
+            null
+        },
         onEditLocalMetadata = if (track.sourceType == TrackSourceType.LocalMediaStore) {
             { controller.openLocalMetadataEditor(track) }
         } else {
@@ -373,6 +381,7 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
         onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
         onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
         onShare = sharePayload?.let { payload -> { onShare(payload) } },
+        roundButton = true,
     )
 }
 
@@ -663,41 +672,56 @@ fun QueueRepeatModeHeader(repeatMode: RepeatMode, onRepeat: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = repeatMode.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            RepeatModeControlButton(
+            RepeatModeTextButton(
                 repeatMode = repeatMode,
                 onRepeat = onRepeat,
-                size = 40.dp,
-                iconSize = 22.dp,
             )
         }
     }
 }
 
 @Composable
-fun RepeatModeControlButton(
+fun RepeatModeTextButton(
     repeatMode: RepeatMode,
     onRepeat: () -> Unit,
-    size: androidx.compose.ui.unit.Dp = 44.dp,
-    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
 ) {
     val repeatIcon = when (repeatMode) {
         RepeatMode.OFF -> Icons.Filled.Repeat
         RepeatMode.QUEUE -> Icons.Filled.Repeat
         RepeatMode.SINGLE -> Icons.Filled.RepeatOne
     }
-    RoundControlButton(
-        imageVector = repeatIcon,
-        contentDescription = repeatMode.label,
-        onClick = onRepeat,
-        size = size,
-        iconSize = iconSize,
-        selected = repeatMode != RepeatMode.OFF,
-    )
+    Surface(
+        modifier = Modifier.clickable(onClick = onRepeat),
+        color = if (repeatMode == RepeatMode.OFF) {
+            MaterialTheme.colorScheme.surfaceVariant
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+        contentColor = if (repeatMode == RepeatMode.OFF) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.onPrimary
+        },
+        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(50),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = repeatIcon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = repeatMode.label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 fun emptyDisplayTrack() = MusicTrack(
@@ -764,7 +788,7 @@ fun PlayerControls(
         )
         when {
             !compact && extraAction != null -> extraAction()
-            !compact && onRepeat != null -> RepeatModeControlButton(
+            !compact && onRepeat != null -> RepeatModeTextButton(
                 repeatMode = repeatMode,
                 onRepeat = onRepeat,
             )

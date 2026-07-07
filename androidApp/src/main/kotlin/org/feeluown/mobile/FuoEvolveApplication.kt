@@ -55,6 +55,22 @@ class FuoEvolveApplication : PyApplication() {
             scope = appScope,
         ).also { controller ->
             FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
+                override fun toggle() {
+                    controller.toggle()
+                }
+
+                override fun play() {
+                    if (controller.playbackState.status != PlayerStatus.Playing) {
+                        controller.toggle()
+                    }
+                }
+
+                override fun pause() {
+                    if (controller.playbackState.status == PlayerStatus.Playing) {
+                        controller.toggle()
+                    }
+                }
+
                 override fun previous() {
                     controller.previous()
                 }

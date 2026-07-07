@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
@@ -47,6 +48,7 @@ fun TrackRow(
     onDeleteDownload: () -> Unit,
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
+    onOpenDetail: (() -> Unit)? = null,
     onEditLocalMetadata: (() -> Unit)? = null,
     onAddToProviderPlaylist: (() -> Unit)? = null,
     onRemoveFromProviderPlaylist: (() -> Unit)? = null,
@@ -92,6 +94,7 @@ fun TrackRow(
             onDeleteDownload = onDeleteDownload,
             onOpenArtist = onOpenArtist,
             onOpenAlbum = onOpenAlbum,
+            onOpenDetail = onOpenDetail,
             onEditLocalMetadata = onEditLocalMetadata,
             onAddToProviderPlaylist = onAddToProviderPlaylist,
             onRemoveFromProviderPlaylist = onRemoveFromProviderPlaylist,
@@ -123,20 +126,42 @@ fun TrackAction(
     onDeleteDownload: () -> Unit,
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
+    onOpenDetail: (() -> Unit)? = null,
     onEditLocalMetadata: (() -> Unit)?,
     onAddToProviderPlaylist: (() -> Unit)?,
     onRemoveFromProviderPlaylist: (() -> Unit)?,
     onShare: (() -> Unit)?,
+    roundButton: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+        if (roundButton) {
+            RoundControlButton(
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = "更多操作",
+                onClick = { expanded = true },
+                size = 44.dp,
+                iconSize = 24.dp,
+            )
+        } else {
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+            }
         }
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
+            if (onOpenDetail != null) {
+                DropdownMenuItem(
+                    text = { Text("歌曲详情") },
+                    leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onOpenDetail()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("接下来播放") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
@@ -249,6 +274,14 @@ fun addToProviderPlaylistAction(controller: FuoPlayerController, track: MusicTra
 fun removeFromSelectedPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
     return if (controller.canRemoveTrackFromSelectedPlaylist(track)) {
         { controller.removeTrackFromSelectedPlaylist(track) }
+    } else {
+        null
+    }
+}
+
+fun trackDetailAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
+    return if (track.sourceType == TrackSourceType.Provider) {
+        { controller.openTrackDetail(track) }
     } else {
         null
     }

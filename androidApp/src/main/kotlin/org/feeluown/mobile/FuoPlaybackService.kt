@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -67,6 +68,14 @@ class FuoPlaybackService : MediaSessionService() {
                         ACTION_NEXT -> transportControls?.next()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+
+                override fun onMediaButtonEvent(
+                    session: MediaSession,
+                    controllerInfo: MediaSession.ControllerInfo,
+                    intent: Intent,
+                ): Boolean {
+                    return handleMediaButtonEvent(intent)
                 }
             })
             .setMediaButtonPreferences(mediaButtonPreferences())
@@ -184,6 +193,32 @@ class FuoPlaybackService : MediaSessionService() {
         return scheme == "http" || scheme == "https"
     }
 
+    @Suppress("DEPRECATION")
+    private fun handleMediaButtonEvent(intent: Intent): Boolean {
+        if (intent.action != Intent.ACTION_MEDIA_BUTTON) return false
+        val keyEvent = intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT) as? KeyEvent ?: return false
+        val handled = when (keyEvent.keyCode) {
+            KeyEvent.KEYCODE_HEADSETHOOK,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> true
+            else -> false
+        }
+        if (!handled) return false
+        if (keyEvent.action != KeyEvent.ACTION_DOWN || keyEvent.repeatCount > 0) return true
+        when (keyEvent.keyCode) {
+            KeyEvent.KEYCODE_HEADSETHOOK,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> transportControls?.toggle()
+            KeyEvent.KEYCODE_MEDIA_PLAY -> transportControls?.play()
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> transportControls?.pause()
+            KeyEvent.KEYCODE_MEDIA_NEXT -> transportControls?.next()
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> transportControls?.previous()
+        }
+        return true
+    }
+
     companion object {
         private const val ACTION_PLAY = "org.feeluown.mobile.action.PLAY"
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
@@ -251,6 +286,9 @@ class FuoPlaybackService : MediaSessionService() {
     }
 
     interface TransportControls {
+        fun toggle()
+        fun play()
+        fun pause()
         fun previous()
         fun next()
     }
