@@ -147,7 +147,7 @@ fun ProviderContentHomeSection(
                                 item(key = "playlists:${contentSection.feature.id}") {
                                     ProviderPlaylistGrid(
                                         playlists = contentSection.playlists,
-                                        onClick = controller::openPlaylist,
+                                        onClick = { controller.openPlaylist(it, contentSection.feature.category) },
                                     )
                                 }
                             }

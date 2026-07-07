@@ -88,6 +88,8 @@ class FuoPlayerController(
         private set
     var selectedPlaylist by mutableStateOf<ProviderPlaylist?>(null)
         private set
+    var selectedPlaylistCategory by mutableStateOf<ProviderFeatureCategory?>(null)
+        private set
     var selectedPlaylistTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var selectedPlaylistError by mutableStateOf<String?>(null)
@@ -1387,6 +1389,7 @@ class FuoPlayerController(
     fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean {
         val playlist = selectedPlaylist ?: return false
         return track.sourceType == TrackSourceType.Provider &&
+            selectedPlaylistCategory == ProviderFeatureCategory.MinePlaylists &&
             trackProviderId(track) == playlist.providerId &&
             isProviderLoggedIn(playlist.providerId) &&
             providerCapabilities[playlist.providerId]?.canRemoveSongFromPlaylist == true
@@ -1414,8 +1417,9 @@ class FuoPlayerController(
         }
     }
 
-    fun openPlaylist(playlist: ProviderPlaylist) {
+    fun openPlaylist(playlist: ProviderPlaylist, category: ProviderFeatureCategory? = null) {
         selectedPlaylist = playlist
+        selectedPlaylistCategory = category
         selectedPlaylistTracks = emptyList()
         selectedPlaylistError = null
         scope.launch {
@@ -1452,6 +1456,7 @@ class FuoPlayerController(
 
     fun closePlaylist() {
         selectedPlaylist = null
+        selectedPlaylistCategory = null
         selectedPlaylistTracks = emptyList()
         selectedPlaylistError = null
     }
@@ -1902,6 +1907,7 @@ class FuoPlayerController(
         selectedFeature = null
         selectedTrack = null
         selectedPlaylist = null
+        selectedPlaylistCategory = null
         selectedMediaItem = null
         selectedFeatureTracks = emptyList()
         selectedTrackError = null

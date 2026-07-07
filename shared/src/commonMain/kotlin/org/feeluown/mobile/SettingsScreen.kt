@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -996,10 +998,11 @@ fun DebugSettingsPanel(controller: FuoPlayerController) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DebugLogScreen(controller: FuoPlayerController) {
     val clipboardManager = LocalClipboardManager.current
+    var selectionMode by remember { mutableStateOf(false) }
     var selectedLineIndexes by remember { mutableStateOf<Set<Int>>(emptySet()) }
     val visibleLogLines = remember(controller.debugLogLines, controller.debugLogLevelFilters) {
         controller.debugLogLines.mapIndexedNotNull { index, line ->
@@ -1012,6 +1015,11 @@ fun DebugLogScreen(controller: FuoPlayerController) {
     }
     LaunchedEffect(controller.debugLogLines) {
         selectedLineIndexes = selectedLineIndexes.filter { it in controller.debugLogLines.indices }.toSet()
+    }
+    LaunchedEffect(selectedLineIndexes) {
+        if (selectedLineIndexes.isEmpty()) {
+            selectionMode = false
+        }
     }
     Scaffold(
         topBar = {
@@ -1062,48 +1070,50 @@ fun DebugLogScreen(controller: FuoPlayerController) {
                     )
                 }
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "已选 ${selectedLineIndexes.size}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(
-                    enabled = visibleLogLines.isNotEmpty(),
-                    onClick = {
-                        val visibleIndexes = visibleLogLines.map { it.first }.toSet()
-                        selectedLineIndexes = if (visibleIndexes.all { it in selectedLineIndexes }) {
-                            selectedLineIndexes - visibleIndexes
-                        } else {
-                            selectedLineIndexes + visibleIndexes
-                        }
-                    },
+            if (selectionMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("全选")
-                }
-                TextButton(
-                    enabled = selectedLines.isNotEmpty(),
-                    onClick = {
-                        clipboardManager.setText(AnnotatedString(selectedLines.joinToString(separator = "\n")))
-                    },
-                ) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("复制所选")
-                }
-                TextButton(
-                    enabled = selectedLines.isNotEmpty() && !controller.isLoading,
-                    onClick = { controller.exportDebugLogs(selectedLines) },
-                ) {
-                    Icon(Icons.Filled.Download, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("导出所选")
+                    Text(
+                        text = "已选 ${selectedLineIndexes.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        enabled = visibleLogLines.isNotEmpty(),
+                        onClick = {
+                            val visibleIndexes = visibleLogLines.map { it.first }.toSet()
+                            selectedLineIndexes = if (visibleIndexes.all { it in selectedLineIndexes }) {
+                                selectedLineIndexes - visibleIndexes
+                            } else {
+                                selectedLineIndexes + visibleIndexes
+                            }
+                        },
+                    ) {
+                        Text("全选")
+                    }
+                    TextButton(
+                        enabled = selectedLines.isNotEmpty(),
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(selectedLines.joinToString(separator = "\n")))
+                        },
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("复制所选")
+                    }
+                    TextButton(
+                        enabled = selectedLines.isNotEmpty() && !controller.isLoading,
+                        onClick = { controller.exportDebugLogs(selectedLines) },
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text("导出所选")
+                    }
                 }
             }
             LazyColumn(
@@ -1125,13 +1135,21 @@ fun DebugLogScreen(controller: FuoPlayerController) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
-                                .clickable {
-                                    selectedLineIndexes = if (selected) {
-                                        selectedLineIndexes - originalIndex
-                                    } else {
-                                        selectedLineIndexes + originalIndex
-                                    }
-                                },
+                                .combinedClickable(
+                                    onClick = {
+                                        if (selectionMode) {
+                                            selectedLineIndexes = if (selected) {
+                                                selectedLineIndexes - originalIndex
+                                            } else {
+                                                selectedLineIndexes + originalIndex
+                                            }
+                                        }
+                                    },
+                                    onLongClick = {
+                                        selectionMode = true
+                                        selectedLineIndexes = selectedLineIndexes + originalIndex
+                                    },
+                                ),
                             color = debugLogLevelContainerColor(level),
                             shape = RoundedCornerShape(8.dp),
                         ) {
@@ -1140,16 +1158,18 @@ fun DebugLogScreen(controller: FuoPlayerController) {
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
-                                Checkbox(
-                                    checked = selected,
-                                    onCheckedChange = { checked ->
-                                        selectedLineIndexes = if (checked) {
-                                            selectedLineIndexes + originalIndex
-                                        } else {
-                                            selectedLineIndexes - originalIndex
-                                        }
-                                    },
-                                )
+                                if (selectionMode) {
+                                    Checkbox(
+                                        checked = selected,
+                                        onCheckedChange = { checked ->
+                                            selectedLineIndexes = if (checked) {
+                                                selectedLineIndexes + originalIndex
+                                            } else {
+                                                selectedLineIndexes - originalIndex
+                                            }
+                                        },
+                                    )
+                                }
                                 Text(
                                     modifier = Modifier
                                         .weight(1f)

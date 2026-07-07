@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -816,13 +817,59 @@ class FuoPlayerControllerTest {
             )
 
             advanceUntilIdle()
-            controller.openPlaylist(playlist)
+            controller.openPlaylist(playlist, ProviderFeatureCategory.MinePlaylists)
             advanceUntilIdle()
             controller.removeTrackFromSelectedPlaylist(tracks.first())
             advanceUntilIdle()
 
             assertEquals(playlist to tracks.first(), provider.lastRemovedFromPlaylist)
             assertEquals(listOf("netease:2"), controller.selectedPlaylistTracks.map { it.id })
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun favoritePlaylistDoesNotAllowRemovingVisibleTracks() = runTest {
+        val tracks = listOf(providerTrack("netease:1", "First"))
+        val playlist = ProviderPlaylist(
+            id = "playlist:netease:favorite",
+            title = "收藏歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            playlistTracks = tracks,
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canRemoveSongFromPlaylist = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylist(playlist, ProviderFeatureCategory.MineFavoritePlaylists)
+            advanceUntilIdle()
+
+            assertFalse(controller.canRemoveTrackFromSelectedPlaylist(tracks.first()))
+
+            controller.removeTrackFromSelectedPlaylist(tracks.first())
+            advanceUntilIdle()
+
+            assertEquals(null, provider.lastRemovedFromPlaylist)
+            assertEquals(listOf("netease:1"), controller.selectedPlaylistTracks.map { it.id })
         } finally {
             controllerScope.cancel()
         }
