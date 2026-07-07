@@ -5,8 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.view.KeyEvent
 import androidx.annotation.OptIn
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -20,11 +20,6 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionCommands
-import androidx.media3.session.SessionResult
-import com.google.common.util.concurrent.Futures
-import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONObject
 
 class FuoPlaybackService : MediaSessionService() {
@@ -40,42 +35,15 @@ class FuoPlaybackService : MediaSessionService() {
             .setRenderersFactory(renderersFactory)
             .build()
         player = exoPlayer
-        mediaSession = MediaSession.Builder(this, exoPlayer)
+        mediaSession = MediaSession.Builder(this, QueueCommandPlayer(exoPlayer))
             .setCallback(object : MediaSession.Callback {
                 override fun onConnect(
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                 ): MediaSession.ConnectionResult {
-                    val commands = SessionCommands.Builder()
-                        .addSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.commands)
-                        .add(COMMAND_PREVIOUS)
-                        .add(COMMAND_NEXT)
-                        .build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                        .setAvailableSessionCommands(commands)
-                        .setAvailablePlayerCommands(playerCommands())
+                        .setAvailablePlayerCommands(queuePlayerCommands(exoPlayer.getAvailableCommands()))
                         .build()
-                }
-
-                override fun onCustomCommand(
-                    session: MediaSession,
-                    controller: MediaSession.ControllerInfo,
-                    customCommand: SessionCommand,
-                    args: Bundle,
-                ): ListenableFuture<SessionResult> {
-                    when (customCommand.customAction) {
-                        ACTION_PREVIOUS -> transportControls?.previous()
-                        ACTION_NEXT -> transportControls?.next()
-                    }
-                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
-                override fun onMediaButtonEvent(
-                    session: MediaSession,
-                    controllerInfo: MediaSession.ControllerInfo,
-                    intent: Intent,
-                ): Boolean {
-                    return handleMediaButtonEvent(intent)
                 }
             })
             .setMediaButtonPreferences(mediaButtonPreferences())
@@ -193,30 +161,37 @@ class FuoPlaybackService : MediaSessionService() {
         return scheme == "http" || scheme == "https"
     }
 
-    @Suppress("DEPRECATION")
-    private fun handleMediaButtonEvent(intent: Intent): Boolean {
-        if (intent.action != Intent.ACTION_MEDIA_BUTTON) return false
-        val keyEvent = intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT) as? KeyEvent ?: return false
-        val handled = when (keyEvent.keyCode) {
-            KeyEvent.KEYCODE_HEADSETHOOK,
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            KeyEvent.KEYCODE_MEDIA_PLAY,
-            KeyEvent.KEYCODE_MEDIA_PAUSE,
-            KeyEvent.KEYCODE_MEDIA_NEXT,
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> true
-            else -> false
+    @OptIn(UnstableApi::class)
+    private class QueueCommandPlayer(player: Player) : ForwardingPlayer(player) {
+        override fun getAvailableCommands(): Player.Commands {
+            return queuePlayerCommands(super.getAvailableCommands())
         }
-        if (!handled) return false
-        if (keyEvent.action != KeyEvent.ACTION_DOWN || keyEvent.repeatCount > 0) return true
-        when (keyEvent.keyCode) {
-            KeyEvent.KEYCODE_HEADSETHOOK,
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> transportControls?.toggle()
-            KeyEvent.KEYCODE_MEDIA_PLAY -> transportControls?.play()
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> transportControls?.pause()
-            KeyEvent.KEYCODE_MEDIA_NEXT -> transportControls?.next()
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> transportControls?.previous()
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            return command in queueNavigationCommands || super.isCommandAvailable(command)
         }
-        return true
+
+        @Suppress("DEPRECATION")
+        @Deprecated("Deprecated in Java")
+        override fun next() {
+            transportControls?.next()
+        }
+
+        override fun seekToNext() {
+            transportControls?.next()
+        }
+
+        override fun seekToNextMediaItem() {
+            transportControls?.next()
+        }
+
+        override fun seekToPrevious() {
+            transportControls?.previous()
+        }
+
+        override fun seekToPreviousMediaItem() {
+            transportControls?.previous()
+        }
     }
 
     companion object {
@@ -224,12 +199,14 @@ class FuoPlaybackService : MediaSessionService() {
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
         private const val ACTION_RESUME = "org.feeluown.mobile.action.RESUME"
         private const val ACTION_STOP = "org.feeluown.mobile.action.STOP"
-        private const val ACTION_PREVIOUS = "org.feeluown.mobile.action.PREVIOUS"
-        private const val ACTION_NEXT = "org.feeluown.mobile.action.NEXT"
         private const val EXTRA_PAYLOAD = "payload"
         private const val TAG = "FuoPlaybackService"
-        private val COMMAND_PREVIOUS = SessionCommand(ACTION_PREVIOUS, Bundle.EMPTY)
-        private val COMMAND_NEXT = SessionCommand(ACTION_NEXT, Bundle.EMPTY)
+        private val queueNavigationCommands = setOf(
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+        )
 
         @Volatile
         var transportControls: TransportControls? = null
@@ -260,27 +237,22 @@ class FuoPlaybackService : MediaSessionService() {
         @OptIn(UnstableApi::class)
         private fun mediaButtonPreferences(): List<CommandButton> = listOf(
             CommandButton.Builder(CommandButton.ICON_PREVIOUS)
-                .setSessionCommand(COMMAND_PREVIOUS)
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .setDisplayName("上一首")
                 .setSlots(CommandButton.SLOT_BACK)
                 .build(),
             CommandButton.Builder(CommandButton.ICON_NEXT)
-                .setSessionCommand(COMMAND_NEXT)
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT)
                 .setDisplayName("下一首")
                 .setSlots(CommandButton.SLOT_FORWARD)
                 .build(),
         )
 
         @OptIn(UnstableApi::class)
-        private fun playerCommands(): Player.Commands {
+        private fun queuePlayerCommands(commands: Player.Commands): Player.Commands {
             return Player.Commands.Builder()
-                .addAllCommands()
-                .removeAll(
-                    Player.COMMAND_SEEK_TO_PREVIOUS,
-                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-                    Player.COMMAND_SEEK_TO_NEXT,
-                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                )
+                .addAll(commands)
+                .addAll(*queueNavigationCommands.toIntArray())
                 .build()
         }
     }
