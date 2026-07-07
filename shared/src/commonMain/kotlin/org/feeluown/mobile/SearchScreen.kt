@@ -199,6 +199,7 @@ fun SearchScreen(controller: FuoPlayerController) {
                             onDeleteDownload = { controller.deleteDownload(track) },
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
+                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                         )
                         HorizontalDivider()
                     }
@@ -226,6 +227,7 @@ fun SearchResultList(controller: FuoPlayerController, modifier: Modifier) {
                     onDeleteDownload = { controller.deleteDownload(track) },
                     onOpenArtist = { controller.openTrackArtist(track) },
                     onOpenAlbum = { controller.openTrackAlbum(track) },
+                    onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                 )
                 HorizontalDivider()
             }

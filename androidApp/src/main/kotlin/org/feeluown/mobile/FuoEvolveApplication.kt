@@ -39,7 +39,7 @@ class FuoEvolveApplication : PyApplication() {
     }
 
     private val debugLogRepository: AndroidDebugLogRepository by lazy {
-        AndroidDebugLogRepository((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+        AndroidDebugLogRepository(applicationContext, (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
     }
 
     val controller: FuoPlayerController by lazy {

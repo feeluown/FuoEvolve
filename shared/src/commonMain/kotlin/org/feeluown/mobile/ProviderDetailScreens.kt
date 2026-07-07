@@ -192,6 +192,7 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                             onDeleteDownload = { controller.deleteDownload(track) },
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
+                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                         )
                         HorizontalDivider()
                     }
@@ -521,6 +522,8 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                             onDeleteDownload = { controller.deleteDownload(track) },
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
+                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                            onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                         )
                         HorizontalDivider()
                     }
@@ -765,6 +768,7 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                                 onDeleteDownload = { controller.deleteDownload(track) },
                                 onOpenArtist = { controller.openTrackArtist(track) },
                                 onOpenAlbum = { controller.openTrackAlbum(track) },
+                                onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                             )
                             HorizontalDivider()
                         }
@@ -841,6 +845,8 @@ fun TrackCollectionList(
                         onDeleteDownload = { controller.deleteDownload(track) },
                         onOpenArtist = { controller.openTrackArtist(track) },
                         onOpenAlbum = { controller.openTrackAlbum(track) },
+                        onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                        onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                     )
                 }
             }
@@ -863,6 +869,8 @@ fun TrackCollectionList(
                     onDeleteDownload = { controller.deleteDownload(track) },
                     onOpenArtist = { controller.openTrackArtist(track) },
                     onOpenAlbum = { controller.openTrackAlbum(track) },
+                    onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                    onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                 )
                 HorizontalDivider()
             }

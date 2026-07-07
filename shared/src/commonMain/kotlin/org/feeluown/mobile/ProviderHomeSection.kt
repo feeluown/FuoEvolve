@@ -138,6 +138,7 @@ fun ProviderContentHomeSection(
                                         onDeleteDownload = { controller.deleteDownload(track) },
                                         onOpenArtist = { controller.openTrackArtist(track) },
                                         onOpenAlbum = { controller.openTrackAlbum(track) },
+                                        onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                                     )
                                     HorizontalDivider()
                                 }

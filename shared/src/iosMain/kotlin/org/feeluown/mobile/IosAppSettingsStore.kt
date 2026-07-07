@@ -34,8 +34,8 @@ class IosAppSettingsStore : AppSettingsStore {
                 KEY_SMART_REPLACEMENT_MIN_SCORE,
                 DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
             ),
-            smartReplacementUseOriginalMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA, false),
-            smartReplacementUseOriginalLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, false),
+            smartReplacementUseReplacementMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA, false),
+            smartReplacementUseReplacementLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, false),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
@@ -63,8 +63,8 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setObject(settings.cellularAudioQualityPolicy.name, KEY_CELLULAR_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.unavailablePlaybackPolicy.name, KEY_UNAVAILABLE_PLAYBACK_POLICY)
             defaults.setDouble(settings.smartReplacementMinScore, KEY_SMART_REPLACEMENT_MIN_SCORE)
-            defaults.setBool(settings.smartReplacementUseOriginalMetadata, KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA)
-            defaults.setBool(settings.smartReplacementUseOriginalLyrics, KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS)
+            defaults.setBool(settings.smartReplacementUseReplacementMetadata, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA)
+            defaults.setBool(settings.smartReplacementUseReplacementLyrics, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS)
             defaults.setObject(settings.lyricFontSize.name, KEY_LYRIC_FONT_SIZE)
             defaults.setObject(settings.themeMode.name, KEY_THEME_MODE)
             defaults.setObject(settings.themeColorScheme.name, KEY_THEME_COLOR_SCHEME)
@@ -172,8 +172,8 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
-        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
-        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
+        private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
+        private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_COLOR_SCHEME = "theme_color_scheme"

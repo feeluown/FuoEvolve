@@ -45,6 +45,7 @@ enum class LocalMusicViewMode {
 }
 
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
+private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
 class FuoPlayerController(
     private val providerRepository: ProviderMusicRepository,
@@ -62,6 +63,8 @@ class FuoPlayerController(
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
         private set
     var providerFeatures by mutableStateOf<List<ProviderFeature>>(emptyList())
+        private set
+    var providerCapabilities by mutableStateOf<Map<String, ProviderCapabilities>>(emptyMap())
         private set
     var providerAuthStates by mutableStateOf<Map<String, ProviderAuthState>>(emptyMap())
         private set
@@ -106,6 +109,12 @@ class FuoPlayerController(
     var selectedTrack by mutableStateOf<MusicTrack?>(null)
         private set
     var selectedTrackError by mutableStateOf<String?>(null)
+        private set
+    var playlistTargetTrack by mutableStateOf<MusicTrack?>(null)
+        private set
+    var playlistOperationTargets by mutableStateOf<List<ProviderPlaylist>>(emptyList())
+        private set
+    var playlistOperationError by mutableStateOf<String?>(null)
         private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
@@ -171,9 +180,9 @@ class FuoPlayerController(
         private set
     var smartReplacementMinScore by mutableStateOf(DEFAULT_SMART_REPLACEMENT_MIN_SCORE)
         private set
-    var smartReplacementUseOriginalMetadata by mutableStateOf(false)
+    var smartReplacementUseReplacementMetadata by mutableStateOf(false)
         private set
-    var smartReplacementUseOriginalLyrics by mutableStateOf(false)
+    var smartReplacementUseReplacementLyrics by mutableStateOf(false)
         private set
     var lyricFontSize by mutableStateOf(LyricFontSize.Small)
         private set
@@ -182,6 +191,8 @@ class FuoPlayerController(
     var themeColorScheme by mutableStateOf(ThemeColorScheme.Dynamic)
         private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
+        private set
+    var debugLogLevelFilters by mutableStateOf(DEFAULT_DEBUG_LOG_LEVEL_FILTERS)
         private set
     var debugLogError by mutableStateOf<String?>(null)
         private set
@@ -535,6 +546,25 @@ class FuoPlayerController(
         }
     }
 
+    fun onDebugLogLevelFilterChange(level: DebugLogLevel, selected: Boolean) {
+        debugLogLevelFilters = if (selected) {
+            debugLogLevelFilters + level
+        } else {
+            debugLogLevelFilters - level
+        }
+    }
+
+    fun exportDebugLogs(lines: List<String>) {
+        if (!debugLogRepository.isAvailable || lines.isEmpty()) return
+        scope.launch {
+            isLoading = true
+            runCatching { debugLogRepository.exportLogFile(lines) }
+                .onSuccess { message = it }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
     fun onProviderCookiesChange(providerId: String, value: String) {
         providerCookieInputs = providerCookieInputs + (providerId to value)
         persistSettings()
@@ -775,13 +805,13 @@ class FuoPlayerController(
         persistSettings()
     }
 
-    fun onSmartReplacementUseOriginalMetadataChange(value: Boolean) {
-        smartReplacementUseOriginalMetadata = value
+    fun onSmartReplacementUseReplacementMetadataChange(value: Boolean) {
+        smartReplacementUseReplacementMetadata = value
         persistSettings()
     }
 
-    fun onSmartReplacementUseOriginalLyricsChange(value: Boolean) {
-        smartReplacementUseOriginalLyrics = value
+    fun onSmartReplacementUseReplacementLyricsChange(value: Boolean) {
+        smartReplacementUseReplacementLyrics = value
         persistSettings()
     }
 
@@ -1295,6 +1325,95 @@ class FuoPlayerController(
         selectedTrackError = null
     }
 
+    fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
+        val providerId = trackProviderId(track) ?: return false
+        return track.sourceType == TrackSourceType.Provider &&
+            isProviderLoggedIn(providerId) &&
+            providerCapabilities[providerId]?.canAddSongToPlaylist == true
+    }
+
+    fun openPlaylistTargetPicker(track: MusicTrack) {
+        if (!canAddTrackToProviderPlaylist(track)) return
+        playlistTargetTrack = track
+        playlistOperationTargets = emptyList()
+        playlistOperationError = null
+        scope.launch {
+            isLoading = true
+            message = "正在加载可添加歌单"
+            runCatching { providerRepository.playlistOperationTargets(track) }
+                .onSuccess {
+                    playlistOperationTargets = it
+                    playlistOperationError = if (it.isEmpty()) "没有可添加的歌单" else null
+                    message = if (it.isEmpty()) "没有可添加的歌单" else "请选择目标歌单"
+                }
+                .onFailure {
+                    playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
+                    setError(it)
+                }
+            isLoading = false
+        }
+    }
+
+    fun closePlaylistTargetPicker() {
+        playlistTargetTrack = null
+        playlistOperationTargets = emptyList()
+        playlistOperationError = null
+    }
+
+    fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) {
+        val track = playlistTargetTrack ?: return
+        scope.launch {
+            isLoading = true
+            message = "正在添加到歌单"
+            runCatching { providerRepository.addTrackToPlaylist(playlist, track) }
+                .onSuccess { result ->
+                    if (result.success) {
+                        message = result.message.ifBlank { "已添加到：${playlist.title}" }
+                        closePlaylistTargetPicker()
+                        refreshAfterProviderMutation(playlist.providerId)
+                    } else {
+                        playlistOperationError = result.message.ifBlank { "添加失败" }
+                        message = playlistOperationError.orEmpty()
+                    }
+                }
+                .onFailure {
+                    playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
+                    setError(it)
+                }
+            isLoading = false
+        }
+    }
+
+    fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean {
+        val playlist = selectedPlaylist ?: return false
+        return track.sourceType == TrackSourceType.Provider &&
+            trackProviderId(track) == playlist.providerId &&
+            isProviderLoggedIn(playlist.providerId) &&
+            providerCapabilities[playlist.providerId]?.canRemoveSongFromPlaylist == true
+    }
+
+    fun removeTrackFromSelectedPlaylist(track: MusicTrack) {
+        val playlist = selectedPlaylist ?: return
+        if (!canRemoveTrackFromSelectedPlaylist(track)) return
+        scope.launch {
+            isLoading = true
+            message = "正在从歌单移除"
+            runCatching { providerRepository.removeTrackFromPlaylist(playlist, track) }
+                .onSuccess { result ->
+                    if (result.success) {
+                        selectedPlaylistTracks = selectedPlaylistTracks.filterNot { it.id == track.id }
+                        message = result.message.ifBlank { "已从歌单移除：${track.title}" }
+                        refreshAfterProviderMutation(playlist.providerId)
+                    } else {
+                        selectedPlaylistError = result.message.ifBlank { "移除失败" }
+                        message = selectedPlaylistError.orEmpty()
+                    }
+                }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
     fun openPlaylist(playlist: ProviderPlaylist) {
         selectedPlaylist = playlist
         selectedPlaylistTracks = emptyList()
@@ -1758,8 +1877,20 @@ class FuoPlayerController(
                 isLoggedIn = false,
             ))
         }
+        providerCapabilities = providerRepository.providerCapabilities()
+            .associateBy { it.providerId }
         providerFeatures = providerRepository.features().sortedFeaturesByOrder()
         refreshProviderAuthStates()
+    }
+
+    private fun refreshAfterProviderMutation(providerId: String) {
+        val knownPlaylistSections = minePlaylistSections + mineFavoritePlaylistSections
+        if (
+            homeSection == HomeSection.Mine && mineSection == MineSection.Playlists ||
+            knownPlaylistSections.any { it.feature.providerId == providerId }
+        ) {
+            refreshMinePlaylistContent()
+        }
     }
 
     private fun clearProviderContent() {
@@ -1777,6 +1908,7 @@ class FuoPlayerController(
         selectedPlaylistTracks = emptyList()
         selectedMediaItemTracks = emptyList()
         selectedMediaItemAlbums = emptyList()
+        closePlaylistTargetPicker()
     }
 
     private fun reorderProviderContent() {
@@ -1802,6 +1934,11 @@ class FuoPlayerController(
 
     private fun isProviderLoggedIn(providerId: String): Boolean {
         return providerAuthStates[providerId]?.isLoggedIn == true
+    }
+
+    private fun trackProviderId(track: MusicTrack): String? {
+        return track.source.takeIf { it.isNotBlank() }
+            ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
     }
 
     private fun play(
@@ -1857,8 +1994,8 @@ class FuoPlayerController(
                         unavailablePlaybackPolicy,
                         selectedSmartReplacementProviderIds(),
                         smartReplacementMinScore,
-                        smartReplacementUseOriginalMetadata,
-                        smartReplacementUseOriginalLyrics,
+                        !smartReplacementUseReplacementMetadata,
+                        !smartReplacementUseReplacementLyrics,
                     )
                 if (requestSerial != playRequestSerial) return@playRequest
                 val nextParts = payload.parts
@@ -2346,8 +2483,8 @@ class FuoPlayerController(
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
         smartReplacementProviderIds = settings.smartReplacementProviderIds
         smartReplacementMinScore = settings.smartReplacementMinScore.coerceIn(0.0, 1.0)
-        smartReplacementUseOriginalMetadata = settings.smartReplacementUseOriginalMetadata
-        smartReplacementUseOriginalLyrics = settings.smartReplacementUseOriginalLyrics
+        smartReplacementUseReplacementMetadata = settings.smartReplacementUseReplacementMetadata
+        smartReplacementUseReplacementLyrics = settings.smartReplacementUseReplacementLyrics
         lyricFontSize = settings.lyricFontSize
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
@@ -2376,8 +2513,8 @@ class FuoPlayerController(
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,
             smartReplacementProviderIds = smartReplacementProviderIds,
             smartReplacementMinScore = smartReplacementMinScore,
-            smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
-            smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
+            smartReplacementUseReplacementMetadata = smartReplacementUseReplacementMetadata,
+            smartReplacementUseReplacementLyrics = smartReplacementUseReplacementLyrics,
             lyricFontSize = lyricFontSize,
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,

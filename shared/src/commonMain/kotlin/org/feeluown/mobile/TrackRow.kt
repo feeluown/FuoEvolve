@@ -48,6 +48,8 @@ fun TrackRow(
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
     onEditLocalMetadata: (() -> Unit)? = null,
+    onAddToProviderPlaylist: (() -> Unit)? = null,
+    onRemoveFromProviderPlaylist: (() -> Unit)? = null,
 ) {
     val onShare = LocalShareHandler.current
     val sharePayload = track.toSharePayload()
@@ -91,6 +93,8 @@ fun TrackRow(
             onOpenArtist = onOpenArtist,
             onOpenAlbum = onOpenAlbum,
             onEditLocalMetadata = onEditLocalMetadata,
+            onAddToProviderPlaylist = onAddToProviderPlaylist,
+            onRemoveFromProviderPlaylist = onRemoveFromProviderPlaylist,
             onShare = sharePayload?.let { payload -> { onShare(payload) } },
         )
     }
@@ -120,6 +124,8 @@ fun TrackAction(
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
     onEditLocalMetadata: (() -> Unit)?,
+    onAddToProviderPlaylist: (() -> Unit)?,
+    onRemoveFromProviderPlaylist: (() -> Unit)?,
     onShare: (() -> Unit)?,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -180,6 +186,26 @@ fun TrackAction(
                     },
                 )
             }
+            if (onAddToProviderPlaylist != null) {
+                DropdownMenuItem(
+                    text = { Text("添加到歌单") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onAddToProviderPlaylist()
+                    },
+                )
+            }
+            if (onRemoveFromProviderPlaylist != null) {
+                DropdownMenuItem(
+                    text = { Text("从当前歌单移除") },
+                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onRemoveFromProviderPlaylist()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("查看歌手") },
                 leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
@@ -209,5 +235,21 @@ fun TrackAction(
                 )
             }
         }
+    }
+}
+
+fun addToProviderPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
+    return if (controller.canAddTrackToProviderPlaylist(track)) {
+        { controller.openPlaylistTargetPicker(track) }
+    } else {
+        null
+    }
+}
+
+fun removeFromSelectedPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
+    return if (controller.canRemoveTrackFromSelectedPlaylist(track)) {
+        { controller.removeTrackFromSelectedPlaylist(track) }
+    } else {
+        null
     }
 }

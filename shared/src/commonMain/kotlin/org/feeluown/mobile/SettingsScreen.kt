@@ -27,7 +27,9 @@ import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
@@ -52,14 +54,25 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+private val DEBUG_LOG_THREADTIME_LEVEL_REGEX =
+    Regex("""^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([DIWEAF])\s+""")
+private val DEBUG_LOG_TIME_LEVEL_REGEX =
+    Regex("""^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+([DIWEAF])/""")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -567,13 +580,13 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                 ) {
                     Text(
                         modifier = Modifier.weight(1f),
-                        text = "使用原曲信息",
+                        text = "使用替换信息",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Checkbox(
-                        checked = controller.smartReplacementUseOriginalMetadata,
+                        checked = controller.smartReplacementUseReplacementMetadata,
                         enabled = !controller.isLoading,
-                        onCheckedChange = controller::onSmartReplacementUseOriginalMetadataChange,
+                        onCheckedChange = controller::onSmartReplacementUseReplacementMetadataChange,
                     )
                 }
                 Row(
@@ -583,13 +596,13 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                 ) {
                     Text(
                         modifier = Modifier.weight(1f),
-                        text = "使用原曲歌词",
+                        text = "使用替换歌词",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Checkbox(
-                        checked = controller.smartReplacementUseOriginalLyrics,
+                        checked = controller.smartReplacementUseReplacementLyrics,
                         enabled = !controller.isLoading,
-                        onCheckedChange = controller::onSmartReplacementUseOriginalLyricsChange,
+                        onCheckedChange = controller::onSmartReplacementUseReplacementLyricsChange,
                     )
                 }
                 controller.orderedProviders().forEach { provider ->
@@ -978,11 +991,6 @@ fun DebugSettingsPanel(controller: FuoPlayerController) {
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    text = "当前应用 info 及以上日志",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -991,6 +999,20 @@ fun DebugSettingsPanel(controller: FuoPlayerController) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebugLogScreen(controller: FuoPlayerController) {
+    val clipboardManager = LocalClipboardManager.current
+    var selectedLineIndexes by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    val visibleLogLines = remember(controller.debugLogLines, controller.debugLogLevelFilters) {
+        controller.debugLogLines.mapIndexedNotNull { index, line ->
+            val level = parseDebugLogLevel(line) ?: DebugLogLevel.Info
+            if (level in controller.debugLogLevelFilters) index to line else null
+        }
+    }
+    val selectedLines = remember(controller.debugLogLines, selectedLineIndexes) {
+        selectedLineIndexes.sorted().mapNotNull { controller.debugLogLines.getOrNull(it) }
+    }
+    LaunchedEffect(controller.debugLogLines) {
+        selectedLineIndexes = selectedLineIndexes.filter { it in controller.debugLogLines.indices }.toSet()
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -1020,31 +1042,171 @@ fun DebugLogScreen(controller: FuoPlayerController) {
         ) {
             LoadingIndicator(controller.isLoading)
             controller.debugLogError?.let { ProviderContentMessage(it) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DebugLogLevel.entries.forEach { level ->
+                    FilterChip(
+                        selected = level in controller.debugLogLevelFilters,
+                        onClick = {
+                            controller.onDebugLogLevelFilterChange(
+                                level,
+                                level !in controller.debugLogLevelFilters,
+                            )
+                        },
+                        label = { Text(debugLogLevelLabel(level)) },
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "已选 ${selectedLineIndexes.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    enabled = visibleLogLines.isNotEmpty(),
+                    onClick = {
+                        val visibleIndexes = visibleLogLines.map { it.first }.toSet()
+                        selectedLineIndexes = if (visibleIndexes.all { it in selectedLineIndexes }) {
+                            selectedLineIndexes - visibleIndexes
+                        } else {
+                            selectedLineIndexes + visibleIndexes
+                        }
+                    },
+                ) {
+                    Text("全选")
+                }
+                TextButton(
+                    enabled = selectedLines.isNotEmpty(),
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(selectedLines.joinToString(separator = "\n")))
+                    },
+                ) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("复制所选")
+                }
+                TextButton(
+                    enabled = selectedLines.isNotEmpty() && !controller.isLoading,
+                    onClick = { controller.exportDebugLogs(selectedLines) },
+                ) {
+                    Icon(Icons.Filled.Download, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("导出所选")
+                }
+            }
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                if (controller.debugLogLines.isEmpty() && !controller.isLoading && controller.debugLogError == null) {
+                if (visibleLogLines.isEmpty() && !controller.isLoading && controller.debugLogError == null) {
                     item {
                         ProviderContentMessage("暂无日志")
                     }
                 } else {
-                    itemsIndexed(controller.debugLogLines) { _, line ->
-                        Text(
+                    itemsIndexed(visibleLogLines) { _, indexedLine ->
+                        val originalIndex = indexedLine.first
+                        val line = indexedLine.second
+                        val level = parseDebugLogLevel(line)
+                        val selected = originalIndex in selectedLineIndexes
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            text = line,
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                                .padding(vertical = 4.dp)
+                                .clickable {
+                                    selectedLineIndexes = if (selected) {
+                                        selectedLineIndexes - originalIndex
+                                    } else {
+                                        selectedLineIndexes + originalIndex
+                                    }
+                                },
+                            color = debugLogLevelContainerColor(level),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Checkbox(
+                                    checked = selected,
+                                    onCheckedChange = { checked ->
+                                        selectedLineIndexes = if (checked) {
+                                            selectedLineIndexes + originalIndex
+                                        } else {
+                                            selectedLineIndexes - originalIndex
+                                        }
+                                    },
+                                )
+                                Text(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(top = 10.dp),
+                                    text = line,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = debugLogLevelContentColor(level),
+                                )
+                                IconButton(
+                                    modifier = Modifier.size(40.dp),
+                                    onClick = { clipboardManager.setText(AnnotatedString(line)) },
+                                ) {
+                                    Icon(Icons.Filled.ContentCopy, contentDescription = "复制")
+                                }
+                            }
+                        }
                         HorizontalDivider()
                     }
                 }
             }
         }
     }
+}
+
+private fun parseDebugLogLevel(line: String): DebugLogLevel? {
+    val code = DEBUG_LOG_THREADTIME_LEVEL_REGEX.find(line)?.groupValues?.getOrNull(1)
+        ?: DEBUG_LOG_TIME_LEVEL_REGEX.find(line)?.groupValues?.getOrNull(1)
+        ?: return null
+    return when (code) {
+        "D" -> DebugLogLevel.Debug
+        "I" -> DebugLogLevel.Info
+        "W" -> DebugLogLevel.Warning
+        "E", "A", "F" -> DebugLogLevel.Error
+        else -> null
+    }
+}
+
+private fun debugLogLevelLabel(level: DebugLogLevel): String = when (level) {
+    DebugLogLevel.Debug -> "Debug"
+    DebugLogLevel.Info -> "Info"
+    DebugLogLevel.Warning -> "Warn"
+    DebugLogLevel.Error -> "Error"
+}
+
+@Composable
+private fun debugLogLevelContainerColor(level: DebugLogLevel?) = when (level) {
+    DebugLogLevel.Debug -> MaterialTheme.colorScheme.surfaceVariant
+    DebugLogLevel.Info -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.20f)
+    DebugLogLevel.Warning -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+    DebugLogLevel.Error -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+    null -> MaterialTheme.colorScheme.surface
+}
+
+@Composable
+private fun debugLogLevelContentColor(level: DebugLogLevel?) = when (level) {
+    DebugLogLevel.Error -> MaterialTheme.colorScheme.onErrorContainer
+    else -> MaterialTheme.colorScheme.onSurface
 }
 
 @Composable

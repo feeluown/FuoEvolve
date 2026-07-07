@@ -278,7 +278,7 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun smartReplacementUsesOriginalSourceOptions() = runTest {
+    fun smartReplacementCanUseReplacementSourceOptions() = runTest {
         val provider = FakeProviderRepository(listOf(providerTrack("provider:1", "First")))
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -290,8 +290,8 @@ class FuoPlayerControllerTest {
                 playbackEngine = engine,
                 settingsStore = FakeSettingsStore(
                     AppSettings(
-                        smartReplacementUseOriginalMetadata = true,
-                        smartReplacementUseOriginalLyrics = true,
+                        smartReplacementUseReplacementMetadata = true,
+                        smartReplacementUseReplacementLyrics = true,
                     ),
                 ),
                 scope = controllerScope,
@@ -304,8 +304,8 @@ class FuoPlayerControllerTest {
             controller.playFromSearch(0)
             advanceUntilIdle()
 
-            assertEquals(true, provider.lastSmartReplacementUseOriginalMetadata)
-            assertEquals(true, provider.lastSmartReplacementUseOriginalLyrics)
+            assertEquals(false, provider.lastSmartReplacementUseOriginalMetadata)
+            assertEquals(false, provider.lastSmartReplacementUseOriginalLyrics)
         } finally {
             controllerScope.cancel()
         }
@@ -692,6 +692,137 @@ class FuoPlayerControllerTest {
 
             assertEquals("provider:2", engine.lastTrack?.id)
             assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun providerPlaylistTargetsLoadOnlyWhenCapabilityAndLoginAllow() = runTest {
+        val track = providerTrack("netease:1", "First")
+        val target = ProviderPlaylist(
+            id = "playlist:netease:mine",
+            title = "我的歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(track),
+            playlistTargets = listOf(target),
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddSongToPlaylist = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylistTargetPicker(track)
+            advanceUntilIdle()
+
+            assertEquals(track, controller.playlistTargetTrack)
+            assertEquals(listOf(target), controller.playlistOperationTargets)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun addTrackToProviderPlaylistCallsRepositoryAndClosesPicker() = runTest {
+        val track = providerTrack("netease:1", "First")
+        val target = ProviderPlaylist(
+            id = "playlist:netease:mine",
+            title = "我的歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(track),
+            playlistTargets = listOf(target),
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddSongToPlaylist = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylistTargetPicker(track)
+            advanceUntilIdle()
+            controller.addTrackToProviderPlaylist(target)
+            advanceUntilIdle()
+
+            assertEquals(target to track, provider.lastAddedToPlaylist)
+            assertNull(controller.playlistTargetTrack)
+            assertEquals("已添加到：我的歌单", controller.message)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun removeTrackFromSelectedPlaylistUpdatesVisibleTracks() = runTest {
+        val tracks = listOf(
+            providerTrack("netease:1", "First"),
+            providerTrack("netease:2", "Second"),
+        )
+        val playlist = ProviderPlaylist(
+            id = "playlist:netease:mine",
+            title = "我的歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            playlistTracks = tracks,
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canRemoveSongFromPlaylist = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylist(playlist)
+            advanceUntilIdle()
+            controller.removeTrackFromSelectedPlaylist(tracks.first())
+            advanceUntilIdle()
+
+            assertEquals(playlist to tracks.first(), provider.lastRemovedFromPlaylist)
+            assertEquals(listOf("netease:2"), controller.selectedPlaylistTracks.map { it.id })
         } finally {
             controllerScope.cancel()
         }
@@ -1349,8 +1480,8 @@ class FuoPlayerControllerTest {
                 wifiAudioQualityPolicy = AudioQualityPolicy.Highest,
                 cellularAudioQualityPolicy = AudioQualityPolicy.Low,
                 unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip,
-                smartReplacementUseOriginalMetadata = true,
-                smartReplacementUseOriginalLyrics = true,
+                smartReplacementUseReplacementMetadata = true,
+                smartReplacementUseReplacementLyrics = true,
                 lyricFontSize = LyricFontSize.Large,
                 themeMode = ThemeMode.Dark,
                 themeColorScheme = ThemeColorScheme.OceanBlue,
@@ -1398,8 +1529,8 @@ class FuoPlayerControllerTest {
             assertEquals(AudioQualityPolicy.Highest, controller.wifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, controller.cellularAudioQualityPolicy)
             assertEquals(UnavailablePlaybackPolicy.Skip, controller.unavailablePlaybackPolicy)
-            assertEquals(true, controller.smartReplacementUseOriginalMetadata)
-            assertEquals(true, controller.smartReplacementUseOriginalLyrics)
+            assertEquals(true, controller.smartReplacementUseReplacementMetadata)
+            assertEquals(true, controller.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Large, controller.lyricFontSize)
             assertEquals(ThemeMode.Dark, controller.themeMode)
             assertEquals(ThemeColorScheme.OceanBlue, controller.themeColorScheme)
@@ -1419,8 +1550,8 @@ class FuoPlayerControllerTest {
             controller.onWifiAudioQualityPolicyChange(AudioQualityPolicy.High)
             controller.onCellularAudioQualityPolicyChange(AudioQualityPolicy.Standard)
             controller.onUnavailablePlaybackPolicyChange(UnavailablePlaybackPolicy.SmartReplace)
-            controller.onSmartReplacementUseOriginalMetadataChange(false)
-            controller.onSmartReplacementUseOriginalLyricsChange(false)
+            controller.onSmartReplacementUseReplacementMetadataChange(false)
+            controller.onSmartReplacementUseReplacementLyricsChange(false)
             controller.onLyricFontSizeChange(LyricFontSize.Medium)
             controller.onThemeModeChange(ThemeMode.Light)
             controller.onThemeColorSchemeChange(ThemeColorScheme.FuoGreen)
@@ -1445,8 +1576,8 @@ class FuoPlayerControllerTest {
             assertEquals(AudioQualityPolicy.High, store.saved.wifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, store.saved.cellularAudioQualityPolicy)
             assertEquals(UnavailablePlaybackPolicy.SmartReplace, store.saved.unavailablePlaybackPolicy)
-            assertEquals(false, store.saved.smartReplacementUseOriginalMetadata)
-            assertEquals(false, store.saved.smartReplacementUseOriginalLyrics)
+            assertEquals(false, store.saved.smartReplacementUseReplacementMetadata)
+            assertEquals(false, store.saved.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
             assertEquals(ThemeMode.Light, store.saved.themeMode)
             assertEquals(ThemeColorScheme.FuoGreen, store.saved.themeColorScheme)
@@ -2377,6 +2508,8 @@ class FuoPlayerControllerTest {
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
+        private val playlistTargets: List<ProviderPlaylist> = emptyList(),
+        private val capabilities: List<ProviderCapabilities> = emptyList(),
         private val resolveFailures: Set<String> = emptySet(),
         private val resolveHandler: (
             suspend (MusicTrack, UnavailablePlaybackPolicy, Set<String>, Double, Boolean, Boolean) -> PlaybackPayload
@@ -2409,6 +2542,8 @@ class FuoPlayerControllerTest {
         var lastSmartReplacementUseOriginalMetadata: Boolean? = null
         var lastSmartReplacementUseOriginalLyrics: Boolean? = null
         var lastTrackDetailId: String? = null
+        var lastAddedToPlaylist: Pair<ProviderPlaylist, MusicTrack>? = null
+        var lastRemovedFromPlaylist: Pair<ProviderPlaylist, MusicTrack>? = null
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
         val loadedMediaItemIds = mutableListOf<String>()
@@ -2496,6 +2631,8 @@ class FuoPlayerControllerTest {
             lastCellularAudioQualityPolicy = cellularPolicy
         }
 
+        override suspend fun providerCapabilities(): List<ProviderCapabilities> = capabilities
+
         override suspend fun features(): List<ProviderFeature> = features
 
         override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection {
@@ -2509,6 +2646,24 @@ class FuoPlayerControllerTest {
         }
 
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks
+
+        override suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> = playlistTargets
+
+        override suspend fun addTrackToPlaylist(
+            playlist: ProviderPlaylist,
+            track: MusicTrack,
+        ): ProviderMutationResult {
+            lastAddedToPlaylist = playlist to track
+            return ProviderMutationResult(true, "已添加到：${playlist.title}")
+        }
+
+        override suspend fun removeTrackFromPlaylist(
+            playlist: ProviderPlaylist,
+            track: MusicTrack,
+        ): ProviderMutationResult {
+            lastRemovedFromPlaylist = playlist to track
+            return ProviderMutationResult(true, "已从歌单移除：${track.title}")
+        }
 
         override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
             loadedMediaItemIds += item.id

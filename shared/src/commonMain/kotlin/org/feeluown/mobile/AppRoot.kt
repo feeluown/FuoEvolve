@@ -252,10 +252,91 @@ fun AppRoot(
                     controller.localMetadataEditorTrack?.let { track ->
                         LocalMetadataDialog(controller = controller, track = track)
                     }
+                    controller.playlistTargetTrack?.let { track ->
+                        ProviderPlaylistTargetDialog(controller = controller, track = track)
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+fun ProviderPlaylistTargetDialog(controller: FuoPlayerController, track: MusicTrack) {
+    AlertDialog(
+        onDismissRequest = controller::closePlaylistTargetPicker,
+        title = {
+            Text(
+                text = "添加到歌单",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = track.title.ifBlank { "未知歌曲" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (controller.isLoading && controller.playlistOperationTargets.isEmpty()) {
+                    Text(
+                        text = controller.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                controller.playlistOperationError?.let {
+                    ProviderContentMessage(it)
+                }
+                controller.playlistOperationTargets.forEach { playlist ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { controller.addTrackToProviderPlaylist(playlist) }
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CoverBox(
+                            track = playlist.toDisplayTrack(),
+                            modifier = Modifier.size(40.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = playlist.title.ifBlank { "未命名歌单" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = playlist.providerName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = controller::closePlaylistTargetPicker) {
+                Text("取消")
+            }
+        },
+    )
 }
 private enum class AppDestination {
     Home,

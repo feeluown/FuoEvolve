@@ -45,12 +45,12 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 KEY_SMART_REPLACEMENT_MIN_SCORE,
                 DEFAULT_SMART_REPLACEMENT_MIN_SCORE.toFloat(),
             ).toDouble(),
-            smartReplacementUseOriginalMetadata = preferences.getBoolean(
-                KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA,
+            smartReplacementUseReplacementMetadata = preferences.getBoolean(
+                KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA,
                 false,
             ),
-            smartReplacementUseOriginalLyrics = preferences.getBoolean(
-                KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS,
+            smartReplacementUseReplacementLyrics = preferences.getBoolean(
+                KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS,
                 false,
             ),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
@@ -84,10 +84,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS, settings.smartReplacementProviderIds)
                 .putFloat(KEY_SMART_REPLACEMENT_MIN_SCORE, settings.smartReplacementMinScore.toFloat())
                 .putBoolean(
-                    KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA,
-                    settings.smartReplacementUseOriginalMetadata,
+                    KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA,
+                    settings.smartReplacementUseReplacementMetadata,
                 )
-                .putBoolean(KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS, settings.smartReplacementUseOriginalLyrics)
+                .putBoolean(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, settings.smartReplacementUseReplacementLyrics)
                 .putString(KEY_LYRIC_FONT_SIZE, settings.lyricFontSize.name)
                 .putString(KEY_THEME_MODE, settings.themeMode.name)
                 .putString(KEY_THEME_COLOR_SCHEME, settings.themeColorScheme.name)
@@ -222,8 +222,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
         private const val KEY_SMART_REPLACEMENT_PROVIDER_IDS = "smart_replacement_provider_ids"
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
-        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_METADATA = "smart_replacement_use_original_metadata"
-        private const val KEY_SMART_REPLACEMENT_USE_ORIGINAL_LYRICS = "smart_replacement_use_original_lyrics"
+        private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
+        private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_COLOR_SCHEME = "theme_color_scheme"

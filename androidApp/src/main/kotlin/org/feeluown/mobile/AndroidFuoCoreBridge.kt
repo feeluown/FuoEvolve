@@ -143,6 +143,15 @@ class AndroidFuoCoreBridge(
         cellularAudioQualityPolicy = cellularPolicy
     }
 
+    override suspend fun providerCapabilities(): List<ProviderCapabilities> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("provider_capabilities").toString()
+            val array = JSONObject(raw).getJSONArray("providers")
+            List(array.length()) { index -> array.getJSONObject(index).toCapabilities() }
+        }
+    }
+
     override suspend fun authState(providerId: String): ProviderAuthState {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -238,6 +247,37 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge)
+                .callAttr("playlist_operation_targets", track.providerId ?: track.id)
+                .toString()
+            val array = JSONObject(raw).getJSONArray("playlists")
+            List(array.length()) { index -> array.getJSONObject(index).toPlaylist() }
+        }
+    }
+
+    override suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge)
+                .callAttr("playlist_add_song", playlist.id, track.providerId ?: track.id)
+                .toString()
+            JSONObject(raw).toMutationResult()
+        }
+    }
+
+    override suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge)
+                .callAttr("playlist_remove_song", playlist.id, track.providerId ?: track.id)
+                .toString()
+            JSONObject(raw).toMutationResult()
+        }
+    }
+
     override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -288,6 +328,22 @@ class AndroidFuoCoreBridge(
         loginUrl = optString("login_url"),
         cookieKeyGroups = optJSONArray("cookie_key_groups").toStringGroups(),
     )
+
+    private fun JSONObject.toCapabilities(): ProviderCapabilities {
+        val providerId = optString("provider_id")
+        return ProviderCapabilities(
+            providerId = providerId,
+            providerName = optString("provider_name").ifBlank { providerId },
+            canAddSongToPlaylist = optBoolean("can_add_song_to_playlist"),
+            canRemoveSongFromPlaylist = optBoolean("can_remove_song_from_playlist"),
+            canFavoritePlaylist = optBoolean("can_favorite_playlist"),
+            canUnfavoritePlaylist = optBoolean("can_unfavorite_playlist"),
+            canFavoriteArtist = optBoolean("can_favorite_artist"),
+            canUnfavoriteArtist = optBoolean("can_unfavorite_artist"),
+            canFavoriteAlbum = optBoolean("can_favorite_album"),
+            canUnfavoriteAlbum = optBoolean("can_unfavorite_album"),
+        )
+    }
 
     private fun JSONObject.toFeature(): ProviderFeature {
         val providerId = optString("provider_id")
@@ -433,6 +489,11 @@ class AndroidFuoCoreBridge(
         providerName = optString("provider_name").ifBlank { providerId },
         isLoggedIn = optBoolean("is_logged_in"),
         userName = optString("user_name").takeIf { it.isNotBlank() },
+    )
+
+    private fun JSONObject.toMutationResult(): ProviderMutationResult = ProviderMutationResult(
+        success = optBoolean("success"),
+        message = optString("message"),
     )
 
     private fun currentAudioQualityPolicy(): AudioQualityPolicy {

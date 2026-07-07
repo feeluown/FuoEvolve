@@ -523,6 +523,13 @@ class FuoMobileBridge:
             ensure_ascii=False,
         )
 
+    def provider_capabilities(self) -> str:
+        providers = [self._get_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
+        return json.dumps(
+            {"providers": [provider_capabilities(provider) for provider in providers]},
+            ensure_ascii=False,
+        )
+
     def features(self) -> str:
         features = []
         for provider_id in self.provider_registry.provider_ids:
@@ -713,6 +720,74 @@ class FuoMobileBridge:
         )
         return json.dumps(payload, ensure_ascii=False)
 
+    def playlist_operation_targets(self, track_id: str) -> str:
+        song = self._song_for_operation(track_id)
+        provider_id = getattr(song, "source", "")
+        provider = self._get_provider(provider_id)
+        self._require_logged_in(provider)
+        if not hasattr(provider, "playlist_add_song"):
+            return json.dumps({"playlists": []}, ensure_ascii=False)
+        playlists = read_models(provider.current_user_list_playlists(), limit=100)
+        targets = [
+            self._remember_playlist(playlist)
+            for playlist in playlists
+            if getattr(playlist, "source", "") == provider_id
+        ]
+        return json.dumps({"playlists": targets}, ensure_ascii=False)
+
+    def playlist_add_song(self, playlist_id: str, track_id: str) -> str:
+        playlist = self._playlist_from_id(playlist_id)
+        song = self._song_for_operation(track_id)
+        provider_id = getattr(playlist, "source", "")
+        provider = self._get_provider(provider_id)
+        self._require_logged_in(provider)
+        if getattr(song, "source", "") != provider_id:
+            return json.dumps(mutation_result(False, "只能添加同一音源的歌曲"), ensure_ascii=False)
+        add_song = getattr(provider, "playlist_add_song", None)
+        if add_song is None:
+            return json.dumps(mutation_result(False, "当前音源不支持添加歌曲到歌单"), ensure_ascii=False)
+        ok = bool(add_song(playlist, song))
+        if ok:
+            self._playlists.pop(playlist_id, None)
+        title = display(song, "title")
+        playlist_name = display(playlist, "name")
+        message = f"已添加到：{playlist_name}" if ok else f"添加失败：{title}"
+        return json.dumps(mutation_result(ok, message), ensure_ascii=False)
+
+    def playlist_remove_song(self, playlist_id: str, track_id: str) -> str:
+        playlist = self._playlist_from_id(playlist_id)
+        song = self._song_for_operation(track_id)
+        provider_id = getattr(playlist, "source", "")
+        provider = self._get_provider(provider_id)
+        self._require_logged_in(provider)
+        if getattr(song, "source", "") != provider_id:
+            return json.dumps(mutation_result(False, "只能移除同一音源的歌曲"), ensure_ascii=False)
+        remove_song = getattr(provider, "playlist_remove_song", None)
+        if remove_song is None:
+            return json.dumps(mutation_result(False, "当前音源不支持从歌单移除歌曲"), ensure_ascii=False)
+        ok = bool(remove_song(playlist, song))
+        if ok:
+            self._playlists.pop(playlist_id, None)
+        title = display(song, "title")
+        message = f"已从歌单移除：{title}" if ok else f"移除失败：{title}"
+        return json.dumps(mutation_result(ok, message), ensure_ascii=False)
+
+    def resource_state(self, resource_type: str, resource_id: str) -> str:
+        provider_id = resource_id.split(":", 2)[1] if ":" in resource_id else ""
+        return json.dumps(
+            {
+                "provider_id": provider_id,
+                "resource_id": resource_id,
+                "is_favorite": False,
+                "can_favorite": False,
+                "can_unfavorite": False,
+            },
+            ensure_ascii=False,
+        )
+
+    def set_resource_favorite(self, resource_type: str, resource_id: str, favorite: bool) -> str:
+        return json.dumps(mutation_result(False, "当前音源不支持该收藏操作"), ensure_ascii=False)
+
     def media_item_tracks(self, item_id: str) -> str:
         bridge_log(f"media_item_tracks start item_id={item_id}")
         item_type, provider_id, _ = self._parse_media_item_id(item_id)
@@ -743,6 +818,13 @@ class FuoMobileBridge:
         if provider is None:
             raise RuntimeError(f"provider not found: {provider_id}")
         return provider
+
+    def _require_logged_in(self, provider):
+        if provider.get_current_user_or_none() is None:
+            raise RuntimeError(f"{provider_name(provider)} 未登录")
+
+    def _song_for_operation(self, track_id: str):
+        return self._tracks.get(track_id) or self._song_from_track_id(track_id)
 
     def _playlist_for_tracks(self, playlist_id: str, provider, playlist):
         if getattr(playlist, "source", "") != "bilibili":
@@ -1438,6 +1520,24 @@ def provider_info(provider) -> Dict[str, Any]:
     }
 
 
+def provider_capabilities(provider) -> Dict[str, Any]:
+    provider_id = getattr(provider, "identifier", "")
+    return {
+        "provider_id": provider_id,
+        "provider_name": provider_name(provider),
+        "can_add_song_to_playlist": hasattr(provider, "playlist_add_song"),
+        "can_remove_song_from_playlist": (
+            hasattr(provider, "playlist_remove_song") and provider_id != "ytmusic"
+        ),
+        "can_favorite_playlist": False,
+        "can_unfavorite_playlist": False,
+        "can_favorite_artist": False,
+        "can_unfavorite_artist": False,
+        "can_favorite_album": False,
+        "can_unfavorite_album": False,
+    }
+
+
 def feature_to_dict(feature: Dict[str, Any], provider) -> Dict[str, Any]:
     return {
         "id": feature["id"],
@@ -1447,6 +1547,13 @@ def feature_to_dict(feature: Dict[str, Any], provider) -> Dict[str, Any]:
         "category": feature["category"],
         "content_type": feature["content_type"],
         "requires_login": bool(feature.get("requires_login")),
+    }
+
+
+def mutation_result(success: bool, message: str) -> Dict[str, Any]:
+    return {
+        "success": success,
+        "message": message,
     }
 
 

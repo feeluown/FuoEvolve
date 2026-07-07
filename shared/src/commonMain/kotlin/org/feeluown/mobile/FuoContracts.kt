@@ -92,8 +92,8 @@ data class AppSettings(
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
     val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-    val smartReplacementUseOriginalMetadata: Boolean = false,
-    val smartReplacementUseOriginalLyrics: Boolean = false,
+    val smartReplacementUseReplacementMetadata: Boolean = false,
+    val smartReplacementUseReplacementLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
@@ -442,6 +442,32 @@ data class ProviderAuthState(
     val userName: String? = null,
 )
 
+data class ProviderCapabilities(
+    val providerId: String,
+    val providerName: String,
+    val canAddSongToPlaylist: Boolean = false,
+    val canRemoveSongFromPlaylist: Boolean = false,
+    val canFavoritePlaylist: Boolean = false,
+    val canUnfavoritePlaylist: Boolean = false,
+    val canFavoriteArtist: Boolean = false,
+    val canUnfavoriteArtist: Boolean = false,
+    val canFavoriteAlbum: Boolean = false,
+    val canUnfavoriteAlbum: Boolean = false,
+)
+
+data class ProviderResourceState(
+    val providerId: String,
+    val resourceId: String,
+    val isFavorite: Boolean = false,
+    val canFavorite: Boolean = false,
+    val canUnfavorite: Boolean = false,
+)
+
+data class ProviderMutationResult(
+    val success: Boolean,
+    val message: String,
+)
+
 data class ProviderLoginConfig(
     val loginUrl: String,
     val cookieKeyGroups: List<List<String>>,
@@ -550,15 +576,25 @@ interface ProviderMusicRepository {
     }
     suspend fun logout(providerId: String): ProviderAuthState
     suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)
+    suspend fun providerCapabilities(): List<ProviderCapabilities> = emptyList()
     suspend fun features(): List<ProviderFeature>
     suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
     suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> = loadFeature(feature).tracks
     suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail =
         ProviderPlaylistDetail(playlist, playlistTracks(playlist))
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>
+    suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> = emptyList()
+    suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support playlist add song")
+    suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support playlist remove song")
     suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         ProviderMediaItemDetail(item, mediaItemTracks(item))
     suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack>
+    suspend fun resourceState(resourceType: String, resourceId: String): ProviderResourceState =
+        ProviderResourceState(providerId = "", resourceId = resourceId)
+    suspend fun setResourceFavorite(resourceType: String, resourceId: String, favorite: Boolean): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support favorite operation")
 }
 
 interface LocalMusicRepository {
@@ -638,10 +674,18 @@ object NoOpResourceCacheRepository : ResourceCacheRepository {
 interface DebugLogRepository {
     val isAvailable: Boolean
     suspend fun logLines(): List<String>
+    suspend fun exportLogFile(lines: List<String>): String = "当前平台不支持导出日志文件"
 }
 
 object NoOpDebugLogRepository : DebugLogRepository {
     override val isAvailable: Boolean = false
 
     override suspend fun logLines(): List<String> = emptyList()
+}
+
+enum class DebugLogLevel {
+    Debug,
+    Info,
+    Warning,
+    Error,
 }
