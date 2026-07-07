@@ -772,7 +772,7 @@ class FuoMobileBridge:
         self._delete_saved_login(provider_id)
         return json.dumps(provider_auth_state(provider, None), ensure_ascii=False)
 
-    def load_feature(self, feature_id: str) -> str:
+    def load_feature(self, feature_id: str, offset: int = 0, limit: int = 60) -> str:
         feature = self._feature_by_id(feature_id)
         provider = self._get_provider(feature["provider_id"])
         feature_payload = feature_to_dict(feature, provider)
@@ -785,11 +785,13 @@ class FuoMobileBridge:
                     "media_items": [],
                     "is_login_required": True,
                     "error_message": "",
+                    "next_offset": 0,
+                    "has_more": False,
                 },
                 ensure_ascii=False,
             )
         try:
-            tracks, playlists, media_items, title = self._load_feature_content(provider, feature)
+            tracks, playlists, media_items, title, page = self._load_feature_content(provider, feature, offset, limit)
             if title:
                 feature_payload["title"] = title
             payload = {
@@ -799,6 +801,8 @@ class FuoMobileBridge:
                 "media_items": media_items,
                 "is_login_required": False,
                 "error_message": "",
+                "next_offset": page["next_offset"],
+                "has_more": page["has_more"],
             }
         except Exception as exc:  # pylint: disable=broad-except
             payload = {
@@ -808,6 +812,8 @@ class FuoMobileBridge:
                 "media_items": [],
                 "is_login_required": False,
                 "error_message": str(exc) or exc.__class__.__name__,
+                "next_offset": offset,
+                "has_more": False,
             }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -827,9 +833,9 @@ class FuoMobileBridge:
         bridge_log(f"playlist_tracks done playlist_id={playlist_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
-    def playlist_detail(self, playlist_id: str) -> str:
+    def playlist_detail(self, playlist_id: str, offset: int = 0, limit: int = 60) -> str:
         bridge_log(f"playlist_detail start playlist_id={playlist_id}")
-        payload = self._playlist_detail_payload(playlist_id)
+        payload = self._playlist_detail_payload(playlist_id, offset, limit)
         bridge_log(
             f"playlist_detail done playlist_id={playlist_id} count={len(payload['tracks'])}"
         )
@@ -919,9 +925,15 @@ class FuoMobileBridge:
         bridge_log(f"media_item_tracks done item_id={item_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
-    def media_item_detail(self, item_id: str) -> str:
+    def media_item_detail(
+        self,
+        item_id: str,
+        tracks_offset: int = 0,
+        albums_offset: int = 0,
+        limit: int = 60,
+    ) -> str:
         bridge_log(f"media_item_detail start item_id={item_id}")
-        payload = self._media_item_detail_payload(item_id)
+        payload = self._media_item_detail_payload(item_id, tracks_offset, albums_offset, limit)
         bridge_log(
             f"media_item_detail done item_id={item_id} "
             f"tracks={len(payload['tracks'])} albums={len(payload['albums'])}"
@@ -956,7 +968,7 @@ class FuoMobileBridge:
         bridge_log(f"playlist_tracks hydrated playlist_id={playlist_id}")
         return detail
 
-    def _playlist_detail_payload(self, playlist_id: str) -> Dict[str, Any]:
+    def _playlist_detail_payload(self, playlist_id: str, offset: int = 0, limit: int = 60) -> Dict[str, Any]:
         playlist = self._playlist_from_id(playlist_id)
         detail_playlist = self._playlist_detail_from_id(playlist_id)
         provider = self._get_provider(getattr(playlist, "source", ""))
@@ -965,37 +977,53 @@ class FuoMobileBridge:
             f"playlist_detail resolved playlist_id={playlist_id} source={getattr(track_playlist, 'source', '')}"
         )
         reader = provider.playlist_create_songs_rd(track_playlist)
-        songs = read_models(reader, limit=300)
+        page = read_model_page(reader, offset=offset, limit=limit)
+        songs = page["items"]
         tracks = [self._remember_song(song) for song in songs]
         return {
             "playlist": self._remember_playlist(detail_playlist),
             "tracks": tracks,
+            "tracks_next_offset": page["next_offset"],
+            "tracks_has_more": page["has_more"],
         }
 
-    def _media_item_detail_payload(self, item_id: str) -> Dict[str, Any]:
+    def _media_item_detail_payload(
+        self,
+        item_id: str,
+        tracks_offset: int = 0,
+        albums_offset: int = 0,
+        limit: int = 60,
+    ) -> Dict[str, Any]:
         item_type, provider_id, _ = self._parse_media_item_id(item_id)
         item = self._media_item_from_id(item_id)
         detail_item = self._media_item_detail_from_id(item_id)
         provider = self._get_provider(provider_id)
         albums = []
+        album_page = empty_page(albums_offset)
         if item_type == "artist":
             reader = provider.artist_create_songs_rd(item)
             album_reader = getattr(provider, "artist_create_albums_rd", None)
             if album_reader is not None:
+                album_page = read_model_page(album_reader(item), offset=albums_offset, limit=limit)
                 albums = [
                     self._remember_media_item(album, "album")
-                    for album in read_models(album_reader(item), limit=100)
+                    for album in album_page["items"]
                 ]
         elif item_type == "album":
             reader = provider.album_create_songs_rd(item)
         else:
             raise RuntimeError(f"unsupported media item type: {item_type}")
-        songs = read_models(reader, limit=300)
+        track_page = read_model_page(reader, offset=tracks_offset, limit=limit)
+        songs = track_page["items"]
         tracks = [self._remember_song(song) for song in songs]
         return {
             "item": self._remember_media_item(detail_item, item_type),
             "tracks": tracks,
             "albums": albums,
+            "tracks_next_offset": track_page["next_offset"],
+            "tracks_has_more": track_page["has_more"],
+            "albums_next_offset": album_page["next_offset"],
+            "albums_has_more": album_page["has_more"],
         }
 
     def _feature_by_id(self, feature_id: str) -> Dict[str, Any]:
@@ -1005,39 +1033,44 @@ class FuoMobileBridge:
                     return {**feature, "provider_id": provider_id}
         raise RuntimeError(f"feature not found: {feature_id}")
 
-    def _load_feature_content(self, provider, feature: Dict[str, Any]):
+    def _load_feature_content(self, provider, feature: Dict[str, Any], offset: int = 0, limit: int = 60):
         action = feature["action"]
         if action == "rec_list_daily_songs":
-            songs = read_models(provider.rec_list_daily_songs(), limit=50)
-            return [self._remember_song(song) for song in songs], [], [], ""
+            page = read_model_page(provider.rec_list_daily_songs(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], "", page
         if action == "rec_list_daily_playlists":
-            playlists = read_models(provider.rec_list_daily_playlists(), limit=30)
-            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
+            page = read_model_page(provider.rec_list_daily_playlists(), offset=offset, limit=limit)
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
         if action == "current_user_list_radio_songs":
-            songs = provider.current_user_list_radio_songs(20)
-            return [self._remember_song(song) for song in songs], [], [], ""
+            songs = provider.current_user_list_radio_songs(max(1, min(int_limit(limit), 60)))
+            page = {
+                "items": songs,
+                "next_offset": offset + len(songs),
+                "has_more": bool(songs),
+            }
+            return [self._remember_song(song) for song in songs], [], [], "", page
         if action == "toplist_list":
-            playlists = read_models(provider.toplist_list(), limit=50)
-            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
+            page = read_model_page(provider.toplist_list(), offset=offset, limit=limit)
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
         if action == "rec_a_collection_of_songs":
             collection = provider.rec_a_collection_of_songs()
-            songs = read_models(getattr(collection, "models", []) or [], limit=50)
-            return [self._remember_song(song) for song in songs], [], [], getattr(collection, "name", "")
+            page = read_model_page(getattr(collection, "models", []) or [], offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], getattr(collection, "name", ""), page
         if action == "current_user_fav_create_songs_rd":
-            songs = read_models(provider.current_user_fav_create_songs_rd(), limit=100)
-            return [self._remember_song(song) for song in songs], [], [], ""
+            page = read_model_page(provider.current_user_fav_create_songs_rd(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], "", page
         if action == "current_user_fav_create_playlists_rd":
-            playlists = read_models(provider.current_user_fav_create_playlists_rd(), limit=60)
-            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
+            page = read_model_page(provider.current_user_fav_create_playlists_rd(), offset=offset, limit=limit)
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
         if action == "current_user_list_playlists":
-            playlists = read_models(provider.current_user_list_playlists(), limit=60)
-            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
+            page = read_model_page(provider.current_user_list_playlists(), offset=offset, limit=limit)
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
         if action == "current_user_fav_create_artists_rd":
-            artists = read_models(provider.current_user_fav_create_artists_rd(), limit=60)
-            return [], [], [self._remember_media_item(artist, "artist") for artist in artists], ""
+            page = read_model_page(provider.current_user_fav_create_artists_rd(), offset=offset, limit=limit)
+            return [], [], [self._remember_media_item(artist, "artist") for artist in page["items"]], "", page
         if action == "current_user_fav_create_albums_rd":
-            albums = read_models(provider.current_user_fav_create_albums_rd(), limit=60)
-            return [], [], [self._remember_media_item(album, "album") for album in albums], ""
+            page = read_model_page(provider.current_user_fav_create_albums_rd(), offset=offset, limit=limit)
+            return [], [], [self._remember_media_item(album, "album") for album in page["items"]], "", page
         raise RuntimeError(f"unsupported feature action: {action}")
 
     def _playlist_from_id(self, playlist_id: str):
@@ -1770,6 +1803,66 @@ def read_models(value, limit: int = 50) -> List[Any]:
         return []
 
 
+def read_model_page(value, offset: int = 0, limit: int = 60) -> Dict[str, Any]:
+    safe_offset = max(0, int_offset(offset))
+    safe_limit = max(1, int_limit(limit))
+    read_limit = safe_limit + 1
+    if value is None:
+        return empty_page(safe_offset)
+    if isinstance(value, list):
+        items = value[safe_offset:safe_offset + read_limit]
+        return page_result(items, safe_offset, safe_limit)
+    if hasattr(value, "read_range"):
+        items = value.read_range(safe_offset, safe_offset + read_limit)
+        return page_result(items, safe_offset, safe_limit)
+    if hasattr(value, "readall"):
+        items = value.readall()[safe_offset:safe_offset + read_limit]
+        return page_result(items, safe_offset, safe_limit)
+    try:
+        items = []
+        for index, model in enumerate(value):
+            if index < safe_offset:
+                continue
+            items.append(model)
+            if len(items) >= read_limit:
+                break
+        return page_result(items, safe_offset, safe_limit)
+    except TypeError:
+        return empty_page(safe_offset)
+
+
+def page_result(items, offset: int, limit: int) -> Dict[str, Any]:
+    values = list(items or [])
+    page_items = values[:limit]
+    return {
+        "items": page_items,
+        "next_offset": offset + len(page_items),
+        "has_more": len(values) > limit,
+    }
+
+
+def empty_page(offset: int = 0) -> Dict[str, Any]:
+    return {
+        "items": [],
+        "next_offset": max(0, int_offset(offset)),
+        "has_more": False,
+    }
+
+
+def int_offset(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def int_limit(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 60
+
+
 def is_unsupported_search_type(exc: Exception) -> bool:
     return isinstance(exc, (KeyError, ValueError))
 
@@ -1857,6 +1950,7 @@ def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:
         "description": display(playlist, "description") or display(playlist, "creator_name"),
         "play_count": play_count(playlist),
         "provider_url": provider_web_url(source, "playlist", identifier),
+        "track_count": model_count(playlist, "count", "song_count", "songs_count", "track_count", "tracks_count"),
     }
 
 
@@ -1872,6 +1966,8 @@ def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]
         "cover_url": normalize_image_url(display(item, "pic_url") or display(item, "cover") or display(item, "cover_url")),
         "description": display(item, "description") or display(item, "artists_name"),
         "provider_url": provider_web_url(source, item_type, identifier),
+        "track_count": model_count(item, "song_count", "songs_count", "track_count", "tracks_count"),
+        "album_count": model_count(item, "album_count", "albums_count"),
     }
 
 
@@ -2239,3 +2335,17 @@ def play_count(model) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def model_count(model, *fields: str) -> Optional[int]:
+    for field in fields:
+        value = getattr(model, field, None)
+        if value is None:
+            continue
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        if count >= 0:
+            return count
+    return None

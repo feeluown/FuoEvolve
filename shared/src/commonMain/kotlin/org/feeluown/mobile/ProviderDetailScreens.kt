@@ -35,6 +35,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -184,6 +185,9 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                     }
                 } else {
                     itemsIndexed(controller.selectedFeatureTracks, key = { _, item -> item.id }) { index, track ->
+                        LaunchedEffect(index, controller.selectedFeatureTracks.size) {
+                            controller.prefetchSelectedFeatureIfNeeded(index)
+                        }
                         TrackRow(
                             track = track,
                             downloadState = controller.downloadStates[track.id],
@@ -213,6 +217,7 @@ fun SelectedFeatureTrackList(controller: FuoPlayerController, modifier: Modifier
         showEmpty = !controller.isLoading && controller.selectedFeatureError == null,
         modifier = modifier,
         onClick = controller::playFromSelectedFeature,
+        onItemVisible = controller::prefetchSelectedFeatureIfNeeded,
     )
 }
 
@@ -559,7 +564,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                         text = buildList {
                             add(displayPlaylist.providerName)
                             displayPlaylist.playCount?.let { add(formatPlayCount(it)) }
-                            add("${controller.selectedPlaylistTracks.size} 首")
+                            displayPlaylist.trackCount?.let { add("$it 首") }
                         }.joinToString(" · "),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -622,7 +627,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                 subtitle = buildList {
                     add(displayPlaylist.providerName)
                     displayPlaylist.playCount?.let { add(formatPlayCount(it)) }
-                    add("${controller.selectedPlaylistTracks.size} 首")
+                    displayPlaylist.trackCount?.let { add("$it 首") }
                 }.joinToString(" · "),
                 description = displayPlaylist.description,
                 action = if (controller.selectedPlaylistTracks.isNotEmpty()) {
@@ -660,6 +665,9 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                     }
                 } else {
                     itemsIndexed(controller.selectedPlaylistTracks, key = { _, item -> item.id }) { index, track ->
+                        LaunchedEffect(index, controller.selectedPlaylistTracks.size) {
+                            controller.prefetchSelectedPlaylistIfNeeded(index)
+                        }
                         TrackRow(
                             track = track,
                             downloadState = controller.downloadStates[track.id],
@@ -690,6 +698,7 @@ fun SelectedPlaylistTrackList(controller: FuoPlayerController, modifier: Modifie
         showEmpty = !controller.isLoading && controller.selectedPlaylistError == null,
         modifier = modifier,
         onClick = controller::playFromSelectedPlaylist,
+        onItemVisible = controller::prefetchSelectedPlaylistIfNeeded,
     )
 }
 
@@ -764,8 +773,8 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                         text = buildList {
                             add(displayItem.providerName)
                             add(if (isArtist) "歌手" else "专辑")
-                            add("${controller.selectedMediaItemTracks.size} 首")
-                            if (isArtist) add("${controller.selectedMediaItemAlbums.size} 张专辑")
+                            displayItem.trackCount?.let { add("$it 首") }
+                            if (isArtist) displayItem.albumCount?.let { add("$it 张专辑") }
                         }.joinToString(" · "),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -842,8 +851,8 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                 subtitle = buildList {
                     add(displayItem.providerName)
                     add(if (isArtist) "歌手" else "专辑")
-                    add("${controller.selectedMediaItemTracks.size} 首")
-                    if (isArtist) add("${controller.selectedMediaItemAlbums.size} 张专辑")
+                    displayItem.trackCount?.let { add("$it 首") }
+                    if (isArtist) displayItem.albumCount?.let { add("$it 张专辑") }
                 }.joinToString(" · "),
                 description = displayItem.description,
                 action = if (controller.selectedMediaItemTracks.isNotEmpty()) {
@@ -897,6 +906,7 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                             ProviderMediaItemGrid(
                                 items = controller.selectedMediaItemAlbums,
                                 onClick = controller::openMediaItem,
+                                onItemVisible = controller::prefetchSelectedMediaItemAlbumsIfNeeded,
                             )
                         }
                     }
@@ -907,6 +917,9 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                         }
                     } else {
                         itemsIndexed(controller.selectedMediaItemTracks, key = { _, track -> track.id }) { index, track ->
+                            LaunchedEffect(index, controller.selectedMediaItemTracks.size) {
+                                controller.prefetchSelectedMediaItemTracksIfNeeded(index)
+                            }
                             TrackRow(
                                 track = track,
                                 downloadState = controller.downloadStates[track.id],
@@ -946,6 +959,7 @@ fun SelectedMediaItemContent(
                     ProviderMediaItemGrid(
                         items = controller.selectedMediaItemAlbums,
                         onClick = controller::openMediaItem,
+                        onItemVisible = controller::prefetchSelectedMediaItemAlbumsIfNeeded,
                     )
                 }
             }
@@ -959,6 +973,7 @@ fun SelectedMediaItemContent(
         showEmpty = !controller.isLoading && controller.selectedMediaItemError == null,
         modifier = modifier,
         onClick = controller::playFromSelectedMediaItem,
+        onItemVisible = controller::prefetchSelectedMediaItemTracksIfNeeded,
     )
 }
 
@@ -970,6 +985,7 @@ fun TrackCollectionList(
     showEmpty: Boolean,
     modifier: Modifier,
     onClick: (Int) -> Unit,
+    onItemVisible: ((Int) -> Unit)? = null,
 ) {
     if (LocalAppLayoutInfo.current.useWideLayout) {
         val indexedTracks = remember(tracks) { tracks.mapIndexed { index, track -> index to track } }
@@ -985,6 +1001,11 @@ fun TrackCollectionList(
                 }
             } else {
                 items(indexedTracks, key = { it.second.id }) { (index, track) ->
+                    if (onItemVisible != null) {
+                        LaunchedEffect(index, tracks.size) {
+                            onItemVisible(index)
+                        }
+                    }
                     TrackRow(
                         track = track,
                         downloadState = controller.downloadStates[track.id],
@@ -1010,6 +1031,11 @@ fun TrackCollectionList(
             }
         } else {
             itemsIndexed(tracks, key = { _, item -> item.id }) { index, track ->
+                if (onItemVisible != null) {
+                    LaunchedEffect(index, tracks.size) {
+                        onItemVisible(index)
+                    }
+                }
                 TrackRow(
                     track = track,
                     downloadState = controller.downloadStates[track.id],

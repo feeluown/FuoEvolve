@@ -215,16 +215,20 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection {
+    override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
+        loadFeaturePage(feature, offset = 0, limit = PROVIDER_PAGE_SIZE)
+
+    override suspend fun loadFeaturePage(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
         initialize()
         return withContext(Dispatchers.IO) {
             try {
-                Log.d(TAG, "loadFeature start featureId=${feature.id}")
-                val raw = requireNotNull(bridge).callAttr("load_feature", feature.id).toString()
+                Log.d(TAG, "loadFeature start featureId=${feature.id} offset=$offset limit=$limit")
+                val raw = requireNotNull(bridge).callAttr("load_feature", feature.id, offset, limit).toString()
                 JSONObject(raw).toContentSection(feature).also {
                     Log.d(
                         TAG,
-                        "loadFeature done featureId=${feature.id} tracks=${it.tracks.size} playlists=${it.playlists.size} loginRequired=${it.isLoginRequired}",
+                        "loadFeature done featureId=${feature.id} tracks=${it.tracks.size} playlists=${it.playlists.size} " +
+                            "loginRequired=${it.isLoginRequired} hasMore=${it.hasMore}",
                     )
                 }
             } catch (throwable: Throwable) {
@@ -251,14 +255,17 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail {
+    override suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail =
+        playlistDetailPage(playlist, offset = 0, limit = PROVIDER_PAGE_SIZE)
+
+    override suspend fun playlistDetailPage(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail {
         initialize()
         return withContext(Dispatchers.IO) {
             try {
-                Log.d(TAG, "playlistDetail start playlistId=${playlist.id} title=${playlist.title}")
-                val raw = requireNotNull(bridge).callAttr("playlist_detail", playlist.id).toString()
+                Log.d(TAG, "playlistDetail start playlistId=${playlist.id} title=${playlist.title} offset=$offset limit=$limit")
+                val raw = requireNotNull(bridge).callAttr("playlist_detail", playlist.id, offset, limit).toString()
                 JSONObject(raw).toPlaylistDetail(playlist).also {
-                    Log.d(TAG, "playlistDetail done playlistId=${playlist.id} count=${it.tracks.size}")
+                    Log.d(TAG, "playlistDetail done playlistId=${playlist.id} count=${it.tracks.size} hasMore=${it.tracksHasMore}")
                 }
             } catch (throwable: Throwable) {
                 Log.e(TAG, "playlistDetail failed playlistId=${playlist.id}", throwable)
@@ -315,16 +322,31 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail {
+    override suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
+        mediaItemDetailPage(item, tracksOffset = 0, albumsOffset = 0, limit = PROVIDER_PAGE_SIZE)
+
+    override suspend fun mediaItemDetailPage(
+        item: ProviderMediaItem,
+        tracksOffset: Int,
+        albumsOffset: Int,
+        limit: Int,
+    ): ProviderMediaItemDetail {
         initialize()
         return withContext(Dispatchers.IO) {
             try {
-                Log.d(TAG, "mediaItemDetail start itemId=${item.id} title=${item.title}")
-                val raw = requireNotNull(bridge).callAttr("media_item_detail", item.id).toString()
+                Log.d(
+                    TAG,
+                    "mediaItemDetail start itemId=${item.id} title=${item.title} " +
+                        "tracksOffset=$tracksOffset albumsOffset=$albumsOffset limit=$limit",
+                )
+                val raw = requireNotNull(bridge)
+                    .callAttr("media_item_detail", item.id, tracksOffset, albumsOffset, limit)
+                    .toString()
                 JSONObject(raw).toMediaItemDetail(item).also {
                     Log.d(
                         TAG,
-                        "mediaItemDetail done itemId=${item.id} tracks=${it.tracks.size} albums=${it.albums.size}",
+                        "mediaItemDetail done itemId=${item.id} tracks=${it.tracks.size} albums=${it.albums.size} " +
+                            "tracksHasMore=${it.tracksHasMore} albumsHasMore=${it.albumsHasMore}",
                     )
                 }
             } catch (throwable: Throwable) {
@@ -440,6 +462,8 @@ class AndroidFuoCoreBridge(
             mediaItems = List(mediaItemsArray.length()) { index -> mediaItemsArray.getJSONObject(index).toMediaItem() },
             isLoginRequired = optBoolean("is_login_required"),
             errorMessage = optString("error_message").takeIf { it.isNotBlank() },
+            nextOffset = optInt("next_offset"),
+            hasMore = optBoolean("has_more"),
         )
     }
 
@@ -454,6 +478,7 @@ class AndroidFuoCoreBridge(
             description = optString("description"),
             playCount = optLong("play_count").takeIf { it > 0 },
             providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
+            trackCount = optNullableInt("track_count"),
         )
     }
 
@@ -462,6 +487,8 @@ class AndroidFuoCoreBridge(
         return ProviderPlaylistDetail(
             playlist = optJSONObject("playlist")?.toPlaylist() ?: fallbackPlaylist,
             tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
+            tracksNextOffset = optInt("tracks_next_offset"),
+            tracksHasMore = optBoolean("tracks_has_more"),
         )
     }
 
@@ -476,6 +503,8 @@ class AndroidFuoCoreBridge(
             coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
             description = optString("description"),
             providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
+            trackCount = optNullableInt("track_count"),
+            albumCount = optNullableInt("album_count"),
         )
     }
 
@@ -510,6 +539,10 @@ class AndroidFuoCoreBridge(
             item = optJSONObject("item")?.toMediaItem() ?: fallbackItem,
             tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
             albums = List(albumsArray.length()) { index -> albumsArray.getJSONObject(index).toMediaItem() },
+            tracksNextOffset = optInt("tracks_next_offset"),
+            tracksHasMore = optBoolean("tracks_has_more"),
+            albumsNextOffset = optInt("albums_next_offset"),
+            albumsHasMore = optBoolean("albums_has_more"),
         )
     }
 
@@ -649,6 +682,10 @@ class AndroidFuoCoreBridge(
             result[key] = optString(key)
         }
         return result
+    }
+
+    private fun JSONObject.optNullableInt(name: String): Int? {
+        return if (has(name) && !isNull(name)) optInt(name) else null
     }
 
     private companion object {

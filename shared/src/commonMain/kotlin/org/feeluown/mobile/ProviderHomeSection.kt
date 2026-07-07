@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -391,6 +392,7 @@ fun ProviderPlaylistCard(
 fun ProviderMediaItemGrid(
     items: List<ProviderMediaItem>,
     onClick: (ProviderMediaItem) -> Unit,
+    onItemVisible: ((Int) -> Unit)? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     val columns = layoutInfo.gridColumns
@@ -399,12 +401,18 @@ fun ProviderMediaItemGrid(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        items.chunked(columns).forEach { row ->
+        items.chunked(columns).forEachIndexed { rowIndex, row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
-                row.forEach { item ->
+                row.forEachIndexed { columnIndex, item ->
+                    val index = rowIndex * columns + columnIndex
+                    if (onItemVisible != null) {
+                        LaunchedEffect(index, items.size) {
+                            onItemVisible(index)
+                        }
+                    }
                     ProviderMediaItemCard(
                         item = item,
                         onClick = { onClick(item) },

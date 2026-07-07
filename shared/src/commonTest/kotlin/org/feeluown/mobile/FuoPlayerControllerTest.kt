@@ -819,6 +819,49 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun playAllFromSelectedPlaylistLoadsRemainingPagesBeforePlayback() = runTest {
+        val tracks = (1..(PROVIDER_PAGE_SIZE + 5)).map { index ->
+            providerTrack("provider:$index", "Track $index")
+        }
+        val provider = FakeProviderRepository(emptyList(), playlistTracks = tracks)
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylist(
+                ProviderPlaylist(
+                    id = "playlist:netease:1",
+                    title = "榜单",
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                ),
+            )
+            advanceUntilIdle()
+
+            assertEquals(PROVIDER_PAGE_SIZE, controller.selectedPlaylistTracks.size)
+            assertEquals(true, controller.selectedPlaylistTracksHasMore)
+
+            controller.playAllFromSelectedPlaylist()
+            advanceUntilIdle()
+
+            assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
+            assertEquals(false, controller.selectedPlaylistTracksHasMore)
+            assertEquals(tracks.map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals("provider:1", engine.lastTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun providerPlaylistTargetsLoadOnlyWhenCapabilityAndLoginAllow() = runTest {
         val track = providerTrack("netease:1", "First")
         val target = ProviderPlaylist(
@@ -1232,6 +1275,56 @@ class FuoPlayerControllerTest {
 
             assertEquals("provider:1", engine.lastTrack?.id)
             assertEquals(radioTracks, controller.recommendSections.first { it.feature.id == radioFeature.id }.tracks)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun playAllFromSelectedPrivateFmDoesNotLoadAllPagesBeforePlayback() = runTest {
+        val radioFeature = ProviderFeature(
+            id = "netease_radio",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "私人 FM",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val radioTracks = (1..(PROVIDER_PAGE_SIZE + 5)).map { index ->
+            providerTrack("provider:$index", "Track $index")
+        }
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(radioFeature),
+            featureSections = mapOf(radioFeature.id to ProviderContentSection(radioFeature, tracks = radioTracks)),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openFeature(radioFeature)
+            advanceUntilIdle()
+
+            assertEquals(PROVIDER_PAGE_SIZE, controller.selectedFeatureTracks.size)
+            assertEquals(true, controller.selectedFeatureTracksHasMore)
+            val loadedFeatureCalls = provider.loadedFeatureIds.size
+
+            controller.playAllFromSelectedFeature()
+            advanceUntilIdle()
+
+            assertEquals(PROVIDER_PAGE_SIZE, controller.selectedFeatureTracks.size)
+            assertEquals(loadedFeatureCalls, provider.loadedFeatureIds.size)
+            assertEquals(PROVIDER_PAGE_SIZE, controller.playbackState.queue.size)
+            assertEquals("provider:1", engine.lastTrack?.id)
         } finally {
             controllerScope.cancel()
         }
@@ -2815,9 +2908,50 @@ class FuoPlayerControllerTest {
             return featureSections[feature.id] ?: ProviderContentSection(feature)
         }
 
+        override suspend fun loadFeaturePage(
+            feature: ProviderFeature,
+            offset: Int,
+            limit: Int,
+        ): ProviderContentSection {
+            loadedFeatureIds += feature.id
+            val section = featureSections[feature.id] ?: return ProviderContentSection(feature)
+            val tracks = section.tracks.drop(offset).take(limit)
+            val playlists = section.playlists.drop(offset).take(limit)
+            val mediaItems = section.mediaItems.drop(offset).take(limit)
+            val sourceSize = when (feature.contentType) {
+                ProviderContentType.Songs -> section.tracks.size
+                ProviderContentType.Playlists -> section.playlists.size
+                ProviderContentType.Artists,
+                ProviderContentType.Albums -> section.mediaItems.size
+            }
+            val nextOffset = offset + maxOf(tracks.size, playlists.size, mediaItems.size)
+            return section.copy(
+                tracks = tracks,
+                playlists = playlists,
+                mediaItems = mediaItems,
+                nextOffset = nextOffset,
+                hasMore = nextOffset < sourceSize,
+            )
+        }
+
         override suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> {
             loadedMoreFeatureIds += feature.id
             return additionalFeatureTracks[feature.id] ?: loadFeature(feature).tracks
+        }
+
+        override suspend fun playlistDetailPage(
+            playlist: ProviderPlaylist,
+            offset: Int,
+            limit: Int,
+        ): ProviderPlaylistDetail {
+            val tracks = playlistTracks.drop(offset).take(limit)
+            val nextOffset = offset + tracks.size
+            return ProviderPlaylistDetail(
+                playlist = playlist,
+                tracks = tracks,
+                tracksNextOffset = nextOffset,
+                tracksHasMore = nextOffset < playlistTracks.size,
+            )
         }
 
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks
@@ -2843,6 +2977,23 @@ class FuoPlayerControllerTest {
         override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
             loadedMediaItemIds += item.id
             return mediaItemTracks
+        }
+
+        override suspend fun mediaItemDetailPage(
+            item: ProviderMediaItem,
+            tracksOffset: Int,
+            albumsOffset: Int,
+            limit: Int,
+        ): ProviderMediaItemDetail {
+            loadedMediaItemIds += item.id
+            val tracks = mediaItemTracks.drop(tracksOffset).take(limit)
+            val tracksNextOffset = tracksOffset + tracks.size
+            return ProviderMediaItemDetail(
+                item = item,
+                tracks = tracks,
+                tracksNextOffset = tracksNextOffset,
+                tracksHasMore = tracksNextOffset < mediaItemTracks.size,
+            )
         }
 
         override suspend fun similarTracks(track: MusicTrack): List<MusicTrack> = similarTracks
