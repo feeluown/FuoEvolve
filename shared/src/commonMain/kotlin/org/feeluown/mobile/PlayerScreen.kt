@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -243,7 +244,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                                 onToggle = controller::toggle,
                                 onNext = controller::next,
                                 shuffleEnabled = controller.isShuffleEnabled,
-                                repeatEnabled = controller.isRepeatEnabled,
+                                repeatMode = controller.repeatMode,
                                 shuffleAvailable = !controller.isFmQueueActive,
                                 onShuffle = controller::toggleShuffle,
                                 onRepeat = controller::toggleRepeat,
@@ -327,7 +328,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     onToggle = controller::toggle,
                     onNext = controller::next,
                     shuffleEnabled = controller.isShuffleEnabled,
-                    repeatEnabled = controller.isRepeatEnabled,
+                    repeatMode = controller.repeatMode,
                     shuffleAvailable = !controller.isFmQueueActive,
                     onShuffle = controller::toggleShuffle,
                     onRepeat = controller::toggleRepeat,
@@ -623,7 +624,7 @@ fun PlayerControls(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     shuffleEnabled: Boolean = false,
-    repeatEnabled: Boolean = true,
+    repeatMode: RepeatMode = RepeatMode.QUEUE,
     shuffleAvailable: Boolean = true,
     onShuffle: (() -> Unit)? = null,
     onRepeat: (() -> Unit)? = null,
@@ -667,13 +668,18 @@ fun PlayerControls(
             iconSize = if (compact) 24.dp else 26.dp,
         )
         if (!compact && onRepeat != null) {
+            val repeatIcon = when (repeatMode) {
+                RepeatMode.OFF -> Icons.Filled.Repeat
+                RepeatMode.QUEUE -> Icons.Filled.Repeat
+                RepeatMode.SINGLE -> Icons.Filled.RepeatOne
+            }
             RoundControlButton(
-                imageVector = Icons.Filled.Repeat,
-                contentDescription = "循环播放",
+                imageVector = repeatIcon,
+                contentDescription = repeatMode.label,
                 onClick = onRepeat,
                 size = 44.dp,
                 iconSize = 24.dp,
-                selected = repeatEnabled,
+                selected = repeatMode != RepeatMode.OFF,
             )
         }
     }

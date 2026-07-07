@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -79,7 +80,12 @@ class FuoPlaybackService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
-            ACTION_PLAY -> playPayload(requireNotNull(intent.getStringExtra(EXTRA_PAYLOAD)))
+            ACTION_PLAY -> runCatching {
+                playPayload(intent.getStringExtra(EXTRA_PAYLOAD) ?: error("Missing playback payload"))
+            }.onFailure { throwable ->
+                Log.e(TAG, "play payload failed", throwable)
+                player?.stop()
+            }
             ACTION_PAUSE -> player?.pause()
             ACTION_RESUME -> player?.play()
             ACTION_STOP -> {
@@ -103,6 +109,8 @@ class FuoPlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     private fun playPayload(raw: String) {
         val payload = JSONObject(raw)
+        val url = payload.getString("url")
+        require(url.isNotBlank()) { "Playback URL is blank" }
         val extras = Bundle().apply {
             putString("source", payload.optString("source"))
             putString("source_type", payload.optString("source_type"))
@@ -124,8 +132,8 @@ class FuoPlaybackService : MediaSessionService() {
             putString("audio_quality", payload.optString("audio_quality"))
         }
         val mediaItem = MediaItem.Builder()
-            .setMediaId(payload.optString("track_id").ifBlank { payload.getString("url") })
-            .setUri(payload.getString("url"))
+            .setMediaId(payload.optString("track_id").ifBlank { url })
+            .setUri(url)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(payload.optString("title"))
@@ -137,9 +145,12 @@ class FuoPlaybackService : MediaSessionService() {
             )
             .build()
 
-        val url = payload.getString("url")
         val headers = payload.optJSONObject("headers").toStringMap()
-        val httpFactory = DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(headers)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(15_000)
+            .setAllowCrossProtocolRedirects(true)
         val upstreamFactory = DefaultDataSource.Factory(this, httpFactory)
         val sourceFactory = if (url.isRemoteUrl()) {
             CacheDataSource.Factory()
@@ -181,6 +192,7 @@ class FuoPlaybackService : MediaSessionService() {
         private const val ACTION_PREVIOUS = "org.feeluown.mobile.action.PREVIOUS"
         private const val ACTION_NEXT = "org.feeluown.mobile.action.NEXT"
         private const val EXTRA_PAYLOAD = "payload"
+        private const val TAG = "FuoPlaybackService"
         private val COMMAND_PREVIOUS = SessionCommand(ACTION_PREVIOUS, Bundle.EMPTY)
         private val COMMAND_NEXT = SessionCommand(ACTION_NEXT, Bundle.EMPTY)
 

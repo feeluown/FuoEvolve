@@ -406,6 +406,73 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun singleRepeatCyclesInsideMultiPartTrack() = runTest {
+        val parent = providerTrack("bilibili:BV1xx", "Multi Part").copy(
+            source = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val other = providerTrack("provider:2", "Second")
+        val parts = listOf(
+            PlaybackPart("bilibili:paged_BV1xx__1", "P1", 60_000),
+            PlaybackPart("bilibili:paged_BV1xx__2", "P2", 70_000),
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(parent, other),
+            resolveHandler = { track, _, _, _, _, _ ->
+                val partIndex = parts.indexOfFirst { it.id == track.id }.takeIf { it >= 0 } ?: 0
+                PlaybackPayload(
+                    url = "https://example.com/${parts[partIndex].id}.m4s",
+                    title = parts[partIndex].title,
+                    artists = parent.artists,
+                    album = parent.album,
+                    source = parent.source,
+                    providerName = parent.providerName,
+                    durationMs = parts[partIndex].durationMs,
+                    parts = parts,
+                    currentPartIndex = partIndex,
+                )
+            },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playLocalTrack(parent, listOf(parent, other))
+            advanceUntilIdle()
+            controller.toggleRepeat()
+
+            engine.emitEnded(engine.lastTrack ?: parent)
+            advanceUntilIdle()
+
+            assertEquals(RepeatMode.SINGLE, controller.repeatMode)
+            assertEquals("https://example.com/bilibili:paged_BV1xx__2.m4s", engine.lastPayload?.url)
+            assertEquals(1, controller.playbackState.currentPartIndex)
+
+            engine.emitEnded(engine.lastTrack ?: parent)
+            advanceUntilIdle()
+
+            assertEquals("https://example.com/bilibili:paged_BV1xx__1.m4s", engine.lastPayload?.url)
+            assertEquals(0, controller.playbackState.currentPartIndex)
+
+            controller.previous()
+            advanceUntilIdle()
+
+            assertEquals("https://example.com/bilibili:paged_BV1xx__2.m4s", engine.lastPayload?.url)
+            assertEquals(1, controller.playbackState.currentPartIndex)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun staleEndedWhileNextTrackIsLoadingDoesNotSkipAgain() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -1779,7 +1846,7 @@ class FuoPlayerControllerTest {
                 upNextQueue = listOf(upNext),
                 queueIndex = 1,
                 shuffleEnabled = true,
-                repeatEnabled = false,
+                repeatMode = RepeatMode.OFF,
             ),
         )
         val engine = FakePlaybackEngine()
@@ -1800,7 +1867,7 @@ class FuoPlayerControllerTest {
             assertEquals(listOf("provider:2", "provider:3"), controller.playbackState.queue.map { it.id })
             assertEquals(0, controller.playbackState.queueIndex)
             assertEquals(true, controller.isShuffleEnabled)
-            assertEquals(false, controller.isRepeatEnabled)
+            assertEquals(RepeatMode.OFF, controller.repeatMode)
             assertEquals(null, engine.lastTrack)
         } finally {
             controllerScope.cancel()
@@ -2031,7 +2098,65 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun repeatDisabledStopsAtMainQueueEnd() = runTest {
+    fun repeatModeCyclesThroughQueueSingleOff() = runTest {
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
+            controller.toggleRepeat()
+            assertEquals(RepeatMode.SINGLE, controller.repeatMode)
+            controller.toggleRepeat()
+            assertEquals(RepeatMode.OFF, controller.repeatMode)
+            controller.toggleRepeat()
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun repeatQueueLoopsAtMainQueueEnd() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(tracks),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
+            assertEquals("provider:1", engine.lastTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun repeatSingleReplaysCurrentTrack() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
             providerTrack("provider:2", "Second"),
@@ -2053,10 +2178,42 @@ class FuoPlayerControllerTest {
             advanceUntilIdle()
             controller.next()
             advanceUntilIdle()
+
+            assertEquals(RepeatMode.SINGLE, controller.repeatMode)
+            assertEquals("provider:1", engine.lastTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun repeatDisabledStopsAtMainQueueEnd() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(tracks),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.toggleRepeat()
+            controller.toggleRepeat()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
             controller.next()
             advanceUntilIdle()
 
-            assertEquals(false, controller.isRepeatEnabled)
+            assertEquals(RepeatMode.OFF, controller.repeatMode)
             assertEquals("provider:2", engine.lastTrack?.id)
         } finally {
             controllerScope.cancel()

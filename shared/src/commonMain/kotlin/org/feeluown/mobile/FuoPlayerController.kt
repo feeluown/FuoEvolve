@@ -197,8 +197,8 @@ class FuoPlayerController(
         get() = debugLogRepository.isAvailable
     val isShuffleEnabled: Boolean
         get() = shuffleEnabled
-    val isRepeatEnabled: Boolean
-        get() = repeatEnabled
+    val repeatMode: RepeatMode
+        get() = _repeatMode
     val isFmQueueActive: Boolean
         get() = isFmQueue
     val displayUpNextCount: Int
@@ -221,7 +221,7 @@ class FuoPlayerController(
     private var currentIsUpNext: Boolean = false
     private var queueFeature: ProviderFeature? = null
     private var shuffleEnabled: Boolean = false
-    private var repeatEnabled: Boolean = true
+    private var _repeatMode: RepeatMode = RepeatMode.QUEUE
     private var isFmQueue: Boolean = false
     private var shuffleBeforeFm: Boolean? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
@@ -1497,6 +1497,11 @@ class FuoPlayerController(
     }
 
     fun next() {
+        if (_repeatMode == RepeatMode.SINGLE) {
+            if (playPlaybackPartOffset(1, wrap = true)) return
+            (currentQueueTrack() ?: playbackState.currentTrack)?.let { startPlayback(it) }
+            return
+        }
         if (playPlaybackPartOffset(1)) return
         if (currentIsUpNext) {
             currentUpNextTrack = null
@@ -1524,12 +1529,17 @@ class FuoPlayerController(
         val nextIndex = mainQueueIndex + 1
         if (nextIndex < mainQueue.size) {
             playMainIndex(nextIndex)
-        } else if (repeatEnabled) {
+        } else if (_repeatMode == RepeatMode.QUEUE) {
             playMainIndex(0)
         }
     }
 
     fun previous() {
+        if (_repeatMode == RepeatMode.SINGLE) {
+            if (playPlaybackPartOffset(-1, wrap = true)) return
+            (currentQueueTrack() ?: playbackState.currentTrack)?.let { startPlayback(it) }
+            return
+        }
         if (playPlaybackPartOffset(-1)) return
         if (currentIsUpNext) {
             currentUpNextTrack = null
@@ -1542,7 +1552,7 @@ class FuoPlayerController(
         val previousIndex = mainQueueIndex - 1
         if (previousIndex >= 0) {
             playMainIndex(previousIndex)
-        } else if (repeatEnabled) {
+        } else if (_repeatMode == RepeatMode.QUEUE) {
             playMainIndex(mainQueue.lastIndex)
         }
     }
@@ -1631,7 +1641,11 @@ class FuoPlayerController(
     }
 
     fun toggleRepeat() {
-        repeatEnabled = !repeatEnabled
+        _repeatMode = when (_repeatMode) {
+            RepeatMode.OFF -> RepeatMode.QUEUE
+            RepeatMode.QUEUE -> RepeatMode.SINGLE
+            RepeatMode.SINGLE -> RepeatMode.OFF
+        }
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
@@ -2114,12 +2128,20 @@ class FuoPlayerController(
         )
     }
 
-    private fun playPlaybackPartOffset(offset: Int): Boolean {
+    private fun playPlaybackPartOffset(offset: Int, wrap: Boolean = false): Boolean {
         if (playbackParts.isEmpty() || currentPartIndex < 0) return false
         val nextPartIndex = currentPartIndex + offset
-        if (nextPartIndex !in playbackParts.indices) return false
-        currentQueueTrack()?.let { startPlayback(it, requestedPartIndex = nextPartIndex) } ?: return false
+        val targetPartIndex = if (wrap) {
+            nextPartIndex.floorMod(playbackParts.size)
+        } else {
+            nextPartIndex.takeIf { it in playbackParts.indices } ?: return false
+        }
+        currentQueueTrack()?.let { startPlayback(it, requestedPartIndex = targetPartIndex) } ?: return false
         return true
+    }
+
+    private fun Int.floorMod(divisor: Int): Int {
+        return ((this % divisor) + divisor) % divisor
     }
 
     private fun currentPlaybackPartLabel(): String? {
@@ -2192,7 +2214,7 @@ class FuoPlayerController(
         upNextQueue = snapshot.upNextQueue
         mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
         shuffleEnabled = snapshot.shuffleEnabled
-        repeatEnabled = snapshot.repeatEnabled
+        _repeatMode = snapshot.repeatMode
         isFmQueue = snapshot.isFmQueue
         shuffleBeforeFm = snapshot.shuffleBeforeFm
         currentUpNextTrack = null
@@ -2215,7 +2237,7 @@ class FuoPlayerController(
             upNextQueue = upNextQueue,
             queueIndex = mainQueueIndex,
             shuffleEnabled = shuffleEnabled,
-            repeatEnabled = repeatEnabled,
+            repeatMode = _repeatMode,
             isFmQueue = isFmQueue,
             shuffleBeforeFm = shuffleBeforeFm,
         )
@@ -2441,7 +2463,7 @@ class FuoPlayerController(
             val nextIndex = mainQueueIndex + 1
             if (nextIndex < mainQueue.size) {
                 playMainIndex(nextIndex, skippedUnavailableCount + 1)
-            } else if (repeatEnabled) {
+            } else if (_repeatMode == RepeatMode.QUEUE) {
                 playMainIndex(0, skippedUnavailableCount + 1)
             } else {
                 return false

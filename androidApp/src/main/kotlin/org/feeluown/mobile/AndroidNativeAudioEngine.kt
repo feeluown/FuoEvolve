@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.content.ComponentName
 import android.content.Context
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -9,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,8 @@ class AndroidNativeAudioEngine(
     private var mediaController: MediaController? = null
     private var currentPayload: PlaybackPayload? = null
     private var controllerConnecting = false
+    private var playRequestSerial: Long = 0
+    private var loadingWatchdog: Job? = null
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
 
@@ -38,6 +42,8 @@ class AndroidNativeAudioEngine(
     }
 
     override fun prepareLoading(track: MusicTrack) {
+        playRequestSerial += 1
+        cancelLoadingWatchdog()
         currentPayload = null
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
@@ -55,6 +61,8 @@ class AndroidNativeAudioEngine(
     }
 
     override fun play(track: MusicTrack, payload: PlaybackPayload) {
+        val requestSerial = ++playRequestSerial
+        cancelLoadingWatchdog()
         currentPayload = payload
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
@@ -67,23 +75,35 @@ class AndroidNativeAudioEngine(
             currentPartIndex = payload.currentPartIndex,
             errorMessage = null,
         )
-        FuoPlaybackService.play(context, payload.toJson(track))
+        runCatching { FuoPlaybackService.play(context, payload.toJson(track)) }
+            .onFailure { throwable ->
+                Log.e(TAG, "start playback service failed trackId=${track.id}", throwable)
+                mutableState.value = mutableState.value.copy(
+                    status = PlayerStatus.Error,
+                    errorMessage = throwable.message ?: "无法启动播放器服务",
+                )
+                return
+            }
         connectController()
+        startLoadingWatchdog(requestSerial, track.id)
     }
 
     override fun pause() {
+        cancelLoadingWatchdog()
         mediaController?.pause()
         FuoPlaybackService.pause(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
     }
 
     override fun resume() {
+        cancelLoadingWatchdog()
         mediaController?.play()
         FuoPlaybackService.resume(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Playing)
     }
 
     override fun stop() {
+        cancelLoadingWatchdog()
         mediaController?.stop()
         FuoPlaybackService.stop(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Idle, positionMs = 0)
@@ -115,6 +135,7 @@ class AndroidNativeAudioEngine(
                                 }
 
                                 override fun onPlayerError(error: PlaybackException) {
+                                    cancelLoadingWatchdog()
                                     mutableState.value = mutableState.value.copy(
                                         status = PlayerStatus.Error,
                                         errorMessage = error.message ?: error.errorCodeName,
@@ -143,6 +164,9 @@ class AndroidNativeAudioEngine(
             playbackState == Player.STATE_READY -> PlayerStatus.Paused
             else -> mutableState.value.status
         }
+        if (status != PlayerStatus.Loading) {
+            cancelLoadingWatchdog()
+        }
         mutableState.value = mutableState.value.copy(
             status = status,
             currentTrack = mutableState.value.currentTrack ?: controller.currentMediaItem?.toMusicTrack(),
@@ -158,6 +182,33 @@ class AndroidNativeAudioEngine(
                 ?.getString("audio_quality")
                 ?.takeIf { it.isNotBlank() },
         )
+    }
+
+    private fun startLoadingWatchdog(requestSerial: Long, trackId: String) {
+        loadingWatchdog = scope.launch {
+            delay(PLAYBACK_START_TIMEOUT_MS)
+            if (requestSerial != playRequestSerial || mutableState.value.status != PlayerStatus.Loading) {
+                return@launch
+            }
+            val controller = mediaController
+            Log.w(
+                TAG,
+                "playback loading timeout trackId=$trackId state=${controller?.playbackState} isPlaying=${controller?.isPlaying}",
+            )
+            runCatching {
+                controller?.stop()
+                FuoPlaybackService.stop(context)
+            }
+            mutableState.value = mutableState.value.copy(
+                status = PlayerStatus.Error,
+                errorMessage = "音频加载超时，请检查网络后重试",
+            )
+        }
+    }
+
+    private fun cancelLoadingWatchdog() {
+        loadingWatchdog?.cancel()
+        loadingWatchdog = null
     }
 
     private fun updatePosition() {
@@ -238,5 +289,10 @@ class AndroidNativeAudioEngine(
             replacementStrategy = mediaMetadata.extras?.getString("replacement_strategy")?.takeIf { it.isNotBlank() },
             replacementScore = mediaMetadata.extras?.getDouble("replacement_score")?.takeIf { it > 0.0 },
         )
+    }
+
+    private companion object {
+        private const val TAG = "FuoAudioEngine"
+        private const val PLAYBACK_START_TIMEOUT_MS = 30_000L
     }
 }

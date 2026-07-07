@@ -50,6 +50,14 @@ enum class ThemeMode(
     Dark("暗色"),
 }
 
+enum class RepeatMode(
+    val label: String,
+) {
+    OFF("不循环"),
+    QUEUE("全部循环"),
+    SINGLE("单曲循环"),
+}
+
 enum class ThemeColorScheme(
     val label: String,
 ) {
@@ -222,7 +230,7 @@ data class PlaybackQueueSnapshot(
     val upNextQueue: List<MusicTrack> = emptyList(),
     val queueIndex: Int = -1,
     val shuffleEnabled: Boolean = false,
-    val repeatEnabled: Boolean = true,
+    val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
 )
@@ -239,14 +247,16 @@ object NoOpPlaybackQueueStore : PlaybackQueueStore {
 }
 
 object PlaybackQueueCodec {
+    private const val CURRENT_VERSION = "v2"
+
     fun encode(snapshot: PlaybackQueueSnapshot): String {
         return buildList {
-            add("v1")
+            add(CURRENT_VERSION)
             add(
                 listOf(
                     snapshot.queueIndex.toString(),
                     snapshot.shuffleEnabled.toString(),
-                    snapshot.repeatEnabled.toString(),
+                    snapshot.repeatMode.name,
                     snapshot.isFmQueue.toString(),
                     snapshot.shuffleBeforeFm?.toString().orEmpty(),
                 ).joinToString("\t")
@@ -259,8 +269,24 @@ object PlaybackQueueCodec {
 
     fun decode(raw: String): PlaybackQueueSnapshot {
         val lines = raw.lineSequence().filter { it.isNotBlank() }.toList()
-        if (lines.size < 2 || lines.first() != "v1") return PlaybackQueueSnapshot()
-        val flags = lines[1].split("\t")
+        if (lines.isEmpty()) return PlaybackQueueSnapshot()
+
+        val version = lines.first()
+        val flags = lines.getOrNull(1)?.split("\t") ?: return PlaybackQueueSnapshot()
+
+        // 根据版本解析 repeatMode
+        val repeatMode = when (version) {
+            "v1" -> {
+                val boolValue = flags.getOrNull(2)?.toBooleanStrictOrNull() ?: true
+                if (boolValue) RepeatMode.QUEUE else RepeatMode.OFF
+            }
+            CURRENT_VERSION -> {
+                runCatching { RepeatMode.valueOf(flags.getOrNull(2) ?: "QUEUE") }
+                    .getOrDefault(RepeatMode.QUEUE)
+            }
+            else -> RepeatMode.QUEUE
+        }
+
         val tracksBySection = lines.drop(2)
             .mapNotNull { line ->
                 val fields = line.split("\t")
@@ -274,7 +300,7 @@ object PlaybackQueueCodec {
             upNextQueue = tracksBySection["upNext"].orEmpty(),
             queueIndex = flags.getOrNull(0)?.toIntOrNull() ?: -1,
             shuffleEnabled = flags.getOrNull(1)?.toBooleanStrictOrNull() ?: false,
-            repeatEnabled = flags.getOrNull(2)?.toBooleanStrictOrNull() ?: true,
+            repeatMode = repeatMode,
             isFmQueue = flags.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
             shuffleBeforeFm = flags.getOrNull(4)?.takeIf { it.isNotBlank() }?.toBooleanStrictOrNull(),
         )
