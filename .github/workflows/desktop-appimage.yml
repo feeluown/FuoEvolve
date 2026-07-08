@@ -47,7 +47,7 @@ jobs:
       - name: Build desktop app image
         run: ./gradlew :desktopApp:packageAppImage
 
-      - name: Package desktop app image artifact
+      - name: Check desktop app image artifact
         run: |
           app_dir="desktopApp/build/compose/binaries/main/app/FuoEvolve"
           if [ ! -x "${app_dir}/bin/FuoEvolve" ]; then
@@ -55,14 +55,11 @@ jobs:
             find desktopApp/build/compose/binaries/main -maxdepth 4 -type f -o -type d || true
             exit 1
           fi
-          mkdir -p build/artifacts
-          tar -czf "build/artifacts/fuo-evolve-desktop-linux-x64-appimage-${GITHUB_SHA}.tar.gz" \
-            -C desktopApp/build/compose/binaries/main/app \
-            FuoEvolve
 
       - name: Upload desktop app image
         uses: actions/upload-artifact@v7
         with:
-          path: build/artifacts/fuo-evolve-desktop-linux-x64-appimage-${{ github.sha }}.tar.gz
+          name: fuo-evolve-desktop-linux-x64-appimage-${{ github.sha }}
+          path: desktopApp/build/compose/binaries/main/app/FuoEvolve
           archive: false
           if-no-files-found: error
