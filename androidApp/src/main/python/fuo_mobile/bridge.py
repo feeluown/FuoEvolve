@@ -1946,7 +1946,7 @@ def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:
         "title": display(playlist, "name"),
         "provider_id": source,
         "provider_name": provider_name(library.get(source)),
-        "cover_url": normalize_image_url(display(playlist, "cover")),
+        "cover_url": image_url(playlist),
         "description": display(playlist, "description") or display(playlist, "creator_name"),
         "play_count": play_count(playlist),
         "provider_url": provider_web_url(source, "playlist", identifier),
@@ -1963,7 +1963,7 @@ def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]
         "provider_id": source,
         "provider_name": provider_name(library.get(source)),
         "type": "Artist" if item_type == "artist" else "Album",
-        "cover_url": normalize_image_url(display(item, "pic_url") or display(item, "cover") or display(item, "cover_url")),
+        "cover_url": image_url(item),
         "description": display(item, "description") or display(item, "artists_name"),
         "provider_url": provider_web_url(source, item_type, identifier),
         "track_count": model_count(item, "song_count", "songs_count", "track_count", "tracks_count"),
@@ -2044,6 +2044,27 @@ def normalize_image_url(url: Optional[str]) -> str:
     if value.startswith("http://qpic.y.qq.com/") or value.startswith("http://y.gtimg.cn/"):
         return "https://" + value[len("http://"):]
     return value
+
+
+def image_url(model) -> str:
+    for field in (
+        "cover",
+        "cover_url",
+        "coverUrl",
+        "pic_url",
+        "picUrl",
+        "picture_url",
+        "pictureUrl",
+        "image_url",
+        "imageUrl",
+        "thumbnail",
+        "avatar",
+        "face",
+    ):
+        value = display(model, field)
+        if value:
+            return normalize_image_url(value)
+    return ""
 
 
 def song_provider_url(song, library: Library) -> str:

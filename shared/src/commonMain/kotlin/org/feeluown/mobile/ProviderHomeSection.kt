@@ -70,43 +70,29 @@ fun ProviderContentHomeSection(
                         EmptyProviderContentHint(title)
                     }
                 } else {
-                    val dailySongSections = visibleSections.filter { it.feature.isDailySongs() }
-                    val privateFmSections = visibleSections.filter { it.feature.isPrivateFm() }
+                    val forYouSections = visibleSections.filter {
+                        it.feature.isDailySongs() || it.feature.isPrivateFm()
+                    }
                     val otherSections = visibleSections.filterNot {
                         it.feature.isDailySongs() || it.feature.isPrivateFm()
                     }
-                    if (dailySongSections.isNotEmpty()) {
-                        item(key = "header:daily-songs") {
+                    if (forYouSections.isNotEmpty()) {
+                        item(key = "header:for-you") {
                             ProviderFeatureHeader(
-                                feature = dailySongSections.first().feature,
-                                providerLabel = dailySongSections
+                                feature = forYouSections.first().feature,
+                                title = "为你推荐",
+                                providerLabel = forYouSections
                                     .map { it.feature.providerName }
                                     .distinct()
                                     .joinToString(" / "),
                             )
                         }
-                        item(key = "daily-songs-grid") {
-                            ProviderFeatureCoverGrid(
-                                features = dailySongSections.map { it.feature },
-                                onClick = controller::openFeature,
-                            )
-                        }
-                    }
-                    if (privateFmSections.isNotEmpty()) {
-                        item(key = "header:private-fm") {
-                            ProviderFeatureHeader(
-                                feature = privateFmSections.first().feature,
-                                providerLabel = privateFmSections
-                                    .map { it.feature.providerName }
-                                    .distinct()
-                                    .joinToString(" / "),
-                            )
-                        }
-                        item(key = "private-fm-grid") {
-                            PrivateFmGrid(
-                                sections = privateFmSections,
+                        item(key = "for-you-grid") {
+                            ForYouRecommendGrid(
+                                sections = forYouSections,
                                 enabled = !controller.isLoading,
-                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
+                                onFeatureClick = controller::openFeature,
+                                onPrivateFmClick = { section -> controller.playAllFromFeature(section.feature.id) },
                             )
                         }
                     }
@@ -171,6 +157,50 @@ fun ProviderContentHomeSection(
         }
     }
 }
+
+@Composable
+fun ForYouRecommendGrid(
+    sections: List<ProviderContentSection>,
+    enabled: Boolean,
+    onFeatureClick: (ProviderFeature) -> Unit,
+    onPrivateFmClick: (ProviderContentSection) -> Unit,
+) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns
+    val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        sections.chunked(columns).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                row.forEach { section ->
+                    if (section.feature.isPrivateFm()) {
+                        PrivateFmButton(
+                            section = section,
+                            enabled = enabled,
+                            onClick = { onPrivateFmClick(section) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        ProviderFeatureCoverCard(
+                            feature = section.feature,
+                            onClick = { onFeatureClick(section.feature) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                repeat(columns - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ProviderFeatureCoverGrid(
     features: List<ProviderFeature>,
@@ -468,6 +498,7 @@ fun ProviderMediaItemCard(
 @Composable
 fun ProviderFeatureHeader(
     feature: ProviderFeature,
+    title: String = feature.title,
     providerLabel: String = feature.providerName,
     onPlayAll: (() -> Unit)? = null,
 ) {
@@ -480,7 +511,7 @@ fun ProviderFeatureHeader(
     ) {
         Text(
             modifier = Modifier.weight(1f),
-            text = feature.title,
+            text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,

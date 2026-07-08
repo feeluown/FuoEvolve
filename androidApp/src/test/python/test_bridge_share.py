@@ -82,6 +82,31 @@ class BridgeShareTest(unittest.TestCase):
         self.assertEqual(12, media_item_to_dict(album, "album", library)["track_count"])
         self.assertIsNone(playlist_to_dict(unknown_playlist, library)["track_count"])
 
+    def test_playlist_and_media_items_use_list_cover_fields(self):
+        library = _Library()
+        playlist = SimpleNamespace(
+            source="bilibili",
+            identifier="123",
+            name="Favorite",
+            coverUrl="https://example.com/playlist.jpg",
+        )
+        artist = SimpleNamespace(
+            source="netease",
+            identifier="456",
+            name="Artist",
+            picUrl="https://example.com/artist.jpg",
+        )
+        album = SimpleNamespace(
+            source="netease",
+            identifier="789",
+            name="Album",
+            image_url="https://example.com/album.jpg",
+        )
+
+        self.assertEqual("https://example.com/playlist.jpg", playlist_to_dict(playlist, library)["cover_url"])
+        self.assertEqual("https://example.com/artist.jpg", media_item_to_dict(artist, "artist", library)["cover_url"])
+        self.assertEqual("https://example.com/album.jpg", media_item_to_dict(album, "album", library)["cover_url"])
+
     def test_provider_web_url_returns_empty_for_unsupported_resource(self):
         self.assertEqual("", provider_web_url("bilibili", "album", "123"))
         self.assertEqual("https://www.bilibili.com/video/BV1xx", provider_web_url("bilibili", "song", "BV1xx"))
