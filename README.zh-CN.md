@@ -1,7 +1,7 @@
 # FuoEvolve
 
 [![正式版](https://img.shields.io/github/v/release/feeluown/FuoEvolve?label=stable)](https://github.com/feeluown/FuoEvolve/releases/latest)
-[![Canary](https://img.shields.io/badge/canary-1.0.1--3--geeb8ad2-orange)](https://github.com/feeluown/FuoEvolve/actions/runs/28952679677)
+[![Canary](https://img.shields.io/github/actions/workflow/status/feeluown/FuoEvolve/android-debug-apk.yml?branch=master&label=canary)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster)
 [![Android APK](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster)
 [![Android Release](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -26,9 +26,8 @@ Android 端通过 Chaquopy 打包 FeelUOwn Python Core 与音乐源插件，并�
 | 正式版 | [GitHub 最新 Release](https://github.com/feeluown/FuoEvolve/releases/latest) | 签名 release APK，提供 `arm64-v8a`、`x86_64`、universal 三个包。 |
 | Canary | [master 分支最新 Android APK workflow](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster) | 在最新成功 workflow 的 Artifacts 中下载：用于开发者调试的签名 debug APK，以及 `arm64-v8a`、`x86_64`、universal 三个签名 release APK。 |
 
-本 README 更新时可获取到的最新正式版是
-[`1.0.1`](https://github.com/feeluown/FuoEvolve/releases/tag/1.0.1)，最新 master
-canary 构建版本是 `1.0.1-3-geeb8ad2`。
+正式版 badge 会动态解析 GitHub 最新 Release。Canary badge 会动态解析 master 分支
+Android APK workflow 状态；无法动态获取 canary 版本号时，README 不展示 canary 版本号。
 
 ## 项目亮点
 

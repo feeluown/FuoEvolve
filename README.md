@@ -1,7 +1,7 @@
 # FuoEvolve
 
 [![Stable release](https://img.shields.io/github/v/release/feeluown/FuoEvolve?label=stable)](https://github.com/feeluown/FuoEvolve/releases/latest)
-[![Canary](https://img.shields.io/badge/canary-1.0.1--3--geeb8ad2-orange)](https://github.com/feeluown/FuoEvolve/actions/runs/28952679677)
+[![Canary](https://img.shields.io/github/actions/workflow/status/feeluown/FuoEvolve/android-debug-apk.yml?branch=master&label=canary)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster)
 [![Android APK](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster)
 [![Android Release](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -28,9 +28,9 @@ Media3.
 | Stable | [Latest GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | Signed release APKs for `arm64-v8a`, `x86_64`, and universal devices. |
 | Canary | [Latest master Android APK workflow](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster) | Artifacts from the newest successful master build: signed debug APK for development debugging, plus signed release APKs for `arm64-v8a`, `x86_64`, and universal devices. |
 
-The latest stable release observed when this README was updated is
-[`1.0.1`](https://github.com/feeluown/FuoEvolve/releases/tag/1.0.1). The latest
-master canary build observed at that time is `1.0.1-3-geeb8ad2`.
+The stable badge resolves the latest GitHub Release. The canary badge resolves
+the latest master branch Android APK workflow status; when a dynamic canary
+version is not available, the README does not show a canary version number.
 
 ## Highlights
 
