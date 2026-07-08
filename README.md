@@ -28,26 +28,22 @@ Media3.
 | Stable | [Latest GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | Signed release APKs for `arm64-v8a`, `x86_64`, and universal devices. |
 | Canary | [Latest master Android APK workflow](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster) | Artifacts from the newest successful master build: signed debug APK for development debugging, plus signed release APKs for `arm64-v8a`, `x86_64`, and universal devices. |
 
-The stable badge resolves the latest GitHub Release. The canary badge resolves
-the latest master branch Android APK workflow status; when a dynamic canary
-version is not available, the README does not show a canary version number.
-
 ## Highlights
 
-- FeelUOwn-based online music provider integration on Android.
-- Search across enabled providers and local music, with provider filtering.
-- Typed provider search tabs for songs, artists, albums, playlists, and videos
+- 🎵 FeelUOwn-based online music provider integration on Android.
+- 🔎 Search across enabled providers and local music, with provider filtering.
+- 🧭 Typed provider search tabs for songs, artists, albums, playlists, and videos
   where the upstream provider supports those result types.
-- Provider home sections for recommendations, exploration, user playlists, and
+- 🏠 Provider home sections for recommendations, exploration, user playlists, and
   favorites.
-- Media3 audio playback, video/MV playback, queue management, shuffle, repeat,
+- ▶️ Media3 audio playback, video/MV playback, queue management, shuffle, repeat,
   up-next, multi-part tracks, covers, and LRC lyrics.
-- Smart replacement for unavailable tracks, with configurable provider pool,
+- 🔁 Smart replacement for unavailable tracks, with configurable provider pool,
   score threshold, metadata policy, and lyric policy.
-- Downloads, app-private lyrics, local music database, local metadata edits, and
+- ⬇️ Downloads, app-private lyrics, local music database, local metadata edits, and
   provider-assisted metadata/lyric lookup.
-- Direct system sharing with App Link-friendly share URLs.
-- Runtime settings for providers, login, quality, playback behavior, local scan
+- 🔗 Direct system sharing with App Link-friendly share URLs.
+- ⚙️ Runtime settings for providers, login, quality, playback behavior, local scan
   filters, cache limits, lyrics, and theme.
 
 ## Provider Support
@@ -64,24 +60,28 @@ Provider packages currently bundled in the Android app:
 The app loads NetEase by default. QQ Music, Bilibili, and YouTube Music are
 packaged and can be enabled, disabled, or reordered from Settings.
 
+Legend: ✅ supported, including features that require login; 🧩 supported only
+when the upstream provider exposes the required method or result type; ➖ not
+exposed in the app today.
+
 | Feature | NetEase | QQ Music | Bilibili | YouTube Music |
 | --- | --- | --- | --- | --- |
-| Provider login/logout | Yes | Yes | Yes | Yes |
-| Song search | Yes | Yes | Login required for selected Bilibili search | Yes |
-| Artist / album / playlist / video search tabs | Wired when returned by provider | Wired when returned by provider | Wired when returned by provider | Wired when returned by provider |
-| Daily songs | Login required | Login required | No dedicated section | Public section |
-| Recommended playlists | Login required | Login required | No dedicated section | Public section |
-| Private FM / radio | Login required | Login required | No dedicated section | No dedicated section |
-| Top lists | Public | No dedicated section | No dedicated section | Public |
-| User playlists | Login required | Login required | Login required | Login required |
-| Favorite songs | Login required | Login required | No dedicated section | Login required |
-| Favorite playlists | Login required | Login required | Login required | Login required |
-| Favorite artists | Login required | Login required | No dedicated section | Login required |
-| Favorite albums | Login required | Login required | No dedicated section | Login required |
-| Add song to user playlist | Supported when provider exposes playlist mutation | Supported when provider exposes playlist mutation | Supported when provider exposes playlist mutation | Supported when provider exposes playlist mutation |
-| Remove song from playlist | Supported when provider exposes playlist mutation | Supported when provider exposes playlist mutation | Supported when provider exposes playlist mutation | Disabled in app for YouTube Music |
-| Similar songs / hot comments / song MV | Wired through FeelUOwn provider methods when available | Wired through FeelUOwn provider methods when available | Wired through FeelUOwn provider methods when available | Wired through FeelUOwn provider methods when available |
-| Video playback | Wired through provider video media methods when available | Wired through provider video media methods when available | Wired through provider video media methods when available | Wired through provider video media methods when available |
+| Provider login/logout | ✅ | ✅ | ✅ | ✅ |
+| Song search | ✅ | ✅ | ✅ | ✅ |
+| Artist / album / playlist / video search tabs | 🧩 | 🧩 | 🧩 | 🧩 |
+| Daily songs | ✅ | ✅ | ➖ | ✅ |
+| Recommended playlists | ✅ | ✅ | ➖ | ✅ |
+| Private FM / radio | ✅ | ✅ | ➖ | ➖ |
+| Top lists | ✅ | ➖ | ➖ | ✅ |
+| User playlists | ✅ | ✅ | ✅ | ✅ |
+| Favorite songs | ✅ | ✅ | ➖ | ✅ |
+| Favorite playlists | ✅ | ✅ | ✅ | ✅ |
+| Favorite artists | ✅ | ✅ | ➖ | ✅ |
+| Favorite albums | ✅ | ✅ | ➖ | ✅ |
+| Add song to user playlist | 🧩 | 🧩 | 🧩 | 🧩 |
+| Remove song from playlist | 🧩 | 🧩 | 🧩 | ➖ |
+| Similar songs / hot comments / song MV | 🧩 | 🧩 | 🧩 | 🧩 |
+| Video playback | 🧩 | 🧩 | 🧩 | 🧩 |
 
 Provider behavior can still vary with upstream service limits, region, login
 state, and the exact FeelUOwn provider implementation.
@@ -90,15 +90,15 @@ state, and the exact FeelUOwn provider implementation.
 
 | Area | Current options |
 | --- | --- |
-| Providers | Enable or disable packaged providers, reorder provider priority, manage provider login, and switch login mode per provider. |
-| Audio quality | Separate Wi-Fi and cellular policies: highest, high, standard, or low-data. |
-| Unavailable tracks | Smart replacement or skip. Smart replacement can choose providers, minimum score, replacement metadata, and replacement lyrics. |
-| Playback display | Lyrics font size, system/light/dark mode, dynamic color, and preset color schemes. |
-| Local music | Media permission entry, database-backed refresh, grouping by all/artist/album, directory inclusion, and minimum-duration filter. |
-| Local metadata | Edit title/artist/album, search provider metadata, and download lyrics into app-private storage. |
-| Cache | Configurable audio cache and image cache limits. |
-| Downloads | Download provider tracks, play downloaded tracks locally, and remove downloaded files. |
-| Debug builds | Debug log viewer is available only in debug builds. |
+| 🎛️ Providers | Enable or disable packaged providers, reorder provider priority, manage provider login, and switch login mode per provider. |
+| 🎧 Audio quality | Separate Wi-Fi and cellular policies: highest, high, standard, or low-data. |
+| 🔁 Unavailable tracks | Smart replacement or skip. Smart replacement can choose providers, minimum score, replacement metadata, and replacement lyrics. |
+| 🖼️ Playback display | Lyrics font size, system/light/dark mode, dynamic color, and preset color schemes. |
+| 💽 Local music | Media permission entry, database-backed refresh, grouping by all/artist/album, directory inclusion, and minimum-duration filter. |
+| ✏️ Local metadata | Edit title/artist/album, search provider metadata, and download lyrics into app-private storage. |
+| 🧹 Cache | Configurable audio cache and image cache limits. |
+| ⬇️ Downloads | Download provider tracks, play downloaded tracks locally, and remove downloaded files. |
+| 🐞 Debug builds | Debug log viewer is available only in debug builds. |
 
 ## Project Structure
 
