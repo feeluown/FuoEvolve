@@ -64,16 +64,12 @@ internal class DesktopPythonClient(
         if (!bridgeScript.isFile) {
             error("找不到桌面 Python bridge：${bridgeScript.absolutePath}")
         }
-        DesktopPaths.feelUOwnDirs
         val builder = ProcessBuilder(pythonExecutable, bridgeScript.absolutePath)
             .directory(DesktopPaths.configDir)
         builder.environment().apply {
             this["FUO_ANDROID_PYTHON_DIR"] = androidPythonDir.absolutePath
             this["PYTHONPATH"] = pythonPathEntries(androidPythonDir).joinToString(File.pathSeparator)
-            this["XDG_CONFIG_HOME"] = DesktopPaths.configDir.absolutePath
-            this["XDG_DATA_HOME"] = DesktopPaths.dataDir.absolutePath
-            this["XDG_STATE_HOME"] = DesktopPaths.stateDir.absolutePath
-            this["XDG_CACHE_HOME"] = DesktopPaths.cacheDir.absolutePath
+            this["FEELUOWN_USER_HOME"] = System.getProperty("user.home")
         }
         val nextProcess = builder.start()
         process = nextProcess
