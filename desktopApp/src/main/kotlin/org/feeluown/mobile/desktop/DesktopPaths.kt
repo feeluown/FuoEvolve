@@ -17,8 +17,31 @@ internal object DesktopPaths {
         File(base, "fuo-evolve").ensureDirectory()
     }
 
+    val dataDir: File by lazy {
+        val base = System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
+            ?.let(::File)
+            ?: File(System.getProperty("user.home"), ".local/share")
+        File(base, "fuo-evolve").ensureDirectory()
+    }
+
+    val stateDir: File by lazy {
+        val base = System.getenv("XDG_STATE_HOME")?.takeIf { it.isNotBlank() }
+            ?.let(::File)
+            ?: File(System.getProperty("user.home"), ".local/state")
+        File(base, "fuo-evolve").ensureDirectory()
+    }
+
     val musicDir: File by lazy {
         File(System.getProperty("user.home"), "Music").ensureDirectory()
+    }
+
+    val feelUOwnDirs: List<File> by lazy {
+        listOf(
+            File(configDir, "feeluown"),
+            File(dataDir, "feeluown"),
+            File(stateDir, "feeluown"),
+            File(cacheDir, "feeluown"),
+        ).onEach { it.ensureDirectory() }
     }
 
     fun File.ensureDirectory(): File {

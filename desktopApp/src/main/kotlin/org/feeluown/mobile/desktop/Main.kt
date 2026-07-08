@@ -78,10 +78,8 @@ private class DesktopAppContainer : AutoCloseable {
     fun openProviderWebLogin(provider: ProviderInfo) {
         val url = provider.loginConfig?.loginUrl.orEmpty()
         if (url.isNotBlank()) {
-            runCatching {
-                if (Desktop.isDesktopSupported()) {
-                    Desktop.getDesktop().browse(URI(url))
-                }
+            if (!openExternalBrowser(url)) {
+                copyShareText(url)
             }
         }
         controller.openSettings(provider.providerId)
@@ -104,5 +102,26 @@ private fun copyShareText(text: String) {
         Toolkit.getDefaultToolkit()
             .systemClipboard
             .setContents(StringSelection(text), null)
+    }
+}
+
+private fun openExternalBrowser(url: String): Boolean {
+    val openedByDesktop = runCatching {
+        if (!Desktop.isDesktopSupported()) return@runCatching false
+        val desktop = Desktop.getDesktop()
+        if (!desktop.isSupported(Desktop.Action.BROWSE)) return@runCatching false
+        desktop.browse(URI(url))
+        true
+    }.getOrDefault(false)
+    if (openedByDesktop) return true
+
+    return listOf(
+        listOf("xdg-open", url),
+        listOf("gio", "open", url),
+    ).any { command ->
+        runCatching {
+            ProcessBuilder(command).start()
+            true
+        }.getOrDefault(false)
     }
 }
