@@ -516,17 +516,18 @@ class FuoMobileBridge:
         self._media_items: Dict[str, Any] = {}
         self._videos: Dict[str, Any] = {}
         self._saved_login_provider_ids = set()
+        self._authenticated_provider_ids = set()
         self._restore_saved_logins()
 
     def providers(self) -> str:
-        providers = [self._get_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
+        providers = [self._raw_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
         return json.dumps(
             {"providers": [provider_info(provider) for provider in providers]},
             ensure_ascii=False,
         )
 
     def provider_capabilities(self) -> str:
-        providers = [self._get_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
+        providers = [self._raw_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
         return json.dumps(
             {"providers": [provider_capabilities(provider) for provider in providers]},
             ensure_ascii=False,
@@ -535,13 +536,17 @@ class FuoMobileBridge:
     def features(self) -> str:
         features = []
         for provider_id in self.provider_registry.provider_ids:
-            provider = self._get_provider(provider_id)
+            provider = self._raw_provider(provider_id)
             for feature in FEATURE_DEFS.get(provider_id, []):
                 if hasattr(provider, feature["action"]):
                     features.append(feature_to_dict(feature, provider))
         return json.dumps({"features": features}, ensure_ascii=False)
 
     def search(self, keyword: str, provider_id: str = "") -> str:
+        if provider_id == "bilibili":
+            self._get_provider(provider_id)
+        elif not provider_id and "bilibili" in getattr(getattr(self, "provider_registry", None), "provider_ids", []):
+            self._get_provider("bilibili")
         tracks = []
         source_in = [provider_id] if provider_id else None
         for result in self.app.library.search(keyword, type_in=[SearchType.so], source_in=source_in):
@@ -571,6 +576,8 @@ class FuoMobileBridge:
                     },
                     ensure_ascii=False,
                 )
+        elif not provider_id and "bilibili" in getattr(getattr(self, "provider_registry", None), "provider_ids", []):
+            self._get_provider("bilibili")
         source_in = [provider_id] if provider_id else None
         for search_type in (SearchType.so, SearchType.ar, SearchType.al, SearchType.pl, SearchType.vi):
             try:
@@ -703,14 +710,14 @@ class FuoMobileBridge:
         return self.resolve(track_id)
 
     def provider_auth_state(self, provider_id: str) -> str:
-        provider = self._get_provider(provider_id)
+        provider = self._raw_provider(provider_id)
         return json.dumps(
             provider_auth_state(provider, None, provider_id in self._saved_login_provider_ids),
             ensure_ascii=False,
         )
 
     def provider_auth_state_with_user(self, provider_id: str) -> str:
-        provider = self._get_provider(provider_id)
+        provider = self._raw_provider(provider_id)
         if provider_id not in self._saved_login_provider_ids:
             return json.dumps(provider_auth_state(provider, None, False), ensure_ascii=False)
         self._restore_saved_login(provider_id)
@@ -956,10 +963,33 @@ class FuoMobileBridge:
         return json.dumps(payload, ensure_ascii=False)
 
     def _get_provider(self, provider_id: str):
+        provider = self._raw_provider(provider_id)
+        if provider_id == "bilibili":
+            self._ensure_bilibili_authenticated(provider)
+        return provider
+
+    def _raw_provider(self, provider_id: str):
         provider = self.app.library.get(provider_id)
         if provider is None:
             raise RuntimeError(f"provider not found: {provider_id}")
         return provider
+
+    def _ensure_bilibili_authenticated(self, provider) -> None:
+        authenticated_provider_ids = getattr(self, "_authenticated_provider_ids", set())
+        if "bilibili" in authenticated_provider_ids:
+            return
+        if "bilibili" in getattr(self, "_saved_login_provider_ids", set()):
+            self._restore_saved_login("bilibili")
+            if "bilibili" in getattr(self, "_authenticated_provider_ids", set()):
+                return
+        current_user = getattr(provider, "get_current_user_or_none", None)
+        if current_user is None:
+            return
+        user = current_user()
+        if user is not None:
+            provider.auth(user)
+            authenticated_provider_ids.add("bilibili")
+            self._authenticated_provider_ids = authenticated_provider_ids
 
     def _require_logged_in(self, provider):
         if provider.get_current_user_or_none() is None:
@@ -1275,7 +1305,7 @@ class FuoMobileBridge:
                 bridge_log(f"restore cookies failed provider_id={provider_id}: {exc}")
 
     def _restore_saved_cookies(self, provider_id: str) -> bool:
-        provider = self._get_provider(provider_id)
+        provider = self._raw_provider(provider_id)
         if provider_id == "netease":
             from fuo_netease.login_controller import LoginController
 
@@ -1310,7 +1340,7 @@ class FuoMobileBridge:
         return False
 
     def _restore_saved_login(self, provider_id: str) -> None:
-        provider = self._get_provider(provider_id)
+        provider = self._raw_provider(provider_id)
         user = None
         if provider_id == "netease":
             from fuo_netease.login_controller import LoginController
@@ -1335,6 +1365,8 @@ class FuoMobileBridge:
             user = provider.try_get_user_with_headerfile()
         if user is not None:
             provider.auth(user)
+            if provider_id == "bilibili":
+                self._authenticated_provider_ids.add(provider_id)
             current_user_changed = getattr(provider, "current_user_changed", None)
             if current_user_changed is not None:
                 current_user_changed.emit(user)

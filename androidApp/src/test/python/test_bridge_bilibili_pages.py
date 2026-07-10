@@ -63,9 +63,17 @@ class _LoggedOutBilibiliProvider:
 
     def __init__(self):
         self.user = None
+        self.auth_calls = []
 
     def get_current_user_or_none(self):
         return self.user
+
+    def auth(self, user):
+        self.auth_calls.append(user)
+        self.user = user
+
+    def current_user_list_playlists(self):
+        return []
 
 
 class BilibiliPagesTest(unittest.TestCase):
@@ -99,7 +107,7 @@ class BilibiliPagesTest(unittest.TestCase):
     def test_auth_state_uses_saved_bilibili_cookie_without_user_lookup(self):
         provider = _LoggedOutBilibiliProvider()
         bridge = FuoMobileBridge.__new__(FuoMobileBridge)
-        bridge._get_provider = lambda provider_id: provider
+        bridge.app = SimpleNamespace(library=_Library(provider))
         bridge._saved_login_provider_ids = {"bilibili"}
         bridge._restore_saved_login = lambda provider_id: self.fail("不应在普通状态查询时读取用户信息")
 
@@ -112,7 +120,7 @@ class BilibiliPagesTest(unittest.TestCase):
         provider = _LoggedOutBilibiliProvider()
         restored_user = SimpleNamespace(name="bilibili-user")
         bridge = FuoMobileBridge.__new__(FuoMobileBridge)
-        bridge._get_provider = lambda provider_id: provider
+        bridge.app = SimpleNamespace(library=_Library(provider))
         bridge._saved_login_provider_ids = {"bilibili"}
         bridge._restore_saved_login = lambda provider_id: setattr(provider, "user", restored_user)
 
@@ -120,6 +128,23 @@ class BilibiliPagesTest(unittest.TestCase):
 
         self.assertTrue(state["is_logged_in"])
         self.assertEqual("bilibili-user", state["user_name"])
+
+    def test_login_required_feature_restores_saved_bilibili_login(self):
+        provider = _LoggedOutBilibiliProvider()
+        bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+        bridge.app = SimpleNamespace(library=_Library(provider))
+        bridge._saved_login_provider_ids = {"bilibili"}
+        bridge._authenticated_provider_ids = set()
+        bridge._tracks = {}
+        bridge._playlists = {}
+        bridge._media_items = {}
+        bridge._restore_saved_login = lambda provider_id: setattr(provider, "user", SimpleNamespace(name="bilibili-user"))
+
+        payload = json.loads(bridge.load_feature("bilibili_user_playlists"))
+        bridge._get_provider("bilibili")
+
+        self.assertFalse(payload["is_login_required"])
+        self.assertEqual(1, len(provider.auth_calls))
 
 
 if __name__ == "__main__":
