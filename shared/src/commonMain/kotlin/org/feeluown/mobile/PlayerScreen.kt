@@ -956,7 +956,7 @@ fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
     LazyColumn(
         modifier = modifier,
     ) {
-        itemsIndexed(queue, key = { _, item -> item.id }) { index, track ->
+        itemsIndexed(queue) { index, track ->
             if (index == 0 && currentCount == 1) {
                 Text(
                     text = "当前播放",

@@ -515,6 +515,7 @@ class FuoMobileBridge:
         self._playlists: Dict[str, Any] = {}
         self._media_items: Dict[str, Any] = {}
         self._videos: Dict[str, Any] = {}
+        self._saved_login_provider_ids = set()
         self._restore_saved_logins()
 
     def providers(self) -> str:
@@ -703,8 +704,18 @@ class FuoMobileBridge:
 
     def provider_auth_state(self, provider_id: str) -> str:
         provider = self._get_provider(provider_id)
+        return json.dumps(
+            provider_auth_state(provider, None, provider_id in self._saved_login_provider_ids),
+            ensure_ascii=False,
+        )
+
+    def provider_auth_state_with_user(self, provider_id: str) -> str:
+        provider = self._get_provider(provider_id)
+        if provider_id not in self._saved_login_provider_ids:
+            return json.dumps(provider_auth_state(provider, None, False), ensure_ascii=False)
+        self._restore_saved_login(provider_id)
         user = provider.get_current_user_or_none()
-        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+        return json.dumps(provider_auth_state(provider, user, user is not None), ensure_ascii=False)
 
     def provider_login_with_cookies(self, provider_id: str, cookies_json: str) -> str:
         provider = self._get_provider(provider_id)
@@ -713,6 +724,7 @@ class FuoMobileBridge:
             raise RuntimeError("cookies must be a non-empty JSON object")
         if provider_id == "ytmusic":
             user = self._login_ytmusic_with_cookies(provider, cookies)
+            self._saved_login_provider_ids.add(provider_id)
             return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
         if provider_id == "bilibili":
             provider._api.from_cookiedict(cookies)
@@ -727,6 +739,7 @@ class FuoMobileBridge:
             raise RuntimeError(f"provider does not support cookies login: {provider_id}")
         provider.auth(user)
         self._save_login(provider_id, user, cookies)
+        self._saved_login_provider_ids.add(provider_id)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
     def _login_ytmusic_with_cookies(self, provider, cookies: Dict[str, str]):
@@ -764,12 +777,14 @@ class FuoMobileBridge:
         current_user_changed = getattr(provider, "current_user_changed", None)
         if current_user_changed is not None:
             current_user_changed.emit(user)
+        self._saved_login_provider_ids.add(provider_id)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
     def provider_logout(self, provider_id: str) -> str:
         provider = self._get_provider(provider_id)
         self._clear_provider_auth(provider_id, provider)
         self._delete_saved_login(provider_id)
+        self._saved_login_provider_ids.discard(provider_id)
         return json.dumps(provider_auth_state(provider, None), ensure_ascii=False)
 
     def load_feature(self, feature_id: str, offset: int = 0, limit: int = 60) -> str:
@@ -1254,9 +1269,45 @@ class FuoMobileBridge:
     def _restore_saved_logins(self) -> None:
         for provider_id in self.provider_registry.provider_ids:
             try:
-                self._restore_saved_login(provider_id)
+                if self._restore_saved_cookies(provider_id):
+                    self._saved_login_provider_ids.add(provider_id)
             except Exception as exc:  # pylint: disable=broad-except
-                bridge_log(f"restore login failed provider_id={provider_id}: {exc}")
+                bridge_log(f"restore cookies failed provider_id={provider_id}: {exc}")
+
+    def _restore_saved_cookies(self, provider_id: str) -> bool:
+        provider = self._get_provider(provider_id)
+        if provider_id == "netease":
+            from fuo_netease.login_controller import LoginController
+
+            user = LoginController.load()
+            if user is None:
+                return False
+            provider.auth(user)
+            return True
+        if provider_id == "qqmusic":
+            from fuo_qqmusic.login import read_cookies
+
+            cookies = read_cookies()
+            if not cookies:
+                return False
+            provider.api.set_cookies(cookies)
+            return True
+        if provider_id == "bilibili":
+            from fuo_bilibili.login import load_user_cookies
+
+            cookies = load_user_cookies()
+            if not cookies:
+                return False
+            provider._api.from_cookiedict(cookies)
+            return True
+        if provider_id == "ytmusic":
+            from fuo_ytmusic.consts import HEADER_FILE
+
+            if not HEADER_FILE.exists():
+                return False
+            provider.service.reinitialize_by_headerfile(HEADER_FILE)
+            return True
+        return False
 
     def _restore_saved_login(self, provider_id: str) -> None:
         provider = self._get_provider(provider_id)
@@ -1725,11 +1776,11 @@ def mutation_result(success: bool, message: str) -> Dict[str, Any]:
     }
 
 
-def provider_auth_state(provider, user) -> Dict[str, Any]:
+def provider_auth_state(provider, user, is_logged_in: Optional[bool] = None) -> Dict[str, Any]:
     return {
         "provider_id": getattr(provider, "identifier", ""),
         "provider_name": provider_name(provider),
-        "is_logged_in": user is not None,
+        "is_logged_in": user is not None if is_logged_in is None else is_logged_in,
         "user_name": getattr(user, "name", "") if user is not None else "",
     }
 

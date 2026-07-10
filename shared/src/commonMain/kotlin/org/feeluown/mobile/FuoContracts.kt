@@ -621,6 +621,7 @@ interface ProviderMusicRepository {
         smartReplacementUseOriginalLyrics: Boolean = false,
     ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
+    suspend fun refreshAuthState(providerId: String): ProviderAuthState = authState(providerId)
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support header login: $providerId")

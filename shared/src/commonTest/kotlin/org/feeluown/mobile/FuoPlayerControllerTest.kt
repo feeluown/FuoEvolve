@@ -1671,6 +1671,7 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.isSettingsOpen)
             assertEquals("qqmusic", controller.selectedSettingsProviderId)
             assertEquals("qqmusic", controller.selectedSettingsProvider()?.providerId)
+            assertEquals(true, provider.refreshAuthStateCount > 0)
         } finally {
             controllerScope.cancel()
         }
@@ -2799,6 +2800,7 @@ class FuoPlayerControllerTest {
         private var enabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS
         var resolveCount = 0
         var logoutCount = 0
+        var refreshAuthStateCount = 0
         var lastEnabledProviderIds: Set<String>? = null
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
@@ -2874,6 +2876,11 @@ class FuoPlayerControllerTest {
                 isLoggedIn = isLoggedIn,
                 userName = "tester".takeIf { isLoggedIn },
             )
+
+        override suspend fun refreshAuthState(providerId: String): ProviderAuthState {
+            refreshAuthStateCount += 1
+            return authState(providerId)
+        }
 
         override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
             isLoggedIn = true

@@ -561,7 +561,7 @@ class FuoPlayerController(
         providerId?.takeIf { it.isNotBlank() }?.let { selectedSettingsProviderId = it }
         providerId?.takeIf { it.isNotBlank() }?.let { settingsLoginProviderId = it }
         isSettingsOpen = true
-        refreshAllProviderAuthStates()
+        refreshAllProviderAuthStates(refreshUserInfo = true)
         refreshResourceCacheUsage()
         refreshLocalMusicDirectories()
     }
@@ -2401,15 +2401,21 @@ class FuoPlayerController(
         mineFavoritePlaylistSections = mineFavoritePlaylistSections.sortedSectionsByOrder()
     }
 
-    private fun refreshAllProviderAuthStates() {
+    private fun refreshAllProviderAuthStates(refreshUserInfo: Boolean = false) {
         scope.launch {
-            refreshProviderAuthStates()
+            refreshProviderAuthStates(refreshUserInfo)
         }
     }
 
-    private suspend fun refreshProviderAuthStates() {
+    private suspend fun refreshProviderAuthStates(refreshUserInfo: Boolean = false) {
         providers.forEach { provider ->
-            runCatching { providerRepository.authState(provider.providerId) }
+            runCatching {
+                if (refreshUserInfo) {
+                    providerRepository.refreshAuthState(provider.providerId)
+                } else {
+                    providerRepository.authState(provider.providerId)
+                }
+            }
                 .onSuccess { providerAuthStates = providerAuthStates + (provider.providerId to it) }
         }
     }

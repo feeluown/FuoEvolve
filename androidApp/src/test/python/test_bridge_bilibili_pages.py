@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -56,6 +57,17 @@ class _BilibiliProvider:
         return song("BV1xx", "parent", self.children)
 
 
+class _LoggedOutBilibiliProvider:
+    identifier = "bilibili"
+    name = "哔哩哔哩"
+
+    def __init__(self):
+        self.user = None
+
+    def get_current_user_or_none(self):
+        return self.user
+
+
 class BilibiliPagesTest(unittest.TestCase):
     def test_select_media_uses_first_child_when_parent_has_multiple_pages(self):
         provider = _BilibiliProvider()
@@ -83,6 +95,31 @@ class BilibiliPagesTest(unittest.TestCase):
         result = bridge._song_from_track_id("bilibili:paged_BV1xx__2")
 
         self.assertEqual("paged_BV1xx__2", result.identifier)
+
+    def test_auth_state_uses_saved_bilibili_cookie_without_user_lookup(self):
+        provider = _LoggedOutBilibiliProvider()
+        bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+        bridge._get_provider = lambda provider_id: provider
+        bridge._saved_login_provider_ids = {"bilibili"}
+        bridge._restore_saved_login = lambda provider_id: self.fail("不应在普通状态查询时读取用户信息")
+
+        state = json.loads(bridge.provider_auth_state("bilibili"))
+
+        self.assertTrue(state["is_logged_in"])
+        self.assertEqual("", state["user_name"])
+
+    def test_auth_state_with_user_refreshes_bilibili_profile(self):
+        provider = _LoggedOutBilibiliProvider()
+        restored_user = SimpleNamespace(name="bilibili-user")
+        bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+        bridge._get_provider = lambda provider_id: provider
+        bridge._saved_login_provider_ids = {"bilibili"}
+        bridge._restore_saved_login = lambda provider_id: setattr(provider, "user", restored_user)
+
+        state = json.loads(bridge.provider_auth_state_with_user("bilibili"))
+
+        self.assertTrue(state["is_logged_in"])
+        self.assertEqual("bilibili-user", state["user_name"])
 
 
 if __name__ == "__main__":

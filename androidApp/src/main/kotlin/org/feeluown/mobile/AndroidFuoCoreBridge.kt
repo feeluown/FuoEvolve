@@ -186,6 +186,14 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun refreshAuthState(providerId: String): ProviderAuthState {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("provider_auth_state_with_user", providerId).toString()
+            JSONObject(raw).toAuthState(providerId)
+        }
+    }
+
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
         initialize()
         return withContext(Dispatchers.IO) {
