@@ -19,6 +19,8 @@ class AndroidFuoCoreBridge(
     @Volatile
     private var enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS
     @Volatile
+    private var initializedProviderIds: Set<String>? = null
+    @Volatile
     private var wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY
     @Volatile
     private var cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY
@@ -34,16 +36,20 @@ class AndroidFuoCoreBridge(
             .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
             .intersect(AVAILABLE_PROVIDERS.map { it.providerId }.toSet())
             .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
+        synchronized(this) {
+            enabledProviderIds = nextProviderIds
+        }
         withContext(Dispatchers.IO) {
             synchronized(this@AndroidFuoCoreBridge) {
-                if (bridge != null && enabledProviderIds == nextProviderIds) return@synchronized
+                if (enabledProviderIds != nextProviderIds) return@synchronized
+                if (bridge != null && initializedProviderIds == nextProviderIds) return@synchronized
                 try {
                     Log.d(TAG, "initialize start providers=$nextProviderIds")
                     val nextBridge = Python.getInstance()
                         .getModule("fuo_mobile.bridge")
                         .callAttr("create_bridge", enabledProvidersJson(nextProviderIds))
                     bridge = nextBridge
-                    enabledProviderIds = nextProviderIds
+                    initializedProviderIds = nextProviderIds
                     Log.d(TAG, "initialize done")
                 } catch (throwable: Throwable) {
                     Log.e(TAG, "initialize failed", throwable)
