@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
@@ -60,6 +61,14 @@ class FuoPlaybackService : MediaSessionService() {
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailablePlayerCommands(queuePlayerCommands(exoPlayer.getAvailableCommands()))
                         .build()
+                }
+
+                override fun onMediaButtonEvent(
+                    session: MediaSession,
+                    controllerInfo: MediaSession.ControllerInfo,
+                    intent: Intent,
+                ): Boolean {
+                    return handleMediaButtonEvent(intent)
                 }
             })
             .setMediaButtonPreferences(mediaButtonPreferences())
@@ -297,6 +306,27 @@ class FuoPlaybackService : MediaSessionService() {
                 .addAll(commands)
                 .addAll(*queueNavigationCommands.toIntArray())
                 .build()
+        }
+
+        @Suppress("DEPRECATION")
+        private fun handleMediaButtonEvent(intent: Intent): Boolean {
+            if (intent.action != Intent.ACTION_MEDIA_BUTTON) return false
+            val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
+            return when (event.keyCode) {
+                KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        transportControls?.next()
+                    }
+                    true
+                }
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        transportControls?.previous()
+                    }
+                    true
+                }
+                else -> false
+            }
         }
     }
 
