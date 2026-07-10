@@ -29,16 +29,16 @@ class FuoPlayerControllerTest {
         val payload = track.toSharePayload()
 
         assertEquals("fuo://netease/songs/1811961337", payload?.fuoUri)
-        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337", payload?.appLinkUrl)
+        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337?d=SWdhbGx0YQ", payload?.appLinkUrl)
         assertEquals("https://y.music.163.com/m/song?id=1811961337", payload?.content(ShareMode.ProviderLink))
         assertEquals(
-            "https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337",
+            "https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337?d=SWdhbGx0YQ",
             payload?.content(ShareMode.FuoLink),
         )
         assertEquals(
             "分享一首歌：\n" +
                 "《Igallta》 - Se-U-Ra（专辑：Igallta）\n" +
-                "打开收听：https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337\n" +
+                "打开收听：https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337?d=SWdhbGx0YQ\n" +
                 "也可以在网易云音乐收听：https://y.music.163.com/m/song?id=1811961337",
             payload?.content(ShareMode.FullText),
         )
@@ -54,12 +54,12 @@ class FuoPlayerControllerTest {
         ).toSharePayload()
 
         assertEquals("fuo://netease/playlists/123", payload?.fuoUri)
-        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/playlists/123", payload?.content(ShareMode.FuoLink))
+        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/playlists/123?d=5q-P5pel5o6o6I2Q", payload?.content(ShareMode.FuoLink))
         assertNull(payload?.content(ShareMode.ProviderLink))
         assertEquals(
             "分享一个歌单：\n" +
                 "《每日推荐》\n" +
-                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123",
+                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123?d=5q-P5pel5o6I2Q",
             payload?.content(ShareMode.FullText),
         )
     }
