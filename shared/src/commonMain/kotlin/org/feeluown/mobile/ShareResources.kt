@@ -1,5 +1,8 @@
 package org.feeluown.mobile
 
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
+
 enum class ShareResourceType(
     val namespace: String,
     val displayName: String,
@@ -88,9 +91,10 @@ fun ProviderMediaItem.toSharePayload(): SharePayload? {
     ).toSharePayload()
 }
 
+@OptIn(ExperimentalEncodingApi::class)
 fun ShareResourceRef.toSharePayload(): SharePayload {
     val fuoUri = "fuo://$providerId/${type.namespace}/$identifier"
-    val appLinkUrl = "$FUO_EVOLVE_PAGES_BASE_URL/$providerId/${type.namespace}/$identifier"
+    val appLinkUrl = "$FUO_EVOLVE_PAGES_BASE_URL/$providerId/${type.namespace}/$identifier?d=${shareTitleData(title)}"
     val introLine = when (type) {
         ShareResourceType.Song -> "分享一首歌："
         ShareResourceType.Playlist -> "分享一个歌单："
@@ -182,6 +186,10 @@ const val FUO_EVOLVE_PAGES_BASE_URL = "https://feeluown.github.io/FuoEvolve/r"
 private val FUO_URI_REGEX = Regex("""fuo://([A-Za-z0-9_]+)/(?:(songs|playlists|artists|albums)/)?([A-Za-z0-9_-]+)""")
 private val FUO_EVOLVE_PAGES_REGEX =
     Regex("""https://feeluown\.github\.io/FuoEvolve/r/([A-Za-z0-9_]+)/(songs|playlists|artists|albums)/([A-Za-z0-9_-]+)""")
+
+@OptIn(ExperimentalEncodingApi::class)
+private fun shareTitleData(title: String): String =
+    Base64.UrlSafe.encode(title.encodeToByteArray()).trimEnd('=')
 
 private fun providerIdentifier(id: String, providerId: String, prefix: String? = null): String? {
     if (id.isBlank() || providerId.isBlank()) return null
