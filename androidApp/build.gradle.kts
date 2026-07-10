@@ -105,6 +105,9 @@ android {
             }
         }
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             if (hasFuoSigningConfig) {
                 signingConfig = signingConfigs.getByName("fuo")
             }
