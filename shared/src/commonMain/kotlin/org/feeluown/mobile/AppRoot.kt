@@ -97,6 +97,8 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
@@ -157,6 +159,13 @@ fun AppRoot(
         themeMode = controller.themeMode,
         themeColorScheme = controller.themeColorScheme,
     ) {
+        val snackbarHostState = remember { SnackbarHostState() }
+        val playlistOperationFeedback = controller.playlistOperationFeedback
+        LaunchedEffect(playlistOperationFeedback) {
+            playlistOperationFeedback ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(playlistOperationFeedback)
+            controller.dismissPlaylistOperationFeedback(playlistOperationFeedback)
+        }
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val layoutInfo = remember(maxWidth, maxHeight) {
                 val isLandscape = maxWidth > maxHeight
@@ -263,6 +272,13 @@ fun AppRoot(
                     controller.playlistTargetTrack?.let { track ->
                         ProviderPlaylistTargetDialog(controller = controller, track = track)
                     }
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(16.dp),
+                    )
                 }
             }
         }

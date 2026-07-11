@@ -54,6 +54,7 @@ enum class LocalMusicViewMode {
 
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
+private const val PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT = 200
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
 class FuoPlayerController(
@@ -148,6 +149,8 @@ class FuoPlayerController(
     var playlistOperationTargets by mutableStateOf<List<ProviderPlaylist>>(emptyList())
         private set
     var playlistOperationError by mutableStateOf<String?>(null)
+        private set
+    var playlistOperationFeedback by mutableStateOf<String?>(null)
         private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
@@ -269,6 +272,7 @@ class FuoPlayerController(
     private var currentUpNextTrack: MusicTrack? = null
     private var currentIsUpNext: Boolean = false
     private var queueFeature: ProviderFeature? = null
+    private var queuePlaylistId: String? = null
     private var shuffleEnabled: Boolean = false
     private var _repeatMode: RepeatMode = RepeatMode.QUEUE
     private var isFmQueue: Boolean = false
@@ -278,6 +282,7 @@ class FuoPlayerController(
     private var selectedFeatureLoadMoreJob: Job? = null
     private var selectedPlaylistTracksNextOffset = 0
     private var selectedPlaylistLoadMoreJob: Job? = null
+    private var selectedPlaylistBackgroundLoadJob: Job? = null
     private var selectedMediaItemTracksNextOffset = 0
     private var selectedMediaItemAlbumsNextOffset = 0
     private var selectedMediaItemTracksLoadMoreJob: Job? = null
@@ -1537,16 +1542,19 @@ class FuoPlayerController(
                 .onSuccess { result ->
                     if (result.success) {
                         message = result.message.ifBlank { "已添加到：${playlist.title}" }
+                        playlistOperationFeedback = message
                         closePlaylistTargetPicker()
                         refreshAfterProviderMutation(playlist.providerId)
                     } else {
                         playlistOperationError = result.message.ifBlank { "添加失败" }
                         message = playlistOperationError.orEmpty()
+                        playlistOperationFeedback = message
                     }
                 }
                 .onFailure {
                     playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
                     setError(it)
+                    playlistOperationFeedback = message
                 }
             isLoading = false
         }
@@ -1572,24 +1580,37 @@ class FuoPlayerController(
                     if (result.success) {
                         selectedPlaylistTracks = selectedPlaylistTracks.filterNot { it.id == track.id }
                         message = result.message.ifBlank { "已从歌单移除：${track.title}" }
+                        playlistOperationFeedback = message
                         refreshAfterProviderMutation(playlist.providerId)
                     } else {
                         selectedPlaylistError = result.message.ifBlank { "移除失败" }
                         message = selectedPlaylistError.orEmpty()
+                        playlistOperationFeedback = message
                     }
                 }
-                .onFailure { setError(it) }
+                .onFailure {
+                    setError(it)
+                    playlistOperationFeedback = message
+                }
             isLoading = false
         }
     }
 
+    fun dismissPlaylistOperationFeedback(feedback: String) {
+        if (playlistOperationFeedback == feedback) {
+            playlistOperationFeedback = null
+        }
+    }
+
     fun openPlaylist(playlist: ProviderPlaylist, category: ProviderFeatureCategory? = null) {
+        selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = playlist
         selectedPlaylistCategory = category
         selectedPlaylistTracks = emptyList()
         selectedPlaylistTracksNextOffset = 0
         selectedPlaylistTracksHasMore = false
         selectedPlaylistLoadMoreJob = null
+        selectedPlaylistBackgroundLoadJob = null
         selectedPlaylistError = null
         scope.launch {
             isLoading = true
@@ -1626,12 +1647,14 @@ class FuoPlayerController(
     }
 
     fun closePlaylist() {
+        selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = null
         selectedPlaylistCategory = null
         selectedPlaylistTracks = emptyList()
         selectedPlaylistTracksNextOffset = 0
         selectedPlaylistTracksHasMore = false
         selectedPlaylistLoadMoreJob = null
+        selectedPlaylistBackgroundLoadJob = null
         selectedPlaylistError = null
     }
 
@@ -1890,6 +1913,13 @@ class FuoPlayerController(
         }
     }
 
+    private suspend fun ensureSelectedPlaylistTracksAtLeast(count: Int) {
+        selectedPlaylistLoadMoreJob?.join()
+        while (selectedPlaylistTracksHasMore && selectedPlaylistTracks.size < count) {
+            if (!appendSelectedPlaylistTracksPage()) break
+        }
+    }
+
     private suspend fun ensureAllSelectedMediaItemTracks() {
         selectedMediaItemTracksLoadMoreJob?.join()
         while (selectedMediaItemTracksHasMore) {
@@ -1981,17 +2011,26 @@ class FuoPlayerController(
 
     fun playFromSelectedPlaylist(index: Int) {
         val track = selectedPlaylistTracks.getOrNull(index) ?: return
-        play(track, selectedPlaylistTracks, index)
+        play(track, selectedPlaylistTracks, index, sourcePlaylistId = selectedPlaylist?.id)
     }
 
     fun playAllFromSelectedPlaylist() {
         val playlist = selectedPlaylist ?: return
+        selectedPlaylistBackgroundLoadJob?.cancel()
         scope.launch {
             isLoading = true
-            message = "正在加载完整歌单：${playlist.title}"
-            ensureAllSelectedPlaylistTracks()
-            playFirst(selectedPlaylistTracks)
+            message = "正在加载前 $PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT 首：${playlist.title}"
+            ensureSelectedPlaylistTracksAtLeast(PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT)
+            playFirst(selectedPlaylistTracks, sourcePlaylistId = playlist.id)
             isLoading = false
+            if (selectedPlaylistTracksHasMore && queuePlaylistId == playlist.id) {
+                selectedPlaylistBackgroundLoadJob = scope.launch {
+                    ensureAllSelectedPlaylistTracks()
+                    if (!selectedPlaylistTracksHasMore) {
+                        syncPlaylistPlaybackQueue(playlist)
+                    }
+                }
+            }
         }
     }
 
@@ -2199,6 +2238,7 @@ class FuoPlayerController(
         currentIsUpNext = false
         mainQueueIndex = -1
         queueFeature = null
+        queuePlaylistId = null
         isFmQueue = false
         shuffleBeforeFm = null
         if (currentTrack != null) {
@@ -2364,6 +2404,7 @@ class FuoPlayerController(
     }
 
     private fun clearProviderContent() {
+        selectedPlaylistBackgroundLoadJob?.cancel()
         recommendSections = emptyList()
         musicSections = emptyList()
         mineSections = emptyList()
@@ -2383,6 +2424,7 @@ class FuoPlayerController(
         selectedPlaylistTracksNextOffset = 0
         selectedPlaylistTracksHasMore = false
         selectedPlaylistLoadMoreJob = null
+        selectedPlaylistBackgroundLoadJob = null
         selectedMediaItemTracks = emptyList()
         selectedMediaItemTracksNextOffset = 0
         selectedMediaItemTracksHasMore = false
@@ -2435,11 +2477,18 @@ class FuoPlayerController(
         sourceQueue: List<MusicTrack>,
         index: Int,
         sourceFeature: ProviderFeature? = null,
+        sourcePlaylistId: String? = null,
         skippedUnavailableCount: Int = 0,
     ) {
         var playbackIndex = index
         if (skippedUnavailableCount == 0) {
-            playbackIndex = replaceMainQueue(sourceQueue, index, sourceFeature, keepSelectedTrack = true)
+            playbackIndex = replaceMainQueue(
+                sourceQueue,
+                index,
+                sourceFeature,
+                sourcePlaylistId,
+                keepSelectedTrack = true,
+            )
         }
         playMainIndex(playbackIndex, skippedUnavailableCount)
     }
@@ -2550,9 +2599,19 @@ class FuoPlayerController(
         }
     }
 
-    private fun playFirst(sourceQueue: List<MusicTrack>, sourceFeature: ProviderFeature? = null) {
+    private fun playFirst(
+        sourceQueue: List<MusicTrack>,
+        sourceFeature: ProviderFeature? = null,
+        sourcePlaylistId: String? = null,
+    ) {
         if (sourceQueue.isEmpty()) return
-        val playbackIndex = replaceMainQueue(sourceQueue, 0, sourceFeature, keepSelectedTrack = false)
+        val playbackIndex = replaceMainQueue(
+            sourceQueue,
+            0,
+            sourceFeature,
+            sourcePlaylistId,
+            keepSelectedTrack = false,
+        )
         playMainIndex(playbackIndex)
     }
 
@@ -2560,6 +2619,7 @@ class FuoPlayerController(
         sourceQueue: List<MusicTrack>,
         index: Int,
         sourceFeature: ProviderFeature?,
+        sourcePlaylistId: String?,
         keepSelectedTrack: Boolean,
     ): Int {
         if (sourceQueue.isEmpty()) return -1
@@ -2575,6 +2635,7 @@ class FuoPlayerController(
         }
         isFmQueue = enteringFm
         queueFeature = sourceFeature
+        queuePlaylistId = sourcePlaylistId
         currentUpNextTrack = null
         currentIsUpNext = false
         originalMainQueue = emptyList()
@@ -2592,6 +2653,28 @@ class FuoPlayerController(
         updatePlaybackQueueState()
         persistPlaybackQueue()
         return mainQueueIndex
+    }
+
+    private fun syncPlaylistPlaybackQueue(playlist: ProviderPlaylist) {
+        if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) return
+        val currentMainTrack = mainQueue.getOrNull(mainQueueIndex)
+        originalMainQueue = selectedPlaylistTracks
+        if (shuffleEnabled) {
+            mainQueue = listOfNotNull(currentMainTrack) + selectedPlaylistTracks
+                .filterNot { it.id == currentMainTrack?.id }
+                .shuffled()
+            mainQueueIndex = currentMainTrack?.let { 0 } ?: mainQueueIndex.coerceIn(0, mainQueue.lastIndex)
+        } else {
+            mainQueue = selectedPlaylistTracks.map { track ->
+                currentMainTrack?.takeIf { it.id == track.id } ?: track
+            }
+            mainQueueIndex = currentMainTrack?.let { track ->
+                mainQueue.indexOfFirst { it.id == track.id }
+            }?.takeIf { it >= 0 } ?: mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
+            originalMainQueue = emptyList()
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
     }
 
     private fun playMainIndex(index: Int, skippedUnavailableCount: Int = 0) {

@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
@@ -9,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
@@ -819,11 +821,16 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun playAllFromSelectedPlaylistLoadsRemainingPagesBeforePlayback() = runTest {
-        val tracks = (1..(PROVIDER_PAGE_SIZE + 5)).map { index ->
+    fun playAllFromSelectedPlaylistStartsPlaybackAfterFirst200TracksAndSyncsShuffleQueue() = runTest {
+        val tracks = (1..205).map { index ->
             providerTrack("provider:$index", "Track $index")
         }
-        val provider = FakeProviderRepository(emptyList(), playlistTracks = tracks)
+        val provider = FakeProviderRepository(
+            emptyList(),
+            playlistTracks = tracks,
+            playlistPageDelayOffset = 200,
+            playlistPageDelayMs = 1_000,
+        )
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
@@ -849,13 +856,23 @@ class FuoPlayerControllerTest {
             assertEquals(PROVIDER_PAGE_SIZE, controller.selectedPlaylistTracks.size)
             assertEquals(true, controller.selectedPlaylistTracksHasMore)
 
+            controller.toggleShuffle()
             controller.playAllFromSelectedPlaylist()
+            runCurrent()
+
+            assertEquals(200, controller.selectedPlaylistTracks.size)
+            assertEquals(true, controller.selectedPlaylistTracksHasMore)
+            assertEquals(200, controller.playbackState.queue.size)
+            assertEquals(engine.lastTrack?.id, controller.playbackState.queue.firstOrNull()?.id)
+            assertEquals(listOf(0, 50, 100, 150), provider.playlistPageOffsets.take(4))
+
+            advanceTimeBy(1_000)
             advanceUntilIdle()
 
             assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
             assertEquals(false, controller.selectedPlaylistTracksHasMore)
-            assertEquals(tracks.map { it.id }, controller.playbackState.queue.map { it.id })
-            assertEquals("provider:1", engine.lastTrack?.id)
+            assertEquals(tracks.map { it.id }.toSet(), controller.playbackState.queue.map { it.id }.toSet())
+            assertEquals(engine.lastTrack?.id, controller.playbackState.queue.firstOrNull()?.id)
         } finally {
             controllerScope.cancel()
         }
@@ -941,6 +958,7 @@ class FuoPlayerControllerTest {
             assertEquals(target to track, provider.lastAddedToPlaylist)
             assertNull(controller.playlistTargetTrack)
             assertEquals("已添加到：我的歌单", controller.message)
+            assertEquals("已添加到：我的歌单", controller.playlistOperationFeedback)
         } finally {
             controllerScope.cancel()
         }
@@ -987,6 +1005,7 @@ class FuoPlayerControllerTest {
 
             assertEquals(playlist to tracks.first(), provider.lastRemovedFromPlaylist)
             assertEquals(listOf("netease:2"), controller.selectedPlaylistTracks.map { it.id })
+            assertEquals("已从歌单移除：First", controller.playlistOperationFeedback)
         } finally {
             controllerScope.cancel()
         }
@@ -2770,6 +2789,8 @@ class FuoPlayerControllerTest {
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
         private val playlistTracks: List<MusicTrack> = emptyList(),
+        private val playlistPageDelayOffset: Int = Int.MAX_VALUE,
+        private val playlistPageDelayMs: Long = 0,
         private val mediaItemTracks: List<MusicTrack> = emptyList(),
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
@@ -2816,6 +2837,7 @@ class FuoPlayerControllerTest {
         var lastTrackDetailId: String? = null
         var lastAddedToPlaylist: Pair<ProviderPlaylist, MusicTrack>? = null
         var lastRemovedFromPlaylist: Pair<ProviderPlaylist, MusicTrack>? = null
+        val playlistPageOffsets = mutableListOf<Int>()
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
         val loadedMediaItemIds = mutableListOf<String>()
@@ -2956,6 +2978,8 @@ class FuoPlayerControllerTest {
             offset: Int,
             limit: Int,
         ): ProviderPlaylistDetail {
+            playlistPageOffsets += offset
+            if (offset >= playlistPageDelayOffset) delay(playlistPageDelayMs)
             val tracks = playlistTracks.drop(offset).take(limit)
             val nextOffset = offset + tracks.size
             return ProviderPlaylistDetail(

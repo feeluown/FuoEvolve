@@ -113,7 +113,7 @@ val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
 const val DEFAULT_SMART_REPLACEMENT_MIN_SCORE = 0.55
-const val PROVIDER_PAGE_SIZE = 60
+const val PROVIDER_PAGE_SIZE = 50
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
