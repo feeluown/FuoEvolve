@@ -879,6 +879,58 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun playFromSelectedPlaylistLoadsPlaylistQueueAndStartsAtSelectedTrack() = runTest {
+        val tracks = (1..205).map { index ->
+            providerTrack("provider:$index", "Track $index")
+        }
+        val provider = FakeProviderRepository(
+            emptyList(),
+            playlistTracks = tracks,
+            playlistPageDelayOffset = 200,
+            playlistPageDelayMs = 1_000,
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylist(
+                ProviderPlaylist(
+                    id = "playlist:netease:1",
+                    title = "榜单",
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                ),
+            )
+            advanceUntilIdle()
+
+            controller.playFromSelectedPlaylist(20)
+            runCurrent()
+
+            assertEquals("provider:21", engine.lastTrack?.id)
+            assertEquals(200, controller.selectedPlaylistTracks.size)
+            assertEquals(tracks.take(200).drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(0, controller.playbackState.queueIndex)
+
+            advanceTimeBy(1_000)
+            advanceUntilIdle()
+
+            assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
+            assertEquals(tracks.drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(0, controller.playbackState.queueIndex)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun providerPlaylistTargetsLoadOnlyWhenCapabilityAndLoginAllow() = runTest {
         val track = providerTrack("netease:1", "First")
         val target = ProviderPlaylist(

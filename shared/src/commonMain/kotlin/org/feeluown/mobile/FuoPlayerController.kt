@@ -2010,18 +2010,24 @@ class FuoPlayerController(
     }
 
     fun playFromSelectedPlaylist(index: Int) {
-        val track = selectedPlaylistTracks.getOrNull(index) ?: return
-        play(track, selectedPlaylistTracks, index, sourcePlaylistId = selectedPlaylist?.id)
+        if (selectedPlaylistTracks.getOrNull(index) == null) return
+        playSelectedPlaylistFrom(index)
     }
 
     fun playAllFromSelectedPlaylist() {
+        playSelectedPlaylistFrom(0)
+    }
+
+    private fun playSelectedPlaylistFrom(index: Int) {
         val playlist = selectedPlaylist ?: return
         selectedPlaylistBackgroundLoadJob?.cancel()
         scope.launch {
             isLoading = true
             message = "正在加载前 $PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT 首：${playlist.title}"
-            ensureSelectedPlaylistTracksAtLeast(PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT)
-            playFirst(selectedPlaylistTracks, sourcePlaylistId = playlist.id)
+            ensureSelectedPlaylistTracksAtLeast(maxOf(PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT, index + 1))
+            selectedPlaylistTracks.getOrNull(index)?.let { track ->
+                play(track, selectedPlaylistTracks, index, sourcePlaylistId = playlist.id)
+            }
             isLoading = false
             if (selectedPlaylistTracksHasMore && queuePlaylistId == playlist.id) {
                 selectedPlaylistBackgroundLoadJob = scope.launch {
