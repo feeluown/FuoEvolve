@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -178,19 +179,23 @@ fun ForYouRecommendGrid(
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 row.forEach { section ->
-                    if (section.feature.isPrivateFm()) {
-                        PrivateFmButton(
-                            section = section,
-                            enabled = enabled,
-                            onClick = { onPrivateFmClick(section) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    } else {
-                        ProviderFeatureCoverCard(
-                            feature = section.feature,
-                            onClick = { onFeatureClick(section.feature) },
-                            modifier = Modifier.weight(1f),
-                        )
+                    when {
+                        section.feature.isPrivateFm() -> {
+                            PrivateFmButton(
+                                section = section,
+                                enabled = enabled,
+                                onClick = { onPrivateFmClick(section) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        section.feature.isDailySongs() -> {
+                            DailyRecommendationButton(
+                                feature = section.feature,
+                                enabled = enabled,
+                                onClick = { onFeatureClick(section.feature) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
                 repeat(columns - row.size) {
@@ -310,41 +315,82 @@ fun PrivateFmButton(
     modifier: Modifier = Modifier,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
-    Surface(
+    RecommendationButton(
         modifier = modifier
             .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        title = "私人 FM",
+        providerName = section.feature.providerName,
     ) {
-        Column(
+        Icon(
+            Icons.Filled.PlayArrow,
+            contentDescription = "播放${section.feature.providerName}私人 FM",
+            modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
+        )
+    }
+}
+
+@Composable
+fun DailyRecommendationButton(
+    feature: ProviderFeature,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    RecommendationButton(
+        modifier = modifier
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
+        title = feature.title.ifBlank { "每日推荐" },
+        providerName = feature.providerName,
+    ) {
+        Text(
+            text = "Daily",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+fun RecommendationButton(
+    title: String,
+    providerName: String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    Column(modifier = modifier) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .padding(if (isWideLayout) 8.dp else 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .aspectRatio(1f),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = RoundedCornerShape(8.dp),
         ) {
-            Icon(
-                Icons.Filled.PlayArrow,
-                contentDescription = "播放${section.feature.providerName}私人 FM",
-                modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
-            )
-            Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
-            Text(
-                text = section.feature.providerName,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "私人 FM",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                content()
+            }
         }
+        Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = if (isWideLayout) 1 else 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = providerName,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

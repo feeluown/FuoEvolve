@@ -2229,6 +2229,7 @@ class FuoPlayerController(
     }
 
     fun toggleRepeat() {
+        if (isFmQueue) return
         _repeatMode = when (_repeatMode) {
             RepeatMode.OFF -> RepeatMode.QUEUE
             RepeatMode.QUEUE -> RepeatMode.SINGLE

@@ -145,11 +145,6 @@ fun FullPlayer(controller: FuoPlayerController) {
         pageCount = { PlayerVisualTab.entries.size },
     )
     val scope = rememberCoroutineScope()
-    LaunchedEffect(currentTrack?.id) {
-        if (pagerState.currentPage != PlayerVisualTab.Cover.ordinal) {
-            pagerState.scrollToPage(PlayerVisualTab.Cover.ordinal)
-        }
-    }
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -596,6 +591,7 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             QueueRepeatModeHeader(
+                isFmQueue = controller.isFmQueueActive,
                 repeatMode = controller.repeatMode,
                 onRepeat = controller::toggleRepeat,
             )
@@ -663,7 +659,11 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
 }
 
 @Composable
-fun QueueRepeatModeHeader(repeatMode: RepeatMode, onRepeat: () -> Unit) {
+fun QueueRepeatModeHeader(
+    isFmQueue: Boolean,
+    repeatMode: RepeatMode,
+    onRepeat: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -678,11 +678,32 @@ fun QueueRepeatModeHeader(repeatMode: RepeatMode, onRepeat: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RepeatModeTextButton(
-                repeatMode = repeatMode,
-                onRepeat = onRepeat,
-            )
+            if (isFmQueue) {
+                FmModeBadge()
+            } else {
+                RepeatModeTextButton(
+                    repeatMode = repeatMode,
+                    onRepeat = onRepeat,
+                )
+            }
         }
+    }
+}
+
+@Composable
+fun FmModeBadge() {
+    Surface(
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(50),
+    ) {
+        Text(
+            text = "FM",
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
     }
 }
 

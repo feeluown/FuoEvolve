@@ -2661,6 +2661,11 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.isFmQueueActive)
             assertEquals(false, controller.isShuffleEnabled)
             assertEquals(radioTracks.map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
+
+            controller.toggleRepeat()
+
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
 
             controller.playAllLocalTracks(normalTracks)
             advanceUntilIdle()
