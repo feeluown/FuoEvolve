@@ -2,6 +2,8 @@ package org.feeluown.mobile
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 
 class AudioFormatInfoTest {
     @Test
@@ -14,8 +16,9 @@ class AudioFormatInfoTest {
 
     @Test
     fun displaysUnavailableForMissingBitrate() {
-        assertEquals("暂未提供", AudioBitrateMode.Unknown.displayName())
-        assertEquals("暂未提供", formatAudioBitrate(null))
-        assertEquals("暂未提供", formatAudioBitrate(0))
+        assertNull(AudioBitrateMode.Unknown.displayName())
+        assertNull(formatAudioBitrate(null))
+        assertNull(formatAudioBitrate(0))
+        assertFalse(AudioFormatInfo().hasDisplayableValue())
     }
 }
