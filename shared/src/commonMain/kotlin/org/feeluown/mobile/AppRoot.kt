@@ -152,6 +152,7 @@ fun AppRoot(
     onRequestAudioPermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onShareText: (String) -> Unit = {},
     appVersionInfo: String? = null,
 ) {
@@ -248,6 +249,7 @@ fun AppRoot(
                                 controller,
                                 onOpenProviderWebLogin,
                                 onLogoutProvider,
+                                onImportYtmusicHeaderFile,
                                 appVersionInfo,
                             )
                             AppDestination.Search -> SearchScreen(controller)

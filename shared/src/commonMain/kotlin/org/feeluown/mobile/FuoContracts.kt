@@ -626,6 +626,9 @@ interface ProviderMusicRepository {
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support header login: $providerId")
     }
+    suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support YTMusic header file login")
+    }
     suspend fun logout(providerId: String): ProviderAuthState
     suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)
     suspend fun providerCapabilities(): List<ProviderCapabilities> = emptyList()

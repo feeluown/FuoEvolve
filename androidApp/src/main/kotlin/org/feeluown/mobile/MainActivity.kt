@@ -64,6 +64,19 @@ class MainActivity : ComponentActivity() {
                 }
                 pendingWebLoginProviderId = null
             }
+            val ytmusicHeaderFileLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) {
+                    val headerFileJson = runCatching {
+                        contentResolver.openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                            ?: ""
+                    }.getOrDefault("")
+                    controller.loginYtmusicWithHeaderFile(headerFileJson)
+                }
+            }
 
             BackHandler(enabled = controller.canNavigateBack) {
                 controller.navigateBack()
@@ -90,6 +103,9 @@ class MainActivity : ComponentActivity() {
                 onLogoutProvider = { provider ->
                     ProviderWebLoginActivity.clearWebLoginState()
                     controller.logoutProvider(provider.providerId)
+                },
+                onImportYtmusicHeaderFile = {
+                    ytmusicHeaderFileLauncher.launch(arrayOf("application/json"))
                 },
                 onShareText = ::shareText,
             )

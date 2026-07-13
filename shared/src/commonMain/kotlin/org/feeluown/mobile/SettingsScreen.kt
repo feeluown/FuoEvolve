@@ -82,6 +82,7 @@ fun SettingsScreen(
     controller: FuoPlayerController,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
     appVersionInfo: String?,
 ) {
     val loginProviderId = controller.settingsLoginProviderId
@@ -126,6 +127,7 @@ fun SettingsScreen(
                     provider = loginProvider,
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
                     onLogoutProvider = onLogoutProvider,
+                    onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
                 )
             }
         } else if (layoutInfo.useWideLayout) {
@@ -357,6 +359,7 @@ fun ProviderLoginPanel(
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val authState = controller.authStateFor(provider)
     val supportedLoginModes = listOf(
@@ -467,6 +470,14 @@ fun ProviderLoginPanel(
                 }
                 ProviderLoginMode.Headers -> {
                     val headerInput = controller.providerHeaderInputFor(provider.providerId)
+                    if (provider.providerId == "ytmusic" && onImportYtmusicHeaderFile != null) {
+                        Button(
+                            enabled = !controller.isLoading,
+                            onClick = onImportYtmusicHeaderFile,
+                        ) {
+                            Text("导入 ytmusic_header.json")
+                        }
+                    }
                     TextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = headerInput.authorization,

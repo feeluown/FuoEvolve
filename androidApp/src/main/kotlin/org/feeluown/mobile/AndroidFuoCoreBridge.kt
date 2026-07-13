@@ -212,6 +212,16 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge)
+                .callAttr("provider_login_with_ytmusic_headerfile", headerFileJson)
+                .toString()
+            JSONObject(raw).toAuthState("ytmusic")
+        }
+    }
+
     override suspend fun logout(providerId: String): ProviderAuthState {
         initialize()
         return withContext(Dispatchers.IO) {

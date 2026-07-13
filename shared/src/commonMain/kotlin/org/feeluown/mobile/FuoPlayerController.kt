@@ -808,6 +808,34 @@ class FuoPlayerController(
         }
     }
 
+    fun loginYtmusicWithHeaderFile(headerFileJson: String) {
+        if (headerFileJson.isBlank()) {
+            message = "无法读取 ytmusic_header.json"
+            return
+        }
+        val providerName = providerName("ytmusic")
+        scope.launch {
+            isLoading = true
+            message = "正在登录 $providerName"
+            runCatching { providerRepository.loginWithYtmusicHeaderFile(headerFileJson) }
+                .onSuccess {
+                    providerAuthStates = providerAuthStates + ("ytmusic" to it)
+                    message = if (it.isLoggedIn) {
+                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
+                    } else {
+                        "${it.providerName} 未登录"
+                    }
+                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                        refreshActiveMineProviderContent()
+                    } else {
+                        refreshHomeContent(homeSection)
+                    }
+                }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
     fun logoutProvider(providerId: String) {
         val providerName = providerName(providerId)
         scope.launch {

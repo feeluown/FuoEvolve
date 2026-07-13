@@ -787,6 +787,37 @@ class FuoMobileBridge:
         self._saved_login_provider_ids.add(provider_id)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
+    def provider_login_with_ytmusic_headerfile(self, headerfile_json: str) -> str:
+        try:
+            headers = json.loads(headerfile_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("ytmusic_header.json 不是有效的 JSON 文件") from exc
+        if not isinstance(headers, dict):
+            raise RuntimeError("ytmusic_header.json 顶层必须是 JSON 对象")
+        authorization = headers.get("Authorization")
+        cookie = headers.get("Cookie")
+        if not isinstance(authorization, str) or not authorization.strip():
+            raise RuntimeError("ytmusic_header.json 缺少 Authorization")
+        if not isinstance(cookie, str) or not cookie.strip():
+            raise RuntimeError("ytmusic_header.json 缺少 Cookie")
+
+        provider = self._get_provider("ytmusic")
+        from fuo_ytmusic.consts import HEADER_FILE
+        from fuo_ytmusic.headerfile import YtdlpCookiefileManager
+
+        with HEADER_FILE.open("w", encoding="utf-8") as handle:
+            json.dump(headers, handle, indent=2, ensure_ascii=True)
+        YtdlpCookiefileManager(HEADER_FILE).write(cookie)
+        user = provider.try_get_user_with_headerfile()
+        if user is None:
+            raise RuntimeError("get user with ytmusic headerfile failed")
+        provider.auth(user)
+        current_user_changed = getattr(provider, "current_user_changed", None)
+        if current_user_changed is not None:
+            current_user_changed.emit(user)
+        self._saved_login_provider_ids.add("ytmusic")
+        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
     def provider_logout(self, provider_id: str) -> str:
         provider = self._get_provider(provider_id)
         self._clear_provider_auth(provider_id, provider)
