@@ -22,8 +22,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -502,6 +504,7 @@ fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) 
 fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPlaylist?) {
     val displayPlaylist = controller.selectedPlaylist ?: playlist ?: return
     val sharePayload = displayPlaylist.toSharePayload()
+    var showDeleteDialog by remember(displayPlaylist.id) { mutableStateOf(false) }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -518,6 +521,11 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                     }
                 },
                 actions = {
+                    if (controller.canDeleteSelectedPlaylist()) {
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除歌单")
+                        }
+                    }
                     val onShare = LocalShareHandler.current
                     IconButton(
                         onClick = { if (sharePayload != null) onShare(sharePayload) },
@@ -686,6 +694,20 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                 }
             }
         }
+    }
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("删除歌单？") },
+            text = { Text("将删除《${displayPlaylist.title}》，此操作无法撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    controller.deleteSelectedPlaylist()
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("取消") } },
+        )
     }
 }
 

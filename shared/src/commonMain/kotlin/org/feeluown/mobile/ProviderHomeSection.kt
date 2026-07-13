@@ -140,6 +140,22 @@ fun ProviderContentHomeSection(
                                     )
                                 }
                             }
+                            contentSection.mediaItems.isNotEmpty() -> {
+                                item(key = "media-items:${contentSection.feature.id}") {
+                                    ProviderMediaItemGrid(
+                                        items = contentSection.mediaItems,
+                                        onClick = controller::openMediaItem,
+                                    )
+                                }
+                            }
+                            contentSection.videos.isNotEmpty() -> {
+                                item(key = "videos:${contentSection.feature.id}") {
+                                    ProviderVideoList(
+                                        videos = contentSection.videos,
+                                        onClick = controller::openVideo,
+                                    )
+                                }
+                            }
                             else -> item(key = "empty:${contentSection.feature.id}") {
                                 ProviderContentMessage("暂无内容")
                             }
@@ -154,6 +170,39 @@ fun ProviderContentHomeSection(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProviderVideoList(videos: List<ProviderVideo>, onClick: (ProviderVideo) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        videos.forEach { video ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onClick(video) }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PlatformCoverArt(
+                    title = video.title,
+                    imageUrl = video.coverUrl,
+                    modifier = Modifier.size(48.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        video.artists.ifBlank { video.providerName },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(Icons.Filled.PlayArrow, contentDescription = "播放视频")
             }
         }
     }
