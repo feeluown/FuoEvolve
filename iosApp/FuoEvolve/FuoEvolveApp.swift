@@ -20,7 +20,8 @@ private struct SharedComposeRoot: UIViewControllerRepresentable {
             mediaLibraryOutput: IOSMediaLibraryOutput.shared,
             downloadOutput: IOSDownloadOutput.shared,
             webLoginOutput: IOSWebLoginOutput.shared,
-            shareOutput: IOSShareOutput.shared
+            shareOutput: IOSShareOutput.shared,
+            networkStatusOutput: IOSNetworkStatusOutput.shared
         )
         IOSWebLoginOutput.shared.hostViewController = viewController
         return viewController

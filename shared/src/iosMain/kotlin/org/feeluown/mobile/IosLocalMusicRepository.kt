@@ -12,6 +12,7 @@ class IosLocalMusicRepository(
     private val mediaLibrary: IosMediaLibraryOutput,
 ) : LocalMusicRepository {
     private var scanSettings = LocalMusicScanSettings()
+    private var libraryTracks = emptyList<MusicTrack>()
     private var cachedTracks = emptyList<MusicTrack>()
     private val defaults = NSUserDefaults.standardUserDefaults
 
@@ -26,24 +27,24 @@ class IosLocalMusicRepository(
 
     override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
         scanSettings = settings
-        cachedTracks = filterTracks(cachedTracks)
+        cachedTracks = filterTracks(libraryTracks)
     }
 
     override suspend fun isDatabaseReady(): Boolean = hasPermission
 
-    override suspend fun isDatabaseStale(): Boolean = cachedTracks.isEmpty() && hasPermission
+    override suspend fun isDatabaseStale(): Boolean = libraryTracks.isEmpty() && hasPermission
 
     override suspend fun directories(): List<LocalMusicDirectory> {
         if (cachedTracks.isEmpty()) return emptyList()
         return listOf(LocalMusicDirectory(LIBRARY_DIRECTORY_ID, "媒体资料库", cachedTracks.size))
     }
 
-    override suspend fun tracks(): List<MusicTrack> = cachedTracks.ifEmpty { refreshDatabase() }
+    override suspend fun tracks(): List<MusicTrack> = if (libraryTracks.isEmpty()) refreshDatabase() else cachedTracks
 
     override suspend fun refreshDatabase(): List<MusicTrack> {
         if (!hasPermission) return emptyList()
         val root = Json.parseToJsonElement(mediaLibrary.tracksJson()).jsonObject
-        cachedTracks = filterTracks(root["tracks"]?.jsonArray.orEmpty().map { element ->
+        libraryTracks = root["tracks"]?.jsonArray.orEmpty().map { element ->
             val item = element.jsonObject
             val persistentId = item["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
             applyOverrides(MusicTrack(
@@ -56,7 +57,8 @@ class IosLocalMusicRepository(
                 durationMs = item["duration_ms"]?.jsonPrimitive?.longOrNull,
                 localUri = item["local_uri"]?.jsonPrimitive?.contentOrNull,
             ))
-        })
+        }
+        cachedTracks = filterTracks(libraryTracks)
         return cachedTracks
     }
 
@@ -76,21 +78,23 @@ class IosLocalMusicRepository(
             metadataKey(track.id),
         )
         defaults.synchronize()
-        cachedTracks = cachedTracks.map { item ->
+        libraryTracks = libraryTracks.map { item ->
             if (item.id == track.id) {
                 item.copy(title = metadata.title, artists = metadata.artists, album = metadata.album)
             } else {
                 item
             }
         }
+        cachedTracks = filterTracks(libraryTracks)
     }
 
     override suspend fun saveLyrics(track: MusicTrack, lyrics: String) {
         defaults.setObject(lyrics, lyricsKey(track.id))
         defaults.synchronize()
-        cachedTracks = cachedTracks.map { item ->
+        libraryTracks = libraryTracks.map { item ->
             if (item.id == track.id) item.copy(lyrics = lyrics) else item
         }
+        cachedTracks = filterTracks(libraryTracks)
     }
 
     private fun applyOverrides(track: MusicTrack): MusicTrack {

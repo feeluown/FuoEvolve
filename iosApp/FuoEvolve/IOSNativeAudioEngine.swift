@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import MediaPlayer
+import Network
 import Shared
 import WebKit
 
@@ -455,6 +456,32 @@ final class IOSShareOutput: NSObject, IosShareOutput {
     }
 }
 
+final class IOSNetworkStatusOutput: NSObject, IosNetworkStatusOutput {
+    static let shared = IOSNetworkStatusOutput()
+
+    private let monitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "org.feeluown.mobile.network-status")
+    private let lock = NSLock()
+    private var cellularConnection = false
+
+    override init() {
+        super.init()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            self.lock.lock()
+            self.cellularConnection = path.usesInterfaceType(.cellular)
+            self.lock.unlock()
+        }
+        monitor.start(queue: monitorQueue)
+    }
+
+    func isCellularConnection() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cellularConnection
+    }
+}
+
 private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate {
     private let webView = WKWebView(frame: .zero)
     private let requiredCookieGroups: [[String]]
@@ -503,7 +530,10 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
 
     @objc private func done() {
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
-            let values = Dictionary(uniqueKeysWithValues: cookies.map { ($0.name, $0.value) })
+            var values: [String: String] = [:]
+            for cookie in cookies where !cookie.value.isEmpty || values[cookie.name] == nil {
+                values[cookie.name] = cookie.value
+            }
             let valid = self.requiredCookieGroups.isEmpty || self.requiredCookieGroups.contains { group in
                 group.allSatisfy { !(values[$0] ?? "").isEmpty }
             }
