@@ -42,6 +42,8 @@ jobs:
 
       - name: Prepare iOS Python runtime
         run: bash scripts/prepare-ios-python.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Build debug simulator app
         run: |

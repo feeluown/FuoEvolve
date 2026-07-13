@@ -13,12 +13,20 @@ mkdir -p "$RESOURCE_DIR" "$BUILD_DIR"
 
 ASSET_URL="$("$HOST_PYTHON" - "$PYTHON_TAG" <<'PY'
 import json
+import os
 import sys
 import urllib.request
 
 tag = sys.argv[1]
 url = f"https://api.github.com/repos/beeware/Python-Apple-support/releases/tags/{tag}"
-with urllib.request.urlopen(url, timeout=30) as response:
+headers = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "FuoEvolve-iOS-Python-preparer",
+}
+if token := os.environ.get("GITHUB_TOKEN"):
+    headers["Authorization"] = f"Bearer {token}"
+request = urllib.request.Request(url, headers=headers)
+with urllib.request.urlopen(request, timeout=30) as response:
     release = json.load(response)
 for asset in release.get("assets", []):
     name = asset.get("name", "")
