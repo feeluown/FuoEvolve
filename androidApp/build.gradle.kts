@@ -131,6 +131,12 @@ kotlin {
 }
 
 chaquopy {
+    sourceSets {
+        getByName("main") {
+            srcDir(rootProject.file("shared/src/commonMain/python"))
+        }
+    }
+
     defaultConfig {
         version = "3.12"
         configuredBuildPython?.let { buildPython(it) }

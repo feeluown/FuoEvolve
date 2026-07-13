@@ -8,13 +8,13 @@
 ![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)
 ![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4?logo=jetpackcompose&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-Available-3DDC84?logo=android&logoColor=white)
-![iOS](https://img.shields.io/badge/iOS-Planned-000000?logo=apple&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-Experimental-FF9500?logo=apple&logoColor=white)
 
 [中文](README.zh-CN.md) | English
 
 FuoEvolve is an open-source music player based on the
 [FeelUOwn](https://github.com/feeluown/FeelUOwn) ecosystem. Android is usable
-today. iOS support is planned, but the current iOS target is still a shell.
+today. Experimental iOS build support is available, but iOS is not released.
 
 The project uses Kotlin Multiplatform and Compose Multiplatform for shared UI,
 state, and player contracts. On Android it packages the FeelUOwn Python core and
@@ -27,6 +27,9 @@ Media3.
 | --- | --- | --- |
 | Stable | [Latest GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | Signed release APKs for `arm64-v8a`, `x86_64`, and universal devices. |
 | Canary | [Latest master Android APK workflow](https://github.com/feeluown/FuoEvolve/actions/workflows/android-debug-apk.yml?query=branch%3Amaster) | Artifacts from the newest successful master build: signed debug APK for development debugging, plus signed release APKs for `arm64-v8a`, `x86_64`, and universal devices. |
+
+iOS builds are experimental debug artifacts only. They are not published as
+GitHub Releases or supported for end-user installation.
 
 ## Highlights
 
@@ -102,12 +105,13 @@ state, and the exact FeelUOwn provider implementation.
 
 ## Project Structure
 
-- `shared`: shared Compose UI, domain contracts, player state, and common tests.
+- `shared`: shared Compose UI, domain contracts, player state, common tests, and
+  the shared Python bridge.
 - `androidApp`: Android application, Chaquopy packaging, Media3 playback,
   assets, resources, and provider bridge wiring.
-- `androidApp/src/main/python/fuo_mobile`: Python adapter around the FeelUOwn
+- `shared/src/commonMain/python/fuo_mobile`: Python adapter around the FeelUOwn
   core and provider plugins.
-- `iosApp/FuoEvolve`: Swift app shell for future iOS support.
+- `iosApp/FuoEvolve`: Swift app shell for experimental iOS builds.
 - `.github/workflows`: Android APK and release workflows, plus the experimental
   iOS debug workflow.
 
@@ -116,7 +120,7 @@ state, and the exact FeelUOwn provider implementation.
 - JDK 17 or newer.
 - Android Studio or Android command-line tools for Android builds.
 - Python 3.12 when a local Chaquopy build Python is needed.
-- Xcode on macOS for future iOS work.
+- Xcode on macOS for experimental iOS builds.
 
 ## Android Build
 
@@ -138,15 +142,19 @@ declared in `androidApp/build.gradle.kts`.
 
 ## iOS Status
 
-The iOS project shell is under `iosApp/FuoEvolve.xcodeproj`, but iOS playback
-and provider integration are not implemented yet. The helper script below is
-reserved for future online provider work:
+The iOS project under `iosApp/FuoEvolve.xcodeproj` has experimental debug-build
+support, including shared UI integration and Python runtime preparation. Every
+push to `master` builds a simulator debug artifact in GitHub Actions. iOS is not
+released: do not treat its artifacts as production-ready or expect a GitHub
+Release, App Store distribution, or end-user installation support.
+
+Prepare the Python runtime locally before building in Xcode:
 
 ```bash
 bash scripts/prepare-ios-python.sh
 ```
 
-Do not treat the current iOS target as a usable player.
+Provider and playback integration remain experimental.
 
 ## Testing
 

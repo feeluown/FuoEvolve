@@ -8,8 +8,8 @@ from feeluown.library import SearchType
 from feeluown.media import Media
 
 
-SRC_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(SRC_ROOT / "main" / "python"))
+ROOT_DIR = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT_DIR / "shared" / "src" / "commonMain" / "python"))
 
 from fuo_mobile.bridge import FuoMobileBridge, provider_capabilities  # noqa: E402
 

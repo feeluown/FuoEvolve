@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-SRC_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(SRC_ROOT / "main" / "python"))
+ROOT_DIR = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT_DIR / "shared" / "src" / "commonMain" / "python"))
 
 from feeluown.excs import MediaNotFound  # noqa: E402
 from feeluown.media import Media, Quality  # noqa: E402

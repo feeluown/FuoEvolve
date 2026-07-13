@@ -53,7 +53,7 @@ for framework in "$RESOURCE_DIR/python/Python.xcframework"/*/Python.framework; d
     sed -i '' 's/^module Python/framework module Python/' "$framework/Modules/module.modulemap"
 done
 
-rsync -a "$ROOT_DIR/androidApp/src/main/python/fuo_mobile" "$RESOURCE_DIR/app/"
+rsync -a "$ROOT_DIR/shared/src/commonMain/python/fuo_mobile" "$RESOURCE_DIR/app/"
 
 PYPYDANTIC_NO_EXTENSIONS=1 "$HOST_PYTHON" -m pip install \
     --upgrade \
