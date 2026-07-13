@@ -47,7 +47,8 @@ actual fun PlatformVideoPlayer(
     var playbackError by remember { mutableStateOf<String?>(null) }
     val player = remember(context) {
         val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
             .build()

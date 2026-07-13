@@ -32,7 +32,8 @@ class FuoPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val renderersFactory = DefaultRenderersFactory(this)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
         val exoPlayer = ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
             .build()
