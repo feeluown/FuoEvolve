@@ -695,6 +695,21 @@ fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                     }
                 }
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    modifier = Modifier.weight(1f),
+                    text = "显示播放频谱",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Checkbox(
+                    checked = controller.showPlaybackSpectrum,
+                    onCheckedChange = controller::onShowPlaybackSpectrumChange,
+                )
+            }
             Text(
                 text = "外观模式",
                 style = MaterialTheme.typography.bodyMedium,

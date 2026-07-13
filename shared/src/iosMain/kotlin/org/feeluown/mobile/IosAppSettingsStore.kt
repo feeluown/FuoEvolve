@@ -37,6 +37,7 @@ class IosAppSettingsStore : AppSettingsStore {
             smartReplacementUseReplacementMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA, false),
             smartReplacementUseReplacementLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, false),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
+            showPlaybackSpectrum = boolValue(KEY_SHOW_PLAYBACK_SPECTRUM, true),
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
@@ -66,6 +67,7 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setBool(settings.smartReplacementUseReplacementMetadata, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA)
             defaults.setBool(settings.smartReplacementUseReplacementLyrics, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS)
             defaults.setObject(settings.lyricFontSize.name, KEY_LYRIC_FONT_SIZE)
+            defaults.setBool(settings.showPlaybackSpectrum, KEY_SHOW_PLAYBACK_SPECTRUM)
             defaults.setObject(settings.themeMode.name, KEY_THEME_MODE)
             defaults.setObject(settings.themeColorScheme.name, KEY_THEME_COLOR_SCHEME)
             defaults.synchronize()
@@ -175,6 +177,7 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
+        private const val KEY_SHOW_PLAYBACK_SPECTRUM = "show_playback_spectrum"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_COLOR_SCHEME = "theme_color_scheme"
     }

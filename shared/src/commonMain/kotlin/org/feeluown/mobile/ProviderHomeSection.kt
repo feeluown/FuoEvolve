@@ -650,6 +650,8 @@ fun ProviderFeatureHeader(
     title: String = feature.title,
     providerLabel: String = feature.providerName,
     onPlayAll: (() -> Unit)? = null,
+    action: (() -> Unit)? = null,
+    actionLabel: String = "",
 ) {
     Row(
         modifier = Modifier
@@ -676,6 +678,9 @@ fun ProviderFeatureHeader(
             )
             if (onPlayAll != null) {
                 PlayAllButton(onClick = onPlayAll)
+            }
+            if (action != null) {
+                TextButton(onClick = action) { Text(actionLabel) }
             }
         }
     }

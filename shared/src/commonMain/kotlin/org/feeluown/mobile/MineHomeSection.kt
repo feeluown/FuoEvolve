@@ -227,7 +227,6 @@ fun MinePlaylistsSection(
     var showCreateDialog by remember { mutableStateOf(false) }
     var playlistName by remember { mutableStateOf("") }
     var selectedCreateProviderId by remember { mutableStateOf<String?>(null) }
-    val creatableProviders = controller.creatablePlaylistProviders()
     val userSections = controller.minePlaylistSections
     val favoriteSections = controller.mineFavoritePlaylistSections
     val sections = when (controller.playlistFilter) {
@@ -245,16 +244,6 @@ fun MinePlaylistsSection(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (creatableProviders.isNotEmpty()) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(
-                    onClick = {
-                        selectedCreateProviderId = creatableProviders.singleOrNull()?.providerId
-                        showCreateDialog = true
-                    },
-                ) { Text("新建歌单") }
-            }
-        }
         if (showFilter) {
             PlaylistFilterChips(controller)
         }
@@ -270,7 +259,14 @@ fun MinePlaylistsSection(
                 }
             } else {
                 visibleSections.forEach { contentSection ->
-                    playlistSectionItems(controller, contentSection)
+                    playlistSectionItems(
+                        controller = controller,
+                        contentSection = contentSection,
+                        onCreatePlaylist = { providerId ->
+                            selectedCreateProviderId = providerId
+                            showCreateDialog = true
+                        },
+                    )
                 }
                 if (lockedProviders.isNotEmpty()) {
                     item(key = "locked-providers:mine-playlists") {
@@ -284,31 +280,15 @@ fun MinePlaylistsSection(
         }
     }
     if (showCreateDialog) {
-        val selectedCreateProvider = creatableProviders.firstOrNull {
+        val selectedCreateProvider = controller.creatablePlaylistProviders().firstOrNull {
             it.providerId == selectedCreateProviderId
-        } ?: creatableProviders.singleOrNull()
+        }
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
             title = { Text("新建歌单") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (creatableProviders.size == 1) {
-                        Text("将在 ${creatableProviders.first().providerName} 创建")
-                    } else {
-                        Text("创建到")
-                        Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            creatableProviders.forEach { provider ->
-                                FilterChip(
-                                    selected = provider.providerId == selectedCreateProvider?.providerId,
-                                    onClick = { selectedCreateProviderId = provider.providerId },
-                                    label = { Text(provider.providerName) },
-                                )
-                            }
-                        }
-                    }
+                    Text("将在 ${selectedCreateProvider?.providerName.orEmpty()} 创建")
                     OutlinedTextField(
                         value = playlistName,
                         onValueChange = { playlistName = it },
@@ -366,9 +346,20 @@ fun PlaylistFilter.emptyTitle(): String {
 fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
     controller: FuoPlayerController,
     contentSection: ProviderContentSection,
+    onCreatePlaylist: (String) -> Unit,
 ) {
     item(key = "header:${contentSection.feature.id}") {
-        ProviderFeatureHeader(feature = contentSection.feature)
+        ProviderFeatureHeader(
+            feature = contentSection.feature,
+            action = if (contentSection.feature.category == ProviderFeatureCategory.MinePlaylists) {
+                controller.creatablePlaylistProviders()
+                    .firstOrNull { it.providerId == contentSection.feature.providerId }
+                    ?.let { provider -> { onCreatePlaylist(provider.providerId) } }
+            } else {
+                null
+            },
+            actionLabel = "新建歌单",
+        )
     }
     when {
         contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {

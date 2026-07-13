@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -11,6 +12,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +72,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +81,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
 fun MiniPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
     val isLoadingAudio = state.status == PlayerStatus.Loading
@@ -87,16 +91,22 @@ fun MiniPlayer(controller: FuoPlayerController) {
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(220))
             .clickable(onClick = controller::openFullPlayer),
+        shape = RoundedCornerShape(if (isWideLayout) 12.dp else 18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 3.dp,
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = if (isWideLayout) 6.dp else 10.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = if (isWideLayout) 8.dp else 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 state.currentTrack?.let {
-                    CoverBox(it, modifier = Modifier.size(if (isWideLayout) 40.dp else 48.dp))
+                    PlayerSharedCover(
+                        track = it,
+                        visible = !controller.isFullPlayerOpen,
+                        modifier = Modifier.size(if (isWideLayout) 44.dp else 56.dp),
+                    )
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -120,6 +130,23 @@ fun MiniPlayer(controller: FuoPlayerController) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    state.audioQuality?.takeIf { it.isNotBlank() }?.let { quality ->
+                        Text(
+                            text = quality.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                        )
+                    }
+                    if (controller.showPlaybackSpectrum) {
+                        AudioSpectrumLines(
+                            levels = state.spectrumLevels,
+                            isPlaying = state.status == PlayerStatus.Playing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(14.dp),
+                        )
+                    }
                 }
                 PlayerControls(
                     state = state,
@@ -129,14 +156,24 @@ fun MiniPlayer(controller: FuoPlayerController) {
                     compact = true,
                 )
             }
-            if (isLoadingAudio) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            MiniPlayerProgress(state, isLoadingAudio)
         }
     }
 }
 
 @Composable
+private fun MiniPlayerProgress(state: PlaybackState, isLoadingAudio: Boolean) {
+    val duration = state.durationMs.takeIf { it > 0 }
+    if (isLoadingAudio || duration != null) {
+        LinearProgressIndicator(
+            progress = { duration?.let { state.positionMs.coerceIn(0, it).toFloat() / it } ?: 0f },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
 fun FullPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
     val currentTrack = state.currentTrack
@@ -214,7 +251,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                                     pageSpacing = 16.dp,
                                 ) { page ->
                                     when (PlayerVisualTab.entries[page]) {
-                                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
+                                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack, controller)
                                         PlayerVisualTab.Lyrics -> LyricsPanel(
                                             state = state,
                                             fontSize = controller.lyricFontSize,
@@ -315,7 +352,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     pageSpacing = 16.dp,
                 ) { page ->
                     when (PlayerVisualTab.entries[page]) {
-                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
+                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack, controller)
                         PlayerVisualTab.Lyrics -> LyricsPanel(
                             state = state,
                             fontSize = controller.lyricFontSize,
@@ -403,15 +440,69 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
 }
 
 @Composable
-fun PlayerCoverPage(track: MusicTrack?) {
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        CoverBox(
-            track = track ?: emptyDisplayTrack(),
-            modifier = Modifier.size(minOf(maxWidth, maxHeight)),
-        )
+@OptIn(ExperimentalSharedTransitionApi::class)
+fun PlayerCoverPage(track: MusicTrack?, controller: FuoPlayerController) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val coverSize = minOf(maxWidth, maxHeight * 0.82f)
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            PlayerSharedCover(
+                track = track ?: emptyDisplayTrack(),
+                visible = controller.isFullPlayerOpen,
+                modifier = Modifier.size(coverSize),
+            )
+            if (controller.showPlaybackSpectrum) {
+                AudioSpectrumLines(
+                    levels = controller.playbackState.spectrumLevels,
+                    isPlaying = controller.playbackState.status == PlayerStatus.Playing,
+                    modifier = Modifier
+                        .fillMaxWidth(0.72f)
+                        .height(42.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
+fun PlayerSharedCover(track: MusicTrack, visible: Boolean, modifier: Modifier = Modifier) {
+    val sharedTransitionScope = LocalPlayerSharedTransitionScope.current
+    val sharedModifier = if (sharedTransitionScope == null) {
+        modifier
+    } else {
+        with(sharedTransitionScope) {
+            modifier.sharedElementWithCallerManagedVisibility(
+                sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
+                visible = visible,
+            )
+        }
+    }
+    CoverBox(track = track, modifier = sharedModifier)
+}
+
+@Composable
+fun AudioSpectrumLines(levels: List<Float>, isPlaying: Boolean, modifier: Modifier = Modifier) {
+    if (!isPlaying || levels.isEmpty()) return
+    val color = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        val count = levels.size
+        val spacing = size.width / (count * 2f)
+        val strokeWidth = (spacing * 0.48f).coerceAtLeast(1f)
+        levels.forEachIndexed { index, level ->
+            val height = size.height * (0.18f + level.coerceIn(0f, 1f) * 0.82f)
+            val x = spacing * (index * 2 + 1)
+            drawLine(
+                color = color,
+                start = androidx.compose.ui.geometry.Offset(x, (size.height - height) / 2f),
+                end = androidx.compose.ui.geometry.Offset(x, (size.height + height) / 2f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
     }
 }
 

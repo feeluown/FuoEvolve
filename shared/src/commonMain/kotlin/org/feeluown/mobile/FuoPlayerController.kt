@@ -229,6 +229,8 @@ class FuoPlayerController(
         private set
     var lyricFontSize by mutableStateOf(LyricFontSize.Small)
         private set
+    var showPlaybackSpectrum by mutableStateOf(true)
+        private set
     var themeMode by mutableStateOf(ThemeMode.System)
         private set
     var themeColorScheme by mutableStateOf(ThemeColorScheme.Dynamic)
@@ -915,6 +917,11 @@ class FuoPlayerController(
 
     fun onLyricFontSizeChange(value: LyricFontSize) {
         lyricFontSize = value
+        persistSettings()
+    }
+
+    fun onShowPlaybackSpectrumChange(value: Boolean) {
+        showPlaybackSpectrum = value
         persistSettings()
     }
 
@@ -3226,6 +3233,7 @@ class FuoPlayerController(
         smartReplacementUseReplacementMetadata = settings.smartReplacementUseReplacementMetadata
         smartReplacementUseReplacementLyrics = settings.smartReplacementUseReplacementLyrics
         lyricFontSize = settings.lyricFontSize
+        showPlaybackSpectrum = settings.showPlaybackSpectrum
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
     }
@@ -3256,6 +3264,7 @@ class FuoPlayerController(
             smartReplacementUseReplacementMetadata = smartReplacementUseReplacementMetadata,
             smartReplacementUseReplacementLyrics = smartReplacementUseReplacementLyrics,
             lyricFontSize = lyricFontSize,
+            showPlaybackSpectrum = showPlaybackSpectrum,
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
         )

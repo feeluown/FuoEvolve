@@ -95,6 +95,7 @@ data class AppSettings(
     val smartReplacementUseReplacementMetadata: Boolean = false,
     val smartReplacementUseReplacementLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
+    val showPlaybackSpectrum: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
@@ -239,6 +240,7 @@ data class PlaybackState(
     val audioQuality: String? = null,
     val audioFormatInfo: AudioFormatInfo? = null,
     val audioDecoderInfo: AudioDecoderInfo? = null,
+    val spectrumLevels: List<Float> = emptyList(),
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val errorMessage: String? = null,

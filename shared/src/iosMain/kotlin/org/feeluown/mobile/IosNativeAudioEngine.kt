@@ -19,7 +19,7 @@ class IosNativeAudioEngine(
         scope.launch {
             while (true) {
                 updateFromOutput()
-                delay(500)
+                delay(50)
             }
         }
     }
@@ -82,6 +82,7 @@ class IosNativeAudioEngine(
             durationMs = output.durationMs().takeIf { it > 0 } ?: mutableState.value.durationMs,
             bufferedMs = output.bufferedMs().coerceAtLeast(0),
             audioFormatInfo = output.audioFormatInfo(),
+            spectrumLevels = if (status == PlayerStatus.Playing) output.spectrumLevels() else emptyList(),
             errorMessage = output.errorMessage(),
         )
     }

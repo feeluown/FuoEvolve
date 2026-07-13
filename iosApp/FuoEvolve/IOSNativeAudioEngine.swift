@@ -1,6 +1,8 @@
 import AVFoundation
 import AVKit
+import AudioToolbox
 import CoreMedia
+import MediaToolbox
 import MediaPlayer
 import Network
 import Shared
@@ -13,6 +15,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
     private var didReachEnd = false
     private var playbackError: String?
     private var endObserver: NSObjectProtocol?
+    private let spectrumAnalyzer = AudioTapSpectrumAnalyzer()
 
     override init() {
         super.init()
@@ -47,7 +50,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
             assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = payload.headers
         }
         let asset = AVURLAsset(url: url, options: assetOptions)
-        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        player.replaceCurrentItem(with: playerItem(asset: asset))
         updateNowPlaying(payload: payload)
         player.play()
     }
@@ -69,6 +72,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         player.replaceCurrentItem(with: nil)
         didReachEnd = false
         playbackError = nil
+        spectrumAnalyzer.clear()
     }
 
     func seekTo(positionMs: Int64) {
@@ -128,6 +132,67 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
             averageBitrate: averageBitrate,
             peakBitrate: nil
         )
+    }
+
+    func spectrumLevels() -> [NSNumber] {
+        spectrumAnalyzer.levels().map(NSNumber.init(value:))
+    }
+
+    private func playerItem(asset: AVURLAsset) -> AVPlayerItem {
+        let item = AVPlayerItem(asset: asset)
+        guard let audioTrack = asset.tracks(withMediaType: .audio).first, let tap = makeAudioTap() else {
+            spectrumAnalyzer.clear()
+            return item
+        }
+        let parameters = AVMutableAudioMixInputParameters(track: audioTrack)
+        parameters.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+        item.audioMix = mix
+        return item
+    }
+
+    private func makeAudioTap() -> MTAudioProcessingTap? {
+        var callbacks = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: Unmanaged.passUnretained(spectrumAnalyzer).toOpaque(),
+            init: { _, clientInfo, storageOut in
+                storageOut.pointee = clientInfo
+            },
+            finalize: { _ in },
+            prepare: { tap, _, processingFormat in
+                let analyzer = Unmanaged<AudioTapSpectrumAnalyzer>
+                    .fromOpaque(MTAudioProcessingTapGetStorage(tap))
+                    .takeUnretainedValue()
+                analyzer.prepare(processingFormat.pointee)
+            },
+            unprepare: { _ in },
+            process: { tap, frameCount, _, bufferList, framesOut, flagsOut in
+                let status = MTAudioProcessingTapGetSourceAudio(
+                    tap,
+                    frameCount,
+                    bufferList,
+                    flagsOut,
+                    nil,
+                    framesOut,
+                )
+                guard status == noErr else { return }
+                let analyzer = Unmanaged<AudioTapSpectrumAnalyzer>
+                    .fromOpaque(MTAudioProcessingTapGetStorage(tap))
+                    .takeUnretainedValue()
+                analyzer.consume(bufferList)
+            },
+        )
+        var tap: MTAudioProcessingTap?
+        guard MTAudioProcessingTapCreate(
+            kCFAllocatorDefault,
+            &callbacks,
+            kMTAudioProcessingTapCreationFlag_PostEffects,
+            &tap,
+        ) == noErr else {
+            return nil
+        }
+        return tap
     }
 
     private func milliseconds(_ time: CMTime) -> Int64 {
@@ -192,6 +257,90 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
             MPMediaItemPropertyArtist: payload.artists,
             MPMediaItemPropertyAlbumTitle: payload.album,
         ]
+    }
+}
+
+private final class AudioTapSpectrumAnalyzer {
+    private static let windowSize = 512
+    private static let bandCenters: [Double] = [60, 120, 250, 500, 1_000, 2_000, 3_500, 5_000, 7_000, 9_000, 12_000, 15_000]
+    private let lock = NSLock()
+    private var sampleRate = 0.0
+    private var isFloat = true
+    private var samples = Array(repeating: Float.zero, count: windowSize)
+    private var sampleIndex = 0
+    private var lastPublishedAt = Date.distantPast
+    private var currentLevels: [Float] = []
+
+    func prepare(_ format: AudioStreamBasicDescription) {
+        lock.lock()
+        sampleRate = format.mSampleRate
+        isFloat = format.mFormatFlags & kAudioFormatFlagIsFloat != 0
+        clearLocked()
+        lock.unlock()
+    }
+
+    func consume(_ bufferList: UnsafeMutablePointer<AudioBufferList>) {
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+        guard let buffer = buffers.first, let data = buffer.mData else { return }
+        let sampleCount = Int(buffer.mDataByteSize) / (isFloat ? MemoryLayout<Float>.size : MemoryLayout<Int16>.size)
+        lock.lock()
+        if isFloat {
+            let pointer = data.assumingMemoryBound(to: Float.self)
+            for index in 0..<sampleCount { append(pointer[index]) }
+        } else {
+            let pointer = data.assumingMemoryBound(to: Int16.self)
+            for index in 0..<sampleCount { append(Float(pointer[index]) / 32768) }
+        }
+        lock.unlock()
+    }
+
+    func levels() -> [Float] {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentLevels
+    }
+
+    func clear() {
+        lock.lock()
+        clearLocked()
+        lock.unlock()
+    }
+
+    private func append(_ sample: Float) {
+        samples[sampleIndex] = sample
+        sampleIndex += 1
+        guard sampleIndex == Self.windowSize else { return }
+        sampleIndex = 0
+        guard Date().timeIntervalSince(lastPublishedAt) >= 0.05, sampleRate > 0 else { return }
+        lastPublishedAt = Date()
+        let nyquist = sampleRate / 2
+        currentLevels = Self.bandCenters.map { frequency in
+            guard frequency < nyquist else { return 0 }
+            let normalized = goertzelMagnitude(frequency) * 18
+            return min(1, max(0, log(1 + normalized) / log(19)))
+        }.map(Float.init)
+    }
+
+    private func goertzelMagnitude(_ frequency: Double) -> Double {
+        let omega = 2 * Double.pi * frequency / sampleRate
+        let coefficient = 2 * cos(omega)
+        var previous = 0.0
+        var previousPrevious = 0.0
+        for (index, sample) in samples.enumerated() {
+            let hann = 0.5 - 0.5 * cos(2 * Double.pi * Double(index) / Double(Self.windowSize - 1))
+            let current = Double(sample) * hann + coefficient * previous - previousPrevious
+            previousPrevious = previous
+            previous = current
+        }
+        let power = previousPrevious * previousPrevious + previous * previous - coefficient * previous * previousPrevious
+        return sqrt(max(0, power)) / Double(Self.windowSize)
+    }
+
+    private func clearLocked() {
+        samples = Array(repeating: 0, count: Self.windowSize)
+        sampleIndex = 0
+        lastPublishedAt = .distantPast
+        currentLevels = []
     }
 }
 
