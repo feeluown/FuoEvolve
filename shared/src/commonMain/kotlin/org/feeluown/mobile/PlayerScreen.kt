@@ -72,7 +72,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,7 +106,7 @@ fun MiniPlayer(controller: FuoPlayerController) {
                 state.currentTrack?.let {
                     PlayerSharedCover(
                         track = it,
-                        visible = !controller.isFullPlayerOpen,
+                        heroEnabled = !controller.isFullPlayerOpen,
                         modifier = Modifier.size(if (isWideLayout) 44.dp else 56.dp),
                     )
                 }
@@ -136,15 +138,6 @@ fun MiniPlayer(controller: FuoPlayerController) {
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
-                        )
-                    }
-                    if (controller.showPlaybackSpectrum) {
-                        AudioSpectrumLines(
-                            levels = state.spectrumLevels,
-                            isPlaying = state.status == PlayerStatus.Playing,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(14.dp),
                         )
                     }
                 }
@@ -190,7 +183,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                         .fillMaxSize()
                         .statusBarsPadding()
                         .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 68.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Row(
@@ -301,6 +294,14 @@ fun FullPlayer(controller: FuoPlayerController) {
                         }
                     }
                 }
+                FullPlayerSpectrum(
+                    controller = controller,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 8.dp),
+                )
                 QueueBottomSheet(controller)
             }
         }
@@ -315,7 +316,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 36.dp),
+                    .padding(bottom = 82.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Row(
@@ -392,6 +393,14 @@ fun FullPlayer(controller: FuoPlayerController) {
                     },
                 )
             }
+            FullPlayerSpectrum(
+                controller = controller,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 8.dp),
+            )
             QueueBottomSheet(controller)
         }
     }
@@ -451,33 +460,24 @@ fun PlayerCoverPage(track: MusicTrack?, controller: FuoPlayerController) {
         ) {
             PlayerSharedCover(
                 track = track ?: emptyDisplayTrack(),
-                visible = controller.isFullPlayerOpen,
+                heroEnabled = controller.isFullPlayerOpen,
                 modifier = Modifier.size(coverSize),
             )
-            if (controller.showPlaybackSpectrum) {
-                AudioSpectrumLines(
-                    levels = controller.playbackState.spectrumLevels,
-                    isPlaying = controller.playbackState.status == PlayerStatus.Playing,
-                    modifier = Modifier
-                        .fillMaxWidth(0.72f)
-                        .height(42.dp),
-                )
-            }
         }
     }
 }
 
 @Composable
 @OptIn(ExperimentalSharedTransitionApi::class)
-fun PlayerSharedCover(track: MusicTrack, visible: Boolean, modifier: Modifier = Modifier) {
+fun PlayerSharedCover(track: MusicTrack, heroEnabled: Boolean, modifier: Modifier = Modifier) {
     val sharedTransitionScope = LocalPlayerSharedTransitionScope.current
-    val sharedModifier = if (sharedTransitionScope == null) {
+    val sharedModifier = if (!heroEnabled || sharedTransitionScope == null) {
         modifier
     } else {
         with(sharedTransitionScope) {
             modifier.sharedElementWithCallerManagedVisibility(
                 sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = visible,
+                visible = true,
             )
         }
     }
@@ -485,23 +485,60 @@ fun PlayerSharedCover(track: MusicTrack, visible: Boolean, modifier: Modifier = 
 }
 
 @Composable
-fun AudioSpectrumLines(levels: List<Float>, isPlaying: Boolean, modifier: Modifier = Modifier) {
+fun FullPlayerSpectrum(controller: FuoPlayerController, modifier: Modifier = Modifier) {
+    if (!controller.showPlaybackSpectrum) return
+    AudioSpectrumLines(
+        levels = controller.playbackState.spectrumLevels,
+        isPlaying = controller.playbackState.status == PlayerStatus.Playing,
+        style = controller.playbackSpectrumStyle,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp),
+    )
+}
+
+@Composable
+fun AudioSpectrumLines(
+    levels: List<Float>,
+    isPlaying: Boolean,
+    style: PlaybackSpectrumStyle,
+    modifier: Modifier = Modifier,
+) {
     if (!isPlaying || levels.isEmpty()) return
     val color = MaterialTheme.colorScheme.primary
     Canvas(modifier = modifier) {
         val count = levels.size
         val spacing = size.width / (count * 2f)
         val strokeWidth = (spacing * 0.48f).coerceAtLeast(1f)
-        levels.forEachIndexed { index, level ->
-            val height = size.height * (0.18f + level.coerceIn(0f, 1f) * 0.82f)
-            val x = spacing * (index * 2 + 1)
-            drawLine(
-                color = color,
-                start = androidx.compose.ui.geometry.Offset(x, (size.height - height) / 2f),
-                end = androidx.compose.ui.geometry.Offset(x, (size.height + height) / 2f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
+        when (style) {
+            PlaybackSpectrumStyle.Bars,
+            PlaybackSpectrumStyle.MirrorBars -> levels.forEachIndexed { index, level ->
+                val normalized = 0.18f + level.coerceIn(0f, 1f) * 0.82f
+                val height = size.height * if (style == PlaybackSpectrumStyle.Bars) normalized else normalized / 2f
+                val x = spacing * (index * 2 + 1)
+                drawLine(
+                    color = color,
+                    start = androidx.compose.ui.geometry.Offset(
+                        x,
+                        if (style == PlaybackSpectrumStyle.Bars) size.height else size.height / 2f - height,
+                    ),
+                    end = androidx.compose.ui.geometry.Offset(
+                        x,
+                        if (style == PlaybackSpectrumStyle.Bars) size.height - height else size.height / 2f + height,
+                    ),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round,
+                )
+            }
+            PlaybackSpectrumStyle.Wave -> {
+                val path = Path()
+                levels.forEachIndexed { index, level ->
+                    val x = if (count == 1) size.width / 2f else size.width * index / (count - 1f)
+                    val y = size.height * (1f - (0.1f + level.coerceIn(0f, 1f) * 0.8f))
+                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(path = path, color = color, style = Stroke(width = strokeWidth, cap = StrokeCap.Round))
+            }
         }
     }
 }

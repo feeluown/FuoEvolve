@@ -70,6 +70,14 @@ enum class ThemeColorScheme(
     Amber("琥珀"),
 }
 
+enum class PlaybackSpectrumStyle(
+    val label: String,
+) {
+    Bars("柱状"),
+    MirrorBars("镜像"),
+    Wave("波形"),
+}
+
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
@@ -96,6 +104,7 @@ data class AppSettings(
     val smartReplacementUseReplacementLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
     val showPlaybackSpectrum: Boolean = true,
+    val playbackSpectrumStyle: PlaybackSpectrumStyle = PlaybackSpectrumStyle.Bars,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
