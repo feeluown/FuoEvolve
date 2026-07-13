@@ -2527,6 +2527,104 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun dislikingCurrentTrackKeepsNextTrackAsQueueCurrent() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+            providerTrack("provider:4", "Fourth"),
+        )
+        val engine = FakePlaybackEngine()
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddDislikedSong = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            controller.setSongDisliked(tracks[1], disliked = true)
+            advanceUntilIdle()
+
+            assertEquals("provider:3", engine.lastTrack?.id)
+            assertEquals("provider:3", controller.playbackState.currentTrack?.id)
+            assertEquals(listOf("provider:3", "provider:4"), controller.playbackState.queue.map { it.id })
+
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals("provider:4", engine.lastTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun dislikingEarlierTrackKeepsCurrentTrackAtItsQueuePosition() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+            providerTrack("provider:4", "Fourth"),
+        )
+        val engine = FakePlaybackEngine()
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddDislikedSong = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.next()
+            controller.next()
+            advanceUntilIdle()
+
+            controller.setSongDisliked(tracks.first(), disliked = true)
+            advanceUntilIdle()
+
+            assertEquals("provider:3", engine.lastTrack?.id)
+            assertEquals("provider:3", controller.playbackState.currentTrack?.id)
+            assertEquals(listOf("provider:3", "provider:4"), controller.playbackState.queue.map { it.id })
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun upNextQueuePlaysBeforeMainQueueAndThenReturns() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -3067,6 +3165,11 @@ class FuoPlayerControllerTest {
             lastRemovedFromPlaylist = playlist to track
             return ProviderMutationResult(true, "已从歌单移除：${track.title}")
         }
+
+        override suspend fun setSongDisliked(
+            track: MusicTrack,
+            disliked: Boolean,
+        ): ProviderMutationResult = ProviderMutationResult(true, "操作成功")
 
         override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
             loadedMediaItemIds += item.id
