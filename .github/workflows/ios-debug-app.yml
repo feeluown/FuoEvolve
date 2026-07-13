@@ -35,7 +35,15 @@ jobs:
           cache-dependency-path: iosApp/python/requirements-ios.txt
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
 
       - name: Cache iOS Python distribution
         uses: actions/cache@v4
