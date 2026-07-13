@@ -226,6 +226,7 @@ fun MinePlaylistsSection(
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var playlistName by remember { mutableStateOf("") }
+    var selectedCreateProviderId by remember { mutableStateOf<String?>(null) }
     val creatableProviders = controller.creatablePlaylistProviders()
     val userSections = controller.minePlaylistSections
     val favoriteSections = controller.mineFavoritePlaylistSections
@@ -246,7 +247,12 @@ fun MinePlaylistsSection(
     ) {
         if (creatableProviders.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { showCreateDialog = true }) { Text("新建歌单") }
+                TextButton(
+                    onClick = {
+                        selectedCreateProviderId = creatableProviders.singleOrNull()?.providerId
+                        showCreateDialog = true
+                    },
+                ) { Text("新建歌单") }
             }
         }
         if (showFilter) {
@@ -278,6 +284,9 @@ fun MinePlaylistsSection(
         }
     }
     if (showCreateDialog) {
+        val selectedCreateProvider = creatableProviders.firstOrNull {
+            it.providerId == selectedCreateProviderId
+        } ?: creatableProviders.singleOrNull()
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
             title = { Text("新建歌单") },
@@ -285,6 +294,20 @@ fun MinePlaylistsSection(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (creatableProviders.size == 1) {
                         Text("将在 ${creatableProviders.first().providerName} 创建")
+                    } else {
+                        Text("创建到")
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            creatableProviders.forEach { provider ->
+                                FilterChip(
+                                    selected = provider.providerId == selectedCreateProvider?.providerId,
+                                    onClick = { selectedCreateProviderId = provider.providerId },
+                                    label = { Text(provider.providerName) },
+                                )
+                            }
+                        }
                     }
                     OutlinedTextField(
                         value = playlistName,
@@ -296,11 +319,13 @@ fun MinePlaylistsSection(
             },
             confirmButton = {
                 TextButton(
-                    enabled = playlistName.isNotBlank() && creatableProviders.size == 1,
+                    enabled = playlistName.isNotBlank() && selectedCreateProvider != null,
                     onClick = {
-                        controller.createPlaylist(creatableProviders.first().providerId, playlistName)
-                        playlistName = ""
-                        showCreateDialog = false
+                        selectedCreateProvider?.let { provider ->
+                            controller.createPlaylist(provider.providerId, playlistName)
+                            playlistName = ""
+                            showCreateDialog = false
+                        }
                     },
                 ) { Text("创建") }
             },

@@ -1655,10 +1655,13 @@ class FuoPlayerController(
             val hasNext = upNextQueue.isNotEmpty() || mainQueueIndex + 1 < mainQueue.size
             if (hasNext) next() else playbackEngine.stop()
         }
+        val removedBeforeCurrent = mainQueue
+            .take(mainQueueIndex.coerceIn(0, mainQueue.size))
+            .count { it.id == track.id }
         mainQueue = mainQueue.filterNot { it.id == track.id }
         originalMainQueue = originalMainQueue.filterNot { it.id == track.id }
         upNextQueue = upNextQueue.filterNot { it.id == track.id }
-        mainQueueIndex = mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
+        mainQueueIndex = (mainQueueIndex - removedBeforeCurrent).coerceIn(-1, mainQueue.lastIndex)
         recommendSections = recommendSections.withoutTrack(track.id)
         musicSections = musicSections.withoutTrack(track.id)
         mineSections = mineSections.withoutTrack(track.id)
