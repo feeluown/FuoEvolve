@@ -493,7 +493,7 @@ fun FullPlayerSpectrum(controller: FuoPlayerController, modifier: Modifier = Mod
         style = controller.playbackSpectrumStyle,
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp),
+            .height(64.dp),
     )
 }
 
@@ -514,7 +514,7 @@ fun AudioSpectrumLines(
             PlaybackSpectrumStyle.None -> Unit
             PlaybackSpectrumStyle.Bars,
             PlaybackSpectrumStyle.MirrorBars -> levels.forEachIndexed { index, level ->
-                val normalized = 0.18f + level.coerceIn(0f, 1f) * 0.82f
+                val normalized = 0.12f + level.coerceIn(0f, 1f) * 0.88f
                 val height = size.height * if (style == PlaybackSpectrumStyle.Bars) normalized else normalized / 2f
                 val x = spacing * (index * 2 + 1)
                 drawLine(
@@ -533,12 +533,27 @@ fun AudioSpectrumLines(
             }
             PlaybackSpectrumStyle.Wave -> {
                 val path = Path()
-                levels.forEachIndexed { index, level ->
-                    val x = if (count == 1) size.width / 2f else size.width * index / (count - 1f)
-                    val y = size.height * (1f - (0.1f + level.coerceIn(0f, 1f) * 0.8f))
-                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                val points = levels.mapIndexed { index, level ->
+                    androidx.compose.ui.geometry.Offset(
+                        x = if (count == 1) size.width / 2f else size.width * index / (count - 1f),
+                        y = size.height * (1f - (0.04f + level.coerceIn(0f, 1f) * 0.92f)),
+                    )
                 }
-                drawPath(path = path, color = color, style = Stroke(width = strokeWidth, cap = StrokeCap.Round))
+                path.moveTo(points.first().x, points.first().y)
+                points.zipWithNext().forEach { (previous, current) ->
+                    path.quadraticTo(
+                        x1 = previous.x,
+                        y1 = previous.y,
+                        x2 = (previous.x + current.x) / 2f,
+                        y2 = (previous.y + current.y) / 2f,
+                    )
+                }
+                points.last().let { point -> path.lineTo(point.x, point.y) }
+                drawPath(
+                    path = path,
+                    color = color,
+                    style = Stroke(width = (strokeWidth * 0.75f).coerceAtLeast(1f), cap = StrokeCap.Round),
+                )
             }
         }
     }
