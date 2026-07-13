@@ -72,6 +72,7 @@
             buildConfigurationList = A10000000000000000000090 /* Build configuration list for PBXNativeTarget "FuoEvolve" */;
             buildPhases = (
                 A10000000000000000000060 /* Embed Shared Framework */,
+                A10000000000000000000061 /* Embed Python Runtime */,
                 A10000000000000000000050 /* Sources */,
                 A10000000000000000000020 /* Frameworks */,
             );
@@ -136,6 +137,25 @@
             runOnlyForDeploymentPostprocessing = 0;
             shellPath = /bin/sh;
             shellScript = "cd \"$SRCROOT/..\"\n./gradlew :shared:embedAndSignAppleFrameworkForXcode\n";
+        };
+        A10000000000000000000061 /* Embed Python Runtime */ = {
+            isa = PBXShellScriptBuildPhase;
+            alwaysOutOfDate = 1;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            inputFileListPaths = (
+            );
+            inputPaths = (
+            );
+            name = "Embed Python Runtime";
+            outputFileListPaths = (
+            );
+            outputPaths = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/sh;
+            shellScript = "set -eu\nRUNTIME_ROOT=\"$SRCROOT/FuoEvolve/PythonResources\"\nif [ ! -d \"$RUNTIME_ROOT/python/Python.xcframework\" ]; then\n  echo \"error: iOS Python runtime is missing; run scripts/prepare-ios-python.sh\"\n  exit 1\nfi\nif [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n  PYTHON_SLICE=ios-arm64_x86_64-simulator\nelse\n  PYTHON_SLICE=ios-arm64\nfi\nif [ \"$CURRENT_ARCH\" = \"x86_64\" ]; then\n  PYTHON_ARCH=lib-x86_64\nelse\n  PYTHON_ARCH=lib-arm64\nfi\nAPP_ROOT=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nmkdir -p \"$APP_ROOT/Frameworks\" \"$APP_ROOT/python/lib/python3.12/lib-dynload\" \"$APP_ROOT/python-app\"\nrsync -a --delete \"$RUNTIME_ROOT/python/Python.xcframework/$PYTHON_SLICE/Python.framework\" \"$APP_ROOT/Frameworks/\"\nrsync -a --delete \"$RUNTIME_ROOT/python/Python.xcframework/lib/\" \"$APP_ROOT/python/lib/\"\nrsync -a --delete \"$RUNTIME_ROOT/python/Python.xcframework/$PYTHON_SLICE/$PYTHON_ARCH/python3.12/lib-dynload/\" \"$APP_ROOT/python/lib/python3.12/lib-dynload/\"\nrsync -a --delete \"$RUNTIME_ROOT/app/\" \"$APP_ROOT/python-app/\"\nif [ \"$CODE_SIGNING_ALLOWED\" = \"YES\" ]; then\n  find \"$APP_ROOT/python/lib/python3.12/lib-dynload\" -type f -name '*.so' -print0 | while IFS= read -r -d '' extension; do\n    codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --timestamp=none \"$extension\"\n  done\n  codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --timestamp=none \"$APP_ROOT/Frameworks/Python.framework\"\nfi\n";
         };
 /* End PBXShellScriptBuildPhase section */
 
@@ -281,6 +301,8 @@
                     "$(inherited)",
                     "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
                 );
+                "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64";
+                "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64_x86_64-simulator";
                 INFOPLIST_FILE = FuoEvolve/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
                     "$(inherited)",
@@ -290,6 +312,8 @@
                     "$(inherited)",
                     "-framework",
                     Shared,
+                    "-framework",
+                    Python,
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = org.feeluown.mobile;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -310,6 +334,8 @@
                     "$(inherited)",
                     "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
                 );
+                "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64";
+                "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64_x86_64-simulator";
                 INFOPLIST_FILE = FuoEvolve/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
                     "$(inherited)",
@@ -319,6 +345,8 @@
                     "$(inherited)",
                     "-framework",
                     Shared,
+                    "-framework",
+                    Python,
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = org.feeluown.mobile;
                 PRODUCT_NAME = "$(TARGET_NAME)";

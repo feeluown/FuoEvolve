@@ -18,12 +18,19 @@
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSAppleMusicUsageDescription</key>
     <string>用于扫描并播放本地音乐库。</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>用于访问音源服务和播放媒体资源。</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>

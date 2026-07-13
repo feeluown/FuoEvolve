@@ -37,14 +37,67 @@ fi
 
 rm -rf "$RESOURCE_DIR/python" "$RESOURCE_DIR/app"
 mkdir -p "$RESOURCE_DIR/python" "$RESOURCE_DIR/app"
-tar -xzf "$ARCHIVE" -C "$RESOURCE_DIR/python" --strip-components=1
+tar -xzf "$ARCHIVE" -C "$RESOURCE_DIR/python"
+
+for framework in "$RESOURCE_DIR/python/Python.xcframework"/*/Python.framework; do
+    mkdir -p "$framework/Modules"
+    cp "$framework/Headers/module.modulemap" "$framework/Modules/module.modulemap"
+    sed -i '' 's/^module Python/framework module Python/' "$framework/Modules/module.modulemap"
+done
 
 rsync -a "$ROOT_DIR/androidApp/src/main/python/fuo_mobile" "$RESOURCE_DIR/app/"
 
-"$HOST_PYTHON" -m pip install \
+PYPYDANTIC_NO_EXTENSIONS=1 "$HOST_PYTHON" -m pip install \
     --upgrade \
+    --no-deps \
+    --no-binary pydantic,charset-normalizer \
     --target "$RESOURCE_DIR/app" \
     -r "$REQUIREMENTS"
+
+mkdir -p "$RESOURCE_DIR/app/Crypto/Cipher"
+cat > "$RESOURCE_DIR/app/Crypto/__init__.py" <<'PY'
+PY
+cat > "$RESOURCE_DIR/app/Crypto/Cipher/__init__.py" <<'PY'
+from .AES import AES
+PY
+cat > "$RESOURCE_DIR/app/Crypto/Cipher/AES.py" <<'PY'
+import pyaes
+
+MODE_ECB = 1
+MODE_CBC = 2
+
+
+class _Cipher:
+    def __init__(self, key, mode, iv=None):
+        if mode == MODE_CBC:
+            self._aes = pyaes.AESModeOfOperationCBC(key, iv=iv)
+        elif mode == MODE_ECB:
+            self._aes = pyaes.AESModeOfOperationECB(key)
+        else:
+            raise ValueError(f"unsupported AES mode: {mode}")
+
+    def encrypt(self, data):
+        if len(data) % 16:
+            raise ValueError("data length must be a multiple of 16")
+        return b"".join(
+            self._aes.encrypt(data[offset:offset + 16])
+            for offset in range(0, len(data), 16)
+        )
+
+
+class AES:
+    MODE_ECB = MODE_ECB
+    MODE_CBC = MODE_CBC
+
+    @staticmethod
+    def new(key, mode, iv=None):
+        return _Cipher(key, mode, iv)
+PY
+
+if find "$RESOURCE_DIR/app" -type f \( -name '*.so' -o -name '*.dylib' \) | grep -q .; then
+    echo "native extension modules are not supported in the iOS app package" >&2
+    exit 1
+fi
 
 find "$RESOURCE_DIR/app" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "$RESOURCE_DIR/app" -type f -name "*.pyc" -delete

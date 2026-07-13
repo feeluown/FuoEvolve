@@ -307,6 +307,10 @@ class FuoPlayerController(
             updateResourceCacheLimit()
             updateAudioQualityPolicies()
             resourceCacheRepository.refreshUsage()
+            runCatching { providerRepository.availableProviders() }
+                .onSuccess { loadedProviders ->
+                    availableProviders = loadedProviders.sortedProvidersByOrder()
+                }
             runCatching {
                 providerRepository.updateEnabledProviders(enabledProviderIds)
                 providerRepository.initialize()

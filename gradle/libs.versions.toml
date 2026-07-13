@@ -7,6 +7,7 @@ media3 = "1.5.1"
 activityCompose = "1.10.1"
 coreKtx = "1.15.0"
 coroutines = "1.10.1"
+serializationJson = "1.8.1"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -19,6 +20,7 @@ jellyfin-media3-ffmpeg-decoder = { module = "org.jellyfin.media3:media3-ffmpeg-d
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serializationJson" }
 compose-material3-expressive = { module = "org.jetbrains.compose.material3:material3", version = "1.9.0-alpha04" }
 
 [plugins]

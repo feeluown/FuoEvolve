@@ -61,7 +61,7 @@ class FuoPlayerControllerTest {
         assertEquals(
             "分享一个歌单：\n" +
                 "《每日推荐》\n" +
-                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123?d=5q-P5pel5o6I2Q",
+                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123?d=5q-P5pel5o6o6I2Q",
             payload?.content(ShareMode.FullText),
         )
     }
