@@ -16,6 +16,7 @@ import kotlinx.serialization.json.longOrNull
 
 class IosFuoCoreBridge(
     private val pythonRuntime: IosPythonRuntime,
+    private val networkStatusOutput: IosNetworkStatusOutput,
 ) : ProviderMusicRepository {
     private var enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS
     private var wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY
@@ -590,7 +591,11 @@ class IosFuoCoreBridge(
     }
 
     private fun currentAudioQualityPolicy(): AudioQualityPolicy {
-        return wifiAudioQualityPolicy
+        return if (networkStatusOutput.isCellularConnection()) {
+            cellularAudioQualityPolicy
+        } else {
+            wifiAudioQualityPolicy
+        }
     }
 
     private fun String.toAuthState(providerId: String): ProviderAuthState {

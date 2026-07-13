@@ -16,8 +16,18 @@ fun MainViewController(
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
     shareOutput: IosShareOutput,
+    networkStatusOutput: IosNetworkStatusOutput,
 ): UIViewController = ComposeUIViewController {
-    IosApp(pythonRuntime, audioOutput, videoOutput, mediaLibraryOutput, downloadOutput, webLoginOutput, shareOutput)
+    IosApp(
+        pythonRuntime,
+        audioOutput,
+        videoOutput,
+        mediaLibraryOutput,
+        downloadOutput,
+        webLoginOutput,
+        shareOutput,
+        networkStatusOutput,
+    )
 }
 
 @Composable
@@ -29,10 +39,18 @@ private fun IosApp(
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
     shareOutput: IosShareOutput,
+    networkStatusOutput: IosNetworkStatusOutput,
 ) {
     IosVideoOutputHolder.output = videoOutput
     val container = remember {
-        IosAppContainer(pythonRuntime, audioOutput, mediaLibraryOutput, downloadOutput, webLoginOutput)
+        IosAppContainer(
+            pythonRuntime,
+            audioOutput,
+            mediaLibraryOutput,
+            downloadOutput,
+            webLoginOutput,
+            networkStatusOutput,
+        )
     }
     AppRoot(
         controller = container.controller,
@@ -50,9 +68,10 @@ private class IosAppContainer(
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     private val webLoginOutput: IosWebLoginOutput,
+    networkStatusOutput: IosNetworkStatusOutput,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val providerRepository = IosFuoCoreBridge(pythonRuntime)
+    private val providerRepository = IosFuoCoreBridge(pythonRuntime, networkStatusOutput)
     private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
     private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
     private val playbackEngine = IosNativeAudioEngine(scope, audioOutput)
