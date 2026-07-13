@@ -257,11 +257,6 @@ class FuoPlaybackService : MediaSessionService() {
             codec = codecs,
             averageBitrate = average,
             peakBitrate = peak,
-            bitrateMode = when {
-                average == null || peak == null -> AudioBitrateMode.Unknown
-                average == peak -> AudioBitrateMode.Cbr
-                else -> AudioBitrateMode.Vbr
-            },
         )
     }
 

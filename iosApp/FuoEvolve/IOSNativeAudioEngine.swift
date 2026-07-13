@@ -126,8 +126,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
             format: codec.map(audioFormatName),
             codec: codec,
             averageBitrate: averageBitrate,
-            peakBitrate: nil,
-            bitrateMode: .unknown
+            peakBitrate: nil
         )
     }
 

@@ -531,7 +531,6 @@ fun AudioFormatInfoDialog(info: AudioFormatInfo?, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 info?.format?.takeIf { it.isNotBlank() }?.let { ReplacementInfoLine("当前格式", it) }
                 info?.codec?.takeIf { it.isNotBlank() }?.let { ReplacementInfoLine("编码", it) }
-                info?.bitrateMode?.displayName()?.let { ReplacementInfoLine("码率模式", it) }
                 formatAudioBitrate(info?.averageBitrate)?.let { ReplacementInfoLine("平均比特率", it) }
                 formatAudioBitrate(info?.peakBitrate)?.let { ReplacementInfoLine("峰值比特率", it) }
             }
@@ -547,16 +546,8 @@ fun AudioFormatInfoDialog(info: AudioFormatInfo?, onDismiss: () -> Unit) {
 fun AudioFormatInfo.hasDisplayableValue(): Boolean {
     return !format.isNullOrBlank() ||
         !codec.isNullOrBlank() ||
-        bitrateMode.displayName() != null ||
         formatAudioBitrate(averageBitrate) != null ||
         formatAudioBitrate(peakBitrate) != null
-}
-
-fun AudioBitrateMode.displayName(): String? = when (this) {
-    AudioBitrateMode.Cbr -> "CBR（固定比特率）"
-    AudioBitrateMode.Vbr -> "VBR（可变比特率）"
-    AudioBitrateMode.Abr -> "ABR（平均比特率）"
-    AudioBitrateMode.Unknown -> null
 }
 
 fun formatAudioBitrate(value: Long?): String? {
