@@ -455,7 +455,7 @@ fun PlayerInfoTags(
     audioDecoderInfo: AudioDecoderInfo?,
 ) {
     var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
-    var showAudioDecoderInfo by remember(audioDecoderInfo) { mutableStateOf(false) }
+    var showAudioDecoderInfo by remember(track?.id) { mutableStateOf(false) }
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -475,7 +475,7 @@ fun PlayerInfoTags(
         }
         audioDecoderInfo?.let { decoderInfo ->
             InfoTag(
-                text = if (decoderInfo.type == AudioDecoderType.Hardware) "HW" else "SW",
+                text = if (decoderInfo.type == AudioDecoderType.Software) "SW" else "HW",
                 onClick = { showAudioDecoderInfo = true },
             )
         }
@@ -494,7 +494,7 @@ fun PlayerInfoTags(
             text = {
                 Text(
                     text = "当前音频正在使用${
-                        if (decoderInfo.type == AudioDecoderType.Hardware) "硬件解码" else "软件解码"
+                        if (decoderInfo.type == AudioDecoderType.Software) "软件解码" else "硬件解码"
                     }\n解码器：${decoderInfo.name}",
                 )
             },

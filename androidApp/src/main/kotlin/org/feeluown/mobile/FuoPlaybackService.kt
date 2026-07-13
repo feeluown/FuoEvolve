@@ -133,7 +133,6 @@ class FuoPlaybackService : MediaSessionService() {
 
     @OptIn(UnstableApi::class)
     private fun playPayload(raw: String) {
-        mutableAudioDecoderInfo.value = null
         val payload = JSONObject(raw)
         val url = payload.getString("url")
         require(url.isNotBlank()) { "Playback URL is blank" }
