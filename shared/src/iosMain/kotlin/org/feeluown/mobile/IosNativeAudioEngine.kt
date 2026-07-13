@@ -81,6 +81,7 @@ class IosNativeAudioEngine(
             positionMs = output.positionMs().coerceAtLeast(0),
             durationMs = output.durationMs().takeIf { it > 0 } ?: mutableState.value.durationMs,
             bufferedMs = output.bufferedMs().coerceAtLeast(0),
+            audioFormatInfo = output.audioFormatInfo(),
             errorMessage = output.errorMessage(),
         )
     }

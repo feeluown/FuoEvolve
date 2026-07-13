@@ -42,6 +42,11 @@ class AndroidNativeAudioEngine(
             }
         }
         scope.launch {
+            FuoPlaybackService.audioFormatInfo.collect { audioFormatInfo ->
+                mutableState.value = mutableState.value.copy(audioFormatInfo = audioFormatInfo)
+            }
+        }
+        scope.launch {
             while (true) {
                 updatePosition()
                 delay(1_000)
@@ -63,6 +68,7 @@ class AndroidNativeAudioEngine(
             bufferedMs = 0,
             lyrics = track.lyrics,
             audioQuality = null,
+            audioFormatInfo = null,
             playbackParts = emptyList(),
             currentPartIndex = -1,
             errorMessage = null,
@@ -83,6 +89,7 @@ class AndroidNativeAudioEngine(
             durationMs = payload.durationMs ?: 0,
             lyrics = payload.lyrics,
             audioQuality = payload.audioQuality,
+            audioFormatInfo = null,
             playbackParts = payload.parts,
             currentPartIndex = payload.currentPartIndex,
             errorMessage = null,

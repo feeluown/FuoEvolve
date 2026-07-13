@@ -234,6 +234,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                                     currentTrack,
                                     state.audioQuality,
                                     currentPlaybackPartLabel(state),
+                                    state.audioFormatInfo,
                                     state.audioDecoderInfo,
                                 )
                                 Text(
@@ -327,6 +328,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     currentTrack,
                     state.audioQuality,
                     currentPlaybackPartLabel(state),
+                    state.audioFormatInfo,
                     state.audioDecoderInfo,
                 )
                 Text(
@@ -423,6 +425,7 @@ fun PlayerTitleBlock(
     track: MusicTrack?,
     audioQuality: String?,
     partLabel: String?,
+    audioFormatInfo: AudioFormatInfo?,
     audioDecoderInfo: AudioDecoderInfo?,
 ) {
     Column(
@@ -444,7 +447,7 @@ fun PlayerTitleBlock(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PlayerInfoTags(track, audioQuality, audioDecoderInfo)
+        PlayerInfoTags(track, audioQuality, audioFormatInfo, audioDecoderInfo)
     }
 }
 
@@ -452,9 +455,11 @@ fun PlayerTitleBlock(
 fun PlayerInfoTags(
     track: MusicTrack?,
     audioQuality: String?,
+    audioFormatInfo: AudioFormatInfo?,
     audioDecoderInfo: AudioDecoderInfo?,
 ) {
     var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
+    var showAudioFormatInfo by remember(track?.id) { mutableStateOf(false) }
     var showAudioDecoderInfo by remember(track?.id) { mutableStateOf(false) }
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -471,7 +476,7 @@ fun PlayerInfoTags(
             }
         }
         audioQuality?.takeIf { it.isNotBlank() }?.let {
-            InfoTag(it.uppercase())
+            InfoTag(it.uppercase(), onClick = { showAudioFormatInfo = true })
         }
         audioDecoderInfo?.let { decoderInfo ->
             InfoTag(
@@ -484,6 +489,12 @@ fun PlayerInfoTags(
         ReplacementInfoDialog(
             track = infoTrack,
             onDismiss = { replacementInfoTrack = null },
+        )
+    }
+    if (showAudioFormatInfo) {
+        AudioFormatInfoDialog(
+            info = audioFormatInfo,
+            onDismiss = { showAudioFormatInfo = false },
         )
     }
     audioDecoderInfo?.let { decoderInfo ->
@@ -505,6 +516,42 @@ fun PlayerInfoTags(
             },
         )
     }
+}
+
+@Composable
+fun AudioFormatInfoDialog(info: AudioFormatInfo?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("音频信息") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReplacementInfoLine("当前格式", info?.format ?: "暂未识别")
+                ReplacementInfoLine("编码", info?.codec ?: "暂未识别")
+                ReplacementInfoLine("码率模式", info?.bitrateMode?.displayName() ?: "暂未提供")
+                ReplacementInfoLine("平均比特率", formatAudioBitrate(info?.averageBitrate))
+                info?.peakBitrate?.let {
+                    ReplacementInfoLine("峰值比特率", formatAudioBitrate(it))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
+}
+
+fun AudioBitrateMode.displayName(): String = when (this) {
+    AudioBitrateMode.Cbr -> "CBR（固定比特率）"
+    AudioBitrateMode.Vbr -> "VBR（可变比特率）"
+    AudioBitrateMode.Abr -> "ABR（平均比特率）"
+    AudioBitrateMode.Unknown -> "暂未提供"
+}
+
+fun formatAudioBitrate(value: Long?): String {
+    if (value == null || value <= 0) return "暂未提供"
+    return "${(value / 1_000.0).roundToInt()} kbps"
 }
 
 @Composable

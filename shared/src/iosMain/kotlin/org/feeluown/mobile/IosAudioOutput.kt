@@ -11,4 +11,5 @@ interface IosAudioOutput {
     fun durationMs(): Long
     fun bufferedMs(): Long
     fun errorMessage(): String?
+    fun audioFormatInfo(): AudioFormatInfo?
 }

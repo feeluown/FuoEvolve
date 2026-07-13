@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import CoreMedia
 import MediaPlayer
 import Network
 import Shared
@@ -115,10 +116,46 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         playbackError ?? player.currentItem?.error?.localizedDescription
     }
 
+    func audioFormatInfo() -> AudioFormatInfo? {
+        guard let track = player.currentItem?.asset.tracks(withMediaType: .audio).first else { return nil }
+        let codec = track.formatDescriptions.first
+            .map { CMFormatDescriptionGetMediaSubType($0 as! CMFormatDescription) }
+            .map(fourCharacterCode)
+        let averageBitrate = track.estimatedDataRate > 0 ? Int64(track.estimatedDataRate.rounded()) : nil
+        return AudioFormatInfo(
+            format: codec.map(audioFormatName),
+            codec: codec,
+            averageBitrate: averageBitrate,
+            peakBitrate: nil,
+            bitrateMode: .unknown
+        )
+    }
+
     private func milliseconds(_ time: CMTime) -> Int64 {
         let seconds = CMTimeGetSeconds(time)
         guard seconds.isFinite, seconds > 0 else { return 0 }
         return Int64(seconds * 1000)
+    }
+
+    private func audioFormatName(_ codec: String) -> String {
+        switch codec {
+        case "mp4a": return "AAC"
+        case ".mp3": return "MP3"
+        case "alac": return "ALAC"
+        case "fLaC": return "FLAC"
+        case "Opus": return "Opus"
+        case "vorb": return "Vorbis"
+        default: return codec
+        }
+    }
+
+    private func fourCharacterCode(_ value: UInt32) -> String {
+        String(bytes: [
+            UInt8((value >> 24) & 0xff),
+            UInt8((value >> 16) & 0xff),
+            UInt8((value >> 8) & 0xff),
+            UInt8(value & 0xff),
+        ], encoding: .macOSRoman) ?? String(value)
     }
 
     private func preferredMediaURL(_ rawURL: String) -> URL? {

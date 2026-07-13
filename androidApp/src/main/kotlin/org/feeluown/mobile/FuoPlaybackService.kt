@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -19,6 +20,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -45,6 +47,14 @@ class FuoPlaybackService : MediaSessionService() {
             .build()
             .also { player ->
                 player.addAnalyticsListener(object : AnalyticsListener {
+                    override fun onAudioInputFormatChanged(
+                        eventTime: AnalyticsListener.EventTime,
+                        format: Format,
+                        decoderReuseEvaluation: DecoderReuseEvaluation?,
+                    ) {
+                        mutableAudioFormatInfo.value = format.toAudioFormatInfo()
+                    }
+
                     override fun onAudioDecoderInitialized(
                         eventTime: AnalyticsListener.EventTime,
                         decoderName: String,
@@ -114,6 +124,7 @@ class FuoPlaybackService : MediaSessionService() {
             ACTION_STOP -> {
                 player?.stop()
                 mutableAudioDecoderInfo.value = null
+                mutableAudioFormatInfo.value = null
                 stopSelf()
             }
         }
@@ -128,12 +139,14 @@ class FuoPlaybackService : MediaSessionService() {
         mediaSession = null
         player = null
         mutableAudioDecoderInfo.value = null
+        mutableAudioFormatInfo.value = null
         super.onDestroy()
     }
 
     @OptIn(UnstableApi::class)
     private fun playPayload(raw: String) {
         val payload = JSONObject(raw)
+        mutableAudioFormatInfo.value = null
         val url = payload.getString("url")
         require(url.isNotBlank()) { "Playback URL is blank" }
         val extras = Bundle().apply {
@@ -236,6 +249,22 @@ class FuoPlaybackService : MediaSessionService() {
         }
     }
 
+    private fun Format.toAudioFormatInfo(): AudioFormatInfo {
+        val average = averageBitrate.takeIf { it > 0 }?.toLong()
+        val peak = peakBitrate.takeIf { it > 0 }?.toLong()
+        return AudioFormatInfo(
+            format = sampleMimeType ?: containerMimeType,
+            codec = codecs,
+            averageBitrate = average,
+            peakBitrate = peak,
+            bitrateMode = when {
+                average == null || peak == null -> AudioBitrateMode.Unknown
+                average == peak -> AudioBitrateMode.Cbr
+                else -> AudioBitrateMode.Vbr
+            },
+        )
+    }
+
     private fun String.playbackPayloadSummary(): String {
         return runCatching {
             val payload = JSONObject(this)
@@ -308,6 +337,9 @@ class FuoPlaybackService : MediaSessionService() {
 
         private val mutableAudioDecoderInfo = MutableStateFlow<AudioDecoderInfo?>(null)
         val audioDecoderInfo: StateFlow<AudioDecoderInfo?> = mutableAudioDecoderInfo.asStateFlow()
+
+        private val mutableAudioFormatInfo = MutableStateFlow<AudioFormatInfo?>(null)
+        val audioFormatInfo: StateFlow<AudioFormatInfo?> = mutableAudioFormatInfo.asStateFlow()
 
         fun play(context: Context, payload: String) {
             start(context, Intent(context, FuoPlaybackService::class.java).apply {

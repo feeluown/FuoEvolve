@@ -219,6 +219,21 @@ data class AudioDecoderInfo(
     val name: String,
 )
 
+enum class AudioBitrateMode {
+    Cbr,
+    Vbr,
+    Abr,
+    Unknown,
+}
+
+data class AudioFormatInfo(
+    val format: String? = null,
+    val codec: String? = null,
+    val averageBitrate: Long? = null,
+    val peakBitrate: Long? = null,
+    val bitrateMode: AudioBitrateMode = AudioBitrateMode.Unknown,
+)
+
 data class PlaybackState(
     val status: PlayerStatus = PlayerStatus.Idle,
     val currentTrack: MusicTrack? = null,
@@ -230,6 +245,7 @@ data class PlaybackState(
     val playMode: PlayMode = PlayMode.ListLoop,
     val lyrics: String? = null,
     val audioQuality: String? = null,
+    val audioFormatInfo: AudioFormatInfo? = null,
     val audioDecoderInfo: AudioDecoderInfo? = null,
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
