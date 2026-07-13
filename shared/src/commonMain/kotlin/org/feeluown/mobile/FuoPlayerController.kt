@@ -109,6 +109,8 @@ class FuoPlayerController(
         private set
     var selectedFeature by mutableStateOf<ProviderFeature?>(null)
         private set
+    var selectedFeatureContent by mutableStateOf<ProviderContentSection?>(null)
+        private set
     var selectedFeatureTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var selectedFeatureTracksHasMore by mutableStateOf(false)
@@ -1331,6 +1333,7 @@ class FuoPlayerController(
 
     fun openFeature(feature: ProviderFeature) {
         selectedFeature = feature
+        selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
         selectedFeatureTracksNextOffset = 0
         selectedFeatureTracksHasMore = false
@@ -1350,6 +1353,7 @@ class FuoPlayerController(
             } else {
                 result.onSuccess { section ->
                     if (selectedFeature == feature) {
+                        selectedFeatureContent = section
                         selectedFeatureTracks = section.tracks
                         selectedFeatureTracksNextOffset = section.nextOffset
                         selectedFeatureTracksHasMore = section.hasMore
@@ -1360,8 +1364,8 @@ class FuoPlayerController(
                         }
                         message = when {
                             selectedFeatureError != null -> selectedFeatureError.orEmpty()
-                            section.tracks.isEmpty() -> "${feature.title} 暂无歌曲"
-                            else -> "${feature.title} · ${section.tracks.size} 首"
+                            section.contentCount() == 0 -> "${feature.title} 暂无内容"
+                            else -> "${feature.title} · ${section.contentCount()} 项"
                         }
                     }
                 }.onFailure {
@@ -1375,6 +1379,7 @@ class FuoPlayerController(
 
     fun closeFeature() {
         selectedFeature = null
+        selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
         selectedFeatureTracksNextOffset = 0
         selectedFeatureTracksHasMore = false
@@ -1694,6 +1699,9 @@ class FuoPlayerController(
         musicSections = musicSections.withoutTrack(track.id)
         mineSections = mineSections.withoutTrack(track.id)
         selectedFeatureTracks = selectedFeatureTracks.filterNot { it.id == track.id }
+        selectedFeatureContent = selectedFeatureContent?.copy(
+            tracks = selectedFeatureContent.orEmptyTracks().filterNot { it.id == track.id },
+        )
         selectedPlaylistTracks = selectedPlaylistTracks.filterNot { it.id == track.id }
         updatePlaybackQueueState()
         persistPlaybackQueue()
@@ -1899,13 +1907,13 @@ class FuoPlayerController(
                 val newTracks = section.tracks.filter { seenIds.add(it.id) }
                 if (newTracks.isNotEmpty()) {
                     selectedFeatureTracks = selectedFeatureTracks + newTracks
-                    updateHomeFeatureSection(
-                        section.copy(
-                            tracks = selectedFeatureTracks,
-                            nextOffset = section.nextOffset,
-                            hasMore = section.hasMore,
-                        ),
+                    val updatedSection = section.copy(
+                        tracks = selectedFeatureTracks,
+                        nextOffset = section.nextOffset,
+                        hasMore = section.hasMore,
                     )
+                    selectedFeatureContent = updatedSection
+                    updateHomeFeatureSection(updatedSection)
                 }
                 selectedFeatureTracksNextOffset = section.nextOffset
                 selectedFeatureTracksHasMore = section.hasMore
@@ -2547,6 +2555,7 @@ class FuoPlayerController(
         minePlaylistSections = emptyList()
         mineFavoritePlaylistSections = emptyList()
         selectedFeature = null
+        selectedFeatureContent = null
         selectedTrack = null
         selectedPlaylist = null
         selectedPlaylistCategory = null
@@ -3164,13 +3173,23 @@ class FuoPlayerController(
         map { section -> section.copy(tracks = section.tracks.filterNot { it.id == trackId }) }
 
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
-        return category == ProviderFeatureCategory.Recommend &&
-            (id.endsWith("_daily_songs") || isDynamicQueueFeature())
+        return category == ProviderFeatureCategory.Music ||
+            (category == ProviderFeatureCategory.Recommend &&
+                (id.endsWith("_daily_songs") || isDynamicQueueFeature() || isBilibiliRecommendedVideos()))
     }
 
     private fun ProviderFeature.isDynamicQueueFeature(): Boolean {
         return id.endsWith("_radio")
     }
+
+    private fun ProviderContentSection.contentCount(): Int = maxOf(
+        tracks.size,
+        playlists.size,
+        mediaItems.size,
+        videos.size,
+    )
+
+    private fun ProviderContentSection?.orEmptyTracks(): List<MusicTrack> = this?.tracks.orEmpty()
 
     private fun ProviderSearchResults.totalCount(): Int {
         return tracks.size + playlists.size + artists.size + albums.size + videos.size

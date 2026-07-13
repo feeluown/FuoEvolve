@@ -251,6 +251,83 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun exploreEntriesLoadVideoAndPlaylistContentOnlyAfterOpeningSecondaryPage() = runTest {
+        val popularVideos = ProviderFeature(
+            id = "bilibili_recommended_videos",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+            title = "推荐视频",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Videos,
+            requiresLogin = false,
+        )
+        val weeklyVideos = ProviderFeature(
+            id = "bilibili_weekly_video_playlists",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+            title = "每周必看",
+            category = ProviderFeatureCategory.Music,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = false,
+        )
+        val video = ProviderVideo(
+            id = "video:bilibili:BV1",
+            title = "推荐视频",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val playlist = ProviderPlaylist(
+            id = "playlist:bilibili:weekly_1",
+            title = "每周必看",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(popularVideos, weeklyVideos),
+            featureSections = mapOf(
+                popularVideos.id to ProviderContentSection(popularVideos, videos = listOf(video)),
+                weeklyVideos.id to ProviderContentSection(weeklyVideos, playlists = listOf(playlist)),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.refreshHomeContent(HomeSection.Recommend)
+            advanceUntilIdle()
+
+            assertEquals(listOf(popularVideos.id), controller.recommendSections.map { it.feature.id })
+            assertEquals(emptyList(), provider.loadedFeatureIds)
+
+            controller.refreshHomeContent(HomeSection.Music)
+            advanceUntilIdle()
+
+            assertEquals(listOf(weeklyVideos.id), controller.musicSections.map { it.feature.id })
+            assertEquals(emptyList(), provider.loadedFeatureIds)
+
+            controller.openFeature(popularVideos)
+            advanceUntilIdle()
+
+            assertEquals(listOf(video), controller.selectedFeatureContent?.videos)
+
+            controller.openFeature(weeklyVideos)
+            advanceUntilIdle()
+
+            assertEquals(listOf(playlist), controller.selectedFeatureContent?.playlists)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun smartReplacementPayloadUpdatesCurrentPlaybackTrack() = runTest {
         val origin = providerTrack("provider:1", "First")
         val provider = FakeProviderRepository(
