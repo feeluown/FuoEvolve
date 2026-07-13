@@ -209,6 +209,16 @@ enum class PlayMode {
     SingleLoop,
 }
 
+enum class AudioDecoderType {
+    Hardware,
+    Software,
+}
+
+data class AudioDecoderInfo(
+    val type: AudioDecoderType,
+    val name: String,
+)
+
 data class PlaybackState(
     val status: PlayerStatus = PlayerStatus.Idle,
     val currentTrack: MusicTrack? = null,
@@ -220,6 +230,7 @@ data class PlaybackState(
     val playMode: PlayMode = PlayMode.ListLoop,
     val lyrics: String? = null,
     val audioQuality: String? = null,
+    val audioDecoderInfo: AudioDecoderInfo? = null,
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val errorMessage: String? = null,

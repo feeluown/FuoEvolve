@@ -230,7 +230,12 @@ fun FullPlayer(controller: FuoPlayerController) {
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
+                                PlayerTitleBlock(
+                                    currentTrack,
+                                    state.audioQuality,
+                                    currentPlaybackPartLabel(state),
+                                    state.audioDecoderInfo,
+                                )
                                 Text(
                                     text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
                                     style = MaterialTheme.typography.bodyLarge,
@@ -318,7 +323,12 @@ fun FullPlayer(controller: FuoPlayerController) {
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
+                PlayerTitleBlock(
+                    currentTrack,
+                    state.audioQuality,
+                    currentPlaybackPartLabel(state),
+                    state.audioDecoderInfo,
+                )
                 Text(
                     text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
                     style = MaterialTheme.typography.bodyLarge,
@@ -409,7 +419,12 @@ enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
-fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?, partLabel: String?) {
+fun PlayerTitleBlock(
+    track: MusicTrack?,
+    audioQuality: String?,
+    partLabel: String?,
+    audioDecoderInfo: AudioDecoderInfo?,
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -429,13 +444,18 @@ fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?, partLabel: Strin
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PlayerInfoTags(track, audioQuality)
+        PlayerInfoTags(track, audioQuality, audioDecoderInfo)
     }
 }
 
 @Composable
-fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
+fun PlayerInfoTags(
+    track: MusicTrack?,
+    audioQuality: String?,
+    audioDecoderInfo: AudioDecoderInfo?,
+) {
     var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
+    var showAudioDecoderInfo by remember(audioDecoderInfo) { mutableStateOf(false) }
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -453,11 +473,36 @@ fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
         audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(it.uppercase())
         }
+        audioDecoderInfo?.let { decoderInfo ->
+            InfoTag(
+                text = if (decoderInfo.type == AudioDecoderType.Hardware) "HW" else "SW",
+                onClick = { showAudioDecoderInfo = true },
+            )
+        }
     }
     replacementInfoTrack?.let { infoTrack ->
         ReplacementInfoDialog(
             track = infoTrack,
             onDismiss = { replacementInfoTrack = null },
+        )
+    }
+    audioDecoderInfo?.let { decoderInfo ->
+        if (!showAudioDecoderInfo) return@let
+        AlertDialog(
+            onDismissRequest = { showAudioDecoderInfo = false },
+            title = { Text("音频解码") },
+            text = {
+                Text(
+                    text = "当前音频正在使用${
+                        if (decoderInfo.type == AudioDecoderType.Hardware) "硬件解码" else "软件解码"
+                    }\n解码器：${decoderInfo.name}",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showAudioDecoderInfo = false }) {
+                    Text("知道了")
+                }
+            },
         )
     }
 }

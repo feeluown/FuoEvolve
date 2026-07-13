@@ -2,7 +2,9 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaCodecList
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
@@ -18,10 +20,14 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
 class FuoPlaybackService : MediaSessionService() {
@@ -38,6 +44,19 @@ class FuoPlaybackService : MediaSessionService() {
             .setRenderersFactory(renderersFactory)
             .build()
             .also { player ->
+                player.addAnalyticsListener(object : AnalyticsListener {
+                    override fun onAudioDecoderInitialized(
+                        eventTime: AnalyticsListener.EventTime,
+                        decoderName: String,
+                        initializedTimestampMs: Long,
+                        initializationDurationMs: Long,
+                    ) {
+                        mutableAudioDecoderInfo.value = AudioDecoderInfo(
+                            type = decoderName.toAudioDecoderType(),
+                            name = decoderName,
+                        )
+                    }
+                })
                 player.addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         val item = player.currentMediaItem
@@ -94,6 +113,7 @@ class FuoPlaybackService : MediaSessionService() {
             ACTION_RESUME -> player?.play()
             ACTION_STOP -> {
                 player?.stop()
+                mutableAudioDecoderInfo.value = null
                 stopSelf()
             }
         }
@@ -107,11 +127,13 @@ class FuoPlaybackService : MediaSessionService() {
         }
         mediaSession = null
         player = null
+        mutableAudioDecoderInfo.value = null
         super.onDestroy()
     }
 
     @OptIn(UnstableApi::class)
     private fun playPayload(raw: String) {
+        mutableAudioDecoderInfo.value = null
         val payload = JSONObject(raw)
         val url = payload.getString("url")
         require(url.isNotBlank()) { "Playback URL is blank" }
@@ -194,6 +216,27 @@ class FuoPlaybackService : MediaSessionService() {
         return scheme == "http" || scheme == "https"
     }
 
+    private fun String.toAudioDecoderType(): AudioDecoderType {
+        val codecInfo = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+            .firstOrNull { it.name.equals(this, ignoreCase = true) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && codecInfo != null) {
+            return if (codecInfo.isHardwareAccelerated) {
+                AudioDecoderType.Hardware
+            } else {
+                AudioDecoderType.Software
+            }
+        }
+        return if (
+            startsWith("ffmpeg", ignoreCase = true) ||
+            startsWith("omx.google.", ignoreCase = true) ||
+            startsWith("c2.android.", ignoreCase = true)
+        ) {
+            AudioDecoderType.Software
+        } else {
+            AudioDecoderType.Hardware
+        }
+    }
+
     private fun String.playbackPayloadSummary(): String {
         return runCatching {
             val payload = JSONObject(this)
@@ -263,6 +306,9 @@ class FuoPlaybackService : MediaSessionService() {
 
         @Volatile
         var transportControls: TransportControls? = null
+
+        private val mutableAudioDecoderInfo = MutableStateFlow<AudioDecoderInfo?>(null)
+        val audioDecoderInfo: StateFlow<AudioDecoderInfo?> = mutableAudioDecoderInfo.asStateFlow()
 
         fun play(context: Context, payload: String) {
             start(context, Intent(context, FuoPlaybackService::class.java).apply {
