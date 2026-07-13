@@ -10,8 +10,9 @@ jobs:
   build-debug-app:
     name: Build debug iOS app
     runs-on: macos-15
-    continue-on-error: true
     timeout-minutes: 45
+    env:
+      PYTHON_APPLE_SUPPORT_TAG: 3.12-b8
 
     steps:
       - name: Checkout
@@ -23,8 +24,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: iosApp/python/requirements-ios.txt
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache iOS Python distribution
+        uses: actions/cache@v4
+        with:
+          path: build/ios-python
+          key: ${{ runner.os }}-${{ runner.arch }}-python-apple-support-${{ env.PYTHON_APPLE_SUPPORT_TAG }}
+
+      - name: Prepare iOS Python runtime
+        run: bash scripts/prepare-ios-python.sh
 
       - name: Build debug simulator app
         run: |
