@@ -17,7 +17,7 @@ marshmallow==3.26.2
 mutagen
 packaging
 pydantic==1.10.26
-pycryptodome==3.21.0
+pyaes==1.6.1
 pytz
 qasync
 requests

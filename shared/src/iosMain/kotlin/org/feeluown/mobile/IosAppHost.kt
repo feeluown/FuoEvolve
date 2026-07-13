@@ -8,28 +8,54 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import platform.UIKit.UIViewController
 
-fun MainViewController(): UIViewController = ComposeUIViewController {
-    IosApp()
+fun MainViewController(
+    pythonRuntime: IosPythonRuntime,
+    audioOutput: IosAudioOutput,
+    videoOutput: IosVideoOutput,
+    mediaLibraryOutput: IosMediaLibraryOutput,
+    downloadOutput: IosDownloadOutput,
+    webLoginOutput: IosWebLoginOutput,
+    shareOutput: IosShareOutput,
+): UIViewController = ComposeUIViewController {
+    IosApp(pythonRuntime, audioOutput, videoOutput, mediaLibraryOutput, downloadOutput, webLoginOutput, shareOutput)
 }
 
 @Composable
-private fun IosApp() {
-    val container = remember { IosAppContainer() }
+private fun IosApp(
+    pythonRuntime: IosPythonRuntime,
+    audioOutput: IosAudioOutput,
+    videoOutput: IosVideoOutput,
+    mediaLibraryOutput: IosMediaLibraryOutput,
+    downloadOutput: IosDownloadOutput,
+    webLoginOutput: IosWebLoginOutput,
+    shareOutput: IosShareOutput,
+) {
+    IosVideoOutputHolder.output = videoOutput
+    val container = remember {
+        IosAppContainer(pythonRuntime, audioOutput, mediaLibraryOutput, downloadOutput, webLoginOutput)
+    }
     AppRoot(
         controller = container.controller,
         hasAudioPermission = container.hasAudioPermission,
         onRequestAudioPermission = container::requestAudioPermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
         onLogoutProvider = container::logoutProvider,
+        onShareText = shareOutput::share,
     )
 }
 
-private class IosAppContainer {
+private class IosAppContainer(
+    pythonRuntime: IosPythonRuntime,
+    audioOutput: IosAudioOutput,
+    mediaLibraryOutput: IosMediaLibraryOutput,
+    downloadOutput: IosDownloadOutput,
+    private val webLoginOutput: IosWebLoginOutput,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val providerRepository = IosFuoCoreBridge()
-    private val localRepository = IosLocalMusicRepository()
-    private val downloadRepository = IosDownloadRepository(providerRepository)
-    private val playbackEngine = IosNativeAudioEngine(scope)
+    private val providerRepository = IosFuoCoreBridge(pythonRuntime)
+    private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
+    private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
+    private val playbackEngine = IosNativeAudioEngine(scope, audioOutput)
     private val settingsStore = IosAppSettingsStore()
     private val playbackQueueStore = IosPlaybackQueueStore()
     private val resourceCacheRepository = IosResourceCacheRepository()
@@ -56,12 +82,24 @@ private class IosAppContainer {
     }
 
     fun openProviderWebLogin(provider: ProviderInfo) {
-        // Web cookie extraction is owned by the Swift host in the Xcode target.
-        // Until that host callback is wired, users can still paste Cookie/Header values in settings.
-        controller.onProviderLoginModeChange(ProviderLoginMode.Cookie)
+        val loginConfig = provider.loginConfig ?: return
+        val groupsJson = loginConfig.cookieKeyGroups.joinToString(prefix = "[", postfix = "]") { group ->
+            group.joinToString(prefix = "[\"", postfix = "\"]", separator = "\",\"")
+        }
+        webLoginOutput.open(
+            provider.providerId,
+            provider.providerName,
+            loginConfig.loginUrl,
+            groupsJson,
+        ) { cookiesJson ->
+            if (!cookiesJson.isNullOrBlank()) {
+                controller.loginProviderWithCookies(provider.providerId, cookiesJson)
+            }
+        }
     }
 
     fun logoutProvider(provider: ProviderInfo) {
+        webLoginOutput.clear()
         controller.logoutProvider(provider.providerId)
     }
 }

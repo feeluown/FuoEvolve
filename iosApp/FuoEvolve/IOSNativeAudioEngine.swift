@@ -1,17 +1,44 @@
 import AVFoundation
+import AVKit
 import MediaPlayer
+import Shared
+import WebKit
 
-final class IOSNativeAudioEngine: NativeAudioEngine {
+final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
+    static let shared = IOSNativeAudioEngine()
     private let player = AVPlayer()
     private var currentPayload: PlaybackPayload?
+    private var didReachEnd = false
+    private var playbackError: String?
+    private var endObserver: NSObjectProtocol?
 
-    init() {
+    override init() {
+        super.init()
         configureAudioSession()
         configureRemoteCommands()
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, notification.object as? AVPlayerItem === self.player.currentItem else { return }
+            self.didReachEnd = true
+        }
+    }
+
+    deinit {
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+        }
     }
 
     func play(_ payload: PlaybackPayload) {
-        guard let url = URL(string: payload.url) else { return }
+        guard let url = preferredMediaURL(payload.url) else {
+            playbackError = "音频地址无效"
+            return
+        }
+        didReachEnd = false
+        playbackError = nil
         currentPayload = payload
         var assetOptions: [String: Any] = [:]
         if !payload.headers.isEmpty {
@@ -23,12 +50,82 @@ final class IOSNativeAudioEngine: NativeAudioEngine {
         player.play()
     }
 
+    func play(url: String, headers: [String: String], title: String, artists: String, album: String) {
+        play(PlaybackPayload(url: url, title: title, artists: artists, album: album, source: "", headers: headers, coverUrl: nil))
+    }
+
     func pause() {
         player.pause()
     }
 
     func resume() {
         player.play()
+    }
+
+    func stop() {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        didReachEnd = false
+        playbackError = nil
+    }
+
+    func seekTo(positionMs: Int64) {
+        didReachEnd = false
+        player.seek(to: CMTime(value: positionMs, timescale: 1000))
+    }
+
+    func playbackStatus() -> String {
+        if playbackError != nil || player.currentItem?.status == .failed {
+            return "Error"
+        }
+        if didReachEnd {
+            return "Ended"
+        }
+        guard player.currentItem != nil else {
+            return "Idle"
+        }
+        switch player.timeControlStatus {
+        case .waitingToPlayAtSpecifiedRate:
+            return "Loading"
+        case .playing:
+            return "Playing"
+        case .paused:
+            return "Paused"
+        @unknown default:
+            return "Paused"
+        }
+    }
+
+    func positionMs() -> Int64 {
+        milliseconds(player.currentTime())
+    }
+
+    func durationMs() -> Int64 {
+        guard let duration = player.currentItem?.duration else { return 0 }
+        return milliseconds(duration)
+    }
+
+    func bufferedMs() -> Int64 {
+        guard let range = player.currentItem?.loadedTimeRanges.last?.timeRangeValue else { return 0 }
+        return milliseconds(CMTimeAdd(range.start, range.duration))
+    }
+
+    func errorMessage() -> String? {
+        playbackError ?? player.currentItem?.error?.localizedDescription
+    }
+
+    private func milliseconds(_ time: CMTime) -> Int64 {
+        let seconds = CMTimeGetSeconds(time)
+        guard seconds.isFinite, seconds > 0 else { return 0 }
+        return Int64(seconds * 1000)
+    }
+
+    private func preferredMediaURL(_ rawURL: String) -> URL? {
+        guard !rawURL.isEmpty, var components = URLComponents(string: rawURL) else { return nil }
+        if components.scheme == "http", components.host?.hasSuffix(".qqmusic.qq.com") == true {
+            components.scheme = "https"
+        }
+        return components.url
     }
 
     private func configureAudioSession() {
@@ -58,5 +155,367 @@ final class IOSNativeAudioEngine: NativeAudioEngine {
             MPMediaItemPropertyArtist: payload.artists,
             MPMediaItemPropertyAlbumTitle: payload.album,
         ]
+    }
+}
+
+final class IOSNativeVideoOutput: NSObject, IosVideoOutput {
+    static let shared = IOSNativeVideoOutput()
+
+    func makePlayer(
+        url: String,
+        videoUrl: String,
+        audioUrl: String,
+        headers: [String: String]
+    ) -> UIViewController {
+        let controller = FuoVideoViewController()
+        configure(controller, url: url, videoUrl: videoUrl, audioUrl: audioUrl, headers: headers)
+        return controller
+    }
+
+    func updatePlayer(
+        viewController: UIViewController,
+        url: String,
+        videoUrl: String,
+        audioUrl: String,
+        headers: [String: String]
+    ) {
+        guard let controller = viewController as? FuoVideoViewController else { return }
+        configure(controller, url: url, videoUrl: videoUrl, audioUrl: audioUrl, headers: headers)
+    }
+
+    func releasePlayer(viewController: UIViewController) {
+        guard let controller = viewController as? AVPlayerViewController else { return }
+        controller.player?.pause()
+        controller.player = nil
+    }
+
+    private func configure(
+        _ controller: FuoVideoViewController,
+        url: String,
+        videoUrl: String,
+        audioUrl: String,
+        headers: [String: String]
+    ) {
+        let signature = [url, videoUrl, audioUrl, headers.description].joined(separator: "|")
+        guard controller.payloadSignature != signature else { return }
+        controller.payloadSignature = signature
+        controller.player?.pause()
+        controller.player = makePlayer(url: url, videoUrl: videoUrl, audioUrl: audioUrl, headers: headers)
+        controller.player?.play()
+    }
+
+    private func makePlayer(
+        url: String,
+        videoUrl: String,
+        audioUrl: String,
+        headers: [String: String]
+    ) -> AVPlayer? {
+        if let mediaURL = URL(string: url), !url.isEmpty {
+            return AVPlayer(playerItem: AVPlayerItem(asset: asset(url: mediaURL, headers: headers)))
+        }
+        guard
+            let videoMediaURL = URL(string: videoUrl),
+            let audioMediaURL = URL(string: audioUrl),
+            !videoUrl.isEmpty,
+            !audioUrl.isEmpty
+        else {
+            return nil
+        }
+        let videoAsset = asset(url: videoMediaURL, headers: headers)
+        let audioAsset = asset(url: audioMediaURL, headers: headers)
+        guard
+            let videoTrack = videoAsset.tracks(withMediaType: .video).first,
+            let audioTrack = audioAsset.tracks(withMediaType: .audio).first
+        else {
+            return nil
+        }
+        let composition = AVMutableComposition()
+        guard
+            let compositionVideo = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ),
+            let compositionAudio = composition.addMutableTrack(
+                withMediaType: .audio,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            )
+        else {
+            return nil
+        }
+        do {
+            try compositionVideo.insertTimeRange(
+                CMTimeRange(start: .zero, duration: videoAsset.duration),
+                of: videoTrack,
+                at: .zero
+            )
+            try compositionAudio.insertTimeRange(
+                CMTimeRange(start: .zero, duration: audioAsset.duration),
+                of: audioTrack,
+                at: .zero
+            )
+            compositionVideo.preferredTransform = videoTrack.preferredTransform
+            return AVPlayer(playerItem: AVPlayerItem(asset: composition))
+        } catch {
+            return nil
+        }
+    }
+
+    private func asset(url: URL, headers: [String: String]) -> AVURLAsset {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        if components?.scheme == "http", components?.host?.hasSuffix(".qqmusic.qq.com") == true {
+            components?.scheme = "https"
+        }
+        let resolvedURL = components?.url ?? url
+        let options: [String: Any]? = headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        return AVURLAsset(url: resolvedURL, options: options)
+    }
+}
+
+private final class FuoVideoViewController: AVPlayerViewController {
+    var payloadSignature = ""
+}
+
+final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
+    static let shared = IOSMediaLibraryOutput()
+
+    func hasPermission() -> Bool {
+        MPMediaLibrary.authorizationStatus() == .authorized
+    }
+
+    func requestPermission(completionHandler: @escaping @Sendable (KotlinBoolean) -> Void) {
+        if hasPermission() {
+            completionHandler(KotlinBoolean(bool: true))
+            return
+        }
+        MPMediaLibrary.requestAuthorization { status in
+            DispatchQueue.main.async {
+                completionHandler(KotlinBoolean(bool: status == .authorized))
+            }
+        }
+    }
+
+    func tracksJson() -> String {
+        let tracks: [[String: Any]] = (MPMediaQuery.songs().items ?? []).compactMap { item in
+            guard let assetURL = item.assetURL else { return nil }
+            return [
+                "id": String(item.persistentID),
+                "title": item.title ?? "",
+                "artists": item.artist ?? "",
+                "album": item.albumTitle ?? "",
+                "duration_ms": Int64(item.playbackDuration * 1000),
+                "local_uri": assetURL.absoluteString,
+            ]
+        }
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: ["tracks": tracks]),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            return #"{"tracks":[]}"#
+        }
+        return json
+    }
+}
+
+final class IOSDownloadOutput: NSObject, IosDownloadOutput {
+    static let shared = IOSDownloadOutput()
+
+    func download(
+        url: String,
+        headers: [String: String],
+        fileName: String,
+        lyrics: String?,
+        completionHandler: @escaping (String?, String?) -> Void
+    ) {
+        guard let sourceURL = URL(string: url) else {
+            completionHandler(nil, "下载地址无效")
+            return
+        }
+        var request = URLRequest(url: sourceURL)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        URLSession.shared.downloadTask(with: request) { temporaryURL, _, error in
+            if let error {
+                DispatchQueue.main.async { completionHandler(nil, error.localizedDescription) }
+                return
+            }
+            guard let temporaryURL else {
+                DispatchQueue.main.async { completionHandler(nil, "下载文件为空") }
+                return
+            }
+            do {
+                let directory = try self.downloadDirectory()
+                let target = directory.appendingPathComponent(fileName)
+                if FileManager.default.fileExists(atPath: target.path) {
+                    try FileManager.default.removeItem(at: target)
+                }
+                try FileManager.default.moveItem(at: temporaryURL, to: target)
+                if let lyrics, !lyrics.isEmpty {
+                    let lyricsURL = target.deletingPathExtension().appendingPathExtension("lrc")
+                    try? lyrics.write(to: lyricsURL, atomically: true, encoding: .utf8)
+                }
+                DispatchQueue.main.async { completionHandler(target.absoluteString, nil) }
+            } catch {
+                DispatchQueue.main.async { completionHandler(nil, error.localizedDescription) }
+            }
+        }.resume()
+    }
+
+    func delete(uri: String) -> Bool {
+        guard let url = URL(string: uri) else { return false }
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            let lyricsURL = url.deletingPathExtension().appendingPathExtension("lrc")
+            if FileManager.default.fileExists(atPath: lyricsURL.path) {
+                try? FileManager.default.removeItem(at: lyricsURL)
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func downloadDirectory() throws -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let directory = documents.appendingPathComponent("FeelUOwn", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}
+
+final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
+    static let shared = IOSWebLoginOutput()
+    weak var hostViewController: UIViewController?
+
+    func open(
+        providerId: String,
+        providerName: String,
+        loginUrl: String,
+        cookieKeyGroupsJson: String,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        DispatchQueue.main.async {
+            guard let url = URL(string: loginUrl), let presenter = Self.topViewController() else {
+                completionHandler(nil)
+                return
+            }
+            let groups = (try? JSONSerialization.jsonObject(with: Data(cookieKeyGroupsJson.utf8)))
+                as? [[String]] ?? []
+            let login = FuoWebLoginViewController(
+                providerName: providerName,
+                url: url,
+                requiredCookieGroups: groups,
+                completion: completionHandler
+            )
+            presenter.present(UINavigationController(rootViewController: login), animated: true)
+        }
+    }
+
+    func clear() {
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+            cookies.forEach { WKWebsiteDataStore.default().httpCookieStore.delete($0) }
+        }
+    }
+
+    fileprivate static func topViewController() -> UIViewController? {
+        let sceneController = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController
+        var controller = shared.hostViewController ?? sceneController
+        while true {
+            if let presented = controller?.presentedViewController {
+                controller = presented
+            } else if let navigation = controller as? UINavigationController {
+                controller = navigation.visibleViewController
+            } else if let tabs = controller as? UITabBarController {
+                controller = tabs.selectedViewController
+            } else {
+                return controller
+            }
+        }
+    }
+}
+
+final class IOSShareOutput: NSObject, IosShareOutput {
+    static let shared = IOSShareOutput()
+
+    func share(text: String) {
+        guard let presenter = IOSWebLoginOutput.topViewController() else { return }
+        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = presenter.view
+        activity.popoverPresentationController?.sourceRect = CGRect(
+            x: presenter.view.bounds.midX,
+            y: presenter.view.bounds.midY,
+            width: 1,
+            height: 1
+        )
+        presenter.present(activity, animated: true)
+    }
+}
+
+private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate {
+    private let webView = WKWebView(frame: .zero)
+    private let requiredCookieGroups: [[String]]
+    private let completion: (String?) -> Void
+
+    init(
+        providerName: String,
+        url: URL,
+        requiredCookieGroups: [[String]],
+        completion: @escaping (String?) -> Void
+    ) {
+        self.requiredCookieGroups = requiredCookieGroups
+        self.completion = completion
+        super.init(nibName: nil, bundle: nil)
+        title = providerName
+        webView.navigationDelegate = self
+        webView.load(URLRequest(url: url))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = webView
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(cancel)
+        )
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done,
+            target: self,
+            action: #selector(done)
+        )
+    }
+
+    @objc private func cancel() {
+        dismiss(animated: true) { self.completion(nil) }
+    }
+
+    @objc private func done() {
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            let values = Dictionary(uniqueKeysWithValues: cookies.map { ($0.name, $0.value) })
+            let valid = self.requiredCookieGroups.isEmpty || self.requiredCookieGroups.contains { group in
+                group.allSatisfy { !(values[$0] ?? "").isEmpty }
+            }
+            guard valid,
+                  let data = try? JSONSerialization.data(withJSONObject: values),
+                  let json = String(data: data, encoding: .utf8)
+            else {
+                return
+            }
+            DispatchQueue.main.async {
+                self.dismiss(animated: true) { self.completion(json) }
+            }
+        }
     }
 }

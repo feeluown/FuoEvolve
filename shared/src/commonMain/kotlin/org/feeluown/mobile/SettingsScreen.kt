@@ -391,6 +391,21 @@ fun ProviderLoginPanel(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            val authFeedback = controller.message.takeIf { message ->
+                message.contains(provider.providerName) ||
+                    message.contains("音源运行时尚未接入")
+            }
+            authFeedback?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (authState.isLoggedIn) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
             if (authState.isLoggedIn) {
                 Button(
                     enabled = !controller.isLoading,
