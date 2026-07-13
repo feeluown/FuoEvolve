@@ -37,8 +37,11 @@ class IosAppSettingsStore : AppSettingsStore {
             smartReplacementUseReplacementMetadata = boolValue(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA, false),
             smartReplacementUseReplacementLyrics = boolValue(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, false),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
-            showPlaybackSpectrum = boolValue(KEY_SHOW_PLAYBACK_SPECTRUM, true),
-            playbackSpectrumStyle = enumValue(KEY_PLAYBACK_SPECTRUM_STYLE, PlaybackSpectrumStyle.Bars),
+            playbackSpectrumStyle = if (boolValue(KEY_SHOW_PLAYBACK_SPECTRUM, true)) {
+                enumValue(KEY_PLAYBACK_SPECTRUM_STYLE, PlaybackSpectrumStyle.None)
+            } else {
+                PlaybackSpectrumStyle.None
+            },
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
@@ -68,7 +71,7 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setBool(settings.smartReplacementUseReplacementMetadata, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA)
             defaults.setBool(settings.smartReplacementUseReplacementLyrics, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS)
             defaults.setObject(settings.lyricFontSize.name, KEY_LYRIC_FONT_SIZE)
-            defaults.setBool(settings.showPlaybackSpectrum, KEY_SHOW_PLAYBACK_SPECTRUM)
+            defaults.removeObjectForKey(KEY_SHOW_PLAYBACK_SPECTRUM)
             defaults.setObject(settings.playbackSpectrumStyle.name, KEY_PLAYBACK_SPECTRUM_STYLE)
             defaults.setObject(settings.themeMode.name, KEY_THEME_MODE)
             defaults.setObject(settings.themeColorScheme.name, KEY_THEME_COLOR_SCHEME)

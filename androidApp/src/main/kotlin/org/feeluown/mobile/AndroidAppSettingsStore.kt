@@ -54,8 +54,11 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 false,
             ),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
-            showPlaybackSpectrum = preferences.getBoolean(KEY_SHOW_PLAYBACK_SPECTRUM, true),
-            playbackSpectrumStyle = enumValue(KEY_PLAYBACK_SPECTRUM_STYLE, PlaybackSpectrumStyle.Bars),
+            playbackSpectrumStyle = if (preferences.getBoolean(KEY_SHOW_PLAYBACK_SPECTRUM, true)) {
+                enumValue(KEY_PLAYBACK_SPECTRUM_STYLE, PlaybackSpectrumStyle.None)
+            } else {
+                PlaybackSpectrumStyle.None
+            },
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
@@ -91,7 +94,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 )
                 .putBoolean(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, settings.smartReplacementUseReplacementLyrics)
                 .putString(KEY_LYRIC_FONT_SIZE, settings.lyricFontSize.name)
-                .putBoolean(KEY_SHOW_PLAYBACK_SPECTRUM, settings.showPlaybackSpectrum)
+                .remove(KEY_SHOW_PLAYBACK_SPECTRUM)
                 .putString(KEY_PLAYBACK_SPECTRUM_STYLE, settings.playbackSpectrumStyle.name)
                 .putString(KEY_THEME_MODE, settings.themeMode.name)
                 .putString(KEY_THEME_COLOR_SCHEME, settings.themeColorScheme.name)

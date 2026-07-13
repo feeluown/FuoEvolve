@@ -1869,6 +1869,7 @@ class FuoPlayerControllerTest {
 
     @Test
     fun restoresAndPersistsSettings() = runTest {
+        assertEquals(PlaybackSpectrumStyle.None, AppSettings().playbackSpectrumStyle)
         val store = FakeSettingsStore(
             AppSettings(
                 homeSection = HomeSection.Mine,
@@ -1895,8 +1896,7 @@ class FuoPlayerControllerTest {
                 smartReplacementUseReplacementMetadata = true,
                 smartReplacementUseReplacementLyrics = true,
                 lyricFontSize = LyricFontSize.Large,
-                showPlaybackSpectrum = false,
-                playbackSpectrumStyle = PlaybackSpectrumStyle.MirrorBars,
+                playbackSpectrumStyle = PlaybackSpectrumStyle.None,
                 themeMode = ThemeMode.Dark,
                 themeColorScheme = ThemeColorScheme.OceanBlue,
             ),
@@ -1946,8 +1946,7 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.smartReplacementUseReplacementMetadata)
             assertEquals(true, controller.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Large, controller.lyricFontSize)
-            assertEquals(false, controller.showPlaybackSpectrum)
-            assertEquals(PlaybackSpectrumStyle.MirrorBars, controller.playbackSpectrumStyle)
+            assertEquals(PlaybackSpectrumStyle.None, controller.playbackSpectrumStyle)
             assertEquals(ThemeMode.Dark, controller.themeMode)
             assertEquals(ThemeColorScheme.OceanBlue, controller.themeColorScheme)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
@@ -1969,7 +1968,6 @@ class FuoPlayerControllerTest {
             controller.onSmartReplacementUseReplacementMetadataChange(false)
             controller.onSmartReplacementUseReplacementLyricsChange(false)
             controller.onLyricFontSizeChange(LyricFontSize.Medium)
-            controller.onShowPlaybackSpectrumChange(true)
             controller.onPlaybackSpectrumStyleChange(PlaybackSpectrumStyle.Wave)
             controller.onThemeModeChange(ThemeMode.Light)
             controller.onThemeColorSchemeChange(ThemeColorScheme.FuoGreen)
@@ -1997,7 +1995,6 @@ class FuoPlayerControllerTest {
             assertEquals(false, store.saved.smartReplacementUseReplacementMetadata)
             assertEquals(false, store.saved.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
-            assertEquals(true, store.saved.showPlaybackSpectrum)
             assertEquals(PlaybackSpectrumStyle.Wave, store.saved.playbackSpectrumStyle)
             assertEquals(ThemeMode.Light, store.saved.themeMode)
             assertEquals(ThemeColorScheme.FuoGreen, store.saved.themeColorScheme)

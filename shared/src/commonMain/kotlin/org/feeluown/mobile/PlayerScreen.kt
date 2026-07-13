@@ -486,7 +486,7 @@ fun PlayerSharedCover(track: MusicTrack, heroEnabled: Boolean, modifier: Modifie
 
 @Composable
 fun FullPlayerSpectrum(controller: FuoPlayerController, modifier: Modifier = Modifier) {
-    if (!controller.showPlaybackSpectrum) return
+    if (controller.playbackSpectrumStyle == PlaybackSpectrumStyle.None) return
     AudioSpectrumLines(
         levels = controller.playbackState.spectrumLevels,
         isPlaying = controller.playbackState.status == PlayerStatus.Playing,
@@ -511,6 +511,7 @@ fun AudioSpectrumLines(
         val spacing = size.width / (count * 2f)
         val strokeWidth = (spacing * 0.48f).coerceAtLeast(1f)
         when (style) {
+            PlaybackSpectrumStyle.None -> Unit
             PlaybackSpectrumStyle.Bars,
             PlaybackSpectrumStyle.MirrorBars -> levels.forEachIndexed { index, level ->
                 val normalized = 0.18f + level.coerceIn(0f, 1f) * 0.82f

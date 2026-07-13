@@ -695,40 +695,23 @@ fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    modifier = Modifier.weight(1f),
-                    text = "显示播放频谱",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Checkbox(
-                    checked = controller.showPlaybackSpectrum,
-                    onCheckedChange = controller::onShowPlaybackSpectrumChange,
-                )
-            }
-            if (controller.showPlaybackSpectrum) {
-                Text(
-                    text = "频谱样式",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    PlaybackSpectrumStyle.entries.forEachIndexed { index, style ->
-                        SegmentedButton(
-                            selected = controller.playbackSpectrumStyle == style,
-                            onClick = { controller.onPlaybackSpectrumStyleChange(style) },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = PlaybackSpectrumStyle.entries.size,
-                            ),
-                            colors = settingsSegmentedButtonColors(),
-                        ) {
-                            Text(style.label)
-                        }
+            Text(
+                text = "频谱样式",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                PlaybackSpectrumStyle.entries.forEachIndexed { index, style ->
+                    SegmentedButton(
+                        selected = controller.playbackSpectrumStyle == style,
+                        onClick = { controller.onPlaybackSpectrumStyleChange(style) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = PlaybackSpectrumStyle.entries.size,
+                        ),
+                        colors = settingsSegmentedButtonColors(),
+                    ) {
+                        Text(style.label)
                     }
                 }
             }
