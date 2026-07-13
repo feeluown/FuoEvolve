@@ -52,6 +52,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeature?) {
     feature ?: return
+    val content = controller.selectedFeatureContent
+    val contentCount = content?.let {
+        maxOf(it.tracks.size, it.playlists.size, it.mediaItems.size, it.videos.size)
+    } ?: controller.selectedFeatureTracks.size
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -102,7 +106,7 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = listOf(feature.providerName, "${controller.selectedFeatureTracks.size} 首")
+                        text = listOf(feature.providerName, "${contentCount} 项")
                             .joinToString(" · "),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -129,8 +133,9 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    SelectedFeatureTrackList(
+                    SelectedFeatureContent(
                         controller = controller,
+                        content = content,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
@@ -154,7 +159,7 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
             ) {
                 Text(
                     modifier = Modifier.weight(1f),
-                    text = listOf(feature.providerName, "${controller.selectedFeatureTracks.size} 首")
+                    text = listOf(feature.providerName, "${contentCount} 项")
                         .joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -176,51 +181,55 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            LazyColumn(
+            SelectedFeatureContent(
+                controller = controller,
+                content = content,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-            ) {
-                if (controller.selectedFeatureTracks.isEmpty() && !controller.isLoading && controller.selectedFeatureError == null) {
-                    item {
-                        ProviderContentMessage("暂无歌曲")
-                    }
-                } else {
-                    itemsIndexed(controller.selectedFeatureTracks, key = { _, item -> item.id }) { index, track ->
-                        LaunchedEffect(index, controller.selectedFeatureTracks.size) {
-                            controller.prefetchSelectedFeatureIfNeeded(index)
-                        }
-                        TrackRow(
-                            track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playFromSelectedFeature(index) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                            onOpenDetail = trackDetailAction(controller, track),
-                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
-                        )
-                        HorizontalDivider()
-                    }
-                }
-            }
+            )
         }
     }
 }
 
 @Composable
-fun SelectedFeatureTrackList(controller: FuoPlayerController, modifier: Modifier) {
-    TrackCollectionList(
-        controller = controller,
-        tracks = controller.selectedFeatureTracks,
-        emptyMessage = "暂无歌曲",
-        showEmpty = !controller.isLoading && controller.selectedFeatureError == null,
-        modifier = modifier,
-        onClick = controller::playFromSelectedFeature,
-        onItemVisible = controller::prefetchSelectedFeatureIfNeeded,
-    )
+fun SelectedFeatureContent(
+    controller: FuoPlayerController,
+    content: ProviderContentSection?,
+    modifier: Modifier,
+) {
+    when {
+        content?.playlists?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
+            item {
+                ProviderPlaylistGrid(
+                    playlists = content.playlists,
+                    onClick = { controller.openPlaylist(it, content.feature.category) },
+                )
+            }
+        }
+        content?.mediaItems?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
+            item {
+                ProviderMediaItemGrid(
+                    items = content.mediaItems,
+                    onClick = controller::openMediaItem,
+                )
+            }
+        }
+        content?.videos?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
+            item {
+                ProviderVideoList(videos = content.videos, onClick = controller::openVideo)
+            }
+        }
+        else -> TrackCollectionList(
+            controller = controller,
+            tracks = controller.selectedFeatureTracks,
+            emptyMessage = "暂无内容",
+            showEmpty = !controller.isLoading && controller.selectedFeatureError == null,
+            modifier = modifier,
+            onClick = controller::playFromSelectedFeature,
+            onItemVisible = controller::prefetchSelectedFeatureIfNeeded,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

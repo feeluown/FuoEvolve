@@ -70,12 +70,35 @@ fun ProviderContentHomeSection(
                     item {
                         EmptyProviderContentHint(title)
                     }
+                } else if (section == HomeSection.Music) {
+                    if (visibleSections.isNotEmpty()) {
+                        item(key = "header:explore") {
+                            ProviderFeatureHeader(
+                                feature = visibleSections.first().feature,
+                                title = "探索",
+                                providerLabel = visibleSections
+                                    .map { it.feature.providerName }
+                                    .distinct()
+                                    .joinToString(" / "),
+                            )
+                        }
+                        item(key = "explore-grid") {
+                            ProviderFeatureCoverGrid(
+                                features = visibleSections.map { it.feature },
+                                onClick = controller::openFeature,
+                            )
+                        }
+                    }
                 } else {
                     val forYouSections = visibleSections.filter {
-                        it.feature.isDailySongs() || it.feature.isPrivateFm()
+                        it.feature.isDailySongs() ||
+                            it.feature.isPrivateFm() ||
+                            it.feature.isBilibiliRecommendedVideos()
                     }
                     val otherSections = visibleSections.filterNot {
-                        it.feature.isDailySongs() || it.feature.isPrivateFm()
+                        it.feature.isDailySongs() ||
+                            it.feature.isPrivateFm() ||
+                            it.feature.isBilibiliRecommendedVideos()
                     }
                     if (forYouSections.isNotEmpty()) {
                         item(key = "header:for-you") {
@@ -245,6 +268,14 @@ fun ForYouRecommendGrid(
                                 modifier = Modifier.weight(1f),
                             )
                         }
+                        section.feature.isBilibiliRecommendedVideos() -> {
+                            RecommendationEntryButton(
+                                feature = section.feature,
+                                enabled = enabled,
+                                onClick = { onFeatureClick(section.feature) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
                 repeat(columns - row.size) {
@@ -398,6 +429,29 @@ fun DailyRecommendationButton(
             text = "Daily",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+fun RecommendationEntryButton(
+    feature: ProviderFeature,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    RecommendationButton(
+        modifier = modifier
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
+        title = feature.title.ifBlank { "推荐视频" },
+        providerName = feature.providerName,
+    ) {
+        Icon(
+            Icons.Filled.PlayArrow,
+            contentDescription = "打开${feature.providerName}${feature.title}",
+            modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
         )
     }
 }
@@ -713,6 +767,10 @@ fun ProviderFeature.isPrivateFm(): Boolean {
 
 fun ProviderFeature.isDailySongs(): Boolean {
     return id.endsWith("_daily_songs")
+}
+
+fun ProviderFeature.isBilibiliRecommendedVideos(): Boolean {
+    return providerId == "bilibili" && id == "bilibili_recommended_videos"
 }
 
 fun ProviderFeature.toDisplayTrack(): MusicTrack {
