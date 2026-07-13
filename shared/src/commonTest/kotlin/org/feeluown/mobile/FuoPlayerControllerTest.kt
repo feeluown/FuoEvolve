@@ -1658,10 +1658,13 @@ class FuoPlayerControllerTest {
             advanceUntilIdle()
 
             assertEquals(
-                listOf(favoriteArtistsFeature.id),
+                listOf(favoriteArtistsFeature.id, favoriteSongsFeature.id),
                 provider.loadedFeatureIds,
             )
-            assertEquals(favoriteArtists, controller.mineSections[0].mediaItems)
+            assertEquals(
+                favoriteArtists,
+                controller.mineSections.first { it.feature.id == favoriteArtistsFeature.id }.mediaItems,
+            )
         } finally {
             controllerScope.cancel()
         }
@@ -3004,17 +3007,20 @@ class FuoPlayerControllerTest {
             val tracks = section.tracks.drop(offset).take(limit)
             val playlists = section.playlists.drop(offset).take(limit)
             val mediaItems = section.mediaItems.drop(offset).take(limit)
+            val videos = section.videos.drop(offset).take(limit)
             val sourceSize = when (feature.contentType) {
                 ProviderContentType.Songs -> section.tracks.size
                 ProviderContentType.Playlists -> section.playlists.size
                 ProviderContentType.Artists,
                 ProviderContentType.Albums -> section.mediaItems.size
+                ProviderContentType.Videos -> section.videos.size
             }
-            val nextOffset = offset + maxOf(tracks.size, playlists.size, mediaItems.size)
+            val nextOffset = offset + maxOf(tracks.size, playlists.size, mediaItems.size, videos.size)
             return section.copy(
                 tracks = tracks,
                 playlists = playlists,
                 mediaItems = mediaItems,
+                videos = videos,
                 nextOffset = nextOffset,
                 hasMore = nextOffset < sourceSize,
             )

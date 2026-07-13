@@ -11,7 +11,7 @@ from feeluown.media import Media
 ROOT_DIR = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT_DIR / "shared" / "src" / "commonMain" / "python"))
 
-from fuo_mobile.bridge import FuoMobileBridge, provider_capabilities  # noqa: E402
+from fuo_mobile.bridge import FEATURE_DEFS, FuoMobileBridge, provider_capabilities  # noqa: E402
 
 
 class _Library:
@@ -83,6 +83,9 @@ class _Provider:
         )
         self.added = []
         self.removed = []
+        self.disliked = []
+        self.created = []
+        self.deleted = []
 
     def get_current_user_or_none(self):
         return self.user
@@ -106,6 +109,25 @@ class _Provider:
 
     def playlist_remove_song(self, playlist, song):
         self.removed.append((playlist.identifier, song.identifier))
+        return True
+
+    def playlist_create_by_name(self, name):
+        self.created.append(name)
+        return SimpleNamespace(source=self.identifier, identifier="created", name=name)
+
+    def playlist_delete(self, identifier):
+        self.deleted.append(identifier)
+        return True
+
+    def current_user_dislike_create_songs_rd(self):
+        return [self.song]
+
+    def current_user_dislike_add_song(self, song):
+        self.disliked.append(("add", song.identifier))
+        return True
+
+    def current_user_dislike_remove_song(self, song):
+        self.disliked.append(("remove", song.identifier))
         return True
 
     def song_list_similar(self, song):
@@ -134,6 +156,7 @@ class ProviderOperationBridgeTest(unittest.TestCase):
         bridge._playlists = {}
         bridge._media_items = {}
         bridge._videos = {}
+        bridge._dynamic_features = {}
         bridge.app = SimpleNamespace(library=_Library(provider))
         bridge._get_provider = lambda provider_id: provider
         return bridge
@@ -142,10 +165,35 @@ class ProviderOperationBridgeTest(unittest.TestCase):
         provider = _Provider()
         self.assertTrue(provider_capabilities(provider)["can_add_song_to_playlist"])
         self.assertTrue(provider_capabilities(provider)["can_remove_song_from_playlist"])
+        self.assertTrue(provider_capabilities(provider)["can_create_playlist"])
+        self.assertTrue(provider_capabilities(provider)["can_add_disliked_song"])
 
         provider.identifier = "ytmusic"
         self.assertTrue(provider_capabilities(provider)["can_add_song_to_playlist"])
         self.assertFalse(provider_capabilities(provider)["can_remove_song_from_playlist"])
+
+    def test_create_delete_and_dislike_operations(self):
+        provider = _Provider()
+        bridge = self.bridge(provider)
+
+        created = json.loads(bridge.playlist_create("netease", "New List"))
+        deleted = json.loads(bridge.playlist_delete("playlist:netease:playlist1"))
+        disliked = json.loads(bridge.dislike_song("netease:song1", True))
+        restored = json.loads(bridge.dislike_song("netease:song1", False))
+
+        self.assertTrue(created["result"]["success"])
+        self.assertTrue(deleted["success"])
+        self.assertTrue(disliked["success"])
+        self.assertTrue(restored["success"])
+        self.assertEqual(["New List"], provider.created)
+        self.assertEqual(["playlist1"], provider.deleted)
+        self.assertEqual([("add", "song1"), ("remove", "song1")], provider.disliked)
+
+    def test_new_provider_features_are_registered(self):
+        self.assertIn("current_user_cloud_songs", [item["action"] for item in FEATURE_DEFS["netease"]])
+        self.assertIn("current_user_dislike_create_songs_rd", [item["action"] for item in FEATURE_DEFS["qqmusic"]])
+        self.assertIn("most_popular_videos", [item["action"] for item in FEATURE_DEFS["bilibili"]])
+        self.assertIn("weekly_video_playlists", [item["action"] for item in FEATURE_DEFS["bilibili"]])
 
     def test_playlist_targets_require_login(self):
         bridge = self.bridge(_Provider(logged_in=False))

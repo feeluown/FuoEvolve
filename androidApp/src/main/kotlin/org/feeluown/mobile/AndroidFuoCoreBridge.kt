@@ -329,6 +329,33 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun createPlaylist(providerId: String, name: String): ProviderMutationResult {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("playlist_create", providerId, name).toString()
+            JSONObject(raw).optJSONObject("result")?.toMutationResult()
+                ?: JSONObject(raw).toMutationResult()
+        }
+    }
+
+    override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("playlist_delete", playlist.id).toString()
+            JSONObject(raw).toMutationResult()
+        }
+    }
+
+    override suspend fun setSongDisliked(track: MusicTrack, disliked: Boolean): ProviderMutationResult {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge)
+                .callAttr("dislike_song", track.providerId ?: track.id, disliked)
+                .toString()
+            JSONObject(raw).toMutationResult()
+        }
+    }
+
     override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
         initialize()
         return withContext(Dispatchers.IO) {
@@ -452,6 +479,11 @@ class AndroidFuoCoreBridge(
             providerName = optString("provider_name").ifBlank { providerId },
             canAddSongToPlaylist = optBoolean("can_add_song_to_playlist"),
             canRemoveSongFromPlaylist = optBoolean("can_remove_song_from_playlist"),
+            canCreatePlaylist = optBoolean("can_create_playlist"),
+            canDeletePlaylist = optBoolean("can_delete_playlist"),
+            canListDislikedSongs = optBoolean("can_list_disliked_songs"),
+            canAddDislikedSong = optBoolean("can_add_disliked_song"),
+            canRemoveDislikedSong = optBoolean("can_remove_disliked_song"),
             canFavoritePlaylist = optBoolean("can_favorite_playlist"),
             canUnfavoritePlaylist = optBoolean("can_unfavorite_playlist"),
             canFavoriteArtist = optBoolean("can_favorite_artist"),
@@ -479,11 +511,13 @@ class AndroidFuoCoreBridge(
         val tracksArray = optJSONArray("tracks") ?: JSONArray()
         val playlistsArray = optJSONArray("playlists") ?: JSONArray()
         val mediaItemsArray = optJSONArray("media_items") ?: JSONArray()
+        val videosArray = optJSONArray("videos") ?: JSONArray()
         return ProviderContentSection(
             feature = parsedFeature,
             tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
             playlists = List(playlistsArray.length()) { index -> playlistsArray.getJSONObject(index).toPlaylist() },
             mediaItems = List(mediaItemsArray.length()) { index -> mediaItemsArray.getJSONObject(index).toMediaItem() },
+            videos = List(videosArray.length()) { index -> videosArray.getJSONObject(index).toProviderVideo() },
             isLoginRequired = optBoolean("is_login_required"),
             errorMessage = optString("error_message").takeIf { it.isNotBlank() },
             nextOffset = optInt("next_offset"),

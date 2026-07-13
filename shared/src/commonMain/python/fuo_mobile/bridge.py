@@ -277,6 +277,14 @@ FEATURE_DEFS = {
             "action": "current_user_fav_create_songs_rd",
         },
         {
+            "id": "netease_cloud_songs",
+            "title": "云盘歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_cloud_songs",
+        },
+        {
             "id": "netease_favorite_playlists",
             "title": "收藏歌单",
             "category": "MineFavoritePlaylists",
@@ -351,6 +359,14 @@ FEATURE_DEFS = {
             "action": "current_user_fav_create_songs_rd",
         },
         {
+            "id": "qqmusic_disliked_songs",
+            "title": "不喜欢的歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_dislike_create_songs_rd",
+        },
+        {
             "id": "qqmusic_favorite_playlists",
             "title": "收藏歌单",
             "category": "MineFavoritePlaylists",
@@ -376,6 +392,30 @@ FEATURE_DEFS = {
         },
     ],
     "bilibili": [
+        {
+            "id": "bilibili_popular_videos",
+            "title": "热门视频",
+            "category": "Music",
+            "content_type": "Songs",
+            "requires_login": False,
+            "action": "most_popular_videos",
+        },
+        {
+            "id": "bilibili_weekly_video_playlists",
+            "title": "每周必看",
+            "category": "Music",
+            "content_type": "Playlists",
+            "requires_login": False,
+            "action": "weekly_video_playlists",
+        },
+        {
+            "id": "bilibili_recommended_videos",
+            "title": "推荐视频",
+            "category": "Recommend",
+            "content_type": "Videos",
+            "requires_login": True,
+            "action": "rec_a_collection_of_videos",
+        },
         {
             "id": "bilibili_user_playlists",
             "title": "我的歌单",
@@ -515,6 +555,7 @@ class FuoMobileBridge:
         self._playlists: Dict[str, Any] = {}
         self._media_items: Dict[str, Any] = {}
         self._videos: Dict[str, Any] = {}
+        self._dynamic_features: Dict[str, Dict[str, Any]] = {}
         self._saved_login_provider_ids = set()
         self._authenticated_provider_ids = set()
         self._restore_saved_logins()
@@ -535,11 +576,32 @@ class FuoMobileBridge:
 
     def features(self) -> str:
         features = []
+        self._dynamic_features = {}
         for provider_id in self.provider_registry.provider_ids:
             provider = self._raw_provider(provider_id)
             for feature in FEATURE_DEFS.get(provider_id, []):
                 if hasattr(provider, feature["action"]):
                     features.append(feature_to_dict(feature, provider))
+            if hasattr(provider, "rec_list_collections"):
+                try:
+                    for index, collection in enumerate(provider.rec_list_collections() or []):
+                        content_type = collection_content_type(getattr(collection, "type_", None))
+                        if content_type is None:
+                            continue
+                        feature = {
+                            "id": f"{provider_id}_collection_{index}",
+                            "provider_id": provider_id,
+                            "title": getattr(collection, "name", "推荐"),
+                            "category": "Recommend",
+                            "content_type": content_type,
+                            "requires_login": False,
+                            "action": "cached_collection",
+                            "collection": collection,
+                        }
+                        self._dynamic_features[feature["id"]] = feature
+                        features.append(feature_to_dict(feature, provider))
+                except Exception as exc:  # pylint: disable=broad-except
+                    bridge_log(f"load recommendation collections failed provider_id={provider_id}: {exc}")
         return json.dumps({"features": features}, ensure_ascii=False)
 
     def search(self, keyword: str, provider_id: str = "") -> str:
@@ -836,6 +898,7 @@ class FuoMobileBridge:
                     "tracks": [],
                     "playlists": [],
                     "media_items": [],
+                    "videos": [],
                     "is_login_required": True,
                     "error_message": "",
                     "next_offset": 0,
@@ -844,7 +907,7 @@ class FuoMobileBridge:
                 ensure_ascii=False,
             )
         try:
-            tracks, playlists, media_items, title, page = self._load_feature_content(provider, feature, offset, limit)
+            tracks, playlists, media_items, videos, title, page = self._load_feature_content(provider, feature, offset, limit)
             if title:
                 feature_payload["title"] = title
             payload = {
@@ -852,6 +915,7 @@ class FuoMobileBridge:
                 "tracks": tracks,
                 "playlists": playlists,
                 "media_items": media_items,
+                "videos": videos,
                 "is_login_required": False,
                 "error_message": "",
                 "next_offset": page["next_offset"],
@@ -863,6 +927,7 @@ class FuoMobileBridge:
                 "tracks": [],
                 "playlists": [],
                 "media_items": [],
+                "videos": [],
                 "is_login_required": False,
                 "error_message": str(exc) or exc.__class__.__name__,
                 "next_offset": offset,
@@ -945,6 +1010,44 @@ class FuoMobileBridge:
         title = display(song, "title")
         message = f"已从歌单移除：{title}" if ok else f"移除失败：{title}"
         return json.dumps(mutation_result(ok, message), ensure_ascii=False)
+
+    def playlist_create(self, provider_id: str, name: str) -> str:
+        provider = self._get_provider(provider_id)
+        self._require_logged_in(provider)
+        create = getattr(provider, "playlist_create_by_name", None)
+        if create is None:
+            return json.dumps(mutation_result(False, "当前音源不支持新建歌单"), ensure_ascii=False)
+        title = (name or "").strip()
+        if not title:
+            return json.dumps(mutation_result(False, "歌单名称不能为空"), ensure_ascii=False)
+        playlist = create(title)
+        if playlist is None:
+            return json.dumps(mutation_result(False, "新建歌单失败"), ensure_ascii=False)
+        return json.dumps({"result": mutation_result(True, f"已新建：{title}"), "playlist": self._remember_playlist(playlist)}, ensure_ascii=False)
+
+    def playlist_delete(self, playlist_id: str) -> str:
+        playlist = self._playlist_from_id(playlist_id)
+        provider = self._get_provider(getattr(playlist, "source", ""))
+        self._require_logged_in(provider)
+        delete = getattr(provider, "playlist_delete", None)
+        if delete is None:
+            return json.dumps(mutation_result(False, "当前音源不支持删除歌单"), ensure_ascii=False)
+        ok = bool(delete(getattr(playlist, "identifier", "")))
+        if ok:
+            self._playlists.pop(playlist_id, None)
+        return json.dumps(mutation_result(ok, f"已删除：{display(playlist, 'name')}" if ok else "删除歌单失败"), ensure_ascii=False)
+
+    def dislike_song(self, track_id: str, disliked: bool) -> str:
+        song = self._song_for_operation(track_id)
+        provider = self._get_provider(getattr(song, "source", ""))
+        self._require_logged_in(provider)
+        action_name = "current_user_dislike_add_song" if disliked else "current_user_dislike_remove_song"
+        action = getattr(provider, action_name, None)
+        if action is None:
+            return json.dumps(mutation_result(False, "当前音源不支持不喜欢操作"), ensure_ascii=False)
+        ok = bool(action(song))
+        label = "已设为不喜欢" if disliked else "已取消不喜欢"
+        return json.dumps(mutation_result(ok, label if ok else "操作失败"), ensure_ascii=False)
 
     def resource_state(self, resource_type: str, resource_id: str) -> str:
         provider_id = resource_id.split(":", 2)[1] if ":" in resource_id else ""
@@ -1103,6 +1206,9 @@ class FuoMobileBridge:
         }
 
     def _feature_by_id(self, feature_id: str) -> Dict[str, Any]:
+        dynamic = getattr(self, "_dynamic_features", {}).get(feature_id)
+        if dynamic is not None:
+            return dynamic
         for provider_id, features in FEATURE_DEFS.items():
             for feature in features:
                 if feature["id"] == feature_id:
@@ -1113,10 +1219,10 @@ class FuoMobileBridge:
         action = feature["action"]
         if action == "rec_list_daily_songs":
             page = read_model_page(provider.rec_list_daily_songs(), offset=offset, limit=limit)
-            return [self._remember_song(song) for song in page["items"]], [], [], "", page
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
         if action == "rec_list_daily_playlists":
             page = read_model_page(provider.rec_list_daily_playlists(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_list_radio_songs":
             songs = provider.current_user_list_radio_songs(max(1, min(int_limit(limit), 60)))
             page = {
@@ -1124,29 +1230,56 @@ class FuoMobileBridge:
                 "next_offset": offset + len(songs),
                 "has_more": bool(songs),
             }
-            return [self._remember_song(song) for song in songs], [], [], "", page
+            return [self._remember_song(song) for song in songs], [], [], [], "", page
         if action == "toplist_list":
             page = read_model_page(provider.toplist_list(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "rec_a_collection_of_songs":
             collection = provider.rec_a_collection_of_songs()
             page = read_model_page(getattr(collection, "models", []) or [], offset=offset, limit=limit)
-            return [self._remember_song(song) for song in page["items"]], [], [], getattr(collection, "name", ""), page
+            return [self._remember_song(song) for song in page["items"]], [], [], [], getattr(collection, "name", ""), page
+        if action == "rec_a_collection_of_videos":
+            collection = provider.rec_a_collection_of_videos()
+            page = read_model_page(getattr(collection, "models", []) or [], offset=offset, limit=limit)
+            return [], [], [], [self._remember_video(video) for video in page["items"]], getattr(collection, "name", ""), page
+        if action == "cached_collection":
+            page = read_model_page(getattr(feature["collection"], "models", []) or [], offset=offset, limit=limit)
+            content_type = feature["content_type"]
+            if content_type == "Songs":
+                return [self._remember_song(item) for item in page["items"]], [], [], [], "", page
+            if content_type == "Playlists":
+                return [], [self._remember_playlist(item) for item in page["items"]], [], [], "", page
+            if content_type == "Videos":
+                return [], [], [], [self._remember_video(item) for item in page["items"]], "", page
+            item_type = "artist" if content_type == "Artists" else "album"
+            return [], [], [self._remember_media_item(item, item_type) for item in page["items"]], [], "", page
+        if action == "most_popular_videos":
+            page = read_model_page(provider.most_popular_videos(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
+        if action == "weekly_video_playlists":
+            page = read_model_page(provider.weekly_video_playlists(), offset=offset, limit=limit)
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_fav_create_songs_rd":
             page = read_model_page(provider.current_user_fav_create_songs_rd(), offset=offset, limit=limit)
-            return [self._remember_song(song) for song in page["items"]], [], [], "", page
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
+        if action == "current_user_cloud_songs":
+            page = read_model_page(provider.current_user_cloud_songs(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
+        if action == "current_user_dislike_create_songs_rd":
+            page = read_model_page(provider.current_user_dislike_create_songs_rd(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
         if action == "current_user_fav_create_playlists_rd":
             page = read_model_page(provider.current_user_fav_create_playlists_rd(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_list_playlists":
             page = read_model_page(provider.current_user_list_playlists(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_fav_create_artists_rd":
             page = read_model_page(provider.current_user_fav_create_artists_rd(), offset=offset, limit=limit)
-            return [], [], [self._remember_media_item(artist, "artist") for artist in page["items"]], "", page
+            return [], [], [self._remember_media_item(artist, "artist") for artist in page["items"]], [], "", page
         if action == "current_user_fav_create_albums_rd":
             page = read_model_page(provider.current_user_fav_create_albums_rd(), offset=offset, limit=limit)
-            return [], [], [self._remember_media_item(album, "album") for album in page["items"]], "", page
+            return [], [], [self._remember_media_item(album, "album") for album in page["items"]], [], "", page
         raise RuntimeError(f"unsupported feature action: {action}")
 
     def _playlist_from_id(self, playlist_id: str):
@@ -1811,6 +1944,11 @@ def provider_capabilities(provider) -> Dict[str, Any]:
         "can_remove_song_from_playlist": (
             hasattr(provider, "playlist_remove_song") and provider_id != "ytmusic"
         ),
+        "can_create_playlist": hasattr(provider, "playlist_create_by_name"),
+        "can_delete_playlist": hasattr(provider, "playlist_delete"),
+        "can_list_disliked_songs": hasattr(provider, "current_user_dislike_create_songs_rd"),
+        "can_add_disliked_song": hasattr(provider, "current_user_dislike_add_song"),
+        "can_remove_disliked_song": hasattr(provider, "current_user_dislike_remove_song"),
         "can_favorite_playlist": False,
         "can_unfavorite_playlist": False,
         "can_favorite_artist": False,
@@ -1830,6 +1968,17 @@ def feature_to_dict(feature: Dict[str, Any], provider) -> Dict[str, Any]:
         "content_type": feature["content_type"],
         "requires_login": bool(feature.get("requires_login")),
     }
+
+
+def collection_content_type(type_) -> Optional[str]:
+    name = getattr(type_, "name", "")
+    return {
+        "only_songs": "Songs",
+        "only_playlists": "Playlists",
+        "only_artists": "Artists",
+        "only_albums": "Albums",
+        "only_videos": "Videos",
+    }.get(name)
 
 
 def mutation_result(success: bool, message: str) -> Dict[str, Any]:

@@ -448,6 +448,11 @@ data class ProviderCapabilities(
     val providerName: String,
     val canAddSongToPlaylist: Boolean = false,
     val canRemoveSongFromPlaylist: Boolean = false,
+    val canCreatePlaylist: Boolean = false,
+    val canDeletePlaylist: Boolean = false,
+    val canListDislikedSongs: Boolean = false,
+    val canAddDislikedSong: Boolean = false,
+    val canRemoveDislikedSong: Boolean = false,
     val canFavoritePlaylist: Boolean = false,
     val canUnfavoritePlaylist: Boolean = false,
     val canFavoriteArtist: Boolean = false,
@@ -494,6 +499,7 @@ enum class ProviderContentType {
     Playlists,
     Artists,
     Albums,
+    Videos,
 }
 
 data class ProviderFeature(
@@ -569,6 +575,7 @@ data class ProviderContentSection(
     val tracks: List<MusicTrack> = emptyList(),
     val playlists: List<ProviderPlaylist> = emptyList(),
     val mediaItems: List<ProviderMediaItem> = emptyList(),
+    val videos: List<ProviderVideo> = emptyList(),
     val isLoginRequired: Boolean = false,
     val errorMessage: String? = null,
     val nextOffset: Int = 0,
@@ -653,6 +660,12 @@ interface ProviderMusicRepository {
         ProviderMutationResult(false, "provider does not support playlist add song")
     suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult =
         ProviderMutationResult(false, "provider does not support playlist remove song")
+    suspend fun createPlaylist(providerId: String, name: String): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support playlist create")
+    suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support playlist delete")
+    suspend fun setSongDisliked(track: MusicTrack, disliked: Boolean): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support dislike operation")
     suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         ProviderMediaItemDetail(item, mediaItemTracks(item))
     suspend fun mediaItemDetailPage(
