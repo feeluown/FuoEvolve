@@ -183,7 +183,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
                 analyzer.consume(bufferList)
             },
         )
-        var tap: Unmanaged<MTAudioProcessingTap>?
+        var tap: MTAudioProcessingTap?
         guard MTAudioProcessingTapCreate(
             kCFAllocatorDefault,
             &callbacks,
@@ -192,7 +192,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         ) == noErr else {
             return nil
         }
-        return tap?.takeRetainedValue()
+        return tap
     }
 
     private func milliseconds(_ time: CMTime) -> Int64 {
