@@ -129,7 +129,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         return Shared.AudioFormatInfo(
             format: codec.map(audioFormatName),
             codec: codec,
-            averageBitrate: averageBitrate.map { KotlinLong(long: $0) },
+            averageBitrate: averageBitrate.map { KotlinLong(long: Int($0)) },
             peakBitrate: nil
         )
     }
@@ -314,11 +314,11 @@ private final class AudioTapSpectrumAnalyzer {
         guard Date().timeIntervalSince(lastPublishedAt) >= 0.05, sampleRate > 0 else { return }
         lastPublishedAt = Date()
         let nyquist = sampleRate / 2
-        currentLevels = Self.bandCenters.map { frequency in
+        currentLevels = Self.bandCenters.map { frequency -> Swift.Float in
             guard frequency < nyquist else { return 0 }
             let normalized = goertzelMagnitude(frequency) * 18
-            return min(1, max(0, log(1 + normalized) / log(19)))
-        }.map(Swift.Float.init)
+            return Swift.Float(min(1, max(0, log(1 + normalized) / log(19))))
+        }
     }
 
     private func goertzelMagnitude(_ frequency: Double) -> Double {
