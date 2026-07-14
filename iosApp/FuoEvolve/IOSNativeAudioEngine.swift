@@ -120,13 +120,13 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         playbackError ?? player.currentItem?.error?.localizedDescription
     }
 
-    func audioFormatInfo() -> SharedAudioFormatInfo? {
+    func audioFormatInfo() -> Shared.AudioFormatInfo? {
         guard let track = player.currentItem?.asset.tracks(withMediaType: .audio).first else { return nil }
         let codec = track.formatDescriptions.first
             .map { CMFormatDescriptionGetMediaSubType($0 as! CMFormatDescription) }
             .map(fourCharacterCode)
         let averageBitrate = track.estimatedDataRate > 0 ? Int64(track.estimatedDataRate.rounded()) : nil
-        return SharedAudioFormatInfo(
+        return Shared.AudioFormatInfo(
             format: codec.map(audioFormatName),
             codec: codec,
             averageBitrate: averageBitrate,
