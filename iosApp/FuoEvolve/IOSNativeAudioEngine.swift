@@ -129,7 +129,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         return Shared.AudioFormatInfo(
             format: codec.map(audioFormatName),
             codec: codec,
-            averageBitrate: averageBitrate,
+            averageBitrate: averageBitrate.map { KotlinLong(long: $0) },
             peakBitrate: nil
         )
     }
@@ -183,7 +183,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
                 analyzer.consume(bufferList)
             },
         )
-        var tap: MTAudioProcessingTap?
+        var tap: Unmanaged<MTAudioProcessingTap>?
         guard MTAudioProcessingTapCreate(
             kCFAllocatorDefault,
             &callbacks,
@@ -192,7 +192,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         ) == noErr else {
             return nil
         }
-        return tap
+        return tap?.takeRetainedValue()
     }
 
     private func milliseconds(_ time: CMTime) -> Int64 {
@@ -318,7 +318,7 @@ private final class AudioTapSpectrumAnalyzer {
             guard frequency < nyquist else { return 0 }
             let normalized = goertzelMagnitude(frequency) * 18
             return min(1, max(0, log(1 + normalized) / log(19)))
-        }.map(Float.init)
+        }.map(Swift.Float.init)
     }
 
     private func goertzelMagnitude(_ frequency: Double) -> Double {
