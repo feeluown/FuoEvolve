@@ -33,6 +33,14 @@ enum class HomeSection {
     Mine,
 }
 
+enum class ProviderDisplaySection(val label: String) {
+    Search("搜索"),
+    Recommend("推荐"),
+    Explore("探索"),
+    Mine("我的"),
+    Replace("替换"),
+}
+
 enum class MineSection {
     Playlists,
     Songs,
@@ -86,6 +94,14 @@ class FuoPlayerController(
     var enabledProviderIds by mutableStateOf(DEFAULT_ENABLED_PROVIDER_IDS)
         private set
     var providerOrderIds by mutableStateOf(DEFAULT_PROVIDER_ORDER_IDS)
+        private set
+    var searchProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var recommendProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var exploreProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var mineProviderIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var recommendSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
         private set
@@ -704,6 +720,40 @@ class FuoPlayerController(
         persistSettings()
     }
 
+    fun isProviderShownIn(providerId: String, section: ProviderDisplaySection): Boolean =
+        providerId in selectedProviderIdsFor(section)
+
+    fun onProviderShownInChange(providerId: String, section: ProviderDisplaySection, shown: Boolean) {
+        if (section == ProviderDisplaySection.Replace) {
+            onSmartReplacementProviderEnabledChange(providerId, shown)
+            return
+        }
+        val current = configuredProviderIdsFor(section).ifEmpty {
+            availableProviders.map { it.providerId }.toSet()
+        }
+        if (!shown && current.size <= 1 && providerId in current) {
+            message = "至少保留一个${section.label}音源"
+            return
+        }
+        val updated = current.toMutableSet().apply {
+            if (shown) add(providerId) else remove(providerId)
+        }
+        when (section) {
+            ProviderDisplaySection.Search -> searchProviderIds = updated
+            ProviderDisplaySection.Recommend -> recommendProviderIds = updated
+            ProviderDisplaySection.Explore -> exploreProviderIds = updated
+            ProviderDisplaySection.Mine -> mineProviderIds = updated
+            ProviderDisplaySection.Replace -> Unit
+        }
+        persistSettings()
+        when (section) {
+            ProviderDisplaySection.Recommend -> refreshHomeContent(HomeSection.Recommend)
+            ProviderDisplaySection.Explore -> refreshHomeContent(HomeSection.Music)
+            ProviderDisplaySection.Mine -> refreshActiveMineProviderContent()
+            else -> Unit
+        }
+    }
+
     fun onProviderLoginModeChange(value: ProviderLoginMode) {
         providerLoginMode = value
         persistSettings()
@@ -879,10 +929,6 @@ class FuoPlayerController(
     fun onUnavailablePlaybackPolicyChange(value: UnavailablePlaybackPolicy) {
         unavailablePlaybackPolicy = value
         persistSettings()
-    }
-
-    fun isSmartReplacementProviderEnabled(providerId: String): Boolean {
-        return providerId in selectedSmartReplacementProviderIds()
     }
 
     fun onSmartReplacementProviderEnabledChange(providerId: String, enabled: Boolean) {
@@ -1167,7 +1213,9 @@ class FuoPlayerController(
                         }
                         SearchScope.All -> {
                             val local = localRepository.search(keyword)
-                            val provider = providerRepository.searchAll(keyword)
+                            val provider = searchProviderIdsForSearch().map { providerId ->
+                                providerRepository.searchAll(keyword, providerId)
+                            }.mergeSearchResults()
                             providerSearchResults = provider
                             mergeResults(local, provider.tracks)
                         }
@@ -1228,7 +1276,11 @@ class FuoPlayerController(
                     HomeSection.Mine -> error("mine section is loaded separately")
                 }
                 withTimeout(30_000) {
-                    providerFeatures.filter { it.category == category }.map { feature ->
+                    providerFeatures.filter {
+                        it.category == category && it.providerId in selectedProviderIdsFor(
+                            if (section == HomeSection.Recommend) ProviderDisplaySection.Recommend else ProviderDisplaySection.Explore,
+                        )
+                    }.map { feature ->
                         if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
                             ProviderContentSection(feature, isLoginRequired = true)
                         } else if (feature.isDeferredHomeFeature()) {
@@ -1259,8 +1311,8 @@ class FuoPlayerController(
             message = "正在加载我的歌单"
             runCatching {
                 refreshProviderCatalog()
-                val userPlaylists = loadProviderSections(ProviderFeatureCategory.MinePlaylists)
-                val favoritePlaylists = loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists)
+                val userPlaylists = loadProviderSections(ProviderFeatureCategory.MinePlaylists, ::isMineProviderFeature)
+                val favoritePlaylists = loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists, ::isMineProviderFeature)
                 userPlaylists to favoritePlaylists
             }.onSuccess {
                 minePlaylistSections = it.first
@@ -1279,7 +1331,7 @@ class FuoPlayerController(
             message = "正在加载我的内容"
             runCatching {
                 refreshProviderCatalog()
-                loadProviderSections(ProviderFeatureCategory.Mine)
+                loadProviderSections(ProviderFeatureCategory.Mine, ::isMineProviderFeature)
             }.onSuccess {
                 mineSections = it
                 message = if (it.isEmpty()) "我的内容暂无内容" else "我的内容已更新"
@@ -3223,6 +3275,10 @@ class FuoPlayerController(
         providerHeaderInputs = settings.providerHeaderInputs
         enabledProviderIds = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
         providerOrderIds = settings.providerOrderIds.ifEmpty { DEFAULT_PROVIDER_ORDER_IDS }
+        searchProviderIds = settings.searchProviderIds
+        recommendProviderIds = settings.recommendProviderIds
+        exploreProviderIds = settings.exploreProviderIds
+        mineProviderIds = settings.mineProviderIds
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
@@ -3254,6 +3310,10 @@ class FuoPlayerController(
             providerHeaderInputs = providerHeaderInputs,
             enabledProviderIds = enabledProviderIds,
             providerOrderIds = providerOrderIds,
+            searchProviderIds = searchProviderIds,
+            recommendProviderIds = recommendProviderIds,
+            exploreProviderIds = exploreProviderIds,
+            mineProviderIds = mineProviderIds,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,
@@ -3291,6 +3351,40 @@ class FuoPlayerController(
             .ifEmpty { enabledProviderIds }
         return smartReplacementProviderIds.intersect(availableEnabledIds).ifEmpty { availableEnabledIds }
     }
+
+    private fun selectedProviderIdsFor(section: ProviderDisplaySection): Set<String> {
+        val configured = configuredProviderIdsFor(section)
+        return if (configured.isEmpty() && section != ProviderDisplaySection.Replace) {
+            availableProviders.map { it.providerId }.toSet()
+        } else {
+            configured.intersect(enabledProviderIds)
+        }
+    }
+
+    private fun configuredProviderIdsFor(section: ProviderDisplaySection): Set<String> {
+        return when (section) {
+            ProviderDisplaySection.Search -> searchProviderIds
+            ProviderDisplaySection.Recommend -> recommendProviderIds
+            ProviderDisplaySection.Explore -> exploreProviderIds
+            ProviderDisplaySection.Mine -> mineProviderIds
+            ProviderDisplaySection.Replace -> selectedSmartReplacementProviderIds()
+        }
+    }
+
+    private fun searchProviderIdsForSearch(): List<String> =
+        orderedProviders().map { it.providerId }.filter { it in selectedProviderIdsFor(ProviderDisplaySection.Search) }
+
+    private fun isMineProviderFeature(feature: ProviderFeature): Boolean =
+        feature.providerId in selectedProviderIdsFor(ProviderDisplaySection.Mine)
+
+    private fun List<ProviderSearchResults>.mergeSearchResults(): ProviderSearchResults = ProviderSearchResults(
+        tracks = flatMap { it.tracks },
+        playlists = flatMap { it.playlists },
+        artists = flatMap { it.artists },
+        albums = flatMap { it.albums },
+        videos = flatMap { it.videos },
+        errorMessage = firstNotNullOfOrNull { it.errorMessage },
+    )
 
     private fun refreshLocalMusicDirectories() {
         scope.launch {

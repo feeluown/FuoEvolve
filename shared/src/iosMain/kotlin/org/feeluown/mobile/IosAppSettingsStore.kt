@@ -25,6 +25,10 @@ class IosAppSettingsStore : AppSettingsStore {
             providerHeaderInputs = readHeaderInputs(),
             enabledProviderIds = readStringSet(KEY_ENABLED_PROVIDER_IDS).ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS },
             providerOrderIds = readStringList(KEY_PROVIDER_ORDER_IDS).ifEmpty { DEFAULT_PROVIDER_ORDER_IDS },
+            searchProviderIds = readStringSet(KEY_SEARCH_PROVIDER_IDS),
+            recommendProviderIds = readStringSet(KEY_RECOMMEND_PROVIDER_IDS),
+            exploreProviderIds = readStringSet(KEY_EXPLORE_PROVIDER_IDS),
+            mineProviderIds = readStringSet(KEY_MINE_PROVIDER_IDS),
             audioCacheLimitMb = intValue(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = intValue(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
@@ -62,6 +66,10 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setObject(headerInputsValue(settings.providerHeaderInputs), KEY_PROVIDER_HEADER_INPUTS)
             defaults.setObject(settings.enabledProviderIds.joinToString(LIST_SEPARATOR), KEY_ENABLED_PROVIDER_IDS)
             defaults.setObject(settings.providerOrderIds.joinToString(LIST_SEPARATOR), KEY_PROVIDER_ORDER_IDS)
+            defaults.setObject(settings.searchProviderIds.joinToString(LIST_SEPARATOR), KEY_SEARCH_PROVIDER_IDS)
+            defaults.setObject(settings.recommendProviderIds.joinToString(LIST_SEPARATOR), KEY_RECOMMEND_PROVIDER_IDS)
+            defaults.setObject(settings.exploreProviderIds.joinToString(LIST_SEPARATOR), KEY_EXPLORE_PROVIDER_IDS)
+            defaults.setObject(settings.mineProviderIds.joinToString(LIST_SEPARATOR), KEY_MINE_PROVIDER_IDS)
             defaults.setInteger(settings.audioCacheLimitMb.toLong(), KEY_AUDIO_CACHE_LIMIT_MB)
             defaults.setInteger(settings.imageCacheLimitMb.toLong(), KEY_IMAGE_CACHE_LIMIT_MB)
             defaults.setObject(settings.wifiAudioQualityPolicy.name, KEY_WIFI_AUDIO_QUALITY_POLICY)
@@ -101,6 +109,7 @@ class IosAppSettingsStore : AppSettingsStore {
     }
 
     private fun readStringSet(key: String): Set<String> = readStringList(key).toSet()
+
 
     private fun readStringList(key: String): List<String> {
         return stringValue(key)
@@ -173,6 +182,10 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_PROVIDER_HEADER_INPUTS = "provider_header_inputs"
         private const val KEY_ENABLED_PROVIDER_IDS = "enabled_provider_ids"
         private const val KEY_PROVIDER_ORDER_IDS = "provider_order_ids"
+        private const val KEY_SEARCH_PROVIDER_IDS = "search_provider_ids"
+        private const val KEY_RECOMMEND_PROVIDER_IDS = "recommend_provider_ids"
+        private const val KEY_EXPLORE_PROVIDER_IDS = "explore_provider_ids"
+        private const val KEY_MINE_PROVIDER_IDS = "mine_provider_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"

@@ -29,6 +29,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             providerHeaderInputs = readHeaderInputs(),
             enabledProviderIds = readStringSet(KEY_ENABLED_PROVIDER_IDS).ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS },
             providerOrderIds = readStringList(KEY_PROVIDER_ORDER_IDS).ifEmpty { DEFAULT_PROVIDER_ORDER_IDS },
+            searchProviderIds = readStringSet(KEY_SEARCH_PROVIDER_IDS),
+            recommendProviderIds = readStringSet(KEY_RECOMMEND_PROVIDER_IDS),
+            exploreProviderIds = readStringSet(KEY_EXPLORE_PROVIDER_IDS),
+            mineProviderIds = readStringSet(KEY_MINE_PROVIDER_IDS),
             audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
@@ -81,6 +85,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_PROVIDER_HEADER_INPUTS, headerInputsJson(settings.providerHeaderInputs))
                 .putStringSet(KEY_ENABLED_PROVIDER_IDS, settings.enabledProviderIds)
                 .putString(KEY_PROVIDER_ORDER_IDS, stringListJson(settings.providerOrderIds))
+                .putStringSet(KEY_SEARCH_PROVIDER_IDS, settings.searchProviderIds)
+                .putStringSet(KEY_RECOMMEND_PROVIDER_IDS, settings.recommendProviderIds)
+                .putStringSet(KEY_EXPLORE_PROVIDER_IDS, settings.exploreProviderIds)
+                .putStringSet(KEY_MINE_PROVIDER_IDS, settings.mineProviderIds)
                 .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
@@ -134,6 +142,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             }
         }.getOrDefault(emptyMap())
     }
+
 
     private fun cookieInputsJson(inputs: Map<String, String>): String {
         val json = JSONObject()
@@ -222,6 +231,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_PROVIDER_HEADER_INPUTS = "provider_header_inputs"
         private const val KEY_ENABLED_PROVIDER_IDS = "enabled_provider_ids"
         private const val KEY_PROVIDER_ORDER_IDS = "provider_order_ids"
+        private const val KEY_SEARCH_PROVIDER_IDS = "search_provider_ids"
+        private const val KEY_RECOMMEND_PROVIDER_IDS = "recommend_provider_ids"
+        private const val KEY_EXPLORE_PROVIDER_IDS = "explore_provider_ids"
+        private const val KEY_MINE_PROVIDER_IDS = "mine_provider_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"

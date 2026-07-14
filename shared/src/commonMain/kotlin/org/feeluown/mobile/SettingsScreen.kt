@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,13 +30,17 @@ import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.ManageAccounts
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -275,6 +281,7 @@ fun ProviderSwitchPanel(
     controller: FuoPlayerController,
     onOpenProviderLogin: (ProviderInfo) -> Unit,
 ) {
+    var configuringProvider by remember { mutableStateOf<ProviderInfo?>(null) }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -293,9 +300,10 @@ fun ProviderSwitchPanel(
                 ProviderContentMessage("音源正在初始化")
             } else {
                 val orderedProviders = controller.orderedAvailableProviders()
-                orderedProviders.forEachIndexed { index, provider ->
+                orderedProviders.forEach { provider ->
                     val isEnabled = controller.isProviderEnabled(provider.providerId)
                     val authState = controller.authStateFor(provider)
+                    var dragDistance by remember(provider.providerId) { mutableStateOf(0f) }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -308,30 +316,48 @@ fun ProviderSwitchPanel(
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
-                                text = providerStatusText(isEnabled, authState),
+                                text = providerStatusText(isEnabled, authState) + " · " + providerDisplaySummary(controller, provider.providerId),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(
-                                enabled = !controller.isLoading && index > 0,
-                                onClick = { controller.moveProvider(provider.providerId, -1) },
+                                enabled = !controller.isLoading,
+                                onClick = { configuringProvider = provider },
                             ) {
-                                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上移${provider.providerName}")
+                                Icon(Icons.Filled.Settings, contentDescription = "配置${provider.providerName}")
                             }
                             IconButton(
-                                enabled = !controller.isLoading && index < orderedProviders.lastIndex,
-                                onClick = { controller.moveProvider(provider.providerId, 1) },
-                            ) {
-                                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下移${provider.providerName}")
-                            }
-                            TextButton(
                                 enabled = !controller.isLoading && isEnabled,
                                 onClick = { onOpenProviderLogin(provider) },
                             ) {
-                                Text(if (authState.isLoggedIn) "管理" else "登录")
+                                Icon(
+                                    if (authState.isLoggedIn) Icons.Filled.ManageAccounts else Icons.AutoMirrored.Filled.Login,
+                                    contentDescription = if (authState.isLoggedIn) "管理${provider.providerName}" else "登录${provider.providerName}",
+                                )
                             }
+                            Icon(
+                                modifier = Modifier.pointerInput(provider.providerId, controller.isLoading) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { dragDistance = 0f },
+                                        onDrag = { change, amount ->
+                                            change.consume()
+                                            if (controller.isLoading) return@detectDragGesturesAfterLongPress
+                                            dragDistance += amount.y
+                                            if (dragDistance >= 48f) {
+                                                controller.moveProvider(provider.providerId, 1)
+                                                dragDistance = 0f
+                                            } else if (dragDistance <= -48f) {
+                                                controller.moveProvider(provider.providerId, -1)
+                                                dragDistance = 0f
+                                            }
+                                        },
+                                    )
+                                },
+                                imageVector = Icons.Filled.DragHandle,
+                                contentDescription = "长按拖动排序${provider.providerName}",
+                            )
                         }
                         Checkbox(
                             checked = isEnabled,
@@ -344,6 +370,59 @@ fun ProviderSwitchPanel(
             }
         }
     }
+    configuringProvider?.let { provider ->
+        ProviderDisplaySettingsDialog(
+            controller = controller,
+            provider = provider,
+            onDismissRequest = { configuringProvider = null },
+        )
+    }
+}
+
+@Composable
+private fun ProviderDisplaySettingsDialog(
+    controller: FuoPlayerController,
+    provider: ProviderInfo,
+    onDismissRequest: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(provider.providerName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("显示与替换设置", style = MaterialTheme.typography.bodyMedium)
+                ProviderDisplaySection.entries.forEach { section ->
+                    val selected = controller.isProviderShownIn(provider.providerId, section)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(section.label)
+                        IconButton(
+                            enabled = !controller.isLoading && (selected || section != ProviderDisplaySection.Replace),
+                            onClick = {
+                                controller.onProviderShownInChange(provider.providerId, section, !selected)
+                            },
+                        ) {
+                            Icon(
+                                imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                contentDescription = if (selected) "关闭${section.label}" else "开启${section.label}",
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismissRequest) { Text("完成") } },
+    )
+}
+
+private fun providerDisplaySummary(controller: FuoPlayerController, providerId: String): String {
+    return ProviderDisplaySection.entries
+        .filter { controller.isProviderShownIn(providerId, it) }
+        .joinToString("、") { it.label }
+        .ifBlank { "未显示" }
 }
 
 fun providerStatusText(isEnabled: Boolean, authState: ProviderAuthState): String {
@@ -571,7 +650,7 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
             }
             if (controller.unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace) {
                 Text(
-                    text = "替换音源",
+                    text = "替换设置",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -632,26 +711,6 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                         enabled = !controller.isLoading,
                         onCheckedChange = controller::onSmartReplacementUseReplacementLyricsChange,
                     )
-                }
-                controller.orderedProviders().forEach { provider ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            modifier = Modifier.weight(1f),
-                            text = provider.providerName,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Checkbox(
-                            checked = controller.isSmartReplacementProviderEnabled(provider.providerId),
-                            enabled = !controller.isLoading,
-                            onCheckedChange = {
-                                controller.onSmartReplacementProviderEnabledChange(provider.providerId, it)
-                            },
-                        )
-                    }
                 }
             }
         }
