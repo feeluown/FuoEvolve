@@ -129,7 +129,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         return Shared.AudioFormatInfo(
             format: codec.map(audioFormatName),
             codec: codec,
-            averageBitrate: averageBitrate.map { KotlinLong(long: Int($0)) },
+            averageBitrate: averageBitrate.map { KotlinLong(value: $0) },
             peakBitrate: nil
         )
     }
