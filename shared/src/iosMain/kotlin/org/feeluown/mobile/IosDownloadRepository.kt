@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.Foundation.NSUserDefaults
+import platform.Foundation.NSDate
 import kotlin.coroutines.resume
 
 class IosDownloadRepository(
@@ -62,8 +63,8 @@ class IosDownloadRepository(
         val existing = taskRecords[track.id]
         if (existing?.status == DownloadTaskStatus.Downloading || existing?.status == DownloadTaskStatus.Queued) return
         updateTask(
-            (existing ?: DownloadTask(track.id, track, DownloadTaskStatus.Queued, System.currentTimeMillis()))
-                .copy(status = DownloadTaskStatus.Queued, failureMessage = null, updatedAt = System.currentTimeMillis()),
+            (existing ?: DownloadTask(track.id, track, DownloadTaskStatus.Queued, nowMillis()))
+                .copy(status = DownloadTaskStatus.Queued, failureMessage = null, updatedAt = nowMillis()),
         )
         payload?.let { taskPayloads[track.id] = it }
         schedule()
@@ -245,6 +246,8 @@ class IosDownloadRepository(
             }
         }
     }
+
+    private fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
 
     private companion object {
         private const val KEY_DOWNLOAD_RECORDS = "ios_download_records"
