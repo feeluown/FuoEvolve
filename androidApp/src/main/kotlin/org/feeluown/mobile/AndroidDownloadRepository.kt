@@ -8,6 +8,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Base64
+import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -211,7 +213,7 @@ class AndroidDownloadRepository(
             val extension = extension(payload.url)
             val tempFile = temporaryFile(taskId, extension)
             writePayload(taskId, payload, tempFile)
-            writeId3TagIfNeeded(tempFile, extension, task.track, payload)
+            writeEmbeddedMetadataIfNeeded(tempFile, extension, task.track, payload)
             target = createTarget(task.track, payload, extension)
             val bytes = copyToTarget(taskId, tempFile, target.uri)
             writeLyricsFileIfNeeded(payload, target)
@@ -546,13 +548,19 @@ class AndroidDownloadRepository(
         }
     }
 
-    private fun writeId3TagIfNeeded(
+    private fun writeEmbeddedMetadataIfNeeded(
         file: File,
         extension: String,
         track: MusicTrack,
         payload: PlaybackPayload,
     ) {
-        if (extension.lowercase() != "mp3") return
+        when (extension.lowercase()) {
+            "mp3" -> writeId3Tag(file, track, payload)
+            "m4a" -> writeM4aTag(file, track, payload)
+        }
+    }
+
+    private fun writeId3Tag(file: File, track: MusicTrack, payload: PlaybackPayload) {
         val title = payload.title.ifBlank { track.title }
         val artists = payload.artists.ifBlank { track.artists }
         val album = payload.album.ifBlank { track.album }
@@ -569,6 +577,28 @@ class AndroidDownloadRepository(
         FileOutputStream(file, false).use { output ->
             output.write(tagBytes)
             output.write(audioBytes)
+        }
+    }
+
+    private fun writeM4aTag(file: File, track: MusicTrack, payload: PlaybackPayload) {
+        val title = payload.title.ifBlank { track.title }
+        val artists = payload.artists.ifBlank { track.artists }
+        val album = payload.album.ifBlank { track.album }
+        val coverImage = loadCoverImage(payload.coverUrl ?: track.coverUrl)
+        if (title.isBlank() && artists.isBlank() && album.isBlank() && coverImage == null) return
+
+        runCatching {
+            Python.getInstance().getModule("fuo_mobile.bridge").callAttr(
+                "write_m4a_tags",
+                file.absolutePath,
+                title,
+                artists,
+                album,
+                coverImage?.mimeType.orEmpty(),
+                coverImage?.bytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }.orEmpty(),
+            )
+        }.onFailure { throwable ->
+            Log.w(TAG, "failed to write m4a metadata file=${file.name}", throwable)
         }
     }
 
