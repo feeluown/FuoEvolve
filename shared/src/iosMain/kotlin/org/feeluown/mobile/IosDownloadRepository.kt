@@ -9,7 +9,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.Foundation.NSUserDefaults
-import platform.Foundation.NSDate
 import kotlin.coroutines.resume
 
 class IosDownloadRepository(
@@ -45,6 +44,7 @@ class IosDownloadRepository(
                 completedUri = uri,
             )
         }
+        logicalClock = taskRecords.values.maxOfOrNull { it.createdAt } ?: 0L
         writeTasks()
         publish()
     }
@@ -247,7 +247,12 @@ class IosDownloadRepository(
         }
     }
 
-    private fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+    private var logicalClock = 0L
+
+    private fun nowMillis(): Long {
+        logicalClock += 1
+        return logicalClock
+    }
 
     private companion object {
         private const val KEY_DOWNLOAD_RECORDS = "ios_download_records"
