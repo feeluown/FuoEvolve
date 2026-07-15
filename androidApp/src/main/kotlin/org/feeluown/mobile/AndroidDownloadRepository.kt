@@ -529,6 +529,7 @@ class AndroidDownloadRepository(
     }
 
     private fun extension(url: String): String {
+        if (M4S_EXTENSION_PATTERN.containsMatchIn(url)) return "m4a"
         val clean = url.substringBefore('?').substringAfterLast('/', "")
         val ext = clean.substringAfterLast('.', "mp3").lowercase()
         return ext.takeIf { it.length in 2..5 } ?: "mp3"
@@ -741,6 +742,7 @@ class AndroidDownloadRepository(
     )
 
     private companion object {
+        val M4S_EXTENSION_PATTERN = Regex("\\.m4s(?:[./?#]|$)", RegexOption.IGNORE_CASE)
         private const val ID3_HEADER_SIZE = 10
         private const val MAX_COVER_BYTES = 5 * 1024 * 1024
         private const val COVER_CONNECT_TIMEOUT_MS = 10_000
