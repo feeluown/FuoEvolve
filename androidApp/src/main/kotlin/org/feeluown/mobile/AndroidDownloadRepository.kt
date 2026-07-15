@@ -48,8 +48,12 @@ class AndroidDownloadRepository(
 
     override suspend fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        download(track, providerRepository.resolve(track))
+    }
+
+    override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+        if (track.sourceType != TrackSourceType.Provider) return
         withContext(Dispatchers.IO) {
-            val payload = providerRepository.resolve(track)
             mutableStates.update { it + (track.id to DownloadState.Downloading(0f)) }
             val extension = extension(payload.url)
             val tempFile = File.createTempFile("fuo-download-", ".$extension", context.cacheDir)

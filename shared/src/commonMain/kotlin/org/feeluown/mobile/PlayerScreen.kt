@@ -1141,9 +1141,29 @@ fun PlayPauseButton(
 @Composable
 fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
     val duration = state.durationMs.takeIf { it > 0 } ?: 1L
+    var isSeeking by remember(state.currentTrack?.id) { mutableStateOf(false) }
+    var seekPosition by remember(state.currentTrack?.id) {
+        mutableStateOf(state.positionMs.coerceIn(0, duration).toFloat())
+    }
+
+    LaunchedEffect(state.positionMs, duration, isSeeking) {
+        if (!isSeeking) {
+            seekPosition = state.positionMs.coerceIn(0, duration).toFloat()
+        }
+    }
+
     Slider(
-        value = state.positionMs.coerceIn(0, duration).toFloat(),
-        onValueChange = { onSeek(it.toLong()) },
+        value = seekPosition.coerceIn(0f, duration.toFloat()),
+        onValueChange = {
+            isSeeking = true
+            seekPosition = it
+        },
+        onValueChangeFinished = {
+            if (isSeeking) {
+                onSeek(seekPosition.toLong())
+                isSeeking = false
+            }
+        },
         valueRange = 0f..duration.toFloat(),
     )
     Row(

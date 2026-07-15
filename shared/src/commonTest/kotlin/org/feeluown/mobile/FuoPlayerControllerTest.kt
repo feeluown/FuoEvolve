@@ -171,6 +171,43 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun downloadUsesConfiguredSmartReplacementMetadataLyricsAndProviders() = runTest {
+        val track = providerTrack("netease:1", "原始歌曲")
+        val provider = FakeProviderRepository(listOf(track))
+        val downloads = FakeDownloadRepository(emptyMap())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = downloads,
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = FakeSettingsStore(
+                    AppSettings(
+                        enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
+                        smartReplacementProviderIds = setOf("qqmusic"),
+                        smartReplacementUseReplacementMetadata = false,
+                        smartReplacementUseReplacementLyrics = false,
+                    ),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.download(track)
+            advanceUntilIdle()
+
+            assertEquals(setOf("qqmusic"), provider.lastSmartReplacementProviderIds)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalMetadata)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalLyrics)
+            assertEquals(track.id, downloads.lastTrack?.id)
+            assertEquals(track.title, downloads.lastPayload?.title)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun providerSearchAllStoresTypedResults() = runTest {
         val song = providerTrack("netease:1", "Song")
         val playlist = ProviderPlaylist("playlist:netease:10", "Playlist", "netease", "网易云音乐")
@@ -3388,10 +3425,17 @@ class FuoPlayerControllerTest {
     ) : DownloadRepository {
         private val mutableStates = MutableStateFlow(initialStates)
         override val states = mutableStates
+        var lastTrack: MusicTrack? = null
+        var lastPayload: PlaybackPayload? = null
 
         override suspend fun load() = Unit
 
         override suspend fun download(track: MusicTrack) = Unit
+
+        override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+            lastTrack = track
+            lastPayload = payload
+        }
 
         override suspend fun deleteDownloaded(track: MusicTrack) = Unit
     }

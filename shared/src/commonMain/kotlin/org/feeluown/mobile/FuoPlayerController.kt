@@ -2485,7 +2485,17 @@ class FuoPlayerController(
     fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
         scope.launch {
-            runCatching { downloadRepository.download(track) }
+            runCatching {
+                val payload = providerRepository.resolve(
+                    track,
+                    unavailablePlaybackPolicy,
+                    selectedSmartReplacementProviderIds(),
+                    smartReplacementMinScore,
+                    !smartReplacementUseReplacementMetadata,
+                    !smartReplacementUseReplacementLyrics,
+                )
+                downloadRepository.download(track, payload)
+            }
                 .onSuccess {
                     if (hasLocalMusicPermission) {
                         refreshLocalMusic(forceRefresh = true, showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic)

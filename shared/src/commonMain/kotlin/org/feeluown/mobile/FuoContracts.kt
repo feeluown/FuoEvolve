@@ -740,6 +740,7 @@ interface DownloadRepository {
     val states: StateFlow<Map<String, DownloadState>>
     suspend fun load()
     suspend fun download(track: MusicTrack)
+    suspend fun download(track: MusicTrack, payload: PlaybackPayload) = download(track)
     suspend fun deleteDownloaded(track: MusicTrack)
 }
 

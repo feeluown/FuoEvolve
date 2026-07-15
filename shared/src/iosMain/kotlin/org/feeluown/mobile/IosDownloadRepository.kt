@@ -22,12 +22,12 @@ class IosDownloadRepository(
 
     override suspend fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        download(track, providerRepository.resolve(track))
+    }
+
+    override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+        if (track.sourceType != TrackSourceType.Provider) return
         mutableStates.value = mutableStates.value + (track.id to DownloadState.Queued)
-        val payload = runCatching { providerRepository.resolve(track) }.getOrElse { throwable ->
-            mutableStates.value = mutableStates.value +
-                (track.id to DownloadState.Failed(throwable.message ?: "下载解析失败"))
-            throw throwable
-        }
         mutableStates.value = mutableStates.value + (track.id to DownloadState.Downloading(0f))
         val result = suspendCancellableCoroutine<Result<String>> { continuation ->
             output.download(
