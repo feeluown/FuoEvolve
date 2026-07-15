@@ -185,6 +185,16 @@ fun TrackAction(
                         onClick = {},
                     )
                 }
+                track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Paused -> {
+                    DropdownMenuItem(
+                        text = { Text("继续下载") },
+                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                        onClick = {
+                            expanded = false
+                            onDownload()
+                        },
+                    )
+                }
                 (track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Downloaded) ||
                     track.sourceType == TrackSourceType.Downloaded -> {
                     DropdownMenuItem(

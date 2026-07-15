@@ -1,13 +1,29 @@
 import SwiftUI
+import UIKit
 import Shared
 
 @main
 struct FuoEvolveApp: App {
+    @UIApplicationDelegateAdaptor(FuoEvolveAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             SharedComposeRoot()
                 .ignoresSafeArea()
         }
+    }
+}
+
+private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        IOSDownloadOutput.shared.handleBackgroundEvents(
+            identifier: identifier,
+            completionHandler: completionHandler
+        )
     }
 }
 

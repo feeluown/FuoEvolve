@@ -1231,6 +1231,7 @@ fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): String {
     val state = when (downloadState) {
         is DownloadState.Downloaded -> "已下载"
         is DownloadState.Downloading -> "下载中"
+        DownloadState.Paused -> "下载已暂停"
         is DownloadState.Failed -> "下载失败"
         DownloadState.Queued -> "等待下载"
         else -> null

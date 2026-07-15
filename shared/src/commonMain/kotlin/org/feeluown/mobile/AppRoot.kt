@@ -162,10 +162,16 @@ fun AppRoot(
     ) {
         val snackbarHostState = remember { SnackbarHostState() }
         val playlistOperationFeedback = controller.playlistOperationFeedback
+        val downloadQueueFeedback = controller.downloadQueueFeedback
         LaunchedEffect(playlistOperationFeedback) {
             playlistOperationFeedback ?: return@LaunchedEffect
             snackbarHostState.showSnackbar(playlistOperationFeedback)
             controller.dismissPlaylistOperationFeedback(playlistOperationFeedback)
+        }
+        LaunchedEffect(downloadQueueFeedback) {
+            downloadQueueFeedback ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(downloadQueueFeedback)
+            controller.dismissDownloadQueueFeedback(downloadQueueFeedback)
         }
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val layoutInfo = remember(maxWidth, maxHeight) {
@@ -244,7 +250,8 @@ fun AppRoot(
                                 hasAudioPermission = hasAudioPermission,
                                 onRequestAudioPermission = onRequestAudioPermission,
                             )
-                            AppDestination.DebugLogs -> DebugLogScreen(controller)
+                                    AppDestination.DebugLogs -> DebugLogScreen(controller)
+                                    AppDestination.DownloadManager -> DownloadManagerScreen(controller)
                             AppDestination.Settings -> SettingsScreen(
                                 controller,
                                 onOpenProviderWebLogin,
@@ -373,12 +380,14 @@ private enum class AppDestination {
     Search,
     Settings,
     DebugLogs,
+    DownloadManager,
     MediaItem,
 }
 
 private fun appDestination(controller: FuoPlayerController): AppDestination {
     return when {
         controller.isDebugLogOpen -> AppDestination.DebugLogs
+        controller.isDownloadManagerOpen -> AppDestination.DownloadManager
         controller.isSettingsOpen -> AppDestination.Settings
         controller.selectedVideo != null -> AppDestination.Video
         controller.selectedTrack != null -> AppDestination.Track

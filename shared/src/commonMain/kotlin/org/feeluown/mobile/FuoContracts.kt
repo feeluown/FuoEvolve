@@ -87,6 +87,7 @@ data class AppSettings(
     val providerOrderIds: List<String> = DEFAULT_PROVIDER_ORDER_IDS,
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
+    val downloadParallelism: Int = DEFAULT_DOWNLOAD_PARALLELISM,
     val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
     val cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
@@ -106,6 +107,7 @@ data class ProviderHeaderInput(
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
 const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
+const val DEFAULT_DOWNLOAD_PARALLELISM = 2
 const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
 val DEFAULT_ENABLED_PROVIDER_IDS = setOf("netease")
 val DEFAULT_PROVIDER_ORDER_IDS = listOf("netease", "qqmusic", "bilibili", "ytmusic")
@@ -451,9 +453,30 @@ sealed class DownloadState {
     data object NotDownloaded : DownloadState()
     data object Queued : DownloadState()
     data class Downloading(val progress: Float) : DownloadState()
+    data object Paused : DownloadState()
     data class Downloaded(val uri: String) : DownloadState()
     data class Failed(val message: String) : DownloadState()
 }
+
+enum class DownloadTaskStatus {
+    Queued,
+    Downloading,
+    Paused,
+    Failed,
+    Completed,
+}
+
+data class DownloadTask(
+    val id: String,
+    val track: MusicTrack,
+    val status: DownloadTaskStatus,
+    val createdAt: Long,
+    val updatedAt: Long = createdAt,
+    val downloadedBytes: Long = 0,
+    val totalBytes: Long? = null,
+    val failureMessage: String? = null,
+    val completedUri: String? = null,
+)
 
 data class ProviderAuthState(
     val providerId: String,
@@ -723,10 +746,19 @@ interface LocalMusicRepository {
 
 interface DownloadRepository {
     val states: StateFlow<Map<String, DownloadState>>
+    val tasks: StateFlow<List<DownloadTask>>
+        get() = EMPTY_DOWNLOAD_TASKS
     suspend fun load()
     suspend fun download(track: MusicTrack)
+    suspend fun updateParallelism(parallelism: Int) = Unit
+    suspend fun pause(taskId: String) = Unit
+    suspend fun resume(taskId: String) = Unit
+    suspend fun retry(taskId: String) = Unit
+    suspend fun deleteTask(taskId: String, deleteFile: Boolean = true) = Unit
     suspend fun deleteDownloaded(track: MusicTrack)
 }
+
+private val EMPTY_DOWNLOAD_TASKS = MutableStateFlow<List<DownloadTask>>(emptyList())
 
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>

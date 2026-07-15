@@ -3,6 +3,10 @@ package org.feeluown.mobile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.Foundation.NSUserDefaults
 import kotlin.coroutines.resume
@@ -12,28 +16,80 @@ class IosDownloadRepository(
     private val output: IosDownloadOutput,
 ) : DownloadRepository {
     private val mutableStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
+    private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     private val defaults = NSUserDefaults.standardUserDefaults
+    private val taskRecords = linkedMapOf<String, DownloadTask>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val activeTaskIds = mutableSetOf<String>()
+    private var parallelism = DEFAULT_DOWNLOAD_PARALLELISM
 
     override val states: StateFlow<Map<String, DownloadState>> = mutableStates.asStateFlow()
+    override val tasks: StateFlow<List<DownloadTask>> = mutableTasks.asStateFlow()
 
     override suspend fun load() {
-        mutableStates.value = readRecords().mapValues { DownloadState.Downloaded(it.value) }
+        taskRecords.clear()
+        readTasks().forEach { task ->
+            taskRecords[task.id] = if (task.status == DownloadTaskStatus.Downloading) {
+                task.copy(status = DownloadTaskStatus.Paused)
+            } else task
+        }
+        readRecords().forEach { (id, uri) ->
+            if (id in taskRecords) return@forEach
+            taskRecords[id] = DownloadTask(
+                id = id,
+                track = MusicTrack(id, id, "", "", "", TrackSourceType.Provider),
+                status = DownloadTaskStatus.Completed,
+                createdAt = 0,
+                completedUri = uri,
+            )
+        }
+        writeTasks()
+        publish()
     }
 
     override suspend fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
-        mutableStates.value = mutableStates.value + (track.id to DownloadState.Queued)
-        val payload = runCatching { providerRepository.resolve(track) }.getOrElse { throwable ->
-            mutableStates.value = mutableStates.value +
-                (track.id to DownloadState.Failed(throwable.message ?: "下载解析失败"))
-            throw throwable
+        val existing = taskRecords[track.id]
+        if (existing?.status == DownloadTaskStatus.Downloading || existing?.status == DownloadTaskStatus.Queued) return
+        updateTask(
+            (existing ?: DownloadTask(track.id, track, DownloadTaskStatus.Queued, System.currentTimeMillis()))
+                .copy(status = DownloadTaskStatus.Queued, failureMessage = null, updatedAt = System.currentTimeMillis()),
+        )
+        schedule()
+    }
+
+    override suspend fun updateParallelism(parallelism: Int) {
+        this.parallelism = parallelism.coerceIn(1, 5)
+        schedule()
+    }
+
+    private fun schedule() {
+        val ids = taskRecords.values
+            .filter { it.status == DownloadTaskStatus.Queued && it.id !in activeTaskIds }
+            .sortedBy { it.createdAt }
+            .take((parallelism - activeTaskIds.size).coerceAtLeast(0))
+            .map { it.id }
+        ids.forEach { id ->
+            activeTaskIds += id
+            scope.launch { runTask(id) }
         }
-        mutableStates.value = mutableStates.value + (track.id to DownloadState.Downloading(0f))
+    }
+
+    private suspend fun runTask(taskId: String) {
+        val task = taskRecords[taskId] ?: return
+        updateTask(task.copy(status = DownloadTaskStatus.Downloading, failureMessage = null))
+        val payload = runCatching { providerRepository.resolve(task.track) }.getOrElse { throwable ->
+            updateTask(taskRecords.getValue(taskId).copy(status = DownloadTaskStatus.Failed, failureMessage = throwable.message ?: "下载解析失败"))
+            activeTaskIds -= taskId
+            schedule()
+            return
+        }
         val result = suspendCancellableCoroutine<Result<String>> { continuation ->
             output.download(
+                taskId = taskId,
                 url = payload.url,
                 headers = payload.headers,
-                fileName = downloadFileName(track, payload),
+                fileName = downloadFileName(task.track, payload),
                 lyrics = payload.lyrics,
             ) { uri, error ->
                 if (!continuation.isActive) return@download
@@ -42,14 +98,43 @@ class IosDownloadRepository(
             }
         }
         result.onSuccess { uri ->
-            val records = readRecords() + (track.id to uri)
+            val records = readRecords() + (taskId to uri)
             writeRecords(records)
-            mutableStates.value = mutableStates.value + (track.id to DownloadState.Downloaded(uri))
+            updateTask(taskRecords.getValue(taskId).copy(status = DownloadTaskStatus.Completed, completedUri = uri, failureMessage = null))
         }.onFailure { throwable ->
-            mutableStates.value = mutableStates.value +
-                (track.id to DownloadState.Failed(throwable.message ?: "下载失败"))
-            throw throwable
+            taskRecords[taskId]?.takeIf { it.status != DownloadTaskStatus.Paused }?.let {
+                updateTask(it.copy(status = DownloadTaskStatus.Failed, failureMessage = throwable.message ?: "下载失败"))
+            }
         }
+        activeTaskIds -= taskId
+        schedule()
+    }
+
+    override suspend fun pause(taskId: String) {
+        val task = taskRecords[taskId] ?: return
+        if (task.status !in setOf(DownloadTaskStatus.Downloading, DownloadTaskStatus.Queued)) return
+        output.pause(taskId)
+        activeTaskIds -= taskId
+        updateTask(task.copy(status = DownloadTaskStatus.Paused))
+        schedule()
+    }
+
+    override suspend fun resume(taskId: String) {
+        taskRecords[taskId]?.takeIf { it.status != DownloadTaskStatus.Completed }?.let { download(it.track) }
+    }
+
+    override suspend fun retry(taskId: String) = resume(taskId)
+
+    override suspend fun deleteTask(taskId: String, deleteFile: Boolean) {
+        val task = taskRecords.remove(taskId) ?: return
+        activeTaskIds -= taskId
+        output.deleteTemporary(taskId)
+        if (deleteFile) task.completedUri?.let(output::delete)
+        val records = readRecords().toMutableMap()
+        records.remove(taskId)
+        writeRecords(records)
+        writeTasks()
+        publish()
     }
 
     override suspend fun deleteDownloaded(track: MusicTrack) {
@@ -58,7 +143,9 @@ class IosDownloadRepository(
         val uri = records.remove(key) ?: track.localUri
         if (uri != null) output.delete(uri)
         writeRecords(records)
-        mutableStates.value = mutableStates.value - key
+        taskRecords.remove(key)
+        writeTasks()
+        publish()
     }
 
     private fun downloadFileName(track: MusicTrack, payload: PlaybackPayload): String {
@@ -91,8 +178,67 @@ class IosDownloadRepository(
         defaults.synchronize()
     }
 
+    private fun updateTask(task: DownloadTask) {
+        taskRecords[task.id] = task
+        writeTasks()
+        publish()
+    }
+
+    private fun readTasks(): List<DownloadTask> {
+        return defaults.stringForKey(KEY_DOWNLOAD_TASKS)
+            ?.lineSequence()
+            ?.mapNotNull { line ->
+                val values = line.split(TASK_FIELD_SEPARATOR)
+                if (values.size < 8) return@mapNotNull null
+                val status = runCatching { DownloadTaskStatus.valueOf(values[5]) }.getOrNull() ?: return@mapNotNull null
+                DownloadTask(
+                    id = values[0],
+                    track = MusicTrack(
+                        id = values[1], title = values[2], artists = values[3], album = values[4],
+                        source = values[6], sourceType = TrackSourceType.Provider,
+                    ),
+                    status = status,
+                    createdAt = values[7].toLongOrNull() ?: 0,
+                    completedUri = values.getOrNull(8)?.takeIf { it.isNotBlank() },
+                    failureMessage = values.getOrNull(9)?.takeIf { it.isNotBlank() },
+                )
+            }
+            ?.toList()
+            .orEmpty()
+    }
+
+    private fun writeTasks() {
+        defaults.setObject(
+            taskRecords.values.joinToString("\n") { task ->
+                listOf(
+                    task.id, task.track.id, task.track.title, task.track.artists, task.track.album,
+                    task.status.name, task.track.source, task.createdAt.toString(), task.completedUri.orEmpty(), task.failureMessage.orEmpty(),
+                ).joinToString(TASK_FIELD_SEPARATOR)
+            },
+            KEY_DOWNLOAD_TASKS,
+        )
+        defaults.synchronize()
+    }
+
+    private fun publish() {
+        mutableTasks.value = taskRecords.values.sortedWith(
+            compareBy<DownloadTask> { if (it.status == DownloadTaskStatus.Downloading) 0 else 1 }.thenByDescending { it.createdAt },
+        )
+        mutableStates.value = taskRecords.values.associate { task ->
+            task.id to when (task.status) {
+                DownloadTaskStatus.Queued -> DownloadState.Queued
+                DownloadTaskStatus.Downloading -> DownloadState.Downloading(0f)
+                DownloadTaskStatus.Paused -> DownloadState.Paused
+                DownloadTaskStatus.Failed -> DownloadState.Failed(task.failureMessage ?: "下载失败")
+                DownloadTaskStatus.Completed -> DownloadState.Downloaded(task.completedUri.orEmpty())
+            }
+        }
+    }
+
     private companion object {
         private const val KEY_DOWNLOAD_RECORDS = "ios_download_records"
+        private const val KEY_DOWNLOAD_TASKS = "ios_download_tasks"
         private const val RECORD_SEPARATOR = "\u001f"
+        private const val TASK_FIELD_SEPARATOR = "\u001e"
     }
 }

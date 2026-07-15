@@ -353,10 +353,19 @@ final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
     }
 }
 
-final class IOSDownloadOutput: NSObject, IosDownloadOutput {
+final class IOSDownloadOutput: NSObject, IosDownloadOutput, URLSessionDelegate {
     static let shared = IOSDownloadOutput()
+    private var tasks: [String: URLSessionDownloadTask] = [:]
+    private let resumePrefix = "ios_download_resume_"
+    private var backgroundCompletionHandler: (() -> Void)?
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.background(withIdentifier: "org.feeluown.mobile.downloads")
+        configuration.sessionSendsLaunchEvents = true
+        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }()
 
     func download(
+        taskId: String,
         url: String,
         headers: [String: String],
         fileName: String,
@@ -369,7 +378,9 @@ final class IOSDownloadOutput: NSObject, IosDownloadOutput {
         }
         var request = URLRequest(url: sourceURL)
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-        URLSession.shared.downloadTask(with: request) { temporaryURL, _, error in
+        let resumeKey = resumePrefix + taskId
+        let completion: (URL?, URLResponse?, Error?) -> Void = { temporaryURL, _, error in
+            self.tasks.removeValue(forKey: taskId)
             if let error {
                 DispatchQueue.main.async { completionHandler(nil, error.localizedDescription) }
                 return
@@ -393,7 +404,44 @@ final class IOSDownloadOutput: NSObject, IosDownloadOutput {
             } catch {
                 DispatchQueue.main.async { completionHandler(nil, error.localizedDescription) }
             }
-        }.resume()
+        }
+        let task: URLSessionDownloadTask
+        if let resumeData = UserDefaults.standard.data(forKey: resumeKey) {
+            task = session.downloadTask(withResumeData: resumeData, completionHandler: completion)
+            UserDefaults.standard.removeObject(forKey: resumeKey)
+        } else {
+            task = session.downloadTask(with: request, completionHandler: completion)
+        }
+        tasks[taskId] = task
+        task.resume()
+    }
+
+    func pause(taskId: String) {
+        guard let task = tasks.removeValue(forKey: taskId) else { return }
+        task.cancel(byProducingResumeData: { [resumePrefix] data in
+            guard let data else { return }
+            UserDefaults.standard.set(data, forKey: resumePrefix + taskId)
+        })
+    }
+
+    func deleteTemporary(taskId: String) {
+        tasks.removeValue(forKey: taskId)?.cancel()
+        UserDefaults.standard.removeObject(forKey: resumePrefix + taskId)
+    }
+
+    func handleBackgroundEvents(identifier: String, completionHandler: @escaping () -> Void) {
+        guard identifier == session.configuration.identifier else {
+            completionHandler()
+            return
+        }
+        backgroundCompletionHandler = completionHandler
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        DispatchQueue.main.async {
+            self.backgroundCompletionHandler?()
+            self.backgroundCompletionHandler = nil
+        }
     }
 
     func delete(uri: String) -> Bool {

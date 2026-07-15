@@ -161,6 +161,7 @@ fun SettingsScreen(
                 ) {
                     PlayerDisplaySettingsPanel(controller)
                     LocalMusicScanSettingsPanel(controller)
+                    DownloadSettingsPanel(controller)
                     CacheSettingsPanel(controller)
                     if (controller.isDebugLogViewerAvailable) {
                         DebugSettingsPanel(controller)
@@ -185,6 +186,7 @@ fun SettingsScreen(
                 PlaybackPolicySettingsPanel(controller)
                 PlayerDisplaySettingsPanel(controller)
                 LocalMusicScanSettingsPanel(controller)
+                DownloadSettingsPanel(controller)
                 CacheSettingsPanel(controller)
                 if (controller.isDebugLogViewerAvailable) {
                     DebugSettingsPanel(controller)
@@ -941,6 +943,46 @@ fun LocalMusicDurationFilterRow(
                     label = { Text(if (seconds == 0) "不过滤" else "${seconds} 秒") },
                     colors = settingsFilterChipColors(),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun DownloadSettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = controller::openDownloadManager),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Download, contentDescription = null)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("下载管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "${controller.downloadTasks.count { it.status == DownloadTaskStatus.Downloading }} 个下载中",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text("并行下载数量", style = MaterialTheme.typography.bodyMedium)
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                (1..5).forEach { value ->
+                    SegmentedButton(
+                        selected = controller.downloadParallelism == value,
+                        onClick = { controller.onDownloadParallelismChange(value) },
+                        shape = SegmentedButtonDefaults.itemShape(index = value - 1, count = 5),
+                    ) { Text(value.toString()) }
+                }
             }
         }
     }

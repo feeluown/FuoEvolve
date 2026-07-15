@@ -171,6 +171,29 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun downloadImmediatelyPublishesQueueFeedback() = runTest {
+        val track = providerTrack("netease:1", "Queue Song")
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(listOf(track)),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            controller.download(track)
+
+            assertEquals("已加入下载队列：Queue Song", controller.downloadQueueFeedback)
+            controller.dismissDownloadQueueFeedback("已加入下载队列：Queue Song")
+            assertNull(controller.downloadQueueFeedback)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun providerSearchAllStoresTypedResults() = runTest {
         val song = providerTrack("netease:1", "Song")
         val playlist = ProviderPlaylist("playlist:netease:10", "Playlist", "netease", "网易云音乐")

@@ -27,6 +27,7 @@ class IosAppSettingsStore : AppSettingsStore {
             providerOrderIds = readStringList(KEY_PROVIDER_ORDER_IDS).ifEmpty { DEFAULT_PROVIDER_ORDER_IDS },
             audioCacheLimitMb = intValue(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = intValue(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
+            downloadParallelism = intValue(KEY_DOWNLOAD_PARALLELISM, DEFAULT_DOWNLOAD_PARALLELISM).coerceIn(1, 5),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
             cellularAudioQualityPolicy = enumValue(KEY_CELLULAR_AUDIO_QUALITY_POLICY, DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY),
             unavailablePlaybackPolicy = enumValue(KEY_UNAVAILABLE_PLAYBACK_POLICY, DEFAULT_UNAVAILABLE_PLAYBACK_POLICY),
@@ -59,6 +60,7 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setObject(settings.providerOrderIds.joinToString(LIST_SEPARATOR), KEY_PROVIDER_ORDER_IDS)
             defaults.setInteger(settings.audioCacheLimitMb.toLong(), KEY_AUDIO_CACHE_LIMIT_MB)
             defaults.setInteger(settings.imageCacheLimitMb.toLong(), KEY_IMAGE_CACHE_LIMIT_MB)
+            defaults.setInteger(settings.downloadParallelism.coerceIn(1, 5).toLong(), KEY_DOWNLOAD_PARALLELISM)
             defaults.setObject(settings.wifiAudioQualityPolicy.name, KEY_WIFI_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.cellularAudioQualityPolicy.name, KEY_CELLULAR_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.unavailablePlaybackPolicy.name, KEY_UNAVAILABLE_PLAYBACK_POLICY)
@@ -168,6 +170,7 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_PROVIDER_ORDER_IDS = "provider_order_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
+        private const val KEY_DOWNLOAD_PARALLELISM = "download_parallelism"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
