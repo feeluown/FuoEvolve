@@ -213,6 +213,8 @@ class FuoPlayerController(
         private set
     var isDebugLogOpen by mutableStateOf(false)
         private set
+    var isDownloadManagerOpen by mutableStateOf(false)
+        private set
     var isQueueOpen by mutableStateOf(false)
         private set
     var isLoading by mutableStateOf(false)
@@ -221,6 +223,10 @@ class FuoPlayerController(
         private set
     var downloadStates by mutableStateOf<Map<String, DownloadState>>(emptyMap())
         private set
+    var downloadTasks by mutableStateOf<List<DownloadTask>>(emptyList())
+        private set
+    var downloadQueueFeedback by mutableStateOf<String?>(null)
+        private set
     var playbackState by mutableStateOf(PlaybackState())
         private set
     var cacheUsage by mutableStateOf(CacheUsage())
@@ -228,6 +234,8 @@ class FuoPlayerController(
     var audioCacheLimitMb by mutableStateOf(DEFAULT_AUDIO_CACHE_LIMIT_MB)
         private set
     var imageCacheLimitMb by mutableStateOf(DEFAULT_IMAGE_CACHE_LIMIT_MB)
+        private set
+    var downloadParallelism by mutableStateOf(DEFAULT_DOWNLOAD_PARALLELISM)
         private set
     var wifiAudioQualityPolicy by mutableStateOf(DEFAULT_WIFI_AUDIO_QUALITY_POLICY)
         private set
@@ -314,6 +322,7 @@ class FuoPlayerController(
     private var playRequestSerial: Long = 0
     private var localMusicRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
+    private var observedCompletedDownloadTaskIds = emptySet<String>()
     private var pendingLocalMusicMediaRefresh: Job? = null
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
@@ -321,7 +330,10 @@ class FuoPlayerController(
     init {
         scope.launch {
             val loadedSettings = runCatching { settingsStore.load() }
-            loadedSettings.onSuccess { applySettings(it) }
+            loadedSettings.getOrNull()?.let {
+                applySettings(it)
+                downloadRepository.updateParallelism(downloadParallelism)
+            }
             runCatching { playbackQueueStore.load() }
                 .onSuccess { restorePlaybackQueue(it) }
             updateLocalMusicScanSettings()
@@ -348,6 +360,20 @@ class FuoPlayerController(
         scope.launch {
             downloadRepository.states.collect {
                 downloadStates = it
+            }
+        }
+        scope.launch {
+            downloadRepository.tasks.collect {
+                downloadTasks = it
+                val completedIds = it.filter { task -> task.status == DownloadTaskStatus.Completed }.map { task -> task.id }.toSet()
+                val newlyCompleted = completedIds - observedCompletedDownloadTaskIds
+                observedCompletedDownloadTaskIds = completedIds
+                if (newlyCompleted.isNotEmpty() && hasLocalMusicPermission) {
+                    refreshLocalMusic(
+                        forceRefresh = true,
+                        showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic,
+                    )
+                }
             }
         }
         scope.launch {
@@ -551,6 +577,10 @@ class FuoPlayerController(
                 closeDebugLogs()
                 true
             }
+            isDownloadManagerOpen -> {
+                closeDownloadManager()
+                true
+            }
             isSettingsOpen && settingsLoginProviderId != null -> {
                 closeSettingsProviderLogin()
                 true
@@ -599,6 +629,7 @@ class FuoPlayerController(
     fun closeSettings() {
         isSettingsOpen = false
         isDebugLogOpen = false
+        isDownloadManagerOpen = false
         settingsLoginProviderId = null
     }
 
@@ -620,6 +651,24 @@ class FuoPlayerController(
 
     fun closeDebugLogs() {
         isDebugLogOpen = false
+    }
+
+    fun openDownloadManager() {
+        isDownloadManagerOpen = true
+    }
+
+    fun closeDownloadManager() {
+        isDownloadManagerOpen = false
+    }
+
+    fun dismissDownloadQueueFeedback(feedback: String) {
+        if (downloadQueueFeedback == feedback) downloadQueueFeedback = null
+    }
+
+    fun onDownloadParallelismChange(value: Int) {
+        downloadParallelism = value.coerceIn(1, 5)
+        persistSettings()
+        scope.launch { downloadRepository.updateParallelism(downloadParallelism) }
     }
 
     fun refreshDebugLogs() {
@@ -2484,6 +2533,7 @@ class FuoPlayerController(
 
     fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        downloadQueueFeedback = "已加入下载队列：${track.title}"
         scope.launch {
             runCatching {
                 val payload = providerRepository.resolve(
@@ -2496,14 +2546,16 @@ class FuoPlayerController(
                 )
                 downloadRepository.download(track, payload)
             }
-                .onSuccess {
-                    if (hasLocalMusicPermission) {
-                        refreshLocalMusic(forceRefresh = true, showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic)
-                    }
-                    message = "已下载：${track.title}"
-                }
                 .onFailure { setError(it) }
         }
+    }
+
+    fun pauseDownload(taskId: String) = runDownloadAction { downloadRepository.pause(taskId) }
+    fun resumeDownload(taskId: String) = runDownloadAction { downloadRepository.resume(taskId) }
+    fun retryDownload(taskId: String) = runDownloadAction { downloadRepository.retry(taskId) }
+
+    fun deleteDownloadTask(taskId: String, deleteFile: Boolean) = runDownloadAction {
+        downloadRepository.deleteTask(taskId, deleteFile)
     }
 
     fun deleteDownload(track: MusicTrack) {
@@ -2515,6 +2567,13 @@ class FuoPlayerController(
                     }
                     message = "已删除下载：${track.title}"
                 }
+                .onFailure { setError(it) }
+        }
+    }
+
+    private fun runDownloadAction(action: suspend () -> Unit) {
+        scope.launch {
+            runCatching { action() }
                 .onFailure { setError(it) }
         }
     }
@@ -3291,6 +3350,7 @@ class FuoPlayerController(
         mineProviderIds = settings.mineProviderIds
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
+        downloadParallelism = settings.downloadParallelism.coerceIn(1, 5)
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
         cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
@@ -3326,6 +3386,7 @@ class FuoPlayerController(
             mineProviderIds = mineProviderIds,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
+            downloadParallelism = downloadParallelism,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,
             cellularAudioQualityPolicy = cellularAudioQualityPolicy,
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,

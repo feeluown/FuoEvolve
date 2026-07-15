@@ -2278,6 +2278,34 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
     }
 
 
+def write_m4a_tags(
+    path: str,
+    title: str,
+    artists: str,
+    album: str,
+    cover_mime_type: str = "",
+    cover_base64: str = "",
+) -> bool:
+    from base64 import b64decode
+
+    from mutagen.mp4 import MP4, MP4Cover
+
+    audio = MP4(path)
+    if audio.tags is None:
+        audio.add_tags()
+    if title:
+        audio.tags["\xa9nam"] = [title]
+    if artists:
+        audio.tags["\xa9ART"] = [artists]
+    if album:
+        audio.tags["\xa9alb"] = [album]
+    if cover_base64:
+        image_format = MP4Cover.FORMAT_PNG if cover_mime_type == "image/png" else MP4Cover.FORMAT_JPEG
+        audio.tags["covr"] = [MP4Cover(b64decode(cover_base64), imageformat=image_format)]
+    audio.save()
+    return True
+
+
 def video_media_to_payload(video, media: Media, quality, library: Library) -> Dict[str, Any]:
     video_data = video_to_dict(video, library)
     manifest = getattr(media, "manifest", None)

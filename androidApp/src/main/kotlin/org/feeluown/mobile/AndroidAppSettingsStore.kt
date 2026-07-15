@@ -35,6 +35,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             mineProviderIds = readStringSet(KEY_MINE_PROVIDER_IDS),
             audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
+            downloadParallelism = preferences.getInt(KEY_DOWNLOAD_PARALLELISM, DEFAULT_DOWNLOAD_PARALLELISM).coerceIn(1, 5),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
             cellularAudioQualityPolicy = enumValue(
                 KEY_CELLULAR_AUDIO_QUALITY_POLICY,
@@ -91,6 +92,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putStringSet(KEY_MINE_PROVIDER_IDS, settings.mineProviderIds)
                 .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
+                .putInt(KEY_DOWNLOAD_PARALLELISM, settings.downloadParallelism.coerceIn(1, 5))
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
                 .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
                 .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
@@ -237,6 +239,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_MINE_PROVIDER_IDS = "mine_provider_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
+        private const val KEY_DOWNLOAD_PARALLELISM = "download_parallelism"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
