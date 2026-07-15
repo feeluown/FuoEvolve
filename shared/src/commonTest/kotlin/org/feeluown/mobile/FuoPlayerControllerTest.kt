@@ -194,6 +194,43 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun downloadUsesConfiguredSmartReplacementMetadataLyricsAndProviders() = runTest {
+        val track = providerTrack("netease:1", "原始歌曲")
+        val provider = FakeProviderRepository(listOf(track))
+        val downloads = FakeDownloadRepository(emptyMap())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = downloads,
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = FakeSettingsStore(
+                    AppSettings(
+                        enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
+                        smartReplacementProviderIds = setOf("qqmusic"),
+                        smartReplacementUseReplacementMetadata = false,
+                        smartReplacementUseReplacementLyrics = false,
+                    ),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.download(track)
+            advanceUntilIdle()
+
+            assertEquals(setOf("qqmusic"), provider.lastSmartReplacementProviderIds)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalMetadata)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalLyrics)
+            assertEquals(track.id, downloads.lastTrack?.id)
+            assertEquals(track.title, downloads.lastPayload?.title)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun providerSearchAllStoresTypedResults() = runTest {
         val song = providerTrack("netease:1", "Song")
         val playlist = ProviderPlaylist("playlist:netease:10", "Playlist", "netease", "网易云音乐")
@@ -1892,6 +1929,7 @@ class FuoPlayerControllerTest {
 
     @Test
     fun restoresAndPersistsSettings() = runTest {
+        assertEquals(PlaybackSpectrumStyle.None, AppSettings().playbackSpectrumStyle)
         val store = FakeSettingsStore(
             AppSettings(
                 homeSection = HomeSection.Mine,
@@ -1918,6 +1956,7 @@ class FuoPlayerControllerTest {
                 smartReplacementUseReplacementMetadata = true,
                 smartReplacementUseReplacementLyrics = true,
                 lyricFontSize = LyricFontSize.Large,
+                playbackSpectrumStyle = PlaybackSpectrumStyle.None,
                 themeMode = ThemeMode.Dark,
                 themeColorScheme = ThemeColorScheme.OceanBlue,
             ),
@@ -1967,6 +2006,7 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.smartReplacementUseReplacementMetadata)
             assertEquals(true, controller.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Large, controller.lyricFontSize)
+            assertEquals(PlaybackSpectrumStyle.None, controller.playbackSpectrumStyle)
             assertEquals(ThemeMode.Dark, controller.themeMode)
             assertEquals(ThemeColorScheme.OceanBlue, controller.themeColorScheme)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
@@ -1988,6 +2028,7 @@ class FuoPlayerControllerTest {
             controller.onSmartReplacementUseReplacementMetadataChange(false)
             controller.onSmartReplacementUseReplacementLyricsChange(false)
             controller.onLyricFontSizeChange(LyricFontSize.Medium)
+            controller.onPlaybackSpectrumStyleChange(PlaybackSpectrumStyle.Wave)
             controller.onThemeModeChange(ThemeMode.Light)
             controller.onThemeColorSchemeChange(ThemeColorScheme.FuoGreen)
             advanceUntilIdle()
@@ -2014,6 +2055,7 @@ class FuoPlayerControllerTest {
             assertEquals(false, store.saved.smartReplacementUseReplacementMetadata)
             assertEquals(false, store.saved.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
+            assertEquals(PlaybackSpectrumStyle.Wave, store.saved.playbackSpectrumStyle)
             assertEquals(ThemeMode.Light, store.saved.themeMode)
             assertEquals(ThemeColorScheme.FuoGreen, store.saved.themeColorScheme)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
@@ -3406,10 +3448,17 @@ class FuoPlayerControllerTest {
     ) : DownloadRepository {
         private val mutableStates = MutableStateFlow(initialStates)
         override val states = mutableStates
+        var lastTrack: MusicTrack? = null
+        var lastPayload: PlaybackPayload? = null
 
         override suspend fun load() = Unit
 
         override suspend fun download(track: MusicTrack) = Unit
+
+        override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+            lastTrack = track
+            lastPayload = payload
+        }
 
         override suspend fun deleteDownloaded(track: MusicTrack) = Unit
     }

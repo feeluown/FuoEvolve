@@ -40,6 +40,7 @@ class AndroidDownloadRepository(
     private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val taskJobs = mutableMapOf<String, Job>()
+    private val taskPayloads = mutableMapOf<String, PlaybackPayload>()
     private val taskMutex = Mutex()
     private var parallelism = DEFAULT_DOWNLOAD_PARALLELISM
 
@@ -83,6 +84,15 @@ class AndroidDownloadRepository(
 
     override suspend fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        enqueue(track, null)
+    }
+
+    override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+        if (track.sourceType != TrackSourceType.Provider) return
+        enqueue(track, payload)
+    }
+
+    private suspend fun enqueue(track: MusicTrack, payload: PlaybackPayload?) {
         taskMutex.withLock {
             val existing = taskRecords[track.id]
             when (existing?.status) {
@@ -99,6 +109,7 @@ class AndroidDownloadRepository(
                     ),
                 )
             }
+            payload?.let { taskPayloads[track.id] = it }
         }
         schedule()
     }
@@ -193,7 +204,7 @@ class AndroidDownloadRepository(
                 updateTask(downloading)
                 downloading
             }
-            val payload = providerRepository.resolve(task.track)
+            val payload = taskMutex.withLock { taskPayloads.remove(taskId) } ?: providerRepository.resolve(task.track)
             val extension = extension(payload.url)
             val tempFile = temporaryFile(taskId, extension)
             writePayload(taskId, payload, tempFile)

@@ -19,6 +19,7 @@ class IosDownloadRepository(
     private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     private val defaults = NSUserDefaults.standardUserDefaults
     private val taskRecords = linkedMapOf<String, DownloadTask>()
+    private val taskPayloads = mutableMapOf<String, PlaybackPayload>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val activeTaskIds = mutableSetOf<String>()
     private var parallelism = DEFAULT_DOWNLOAD_PARALLELISM
@@ -49,12 +50,22 @@ class IosDownloadRepository(
 
     override suspend fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        enqueue(track, null)
+    }
+
+    override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+        if (track.sourceType != TrackSourceType.Provider) return
+        enqueue(track, payload)
+    }
+
+    private fun enqueue(track: MusicTrack, payload: PlaybackPayload?) {
         val existing = taskRecords[track.id]
         if (existing?.status == DownloadTaskStatus.Downloading || existing?.status == DownloadTaskStatus.Queued) return
         updateTask(
             (existing ?: DownloadTask(track.id, track, DownloadTaskStatus.Queued, System.currentTimeMillis()))
                 .copy(status = DownloadTaskStatus.Queued, failureMessage = null, updatedAt = System.currentTimeMillis()),
         )
+        payload?.let { taskPayloads[track.id] = it }
         schedule()
     }
 
@@ -78,7 +89,7 @@ class IosDownloadRepository(
     private suspend fun runTask(taskId: String) {
         val task = taskRecords[taskId] ?: return
         updateTask(task.copy(status = DownloadTaskStatus.Downloading, failureMessage = null))
-        val payload = runCatching { providerRepository.resolve(task.track) }.getOrElse { throwable ->
+        val payload = taskPayloads.remove(taskId) ?: runCatching { providerRepository.resolve(task.track) }.getOrElse { throwable ->
             updateTask(taskRecords.getValue(taskId).copy(status = DownloadTaskStatus.Failed, failureMessage = throwable.message ?: "下载解析失败"))
             activeTaskIds -= taskId
             schedule()

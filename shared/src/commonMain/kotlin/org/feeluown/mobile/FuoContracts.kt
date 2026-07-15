@@ -70,6 +70,15 @@ enum class ThemeColorScheme(
     Amber("琥珀"),
 }
 
+enum class PlaybackSpectrumStyle(
+    val label: String,
+) {
+    None("无频谱"),
+    Bars("柱状"),
+    MirrorBars("镜像"),
+    Wave("波形"),
+}
+
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
@@ -85,6 +94,10 @@ data class AppSettings(
     val providerHeaderInputs: Map<String, ProviderHeaderInput> = emptyMap(),
     val enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS,
     val providerOrderIds: List<String> = DEFAULT_PROVIDER_ORDER_IDS,
+    val searchProviderIds: Set<String> = emptySet(),
+    val recommendProviderIds: Set<String> = emptySet(),
+    val exploreProviderIds: Set<String> = emptySet(),
+    val mineProviderIds: Set<String> = emptySet(),
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
     val downloadParallelism: Int = DEFAULT_DOWNLOAD_PARALLELISM,
@@ -96,6 +109,7 @@ data class AppSettings(
     val smartReplacementUseReplacementMetadata: Boolean = false,
     val smartReplacementUseReplacementLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
+    val playbackSpectrumStyle: PlaybackSpectrumStyle = PlaybackSpectrumStyle.None,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
@@ -241,6 +255,7 @@ data class PlaybackState(
     val audioQuality: String? = null,
     val audioFormatInfo: AudioFormatInfo? = null,
     val audioDecoderInfo: AudioDecoderInfo? = null,
+    val spectrumLevels: List<Float> = emptyList(),
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val errorMessage: String? = null,
@@ -750,6 +765,7 @@ interface DownloadRepository {
         get() = EMPTY_DOWNLOAD_TASKS
     suspend fun load()
     suspend fun download(track: MusicTrack)
+    suspend fun download(track: MusicTrack, payload: PlaybackPayload) = download(track)
     suspend fun updateParallelism(parallelism: Int) = Unit
     suspend fun pause(taskId: String) = Unit
     suspend fun resume(taskId: String) = Unit

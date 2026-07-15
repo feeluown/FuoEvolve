@@ -4,6 +4,9 @@ name: iOS Debug App
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -12,7 +15,7 @@ permissions:
 jobs:
   build-debug-app:
     name: Build debug iOS app
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       PYTHON_APPLE_SUPPORT_TAG: 3.12-b8
