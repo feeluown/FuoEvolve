@@ -1928,6 +1928,28 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun appliesSavedDownloadParallelismToRepositoryOnStartup() = runTest {
+        val downloads = FakeDownloadRepository(emptyMap())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = downloads,
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = FakeSettingsStore(AppSettings(downloadParallelism = 4)),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(4, downloads.lastParallelism)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun restoresAndPersistsSettings() = runTest {
         assertEquals(PlaybackSpectrumStyle.None, AppSettings().playbackSpectrumStyle)
         val store = FakeSettingsStore(
@@ -3450,6 +3472,7 @@ class FuoPlayerControllerTest {
         override val states = mutableStates
         var lastTrack: MusicTrack? = null
         var lastPayload: PlaybackPayload? = null
+        var lastParallelism: Int? = null
 
         override suspend fun load() = Unit
 
@@ -3458,6 +3481,10 @@ class FuoPlayerControllerTest {
         override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
             lastTrack = track
             lastPayload = payload
+        }
+
+        override suspend fun updateParallelism(parallelism: Int) {
+            lastParallelism = parallelism
         }
 
         override suspend fun deleteDownloaded(track: MusicTrack) = Unit

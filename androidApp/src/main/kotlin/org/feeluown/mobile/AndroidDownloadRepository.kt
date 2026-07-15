@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
@@ -28,6 +29,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.URL
 import java.net.HttpURLConnection
+import kotlin.coroutines.coroutineContext
 
 class AndroidDownloadRepository(
     private val context: Context,
@@ -40,6 +42,7 @@ class AndroidDownloadRepository(
     private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val taskJobs = mutableMapOf<String, Job>()
+    private val taskConnections = mutableMapOf<String, HttpURLConnection>()
     private val taskPayloads = mutableMapOf<String, PlaybackPayload>()
     private val taskMutex = Mutex()
     private var parallelism = DEFAULT_DOWNLOAD_PARALLELISM
@@ -123,6 +126,7 @@ class AndroidDownloadRepository(
         taskMutex.withLock {
             val task = taskRecords[taskId] ?: return
             if (task.status !in setOf(DownloadTaskStatus.Queued, DownloadTaskStatus.Downloading)) return
+            taskConnections.remove(taskId)?.disconnect()
             taskJobs.remove(taskId)?.cancel()
             updateTask(task.copy(status = DownloadTaskStatus.Paused, updatedAt = System.currentTimeMillis()))
         }
@@ -134,6 +138,7 @@ class AndroidDownloadRepository(
 
     override suspend fun deleteTask(taskId: String, deleteFile: Boolean) {
         taskMutex.withLock {
+            taskConnections.remove(taskId)?.disconnect()
             taskJobs.remove(taskId)?.cancel()
             val task = taskRecords.remove(taskId) ?: return
             temporaryFile(task.id).delete()
@@ -149,11 +154,9 @@ class AndroidDownloadRepository(
     override suspend fun deleteDownloaded(track: MusicTrack) {
         withContext(Dispatchers.IO) {
             val key = track.providerId ?: track.id
-            val record = records.remove(key)
-                ?: track.localUri?.let { uri ->
-                    val matched = records.entries.firstOrNull { it.value.uri == uri }
-                    if (matched != null) records.remove(matched.key) else null
-                }
+            val recordKey = records[key]?.let { key }
+                ?: track.localUri?.let { uri -> records.entries.firstOrNull { it.value.uri == uri }?.key }
+            val record = recordKey?.let(records::remove)
             val uri = record?.uri ?: track.localUri
             if ((record != null || track.sourceType == TrackSourceType.Downloaded) && uri != null) {
                 runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
@@ -162,7 +165,7 @@ class AndroidDownloadRepository(
                 }
             }
             saveRecords()
-            taskRecords.remove(key)
+            taskRecords.remove(recordKey ?: key)
             saveTasks()
             publishTasks()
             publishStates()
@@ -245,34 +248,47 @@ class AndroidDownloadRepository(
         }
     }
 
-    private fun writePayload(taskId: String, payload: PlaybackPayload, targetFile: File): Long {
+    private suspend fun writePayload(taskId: String, payload: PlaybackPayload, targetFile: File): Long {
+        coroutineContext.ensureActive()
         val connection = URL(payload.url).openConnection()
-        payload.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
-        val existing = targetFile.length()
-        if (existing > 0) connection.setRequestProperty("Range", "bytes=$existing-")
-        val responseCode = (connection as? HttpURLConnection)?.responseCode
-        val append = existing > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL
-        val start = if (append) existing else 0L
-        val total = connection.contentLengthLong.takeIf { it > 0 }?.plus(start)
-        var written = start
-        connection.getInputStream().use { input ->
-            FileOutputStream(targetFile, append).use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
-                    written += read
-                    if (total != null) {
-                        val progress = (written.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        scope.launch { taskMutex.withLock {
-                            taskRecords[taskId]?.let { updateTask(it.copy(downloadedBytes = written, totalBytes = total, updatedAt = System.currentTimeMillis())) }
-                        } }
+        val httpConnection = connection as? HttpURLConnection
+        taskMutex.withLock { httpConnection?.let { taskConnections[taskId] = it } }
+        try {
+            coroutineContext.ensureActive()
+            payload.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+            val existing = targetFile.length()
+            if (existing > 0) connection.setRequestProperty("Range", "bytes=$existing-")
+            val responseCode = httpConnection?.responseCode
+            val append = existing > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL
+            val start = if (append) existing else 0L
+            val total = connection.contentLengthLong.takeIf { it > 0 }?.plus(start)
+            var written = start
+            connection.getInputStream().use { input ->
+                FileOutputStream(targetFile, append).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        written += read
+                        if (total != null) {
+                            val progress = (written.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                            scope.launch { taskMutex.withLock {
+                                taskRecords[taskId]?.let { updateTask(it.copy(downloadedBytes = written, totalBytes = total, updatedAt = System.currentTimeMillis())) }
+                            } }
+                        }
                     }
                 }
             }
+            return written
+        } catch (throwable: Throwable) {
+            coroutineContext.ensureActive()
+            throw throwable
+        } finally {
+            taskMutex.withLock { taskConnections.remove(taskId) }
+            httpConnection?.disconnect()
         }
-        return written
     }
 
     private fun copyToTarget(taskId: String, sourceFile: File, targetUri: Uri): Long {

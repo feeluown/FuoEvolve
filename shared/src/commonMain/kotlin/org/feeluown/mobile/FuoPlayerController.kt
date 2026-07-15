@@ -330,7 +330,10 @@ class FuoPlayerController(
     init {
         scope.launch {
             val loadedSettings = runCatching { settingsStore.load() }
-            loadedSettings.onSuccess { applySettings(it) }
+            loadedSettings.getOrNull()?.let {
+                applySettings(it)
+                downloadRepository.updateParallelism(downloadParallelism)
+            }
             runCatching { playbackQueueStore.load() }
                 .onSuccess { restorePlaybackQueue(it) }
             updateLocalMusicScanSettings()

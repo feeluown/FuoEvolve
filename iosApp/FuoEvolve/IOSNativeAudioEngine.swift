@@ -502,9 +502,10 @@ final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
     }
 }
 
-final class IOSDownloadOutput: NSObject, IosDownloadOutput, URLSessionDelegate {
+final class IOSDownloadOutput: NSObject, IosDownloadOutput, URLSessionDownloadDelegate {
     static let shared = IOSDownloadOutput()
     private var tasks: [String: URLSessionDownloadTask] = [:]
+    private var taskContexts: [String: DownloadContext] = [:]
     private let resumePrefix = "ios_download_resume_"
     private var backgroundCompletionHandler: (() -> Void)?
     private lazy var session: URLSession = {
@@ -528,45 +529,26 @@ final class IOSDownloadOutput: NSObject, IosDownloadOutput, URLSessionDelegate {
         var request = URLRequest(url: sourceURL)
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         let resumeKey = resumePrefix + taskId
-        let completion: (URL?, URLResponse?, Error?) -> Void = { temporaryURL, _, error in
-            self.tasks.removeValue(forKey: taskId)
-            if let error {
-                DispatchQueue.main.async { completionHandler(nil, error.localizedDescription) }
-                return
-            }
-            guard let temporaryURL else {
-                DispatchQueue.main.async { completionHandler(nil, "下载文件为空") }
-                return
-            }
-            do {
-                let directory = try self.downloadDirectory()
-                let target = directory.appendingPathComponent(fileName)
-                if FileManager.default.fileExists(atPath: target.path) {
-                    try FileManager.default.removeItem(at: target)
-                }
-                try FileManager.default.moveItem(at: temporaryURL, to: target)
-                if let lyrics, !lyrics.isEmpty {
-                    let lyricsURL = target.deletingPathExtension().appendingPathExtension("lrc")
-                    try? lyrics.write(to: lyricsURL, atomically: true, encoding: .utf8)
-                }
-                DispatchQueue.main.async { completionHandler(target.absoluteString, nil) }
-            } catch {
-                DispatchQueue.main.async { completionHandler(nil, error.localizedDescription) }
-            }
-        }
         let task: URLSessionDownloadTask
         if let resumeData = UserDefaults.standard.data(forKey: resumeKey) {
-            task = session.downloadTask(withResumeData: resumeData, completionHandler: completion)
+            task = session.downloadTask(withResumeData: resumeData)
             UserDefaults.standard.removeObject(forKey: resumeKey)
         } else {
-            task = session.downloadTask(with: request, completionHandler: completion)
+            task = session.downloadTask(with: request)
         }
+        task.taskDescription = taskId
         tasks[taskId] = task
+        taskContexts[taskId] = DownloadContext(
+            fileName: fileName,
+            lyrics: lyrics,
+            completionHandler: completionHandler
+        )
         task.resume()
     }
 
     func pause(taskId: String) {
         guard let task = tasks.removeValue(forKey: taskId) else { return }
+        taskContexts.removeValue(forKey: taskId)
         task.cancel(byProducingResumeData: { [resumePrefix] data in
             guard let data else { return }
             UserDefaults.standard.set(data, forKey: resumePrefix + taskId)
@@ -575,7 +557,49 @@ final class IOSDownloadOutput: NSObject, IosDownloadOutput, URLSessionDelegate {
 
     func deleteTemporary(taskId: String) {
         tasks.removeValue(forKey: taskId)?.cancel()
+        taskContexts.removeValue(forKey: taskId)
         UserDefaults.standard.removeObject(forKey: resumePrefix + taskId)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        guard
+            let taskId = downloadTask.taskDescription,
+            let context = taskContexts.removeValue(forKey: taskId)
+        else {
+            return
+        }
+        tasks.removeValue(forKey: taskId)
+        do {
+            let directory = try downloadDirectory()
+            let target = directory.appendingPathComponent(context.fileName)
+            if FileManager.default.fileExists(atPath: target.path) {
+                try FileManager.default.removeItem(at: target)
+            }
+            try FileManager.default.moveItem(at: location, to: target)
+            if let lyrics = context.lyrics, !lyrics.isEmpty {
+                let lyricsURL = target.deletingPathExtension().appendingPathExtension("lrc")
+                try? lyrics.write(to: lyricsURL, atomically: true, encoding: .utf8)
+            }
+            DispatchQueue.main.async { context.completionHandler(target.absoluteString, nil) }
+        } catch {
+            DispatchQueue.main.async { context.completionHandler(nil, error.localizedDescription) }
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard
+            let error,
+            let taskId = task.taskDescription,
+            let context = taskContexts.removeValue(forKey: taskId)
+        else {
+            return
+        }
+        tasks.removeValue(forKey: taskId)
+        DispatchQueue.main.async { context.completionHandler(nil, error.localizedDescription) }
     }
 
     func handleBackgroundEvents(identifier: String, completionHandler: @escaping () -> Void) {
@@ -614,6 +638,12 @@ final class IOSDownloadOutput: NSObject, IosDownloadOutput, URLSessionDelegate {
         let directory = documents.appendingPathComponent("FeelUOwn", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    private struct DownloadContext {
+        let fileName: String
+        let lyrics: String?
+        let completionHandler: (String?, String?) -> Void
     }
 }
 
