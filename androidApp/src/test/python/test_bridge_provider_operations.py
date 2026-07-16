@@ -149,6 +149,24 @@ class _Provider:
         return Media("https://example.com/video.mp4"), "sd"
 
 
+class _SavedLoginProvider:
+    def __init__(self, identifier):
+        self.identifier = identifier
+        self.name = identifier
+        self.user = None
+        self.auth_calls = []
+
+    def get_current_user_or_none(self):
+        return self.user
+
+    def auth(self, user):
+        self.auth_calls.append(user)
+        self.user = user
+
+    def current_user_list_playlists(self):
+        return []
+
+
 class ProviderOperationBridgeTest(unittest.TestCase):
     def bridge(self, provider):
         bridge = FuoMobileBridge.__new__(FuoMobileBridge)
@@ -256,6 +274,30 @@ class ProviderOperationBridgeTest(unittest.TestCase):
 
         self.assertEqual("登录后搜索哔哩哔哩", payload["error_message"])
         self.assertEqual([], payload["tracks"])
+
+    def test_saved_login_restores_provider_user_before_login_required_feature(self):
+        for provider_id in ("qqmusic", "ytmusic"):
+            with self.subTest(provider_id=provider_id):
+                provider = _SavedLoginProvider(provider_id)
+                bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+                bridge._tracks = {}
+                bridge._playlists = {}
+                bridge._media_items = {}
+                bridge._videos = {}
+                bridge._dynamic_features = {}
+                bridge.app = SimpleNamespace(library=_Library(provider))
+                bridge._saved_login_provider_ids = {provider_id}
+                bridge._authenticated_provider_ids = set()
+                bridge._restore_saved_login = lambda _: setattr(
+                    provider,
+                    "user",
+                    SimpleNamespace(name="saved-user"),
+                )
+
+                payload = json.loads(bridge.load_feature(f"{provider_id}_user_playlists"))
+
+                self.assertFalse(payload["is_login_required"])
+                self.assertEqual(1, len(provider.auth_calls))
 
     def test_track_related_operations(self):
         provider = _Provider()

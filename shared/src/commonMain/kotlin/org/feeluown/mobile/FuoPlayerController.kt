@@ -351,8 +351,7 @@ class FuoPlayerController(
                 downloadRepository.load()
             }.onSuccess {
                 message = "音乐服务已就绪"
-                refreshAllProviderAuthStates()
-                refreshHomeContent(homeSection)
+                refreshHomeContent(homeSection, refreshCatalog = false)
             }.onFailure {
                 setError(it)
             }
@@ -1309,8 +1308,12 @@ class FuoPlayerController(
     }
 
     fun refreshHomeContent(section: HomeSection = homeSection) {
+        refreshHomeContent(section, refreshCatalog = true)
+    }
+
+    private fun refreshHomeContent(section: HomeSection, refreshCatalog: Boolean) {
         if (section == HomeSection.Mine) {
-            refreshActiveMineSection()
+            refreshActiveMineSection(refreshCatalog)
             return
         }
         scope.launch {
@@ -1318,7 +1321,7 @@ class FuoPlayerController(
             val title = if (section == HomeSection.Recommend) "推荐" else "探索"
             message = "正在加载$title"
             runCatching {
-                refreshProviderCatalog()
+                if (refreshCatalog) refreshProviderCatalog()
                 val category = when (section) {
                     HomeSection.Recommend -> ProviderFeatureCategory.Recommend
                     HomeSection.Music -> ProviderFeatureCategory.Music
@@ -1355,11 +1358,15 @@ class FuoPlayerController(
     }
 
     fun refreshMinePlaylistContent() {
+        refreshMinePlaylistContent(refreshCatalog = true)
+    }
+
+    private fun refreshMinePlaylistContent(refreshCatalog: Boolean) {
         scope.launch {
             isLoading = true
             message = "正在加载我的歌单"
             runCatching {
-                refreshProviderCatalog()
+                if (refreshCatalog) refreshProviderCatalog()
                 val userPlaylists = loadProviderSections(ProviderFeatureCategory.MinePlaylists, ::isMineProviderFeature)
                 val favoritePlaylists = loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists, ::isMineProviderFeature)
                 userPlaylists to favoritePlaylists
@@ -1375,11 +1382,15 @@ class FuoPlayerController(
     }
 
     fun refreshMineContent() {
+        refreshMineContent(refreshCatalog = true)
+    }
+
+    private fun refreshMineContent(refreshCatalog: Boolean) {
         scope.launch {
             isLoading = true
             message = "正在加载我的内容"
             runCatching {
-                refreshProviderCatalog()
+                if (refreshCatalog) refreshProviderCatalog()
                 loadProviderSections(ProviderFeatureCategory.Mine, ::isMineProviderFeature)
             }.onSuccess {
                 mineSections = it
@@ -1419,12 +1430,12 @@ class FuoPlayerController(
         }
     }
 
-    private fun refreshActiveMineSection() {
+    private fun refreshActiveMineSection(refreshCatalog: Boolean = true) {
         when (mineSection) {
-            MineSection.Playlists -> refreshMinePlaylistContent()
+            MineSection.Playlists -> refreshMinePlaylistContent(refreshCatalog)
             MineSection.Songs,
             MineSection.Artists,
-            MineSection.Albums -> refreshMineContent()
+            MineSection.Albums -> refreshMineContent(refreshCatalog)
             MineSection.LocalMusic -> ensureLocalMusic()
         }
     }

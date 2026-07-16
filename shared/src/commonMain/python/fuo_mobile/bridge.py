@@ -1100,6 +1100,8 @@ class FuoMobileBridge:
         provider = self._raw_provider(provider_id)
         if provider_id == "bilibili":
             self._ensure_bilibili_authenticated(provider)
+        else:
+            self._ensure_saved_login_authenticated(provider_id, provider)
         return provider
 
     def _raw_provider(self, provider_id: str):
@@ -1435,6 +1437,31 @@ class FuoMobileBridge:
             for path in (HEADER_FILE, cookiefile):
                 if path is not None and os.path.exists(path):
                     os.remove(path)
+
+    def _ensure_saved_login_authenticated(self, provider_id: str, provider) -> None:
+        authenticated_provider_ids = getattr(self, "_authenticated_provider_ids", set())
+        if provider_id in authenticated_provider_ids:
+            return
+        current_user = getattr(provider, "get_current_user_or_none", None)
+        if not callable(current_user) or current_user() is not None:
+            return
+        if provider_id not in getattr(self, "_saved_login_provider_ids", set()):
+            return
+        try:
+            self._restore_saved_login(provider_id)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"restore login failed provider_id={provider_id}: {exc}")
+            return
+        user = current_user()
+        if user is None:
+            return
+        try:
+            provider.auth(user)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"provider auth failed provider_id={provider_id}: {exc}")
+            return
+        authenticated_provider_ids.add(provider_id)
+        self._authenticated_provider_ids = authenticated_provider_ids
 
     def _clear_provider_auth(self, provider_id: str, provider) -> None:
         try:

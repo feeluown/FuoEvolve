@@ -388,6 +388,30 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun initialHomeLoadReusesProviderCatalogAuthStateForAllSections() = runTest {
+        HomeSection.values().forEach { section ->
+            val provider = FakeProviderRepository(emptyList())
+            val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            try {
+                FuoPlayerController(
+                    providerRepository = provider,
+                    localRepository = FakeLocalMusicRepository(),
+                    downloadRepository = FakeDownloadRepository(emptyMap()),
+                    playbackEngine = FakePlaybackEngine(),
+                    settingsStore = FakeSettingsStore(AppSettings(homeSection = section)),
+                    scope = controllerScope,
+                )
+
+                advanceUntilIdle()
+
+                assertEquals(1, provider.authStateCount, section.name)
+            } finally {
+                controllerScope.cancel()
+            }
+        }
+    }
+
+    @Test
     fun smartReplacementPayloadUpdatesCurrentPlaybackTrack() = runTest {
         val origin = providerTrack("provider:1", "First")
         val provider = FakeProviderRepository(
@@ -3143,6 +3167,7 @@ class FuoPlayerControllerTest {
         private var enabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS
         var resolveCount = 0
         var logoutCount = 0
+        var authStateCount = 0
         var refreshAuthStateCount = 0
         var lastEnabledProviderIds: Set<String>? = null
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
@@ -3213,13 +3238,15 @@ class FuoPlayerControllerTest {
             )
         }
 
-        override suspend fun authState(providerId: String): ProviderAuthState =
-            ProviderAuthState(
+        override suspend fun authState(providerId: String): ProviderAuthState {
+            authStateCount += 1
+            return ProviderAuthState(
                 providerId = providerId,
                 providerName = providerId,
                 isLoggedIn = isLoggedIn,
                 userName = "tester".takeIf { isLoggedIn },
             )
+        }
 
         override suspend fun refreshAuthState(providerId: String): ProviderAuthState {
             refreshAuthStateCount += 1
