@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
 import android.media.AudioFormat
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -10,6 +12,7 @@ import kotlin.math.ln
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+@OptIn(UnstableApi::class)
 class AudioSpectrumAnalyzer(
     private val onSpectrum: (List<Float>) -> Unit,
 ) : TeeAudioProcessor.AudioBufferSink {

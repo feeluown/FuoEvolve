@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -28,8 +29,12 @@ class FuoDownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "下载任务", NotificationManager.IMPORTANCE_LOW))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "下载任务", NotificationManager.IMPORTANCE_LOW),
+            )
+        }
     }
 
     companion object {

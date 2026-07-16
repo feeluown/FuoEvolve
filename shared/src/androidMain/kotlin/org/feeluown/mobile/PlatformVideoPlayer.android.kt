@@ -29,6 +29,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 
+@OptIn(UnstableApi::class)
 @Composable
 actual fun PlatformVideoPlayer(
     payload: VideoPlaybackPayload?,
@@ -115,6 +116,7 @@ private fun VideoPlaybackPayload.toMediaSource(context: android.content.Context)
         )
     }
 
+@OptIn(UnstableApi::class)
 private fun dataSourceFactory(context: android.content.Context, headers: Map<String, String>): DefaultDataSource.Factory {
     val httpFactory = DefaultHttpDataSource.Factory()
         .setDefaultRequestProperties(headers)

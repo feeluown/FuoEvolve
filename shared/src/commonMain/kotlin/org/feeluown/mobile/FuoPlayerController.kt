@@ -209,6 +209,8 @@ class FuoPlayerController(
         private set
     var isFullPlayerOpen by mutableStateOf(false)
         private set
+    var isVideoFullscreen by mutableStateOf(false)
+        private set
     var isSettingsOpen by mutableStateOf(false)
         private set
     var isDebugLogOpen by mutableStateOf(false)
@@ -570,6 +572,10 @@ class FuoPlayerController(
             }
             isFullPlayerOpen -> {
                 closeFullPlayer()
+                true
+            }
+            isVideoFullscreen -> {
+                toggleVideoFullscreen()
                 true
             }
             isDebugLogOpen -> {
@@ -1625,6 +1631,7 @@ class FuoPlayerController(
         selectedVideo = video
         selectedVideoPayload = null
         selectedVideoError = null
+        isVideoFullscreen = false
         scope.launch {
             isLoading = true
             message = "正在加载视频：${video.title}"
@@ -1652,9 +1659,14 @@ class FuoPlayerController(
     }
 
     fun closeVideo() {
+        isVideoFullscreen = false
         selectedVideo = null
         selectedVideoPayload = null
         selectedVideoError = null
+    }
+
+    fun toggleVideoFullscreen() {
+        isVideoFullscreen = !isVideoFullscreen
     }
 
     fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {

@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -18,9 +20,12 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
@@ -33,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -446,63 +453,98 @@ private fun TrackRelatedContent(controller: FuoPlayerController) {
 @Composable
 fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) {
     val displayVideo = controller.selectedVideo ?: video ?: return
+    val isFullscreen = controller.isVideoFullscreen
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = displayVideo.title.ifBlank { "视频" },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = controller::closeVideo) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            if (!isFullscreen) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = displayVideo.title.ifBlank { "视频" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = controller::closeVideo) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+            }
         },
         bottomBar = {
-            if (controller.playbackState.currentTrack != null) {
+            if (!isFullscreen && controller.playbackState.currentTrack != null) {
                 MiniPlayer(controller)
             }
         },
     ) { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = if (isFullscreen) {
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            },
+            verticalArrangement = if (isFullscreen) Arrangement.Center else Arrangement.spacedBy(12.dp),
         ) {
-            PlatformVideoPlayer(
-                payload = controller.selectedVideoPayload,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
-            )
-            Text(
-                text = displayVideo.title.ifBlank { "未命名视频" },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOf(displayVideo.artists, displayVideo.providerName, controller.selectedVideoPayload?.quality.orEmpty())
-                    .filter { it.isNotBlank() }
-                    .joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (controller.isLoading && controller.selectedVideoPayload == null) {
-                LoadingIndicator(true)
+            Box(
+                modifier = if (isFullscreen) {
+                    Modifier
+                        .fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                },
+            ) {
+                PlatformVideoPlayer(
+                    payload = controller.selectedVideoPayload,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.6f),
+                ) {
+                    IconButton(onClick = controller::toggleVideoFullscreen) {
+                        Icon(
+                            imageVector = if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                            contentDescription = if (isFullscreen) "退出全屏" else "全屏",
+                            tint = Color.White,
+                        )
+                    }
+                }
             }
-            controller.selectedVideoError?.let {
-                ProviderContentMessage(it)
+            if (!isFullscreen) {
+                Text(
+                    text = displayVideo.title.ifBlank { "未命名视频" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = listOf(displayVideo.artists, displayVideo.providerName, controller.selectedVideoPayload?.quality.orEmpty())
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (controller.isLoading && controller.selectedVideoPayload == null) {
+                    LoadingIndicator(true)
+                }
+                controller.selectedVideoError?.let {
+                    ProviderContentMessage(it)
+                }
             }
         }
     }

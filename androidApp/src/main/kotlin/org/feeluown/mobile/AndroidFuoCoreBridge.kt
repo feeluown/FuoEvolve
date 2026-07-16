@@ -136,12 +136,12 @@ class AndroidFuoCoreBridge(
             val trackId = track.providerId ?: track.id
             try {
                 val policy = currentAudioQualityPolicy()
-                    Log.d(
-                        TAG,
-                        "resolve start trackId=$trackId policy=${policy.policy} " +
-                            "unavailablePolicy=$unavailablePolicy smartReplacementProviderIds=$smartReplacementProviderIds " +
-                            "smartReplacementMinScore=$smartReplacementMinScore",
-                    )
+                Log.d(
+                    TAG,
+                    "resolve start trackId=$trackId policy=${policy.policy} " +
+                        "unavailablePolicy=$unavailablePolicy smartReplacementProviderIds=$smartReplacementProviderIds " +
+                        "smartReplacementMinScore=$smartReplacementMinScore",
+                )
                 val raw = requireNotNull(bridge)
                     .callAttr(
                         "resolve",

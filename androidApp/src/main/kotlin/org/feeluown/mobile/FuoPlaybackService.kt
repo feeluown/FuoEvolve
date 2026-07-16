@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
+@OptIn(UnstableApi::class)
 class FuoPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
@@ -383,6 +384,7 @@ class FuoPlaybackService : MediaSessionService() {
         )
 
         @OptIn(UnstableApi::class)
+        @Suppress("WrongConstant")
         private fun queuePlayerCommands(commands: Player.Commands): Player.Commands {
             return Player.Commands.Builder()
                 .addAll(commands)
