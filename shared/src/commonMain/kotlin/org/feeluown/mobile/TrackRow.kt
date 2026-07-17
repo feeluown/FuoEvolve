@@ -110,6 +110,7 @@ fun TrackRow(
 @Composable
 fun CoverBox(
     track: MusicTrack,
+    cornerRadius: androidx.compose.ui.unit.Dp = 8.dp,
     modifier: Modifier = Modifier.size(48.dp),
 ) {
     PlatformCoverArt(
@@ -117,7 +118,7 @@ fun CoverBox(
         imageUrl = track.coverUrl,
         modifier = Modifier
             .then(modifier)
-            .clip(RoundedCornerShape(8.dp)),
+            .clip(RoundedCornerShape(cornerRadius)),
     )
 }
 

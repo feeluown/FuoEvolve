@@ -107,6 +107,7 @@ fun MiniPlayer(controller: FuoPlayerController) {
                     PlayerSharedCover(
                         track = it,
                         heroEnabled = !controller.isFullPlayerOpen,
+                        cornerRadius = if (isWideLayout) 10.dp else 12.dp,
                         modifier = Modifier.size(if (isWideLayout) 44.dp else 56.dp),
                     )
                 }
@@ -175,7 +176,7 @@ fun FullPlayer(controller: FuoPlayerController) {
         pageCount = { PlayerVisualTab.entries.size },
     )
     val scope = rememberCoroutineScope()
-    if (LocalAppLayoutInfo.current.useWideLayout) {
+    if (LocalAppLayoutInfo.current.isLandscape) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
                 Column(
@@ -208,9 +209,9 @@ fun FullPlayer(controller: FuoPlayerController) {
                             .weight(1f)
                             .fillMaxWidth(),
                     ) {
-                        val visualPaneWidth = (maxHeight * 0.88f)
-                            .coerceAtLeast(280.dp)
-                            .coerceAtMost(maxWidth * 0.58f)
+                        val lyricsPaneWidth = (maxWidth * 0.46f)
+                            .coerceAtLeast(240.dp)
+                            .coerceAtMost(maxWidth * 0.52f)
                         Row(
                             modifier = Modifier
                                 .fillMaxSize(),
@@ -218,40 +219,14 @@ fun FullPlayer(controller: FuoPlayerController) {
                         ) {
                             Column(
                                 modifier = Modifier
-                                    .width(visualPaneWidth)
+                                    .width(lyricsPaneWidth)
                                     .fillMaxHeight(),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                PrimaryTabRow(
-                                    selectedTabIndex = pagerState.currentPage.coerceIn(
-                                        0,
-                                        PlayerVisualTab.entries.lastIndex,
-                                    ),
-                                ) {
-                                    PlayerVisualTab.entries.forEach { tab ->
-                                        Tab(
-                                            selected = pagerState.currentPage == tab.ordinal,
-                                            onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
-                                            text = { Text(tab.title) },
-                                        )
-                                    }
-                                }
-                                HorizontalPager(
-                                    state = pagerState,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    pageSpacing = 16.dp,
-                                ) { page ->
-                                    when (PlayerVisualTab.entries[page]) {
-                                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack, controller)
-                                        PlayerVisualTab.Lyrics -> LyricsPanel(
-                                            state = state,
-                                            fontSize = controller.lyricFontSize,
-                                            modifier = Modifier.fillMaxSize(),
-                                        )
-                                    }
-                                }
+                                LyricsPanel(
+                                    state = state,
+                                    fontSize = controller.lyricFontSize,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
                             Column(
                                 modifier = Modifier
@@ -260,6 +235,13 @@ fun FullPlayer(controller: FuoPlayerController) {
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
+                                PlayerCoverPage(
+                                    track = currentTrack,
+                                    controller = controller,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 260.dp),
+                                )
                                 PlayerTitleBlock(
                                     currentTrack,
                                     state.audioQuality,
@@ -450,8 +432,12 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
 
 @Composable
 @OptIn(ExperimentalSharedTransitionApi::class)
-fun PlayerCoverPage(track: MusicTrack?, controller: FuoPlayerController) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+fun PlayerCoverPage(
+    track: MusicTrack?,
+    controller: FuoPlayerController,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
+    BoxWithConstraints(modifier = modifier) {
         val coverSize = minOf(maxWidth, maxHeight * 0.82f)
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -461,6 +447,7 @@ fun PlayerCoverPage(track: MusicTrack?, controller: FuoPlayerController) {
             PlayerSharedCover(
                 track = track ?: emptyDisplayTrack(),
                 heroEnabled = controller.isFullPlayerOpen,
+                cornerRadius = 22.dp,
                 modifier = Modifier.size(coverSize),
             )
         }
@@ -469,7 +456,12 @@ fun PlayerCoverPage(track: MusicTrack?, controller: FuoPlayerController) {
 
 @Composable
 @OptIn(ExperimentalSharedTransitionApi::class)
-fun PlayerSharedCover(track: MusicTrack, heroEnabled: Boolean, modifier: Modifier = Modifier) {
+fun PlayerSharedCover(
+    track: MusicTrack,
+    heroEnabled: Boolean,
+    cornerRadius: androidx.compose.ui.unit.Dp = 8.dp,
+    modifier: Modifier = Modifier,
+) {
     val sharedTransitionScope = LocalPlayerSharedTransitionScope.current
     val sharedModifier = if (!heroEnabled || sharedTransitionScope == null) {
         modifier
@@ -481,7 +473,7 @@ fun PlayerSharedCover(track: MusicTrack, heroEnabled: Boolean, modifier: Modifie
             )
         }
     }
-    CoverBox(track = track, modifier = sharedModifier)
+    CoverBox(track = track, cornerRadius = cornerRadius, modifier = sharedModifier)
 }
 
 @Composable
