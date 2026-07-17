@@ -49,7 +49,7 @@ jobs:
 
       - name: Check desktop AppImage artifact
         run: |
-          artifact="build/artifacts/FuoEvolve.AppImage"
+          artifact="desktopApp/build/artifacts/FuoEvolve.AppImage"
           if [ ! -x "${artifact}" ]; then
             echo "::error::Desktop AppImage was not produced at ${artifact}"
             find desktopApp/build build/artifacts -maxdepth 5 -type f -o -type d || true
@@ -60,6 +60,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuo-evolve-desktop-linux-x64-appimage-${{ github.sha }}
-          path: build/artifacts/FuoEvolve.AppImage
+          path: desktopApp/build/artifacts/FuoEvolve.AppImage
           archive: false
           if-no-files-found: error
