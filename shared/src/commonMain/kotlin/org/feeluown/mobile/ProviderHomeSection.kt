@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -69,44 +70,53 @@ fun ProviderContentHomeSection(
                     item {
                         EmptyProviderContentHint(title)
                     }
-                } else {
-                    val dailySongSections = visibleSections.filter { it.feature.isDailySongs() }
-                    val privateFmSections = visibleSections.filter { it.feature.isPrivateFm() }
-                    val otherSections = visibleSections.filterNot {
-                        it.feature.isDailySongs() || it.feature.isPrivateFm()
-                    }
-                    if (dailySongSections.isNotEmpty()) {
-                        item(key = "header:daily-songs") {
+                } else if (section == HomeSection.Music) {
+                    if (visibleSections.isNotEmpty()) {
+                        item(key = "header:explore") {
                             ProviderFeatureHeader(
-                                feature = dailySongSections.first().feature,
-                                providerLabel = dailySongSections
+                                feature = visibleSections.first().feature,
+                                title = "探索",
+                                providerLabel = visibleSections
                                     .map { it.feature.providerName }
                                     .distinct()
                                     .joinToString(" / "),
                             )
                         }
-                        item(key = "daily-songs-grid") {
+                        item(key = "explore-grid") {
                             ProviderFeatureCoverGrid(
-                                features = dailySongSections.map { it.feature },
+                                features = visibleSections.map { it.feature },
                                 onClick = controller::openFeature,
                             )
                         }
                     }
-                    if (privateFmSections.isNotEmpty()) {
-                        item(key = "header:private-fm") {
+                } else {
+                    val forYouSections = visibleSections.filter {
+                        it.feature.isDailySongs() ||
+                            it.feature.isPrivateFm() ||
+                            it.feature.isBilibiliRecommendedVideos()
+                    }
+                    val otherSections = visibleSections.filterNot {
+                        it.feature.isDailySongs() ||
+                            it.feature.isPrivateFm() ||
+                            it.feature.isBilibiliRecommendedVideos()
+                    }
+                    if (forYouSections.isNotEmpty()) {
+                        item(key = "header:for-you") {
                             ProviderFeatureHeader(
-                                feature = privateFmSections.first().feature,
-                                providerLabel = privateFmSections
+                                feature = forYouSections.first().feature,
+                                title = "为你推荐",
+                                providerLabel = forYouSections
                                     .map { it.feature.providerName }
                                     .distinct()
                                     .joinToString(" / "),
                             )
                         }
-                        item(key = "private-fm-grid") {
-                            PrivateFmGrid(
-                                sections = privateFmSections,
+                        item(key = "for-you-grid") {
+                            ForYouRecommendGrid(
+                                sections = forYouSections,
                                 enabled = !controller.isLoading,
-                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
+                                onFeatureClick = controller::openFeature,
+                                onPrivateFmClick = { section -> controller.playAllFromFeature(section.feature.id) },
                             )
                         }
                     }
@@ -153,6 +163,22 @@ fun ProviderContentHomeSection(
                                     )
                                 }
                             }
+                            contentSection.mediaItems.isNotEmpty() -> {
+                                item(key = "media-items:${contentSection.feature.id}") {
+                                    ProviderMediaItemGrid(
+                                        items = contentSection.mediaItems,
+                                        onClick = controller::openMediaItem,
+                                    )
+                                }
+                            }
+                            contentSection.videos.isNotEmpty() -> {
+                                item(key = "videos:${contentSection.feature.id}") {
+                                    ProviderVideoList(
+                                        videos = contentSection.videos,
+                                        onClick = controller::openVideo,
+                                    )
+                                }
+                            }
                             else -> item(key = "empty:${contentSection.feature.id}") {
                                 ProviderContentMessage("暂无内容")
                             }
@@ -171,6 +197,95 @@ fun ProviderContentHomeSection(
         }
     }
 }
+
+@Composable
+fun ProviderVideoList(videos: List<ProviderVideo>, onClick: (ProviderVideo) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        videos.forEach { video ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onClick(video) }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PlatformCoverArt(
+                    title = video.title,
+                    imageUrl = video.coverUrl,
+                    modifier = Modifier.size(48.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        video.artists.ifBlank { video.providerName },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(Icons.Filled.PlayArrow, contentDescription = "播放视频")
+            }
+        }
+    }
+}
+
+@Composable
+fun ForYouRecommendGrid(
+    sections: List<ProviderContentSection>,
+    enabled: Boolean,
+    onFeatureClick: (ProviderFeature) -> Unit,
+    onPrivateFmClick: (ProviderContentSection) -> Unit,
+) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns
+    val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        sections.chunked(columns).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                row.forEach { section ->
+                    when {
+                        section.feature.isPrivateFm() -> {
+                            PrivateFmButton(
+                                section = section,
+                                enabled = enabled,
+                                onClick = { onPrivateFmClick(section) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        section.feature.isDailySongs() -> {
+                            DailyRecommendationButton(
+                                feature = section.feature,
+                                enabled = enabled,
+                                onClick = { onFeatureClick(section.feature) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        section.feature.isBilibiliRecommendedVideos() -> {
+                            RecommendationEntryButton(
+                                feature = section.feature,
+                                enabled = enabled,
+                                onClick = { onFeatureClick(section.feature) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+                repeat(columns - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ProviderFeatureCoverGrid(
     features: List<ProviderFeature>,
@@ -280,41 +395,105 @@ fun PrivateFmButton(
     modifier: Modifier = Modifier,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
-    Surface(
+    RecommendationButton(
         modifier = modifier
             .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        title = "私人 FM",
+        providerName = section.feature.providerName,
     ) {
-        Column(
+        Icon(
+            Icons.Filled.PlayArrow,
+            contentDescription = "播放${section.feature.providerName}私人 FM",
+            modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
+        )
+    }
+}
+
+@Composable
+fun DailyRecommendationButton(
+    feature: ProviderFeature,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    RecommendationButton(
+        modifier = modifier
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
+        title = feature.title.ifBlank { "每日推荐" },
+        providerName = feature.providerName,
+    ) {
+        Text(
+            text = "Daily",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+fun RecommendationEntryButton(
+    feature: ProviderFeature,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    RecommendationButton(
+        modifier = modifier
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
+        title = feature.title.ifBlank { "推荐视频" },
+        providerName = feature.providerName,
+    ) {
+        Icon(
+            Icons.Filled.PlayArrow,
+            contentDescription = "打开${feature.providerName}${feature.title}",
+            modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
+        )
+    }
+}
+
+@Composable
+fun RecommendationButton(
+    title: String,
+    providerName: String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    Column(modifier = modifier) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .padding(if (isWideLayout) 8.dp else 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .aspectRatio(1f),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = RoundedCornerShape(8.dp),
         ) {
-            Icon(
-                Icons.Filled.PlayArrow,
-                contentDescription = "播放${section.feature.providerName}私人 FM",
-                modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
-            )
-            Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
-            Text(
-                text = section.feature.providerName,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "私人 FM",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                content()
+            }
         }
+        Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = if (isWideLayout) 1 else 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = providerName,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -468,8 +647,11 @@ fun ProviderMediaItemCard(
 @Composable
 fun ProviderFeatureHeader(
     feature: ProviderFeature,
+    title: String = feature.title,
     providerLabel: String = feature.providerName,
     onPlayAll: (() -> Unit)? = null,
+    action: (() -> Unit)? = null,
+    actionLabel: String = "",
 ) {
     Row(
         modifier = Modifier
@@ -480,7 +662,7 @@ fun ProviderFeatureHeader(
     ) {
         Text(
             modifier = Modifier.weight(1f),
-            text = feature.title,
+            text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -496,6 +678,9 @@ fun ProviderFeatureHeader(
             )
             if (onPlayAll != null) {
                 PlayAllButton(onClick = onPlayAll)
+            }
+            if (action != null) {
+                TextButton(onClick = action) { Text(actionLabel) }
             }
         }
     }
@@ -587,6 +772,10 @@ fun ProviderFeature.isPrivateFm(): Boolean {
 
 fun ProviderFeature.isDailySongs(): Boolean {
     return id.endsWith("_daily_songs")
+}
+
+fun ProviderFeature.isBilibiliRecommendedVideos(): Boolean {
+    return providerId == "bilibili" && id == "bilibili_recommended_videos"
 }
 
 fun ProviderFeature.toDisplayTrack(): MusicTrack {

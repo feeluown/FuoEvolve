@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -18,12 +20,17 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +59,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeature?) {
     feature ?: return
+    val content = controller.selectedFeatureContent
+    val contentCount = content?.let {
+        maxOf(it.tracks.size, it.playlists.size, it.mediaItems.size, it.videos.size)
+    } ?: controller.selectedFeatureTracks.size
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -100,7 +113,7 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = listOf(feature.providerName, "${controller.selectedFeatureTracks.size} 首")
+                        text = listOf(feature.providerName, "${contentCount} 项")
                             .joinToString(" · "),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -127,8 +140,9 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    SelectedFeatureTrackList(
+                    SelectedFeatureContent(
                         controller = controller,
+                        content = content,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
@@ -152,7 +166,7 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
             ) {
                 Text(
                     modifier = Modifier.weight(1f),
-                    text = listOf(feature.providerName, "${controller.selectedFeatureTracks.size} 首")
+                    text = listOf(feature.providerName, "${contentCount} 项")
                         .joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -174,51 +188,55 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            LazyColumn(
+            SelectedFeatureContent(
+                controller = controller,
+                content = content,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-            ) {
-                if (controller.selectedFeatureTracks.isEmpty() && !controller.isLoading && controller.selectedFeatureError == null) {
-                    item {
-                        ProviderContentMessage("暂无歌曲")
-                    }
-                } else {
-                    itemsIndexed(controller.selectedFeatureTracks, key = { _, item -> item.id }) { index, track ->
-                        LaunchedEffect(index, controller.selectedFeatureTracks.size) {
-                            controller.prefetchSelectedFeatureIfNeeded(index)
-                        }
-                        TrackRow(
-                            track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playFromSelectedFeature(index) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                            onOpenDetail = trackDetailAction(controller, track),
-                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
-                        )
-                        HorizontalDivider()
-                    }
-                }
-            }
+            )
         }
     }
 }
 
 @Composable
-fun SelectedFeatureTrackList(controller: FuoPlayerController, modifier: Modifier) {
-    TrackCollectionList(
-        controller = controller,
-        tracks = controller.selectedFeatureTracks,
-        emptyMessage = "暂无歌曲",
-        showEmpty = !controller.isLoading && controller.selectedFeatureError == null,
-        modifier = modifier,
-        onClick = controller::playFromSelectedFeature,
-        onItemVisible = controller::prefetchSelectedFeatureIfNeeded,
-    )
+fun SelectedFeatureContent(
+    controller: FuoPlayerController,
+    content: ProviderContentSection?,
+    modifier: Modifier,
+) {
+    when {
+        content?.playlists?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
+            item {
+                ProviderPlaylistGrid(
+                    playlists = content.playlists,
+                    onClick = { controller.openPlaylist(it, content.feature.category) },
+                )
+            }
+        }
+        content?.mediaItems?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
+            item {
+                ProviderMediaItemGrid(
+                    items = content.mediaItems,
+                    onClick = controller::openMediaItem,
+                )
+            }
+        }
+        content?.videos?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
+            item {
+                ProviderVideoList(videos = content.videos, onClick = controller::openVideo)
+            }
+        }
+        else -> TrackCollectionList(
+            controller = controller,
+            tracks = controller.selectedFeatureTracks,
+            emptyMessage = "暂无内容",
+            showEmpty = !controller.isLoading && controller.selectedFeatureError == null,
+            modifier = modifier,
+            onClick = controller::playFromSelectedFeature,
+            onItemVisible = controller::prefetchSelectedFeatureIfNeeded,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -435,63 +453,98 @@ private fun TrackRelatedContent(controller: FuoPlayerController) {
 @Composable
 fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) {
     val displayVideo = controller.selectedVideo ?: video ?: return
+    val isFullscreen = controller.isVideoFullscreen
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = displayVideo.title.ifBlank { "视频" },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = controller::closeVideo) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            if (!isFullscreen) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = displayVideo.title.ifBlank { "视频" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = controller::closeVideo) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+            }
         },
         bottomBar = {
-            if (controller.playbackState.currentTrack != null) {
+            if (!isFullscreen && controller.playbackState.currentTrack != null) {
                 MiniPlayer(controller)
             }
         },
     ) { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = if (isFullscreen) {
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            },
+            verticalArrangement = if (isFullscreen) Arrangement.Center else Arrangement.spacedBy(12.dp),
         ) {
-            PlatformVideoPlayer(
-                payload = controller.selectedVideoPayload,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
-            )
-            Text(
-                text = displayVideo.title.ifBlank { "未命名视频" },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOf(displayVideo.artists, displayVideo.providerName, controller.selectedVideoPayload?.quality.orEmpty())
-                    .filter { it.isNotBlank() }
-                    .joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (controller.isLoading && controller.selectedVideoPayload == null) {
-                LoadingIndicator(true)
+            Box(
+                modifier = if (isFullscreen) {
+                    Modifier
+                        .fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                },
+            ) {
+                PlatformVideoPlayer(
+                    payload = controller.selectedVideoPayload,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.6f),
+                ) {
+                    IconButton(onClick = controller::toggleVideoFullscreen) {
+                        Icon(
+                            imageVector = if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                            contentDescription = if (isFullscreen) "退出全屏" else "全屏",
+                            tint = Color.White,
+                        )
+                    }
+                }
             }
-            controller.selectedVideoError?.let {
-                ProviderContentMessage(it)
+            if (!isFullscreen) {
+                Text(
+                    text = displayVideo.title.ifBlank { "未命名视频" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = listOf(displayVideo.artists, displayVideo.providerName, controller.selectedVideoPayload?.quality.orEmpty())
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (controller.isLoading && controller.selectedVideoPayload == null) {
+                    LoadingIndicator(true)
+                }
+                controller.selectedVideoError?.let {
+                    ProviderContentMessage(it)
+                }
             }
         }
     }
@@ -502,6 +555,7 @@ fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) 
 fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPlaylist?) {
     val displayPlaylist = controller.selectedPlaylist ?: playlist ?: return
     val sharePayload = displayPlaylist.toSharePayload()
+    var showDeleteDialog by remember(displayPlaylist.id) { mutableStateOf(false) }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -518,6 +572,11 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                     }
                 },
                 actions = {
+                    if (controller.canDeleteSelectedPlaylist()) {
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除歌单")
+                        }
+                    }
                     val onShare = LocalShareHandler.current
                     IconButton(
                         onClick = { if (sharePayload != null) onShare(sharePayload) },
@@ -686,6 +745,20 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                 }
             }
         }
+    }
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("删除歌单？") },
+            text = { Text("将删除《${displayPlaylist.title}》，此操作无法撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    controller.deleteSelectedPlaylist()
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("取消") } },
+        )
     }
 }
 

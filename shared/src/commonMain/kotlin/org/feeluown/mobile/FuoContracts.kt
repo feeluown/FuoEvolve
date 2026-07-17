@@ -70,6 +70,15 @@ enum class ThemeColorScheme(
     Amber("琥珀"),
 }
 
+enum class PlaybackSpectrumStyle(
+    val label: String,
+) {
+    None("无频谱"),
+    Bars("柱状"),
+    MirrorBars("镜像"),
+    Wave("波形"),
+}
+
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
@@ -85,8 +94,13 @@ data class AppSettings(
     val providerHeaderInputs: Map<String, ProviderHeaderInput> = emptyMap(),
     val enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS,
     val providerOrderIds: List<String> = DEFAULT_PROVIDER_ORDER_IDS,
+    val searchProviderIds: Set<String> = emptySet(),
+    val recommendProviderIds: Set<String> = emptySet(),
+    val exploreProviderIds: Set<String> = emptySet(),
+    val mineProviderIds: Set<String> = emptySet(),
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
+    val downloadParallelism: Int = DEFAULT_DOWNLOAD_PARALLELISM,
     val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
     val cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
@@ -95,6 +109,7 @@ data class AppSettings(
     val smartReplacementUseReplacementMetadata: Boolean = false,
     val smartReplacementUseReplacementLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
+    val playbackSpectrumStyle: PlaybackSpectrumStyle = PlaybackSpectrumStyle.None,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
@@ -106,6 +121,7 @@ data class ProviderHeaderInput(
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
 const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
+const val DEFAULT_DOWNLOAD_PARALLELISM = 2
 const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
 val DEFAULT_ENABLED_PROVIDER_IDS = setOf("netease")
 val DEFAULT_PROVIDER_ORDER_IDS = listOf("netease", "qqmusic", "bilibili", "ytmusic")
@@ -113,7 +129,7 @@ val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
 const val DEFAULT_SMART_REPLACEMENT_MIN_SCORE = 0.55
-const val PROVIDER_PAGE_SIZE = 60
+const val PROVIDER_PAGE_SIZE = 50
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
@@ -209,6 +225,23 @@ enum class PlayMode {
     SingleLoop,
 }
 
+enum class AudioDecoderType {
+    Hardware,
+    Software,
+}
+
+data class AudioDecoderInfo(
+    val type: AudioDecoderType,
+    val name: String,
+)
+
+data class AudioFormatInfo(
+    val format: String? = null,
+    val codec: String? = null,
+    val averageBitrate: Long? = null,
+    val peakBitrate: Long? = null,
+)
+
 data class PlaybackState(
     val status: PlayerStatus = PlayerStatus.Idle,
     val currentTrack: MusicTrack? = null,
@@ -220,6 +253,9 @@ data class PlaybackState(
     val playMode: PlayMode = PlayMode.ListLoop,
     val lyrics: String? = null,
     val audioQuality: String? = null,
+    val audioFormatInfo: AudioFormatInfo? = null,
+    val audioDecoderInfo: AudioDecoderInfo? = null,
+    val spectrumLevels: List<Float> = emptyList(),
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val errorMessage: String? = null,
@@ -432,9 +468,30 @@ sealed class DownloadState {
     data object NotDownloaded : DownloadState()
     data object Queued : DownloadState()
     data class Downloading(val progress: Float) : DownloadState()
+    data object Paused : DownloadState()
     data class Downloaded(val uri: String) : DownloadState()
     data class Failed(val message: String) : DownloadState()
 }
+
+enum class DownloadTaskStatus {
+    Queued,
+    Downloading,
+    Paused,
+    Failed,
+    Completed,
+}
+
+data class DownloadTask(
+    val id: String,
+    val track: MusicTrack,
+    val status: DownloadTaskStatus,
+    val createdAt: Long,
+    val updatedAt: Long = createdAt,
+    val downloadedBytes: Long = 0,
+    val totalBytes: Long? = null,
+    val failureMessage: String? = null,
+    val completedUri: String? = null,
+)
 
 data class ProviderAuthState(
     val providerId: String,
@@ -448,6 +505,11 @@ data class ProviderCapabilities(
     val providerName: String,
     val canAddSongToPlaylist: Boolean = false,
     val canRemoveSongFromPlaylist: Boolean = false,
+    val canCreatePlaylist: Boolean = false,
+    val canDeletePlaylist: Boolean = false,
+    val canListDislikedSongs: Boolean = false,
+    val canAddDislikedSong: Boolean = false,
+    val canRemoveDislikedSong: Boolean = false,
     val canFavoritePlaylist: Boolean = false,
     val canUnfavoritePlaylist: Boolean = false,
     val canFavoriteArtist: Boolean = false,
@@ -494,6 +556,7 @@ enum class ProviderContentType {
     Playlists,
     Artists,
     Albums,
+    Videos,
 }
 
 data class ProviderFeature(
@@ -569,6 +632,7 @@ data class ProviderContentSection(
     val tracks: List<MusicTrack> = emptyList(),
     val playlists: List<ProviderPlaylist> = emptyList(),
     val mediaItems: List<ProviderMediaItem> = emptyList(),
+    val videos: List<ProviderVideo> = emptyList(),
     val isLoginRequired: Boolean = false,
     val errorMessage: String? = null,
     val nextOffset: Int = 0,
@@ -621,9 +685,13 @@ interface ProviderMusicRepository {
         smartReplacementUseOriginalLyrics: Boolean = false,
     ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
+    suspend fun refreshAuthState(providerId: String): ProviderAuthState = authState(providerId)
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support header login: $providerId")
+    }
+    suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support YTMusic header file login")
     }
     suspend fun logout(providerId: String): ProviderAuthState
     suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)
@@ -649,6 +717,12 @@ interface ProviderMusicRepository {
         ProviderMutationResult(false, "provider does not support playlist add song")
     suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult =
         ProviderMutationResult(false, "provider does not support playlist remove song")
+    suspend fun createPlaylist(providerId: String, name: String): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support playlist create")
+    suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support playlist delete")
+    suspend fun setSongDisliked(track: MusicTrack, disliked: Boolean): ProviderMutationResult =
+        ProviderMutationResult(false, "provider does not support dislike operation")
     suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         ProviderMediaItemDetail(item, mediaItemTracks(item))
     suspend fun mediaItemDetailPage(
@@ -687,10 +761,20 @@ interface LocalMusicRepository {
 
 interface DownloadRepository {
     val states: StateFlow<Map<String, DownloadState>>
+    val tasks: StateFlow<List<DownloadTask>>
+        get() = EMPTY_DOWNLOAD_TASKS
     suspend fun load()
     suspend fun download(track: MusicTrack)
+    suspend fun download(track: MusicTrack, payload: PlaybackPayload) = download(track)
+    suspend fun updateParallelism(parallelism: Int) = Unit
+    suspend fun pause(taskId: String) = Unit
+    suspend fun resume(taskId: String) = Unit
+    suspend fun retry(taskId: String) = Unit
+    suspend fun deleteTask(taskId: String, deleteFile: Boolean = true) = Unit
     suspend fun deleteDownloaded(track: MusicTrack)
 }
+
+private val EMPTY_DOWNLOAD_TASKS = MutableStateFlow<List<DownloadTask>>(emptyList())
 
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>

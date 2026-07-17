@@ -654,7 +654,7 @@ private fun albumArtUri(albumId: Long): String? {
 
 private fun localCoverUri(audioUri: Uri, albumId: Long): String {
     return Uri.Builder()
-        .scheme("fuo-local-cover")
+        .scheme("fuo-cover")
         .appendQueryParameter("albumArt", albumArtUri(albumId).orEmpty())
         .appendQueryParameter("audio", audioUri.toString())
         .build()

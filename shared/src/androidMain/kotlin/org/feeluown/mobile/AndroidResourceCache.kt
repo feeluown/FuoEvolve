@@ -2,12 +2,15 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
 import java.net.URL
 import java.security.MessageDigest
 
+@OptIn(UnstableApi::class)
 object AndroidResourceCache {
     private const val PREFS_NAME = "fuo_resource_cache"
     private const val KEY_AUDIO_LIMIT_BYTES = "audio_limit_bytes"

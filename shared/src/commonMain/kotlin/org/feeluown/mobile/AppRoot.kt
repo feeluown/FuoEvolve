@@ -2,6 +2,9 @@ package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
@@ -97,6 +100,8 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
@@ -135,6 +140,8 @@ import kotlin.math.roundToInt
 
 val LocalShareHandler = staticCompositionLocalOf<(SharePayload) -> Unit> { {} }
 val LocalAppLayoutInfo = staticCompositionLocalOf { AppLayoutInfo() }
+@OptIn(ExperimentalSharedTransitionApi::class)
+val LocalPlayerSharedTransitionScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
 
 data class AppLayoutInfo(
     val isLandscape: Boolean = false,
@@ -142,7 +149,7 @@ data class AppLayoutInfo(
     val gridColumns: Int = 3,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun AppRoot(
     controller: FuoPlayerController,
@@ -150,6 +157,7 @@ fun AppRoot(
     onRequestAudioPermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onShareText: (String) -> Unit = {},
     appVersionInfo: String? = null,
 ) {
@@ -157,6 +165,19 @@ fun AppRoot(
         themeMode = controller.themeMode,
         themeColorScheme = controller.themeColorScheme,
     ) {
+        val snackbarHostState = remember { SnackbarHostState() }
+        val playlistOperationFeedback = controller.playlistOperationFeedback
+        val downloadQueueFeedback = controller.downloadQueueFeedback
+        LaunchedEffect(playlistOperationFeedback) {
+            playlistOperationFeedback ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(playlistOperationFeedback)
+            controller.dismissPlaylistOperationFeedback(playlistOperationFeedback)
+        }
+        LaunchedEffect(downloadQueueFeedback) {
+            downloadQueueFeedback ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(downloadQueueFeedback)
+            controller.dismissDownloadQueueFeedback(downloadQueueFeedback)
+        }
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val layoutInfo = remember(maxWidth, maxHeight) {
                 val isLandscape = maxWidth > maxHeight
@@ -214,54 +235,67 @@ fun AppRoot(
                 LocalShareHandler provides { onShareText(it.text) },
                 LocalAppLayoutInfo provides layoutInfo,
             ) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    AnimatedContent(
-                        targetState = destination,
-                        modifier = Modifier.fillMaxSize(),
-                        transitionSpec = {
-                            val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                            (slideInHorizontally(animationSpec = tween(220)) { it / 5 * direction } + fadeIn(tween(180)))
-                                .togetherWith(
-                                    slideOutHorizontally(animationSpec = tween(180)) { -it / 6 * direction } +
-                                        fadeOut(tween(160)),
-                                )
-                                .using(SizeTransform(clip = false))
-                        },
-                    ) { target ->
-                        when (target) {
-                            AppDestination.Home -> HomeScreen(
-                                controller = controller,
-                                hasAudioPermission = hasAudioPermission,
-                                onRequestAudioPermission = onRequestAudioPermission,
+                SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalPlayerSharedTransitionScope provides this) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            AnimatedContent(
+                                targetState = destination,
+                                modifier = Modifier.fillMaxSize(),
+                                transitionSpec = {
+                                    val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                                    (slideInHorizontally(animationSpec = tween(220)) { it / 5 * direction } + fadeIn(tween(180)))
+                                        .togetherWith(
+                                            slideOutHorizontally(animationSpec = tween(180)) { -it / 6 * direction } +
+                                                fadeOut(tween(160)),
+                                        )
+                                        .using(SizeTransform(clip = false))
+                                },
+                            ) { target ->
+                                when (target) {
+                                    AppDestination.Home -> HomeScreen(
+                                        controller = controller,
+                                        hasAudioPermission = hasAudioPermission,
+                                        onRequestAudioPermission = onRequestAudioPermission,
+                                    )
+                                    AppDestination.DebugLogs -> DebugLogScreen(controller)
+                                    AppDestination.DownloadManager -> DownloadManagerScreen(controller)
+                                    AppDestination.Settings -> SettingsScreen(
+                                        controller,
+                                        onOpenProviderWebLogin,
+                                        onLogoutProvider,
+                                        onImportYtmusicHeaderFile,
+                                        appVersionInfo,
+                                    )
+                                    AppDestination.Search -> SearchScreen(controller)
+                                    AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
+                                    AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
+                                    AppDestination.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
+                                    AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
+                                    AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
+                                }
+                            }
+                            AnimatedVisibility(
+                                visible = controller.isFullPlayerOpen,
+                                modifier = Modifier.fillMaxSize(),
+                                enter = slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(180)),
+                                exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
+                            ) {
+                                FullPlayer(controller)
+                            }
+                            controller.localMetadataEditorTrack?.let { track ->
+                                LocalMetadataDialog(controller = controller, track = track)
+                            }
+                            controller.playlistTargetTrack?.let { track ->
+                                ProviderPlaylistTargetDialog(controller = controller, track = track)
+                            }
+                            SnackbarHost(
+                                hostState = snackbarHostState,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .navigationBarsPadding()
+                                    .padding(16.dp),
                             )
-                            AppDestination.DebugLogs -> DebugLogScreen(controller)
-                            AppDestination.Settings -> SettingsScreen(
-                                controller,
-                                onOpenProviderWebLogin,
-                                onLogoutProvider,
-                                appVersionInfo,
-                            )
-                            AppDestination.Search -> SearchScreen(controller)
-                            AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
-                            AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
-                            AppDestination.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
-                            AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
-                            AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                         }
-                    }
-                    AnimatedVisibility(
-                        visible = controller.isFullPlayerOpen,
-                        modifier = Modifier.fillMaxSize(),
-                        enter = slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(180)),
-                        exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
-                    ) {
-                        FullPlayer(controller)
-                    }
-                    controller.localMetadataEditorTrack?.let { track ->
-                        LocalMetadataDialog(controller = controller, track = track)
-                    }
-                    controller.playlistTargetTrack?.let { track ->
-                        ProviderPlaylistTargetDialog(controller = controller, track = track)
                     }
                 }
             }
@@ -355,12 +389,14 @@ private enum class AppDestination {
     Search,
     Settings,
     DebugLogs,
+    DownloadManager,
     MediaItem,
 }
 
 private fun appDestination(controller: FuoPlayerController): AppDestination {
     return when {
         controller.isDebugLogOpen -> AppDestination.DebugLogs
+        controller.isDownloadManagerOpen -> AppDestination.DownloadManager
         controller.isSettingsOpen -> AppDestination.Settings
         controller.selectedVideo != null -> AppDestination.Video
         controller.selectedTrack != null -> AppDestination.Track

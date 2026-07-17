@@ -19,7 +19,9 @@ class FuoEvolveApplication : PyApplication() {
     }
 
     private val downloadRepository: AndroidDownloadRepository by lazy {
-        AndroidDownloadRepository(applicationContext, providerRepository)
+        AndroidDownloadRepository(applicationContext, providerRepository) { tasks ->
+            FuoDownloadService.update(applicationContext, tasks)
+        }
     }
 
     private val playbackEngine: AndroidNativeAudioEngine by lazy {

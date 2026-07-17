@@ -52,6 +52,8 @@ fun TrackRow(
     onEditLocalMetadata: (() -> Unit)? = null,
     onAddToProviderPlaylist: (() -> Unit)? = null,
     onRemoveFromProviderPlaylist: (() -> Unit)? = null,
+    onSetDisliked: (() -> Unit)? = null,
+    dislikedActionLabel: String = "不喜欢",
 ) {
     val onShare = LocalShareHandler.current
     val sharePayload = track.toSharePayload()
@@ -98,6 +100,8 @@ fun TrackRow(
             onEditLocalMetadata = onEditLocalMetadata,
             onAddToProviderPlaylist = onAddToProviderPlaylist,
             onRemoveFromProviderPlaylist = onRemoveFromProviderPlaylist,
+            onSetDisliked = onSetDisliked,
+            dislikedActionLabel = dislikedActionLabel,
             onShare = sharePayload?.let { payload -> { onShare(payload) } },
         )
     }
@@ -130,6 +134,8 @@ fun TrackAction(
     onEditLocalMetadata: (() -> Unit)?,
     onAddToProviderPlaylist: (() -> Unit)?,
     onRemoveFromProviderPlaylist: (() -> Unit)?,
+    onSetDisliked: (() -> Unit)?,
+    dislikedActionLabel: String,
     onShare: (() -> Unit)?,
     roundButton: Boolean = false,
 ) {
@@ -177,6 +183,16 @@ fun TrackAction(
                         leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                         enabled = false,
                         onClick = {},
+                    )
+                }
+                track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Paused -> {
+                    DropdownMenuItem(
+                        text = { Text("继续下载") },
+                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                        onClick = {
+                            expanded = false
+                            onDownload()
+                        },
                     )
                 }
                 (track.sourceType == TrackSourceType.Provider && downloadState is DownloadState.Downloaded) ||
@@ -228,6 +244,16 @@ fun TrackAction(
                     onClick = {
                         expanded = false
                         onRemoveFromProviderPlaylist()
+                    },
+                )
+            }
+            if (onSetDisliked != null) {
+                DropdownMenuItem(
+                    text = { Text(dislikedActionLabel) },
+                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onSetDisliked()
                     },
                 )
             }

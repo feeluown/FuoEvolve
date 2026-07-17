@@ -33,8 +33,17 @@ enum class HomeSection {
     Mine,
 }
 
+enum class ProviderDisplaySection(val label: String) {
+    Search("搜索"),
+    Recommend("推荐"),
+    Explore("探索"),
+    Mine("我的"),
+    Replace("替换"),
+}
+
 enum class MineSection {
     Playlists,
+    Songs,
     Artists,
     Albums,
     LocalMusic,
@@ -54,6 +63,7 @@ enum class LocalMusicViewMode {
 
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
+private const val PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT = 200
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
 class FuoPlayerController(
@@ -85,6 +95,14 @@ class FuoPlayerController(
         private set
     var providerOrderIds by mutableStateOf(DEFAULT_PROVIDER_ORDER_IDS)
         private set
+    var searchProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var recommendProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var exploreProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var mineProviderIds by mutableStateOf<Set<String>>(emptySet())
+        private set
     var recommendSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
         private set
     var musicSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
@@ -106,6 +124,8 @@ class FuoPlayerController(
     var selectedPlaylistError by mutableStateOf<String?>(null)
         private set
     var selectedFeature by mutableStateOf<ProviderFeature?>(null)
+        private set
+    var selectedFeatureContent by mutableStateOf<ProviderContentSection?>(null)
         private set
     var selectedFeatureTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
@@ -149,6 +169,8 @@ class FuoPlayerController(
         private set
     var playlistOperationError by mutableStateOf<String?>(null)
         private set
+    var playlistOperationFeedback by mutableStateOf<String?>(null)
+        private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var query by mutableStateOf("")
@@ -187,9 +209,13 @@ class FuoPlayerController(
         private set
     var isFullPlayerOpen by mutableStateOf(false)
         private set
+    var isVideoFullscreen by mutableStateOf(false)
+        private set
     var isSettingsOpen by mutableStateOf(false)
         private set
     var isDebugLogOpen by mutableStateOf(false)
+        private set
+    var isDownloadManagerOpen by mutableStateOf(false)
         private set
     var isQueueOpen by mutableStateOf(false)
         private set
@@ -199,6 +225,10 @@ class FuoPlayerController(
         private set
     var downloadStates by mutableStateOf<Map<String, DownloadState>>(emptyMap())
         private set
+    var downloadTasks by mutableStateOf<List<DownloadTask>>(emptyList())
+        private set
+    var downloadQueueFeedback by mutableStateOf<String?>(null)
+        private set
     var playbackState by mutableStateOf(PlaybackState())
         private set
     var cacheUsage by mutableStateOf(CacheUsage())
@@ -206,6 +236,8 @@ class FuoPlayerController(
     var audioCacheLimitMb by mutableStateOf(DEFAULT_AUDIO_CACHE_LIMIT_MB)
         private set
     var imageCacheLimitMb by mutableStateOf(DEFAULT_IMAGE_CACHE_LIMIT_MB)
+        private set
+    var downloadParallelism by mutableStateOf(DEFAULT_DOWNLOAD_PARALLELISM)
         private set
     var wifiAudioQualityPolicy by mutableStateOf(DEFAULT_WIFI_AUDIO_QUALITY_POLICY)
         private set
@@ -222,6 +254,8 @@ class FuoPlayerController(
     var smartReplacementUseReplacementLyrics by mutableStateOf(false)
         private set
     var lyricFontSize by mutableStateOf(LyricFontSize.Small)
+        private set
+    var playbackSpectrumStyle by mutableStateOf(PlaybackSpectrumStyle.None)
         private set
     var themeMode by mutableStateOf(ThemeMode.System)
         private set
@@ -269,6 +303,7 @@ class FuoPlayerController(
     private var currentUpNextTrack: MusicTrack? = null
     private var currentIsUpNext: Boolean = false
     private var queueFeature: ProviderFeature? = null
+    private var queuePlaylistId: String? = null
     private var shuffleEnabled: Boolean = false
     private var _repeatMode: RepeatMode = RepeatMode.QUEUE
     private var isFmQueue: Boolean = false
@@ -278,6 +313,7 @@ class FuoPlayerController(
     private var selectedFeatureLoadMoreJob: Job? = null
     private var selectedPlaylistTracksNextOffset = 0
     private var selectedPlaylistLoadMoreJob: Job? = null
+    private var selectedPlaylistBackgroundLoadJob: Job? = null
     private var selectedMediaItemTracksNextOffset = 0
     private var selectedMediaItemAlbumsNextOffset = 0
     private var selectedMediaItemTracksLoadMoreJob: Job? = null
@@ -288,6 +324,7 @@ class FuoPlayerController(
     private var playRequestSerial: Long = 0
     private var localMusicRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
+    private var observedCompletedDownloadTaskIds = emptySet<String>()
     private var pendingLocalMusicMediaRefresh: Job? = null
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
@@ -295,13 +332,20 @@ class FuoPlayerController(
     init {
         scope.launch {
             val loadedSettings = runCatching { settingsStore.load() }
-            loadedSettings.onSuccess { applySettings(it) }
+            loadedSettings.getOrNull()?.let {
+                applySettings(it)
+                downloadRepository.updateParallelism(downloadParallelism)
+            }
             runCatching { playbackQueueStore.load() }
                 .onSuccess { restorePlaybackQueue(it) }
             updateLocalMusicScanSettings()
             updateResourceCacheLimit()
             updateAudioQualityPolicies()
             resourceCacheRepository.refreshUsage()
+            runCatching { providerRepository.availableProviders() }
+                .onSuccess { loadedProviders ->
+                    availableProviders = loadedProviders.sortedProvidersByOrder()
+                }
             runCatching {
                 providerRepository.updateEnabledProviders(enabledProviderIds)
                 providerRepository.initialize()
@@ -309,8 +353,7 @@ class FuoPlayerController(
                 downloadRepository.load()
             }.onSuccess {
                 message = "音乐服务已就绪"
-                refreshAllProviderAuthStates()
-                refreshHomeContent(homeSection)
+                refreshHomeContent(homeSection, refreshCatalog = false)
             }.onFailure {
                 setError(it)
             }
@@ -318,6 +361,20 @@ class FuoPlayerController(
         scope.launch {
             downloadRepository.states.collect {
                 downloadStates = it
+            }
+        }
+        scope.launch {
+            downloadRepository.tasks.collect {
+                downloadTasks = it
+                val completedIds = it.filter { task -> task.status == DownloadTaskStatus.Completed }.map { task -> task.id }.toSet()
+                val newlyCompleted = completedIds - observedCompletedDownloadTaskIds
+                observedCompletedDownloadTaskIds = completedIds
+                if (newlyCompleted.isNotEmpty() && hasLocalMusicPermission) {
+                    refreshLocalMusic(
+                        forceRefresh = true,
+                        showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic,
+                    )
+                }
             }
         }
         scope.launch {
@@ -517,8 +574,16 @@ class FuoPlayerController(
                 closeFullPlayer()
                 true
             }
+            isVideoFullscreen -> {
+                toggleVideoFullscreen()
+                true
+            }
             isDebugLogOpen -> {
                 closeDebugLogs()
+                true
+            }
+            isDownloadManagerOpen -> {
+                closeDownloadManager()
                 true
             }
             isSettingsOpen && settingsLoginProviderId != null -> {
@@ -561,7 +626,7 @@ class FuoPlayerController(
         providerId?.takeIf { it.isNotBlank() }?.let { selectedSettingsProviderId = it }
         providerId?.takeIf { it.isNotBlank() }?.let { settingsLoginProviderId = it }
         isSettingsOpen = true
-        refreshAllProviderAuthStates()
+        refreshAllProviderAuthStates(refreshUserInfo = true)
         refreshResourceCacheUsage()
         refreshLocalMusicDirectories()
     }
@@ -569,6 +634,7 @@ class FuoPlayerController(
     fun closeSettings() {
         isSettingsOpen = false
         isDebugLogOpen = false
+        isDownloadManagerOpen = false
         settingsLoginProviderId = null
     }
 
@@ -590,6 +656,24 @@ class FuoPlayerController(
 
     fun closeDebugLogs() {
         isDebugLogOpen = false
+    }
+
+    fun openDownloadManager() {
+        isDownloadManagerOpen = true
+    }
+
+    fun closeDownloadManager() {
+        isDownloadManagerOpen = false
+    }
+
+    fun dismissDownloadQueueFeedback(feedback: String) {
+        if (downloadQueueFeedback == feedback) downloadQueueFeedback = null
+    }
+
+    fun onDownloadParallelismChange(value: Int) {
+        downloadParallelism = value.coerceIn(1, 5)
+        persistSettings()
+        scope.launch { downloadRepository.updateParallelism(downloadParallelism) }
     }
 
     fun refreshDebugLogs() {
@@ -688,6 +772,40 @@ class FuoPlayerController(
         providerFeatures = providerFeatures.sortedFeaturesByOrder()
         reorderProviderContent()
         persistSettings()
+    }
+
+    fun isProviderShownIn(providerId: String, section: ProviderDisplaySection): Boolean =
+        providerId in selectedProviderIdsFor(section)
+
+    fun onProviderShownInChange(providerId: String, section: ProviderDisplaySection, shown: Boolean) {
+        if (section == ProviderDisplaySection.Replace) {
+            onSmartReplacementProviderEnabledChange(providerId, shown)
+            return
+        }
+        val current = configuredProviderIdsFor(section).ifEmpty {
+            availableProviders.map { it.providerId }.toSet()
+        }
+        if (!shown && current.size <= 1 && providerId in current) {
+            message = "至少保留一个${section.label}音源"
+            return
+        }
+        val updated = current.toMutableSet().apply {
+            if (shown) add(providerId) else remove(providerId)
+        }
+        when (section) {
+            ProviderDisplaySection.Search -> searchProviderIds = updated
+            ProviderDisplaySection.Recommend -> recommendProviderIds = updated
+            ProviderDisplaySection.Explore -> exploreProviderIds = updated
+            ProviderDisplaySection.Mine -> mineProviderIds = updated
+            ProviderDisplaySection.Replace -> Unit
+        }
+        persistSettings()
+        when (section) {
+            ProviderDisplaySection.Recommend -> refreshHomeContent(HomeSection.Recommend)
+            ProviderDisplaySection.Explore -> refreshHomeContent(HomeSection.Music)
+            ProviderDisplaySection.Mine -> refreshActiveMineProviderContent()
+            else -> Unit
+        }
     }
 
     fun onProviderLoginModeChange(value: ProviderLoginMode) {
@@ -799,6 +917,34 @@ class FuoPlayerController(
         }
     }
 
+    fun loginYtmusicWithHeaderFile(headerFileJson: String) {
+        if (headerFileJson.isBlank()) {
+            message = "无法读取 ytmusic_header.json"
+            return
+        }
+        val providerName = providerName("ytmusic")
+        scope.launch {
+            isLoading = true
+            message = "正在登录 $providerName"
+            runCatching { providerRepository.loginWithYtmusicHeaderFile(headerFileJson) }
+                .onSuccess {
+                    providerAuthStates = providerAuthStates + ("ytmusic" to it)
+                    message = if (it.isLoggedIn) {
+                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
+                    } else {
+                        "${it.providerName} 未登录"
+                    }
+                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                        refreshActiveMineProviderContent()
+                    } else {
+                        refreshHomeContent(homeSection)
+                    }
+                }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
     fun logoutProvider(providerId: String) {
         val providerName = providerName(providerId)
         scope.launch {
@@ -839,10 +985,6 @@ class FuoPlayerController(
         persistSettings()
     }
 
-    fun isSmartReplacementProviderEnabled(providerId: String): Boolean {
-        return providerId in selectedSmartReplacementProviderIds()
-    }
-
     fun onSmartReplacementProviderEnabledChange(providerId: String, enabled: Boolean) {
         val current = selectedSmartReplacementProviderIds().toMutableSet()
         if (enabled) {
@@ -875,6 +1017,11 @@ class FuoPlayerController(
 
     fun onLyricFontSizeChange(value: LyricFontSize) {
         lyricFontSize = value
+        persistSettings()
+    }
+
+    fun onPlaybackSpectrumStyleChange(value: PlaybackSpectrumStyle) {
+        playbackSpectrumStyle = value
         persistSettings()
     }
 
@@ -927,6 +1074,7 @@ class FuoPlayerController(
         persistSettings()
         when (value) {
             MineSection.Playlists -> if (minePlaylistSections.isEmpty()) refreshMinePlaylistContent()
+            MineSection.Songs,
             MineSection.Artists,
             MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
             MineSection.LocalMusic -> ensureLocalMusic()
@@ -1119,7 +1267,9 @@ class FuoPlayerController(
                         }
                         SearchScope.All -> {
                             val local = localRepository.search(keyword)
-                            val provider = providerRepository.searchAll(keyword)
+                            val provider = searchProviderIdsForSearch().map { providerId ->
+                                providerRepository.searchAll(keyword, providerId)
+                            }.mergeSearchResults()
                             providerSearchResults = provider
                             mergeResults(local, provider.tracks)
                         }
@@ -1164,8 +1314,12 @@ class FuoPlayerController(
     }
 
     fun refreshHomeContent(section: HomeSection = homeSection) {
+        refreshHomeContent(section, refreshCatalog = true)
+    }
+
+    private fun refreshHomeContent(section: HomeSection, refreshCatalog: Boolean) {
         if (section == HomeSection.Mine) {
-            refreshActiveMineSection()
+            refreshActiveMineSection(refreshCatalog)
             return
         }
         scope.launch {
@@ -1173,14 +1327,18 @@ class FuoPlayerController(
             val title = if (section == HomeSection.Recommend) "推荐" else "探索"
             message = "正在加载$title"
             runCatching {
-                refreshProviderCatalog()
+                if (refreshCatalog) refreshProviderCatalog()
                 val category = when (section) {
                     HomeSection.Recommend -> ProviderFeatureCategory.Recommend
                     HomeSection.Music -> ProviderFeatureCategory.Music
                     HomeSection.Mine -> error("mine section is loaded separately")
                 }
                 withTimeout(30_000) {
-                    providerFeatures.filter { it.category == category }.map { feature ->
+                    providerFeatures.filter {
+                        it.category == category && it.providerId in selectedProviderIdsFor(
+                            if (section == HomeSection.Recommend) ProviderDisplaySection.Recommend else ProviderDisplaySection.Explore,
+                        )
+                    }.map { feature ->
                         if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
                             ProviderContentSection(feature, isLoginRequired = true)
                         } else if (feature.isDeferredHomeFeature()) {
@@ -1206,13 +1364,17 @@ class FuoPlayerController(
     }
 
     fun refreshMinePlaylistContent() {
+        refreshMinePlaylistContent(refreshCatalog = true)
+    }
+
+    private fun refreshMinePlaylistContent(refreshCatalog: Boolean) {
         scope.launch {
             isLoading = true
             message = "正在加载我的歌单"
             runCatching {
-                refreshProviderCatalog()
-                val userPlaylists = loadProviderSections(ProviderFeatureCategory.MinePlaylists)
-                val favoritePlaylists = loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists)
+                if (refreshCatalog) refreshProviderCatalog()
+                val userPlaylists = loadProviderSections(ProviderFeatureCategory.MinePlaylists, ::isMineProviderFeature)
+                val favoritePlaylists = loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists, ::isMineProviderFeature)
                 userPlaylists to favoritePlaylists
             }.onSuccess {
                 minePlaylistSections = it.first
@@ -1226,17 +1388,19 @@ class FuoPlayerController(
     }
 
     fun refreshMineContent() {
+        refreshMineContent(refreshCatalog = true)
+    }
+
+    private fun refreshMineContent(refreshCatalog: Boolean) {
         scope.launch {
             isLoading = true
-            message = "正在加载歌手和专辑"
+            message = "正在加载我的内容"
             runCatching {
-                refreshProviderCatalog()
-                loadProviderSections(ProviderFeatureCategory.Mine) {
-                    it.contentType == ProviderContentType.Artists || it.contentType == ProviderContentType.Albums
-                }
+                if (refreshCatalog) refreshProviderCatalog()
+                loadProviderSections(ProviderFeatureCategory.Mine, ::isMineProviderFeature)
             }.onSuccess {
                 mineSections = it
-                message = if (it.isEmpty()) "歌手和专辑暂无内容" else "歌手和专辑已更新"
+                message = if (it.isEmpty()) "我的内容暂无内容" else "我的内容已更新"
             }.onFailure {
                 setError(it)
             }
@@ -1265,17 +1429,19 @@ class FuoPlayerController(
             MineSection.Playlists -> if (minePlaylistSections.isEmpty() && mineFavoritePlaylistSections.isEmpty()) {
                 refreshMinePlaylistContent()
             }
+            MineSection.Songs,
             MineSection.Artists,
             MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
             MineSection.LocalMusic -> ensureLocalMusic()
         }
     }
 
-    private fun refreshActiveMineSection() {
+    private fun refreshActiveMineSection(refreshCatalog: Boolean = true) {
         when (mineSection) {
-            MineSection.Playlists -> refreshMinePlaylistContent()
+            MineSection.Playlists -> refreshMinePlaylistContent(refreshCatalog)
+            MineSection.Songs,
             MineSection.Artists,
-            MineSection.Albums -> refreshMineContent()
+            MineSection.Albums -> refreshMineContent(refreshCatalog)
             MineSection.LocalMusic -> ensureLocalMusic()
         }
     }
@@ -1283,6 +1449,7 @@ class FuoPlayerController(
     private fun refreshActiveMineProviderContent() {
         when (mineSection) {
             MineSection.Playlists -> refreshMinePlaylistContent()
+            MineSection.Songs,
             MineSection.Artists,
             MineSection.Albums -> refreshMineContent()
             MineSection.LocalMusic -> Unit
@@ -1291,6 +1458,7 @@ class FuoPlayerController(
 
     fun openFeature(feature: ProviderFeature) {
         selectedFeature = feature
+        selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
         selectedFeatureTracksNextOffset = 0
         selectedFeatureTracksHasMore = false
@@ -1310,6 +1478,7 @@ class FuoPlayerController(
             } else {
                 result.onSuccess { section ->
                     if (selectedFeature == feature) {
+                        selectedFeatureContent = section
                         selectedFeatureTracks = section.tracks
                         selectedFeatureTracksNextOffset = section.nextOffset
                         selectedFeatureTracksHasMore = section.hasMore
@@ -1320,8 +1489,8 @@ class FuoPlayerController(
                         }
                         message = when {
                             selectedFeatureError != null -> selectedFeatureError.orEmpty()
-                            section.tracks.isEmpty() -> "${feature.title} 暂无歌曲"
-                            else -> "${feature.title} · ${section.tracks.size} 首"
+                            section.contentCount() == 0 -> "${feature.title} 暂无内容"
+                            else -> "${feature.title} · ${section.contentCount()} 项"
                         }
                     }
                 }.onFailure {
@@ -1335,6 +1504,7 @@ class FuoPlayerController(
 
     fun closeFeature() {
         selectedFeature = null
+        selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
         selectedFeatureTracksNextOffset = 0
         selectedFeatureTracksHasMore = false
@@ -1461,6 +1631,7 @@ class FuoPlayerController(
         selectedVideo = video
         selectedVideoPayload = null
         selectedVideoError = null
+        isVideoFullscreen = false
         scope.launch {
             isLoading = true
             message = "正在加载视频：${video.title}"
@@ -1488,9 +1659,14 @@ class FuoPlayerController(
     }
 
     fun closeVideo() {
+        isVideoFullscreen = false
         selectedVideo = null
         selectedVideoPayload = null
         selectedVideoError = null
+    }
+
+    fun toggleVideoFullscreen() {
+        isVideoFullscreen = !isVideoFullscreen
     }
 
     fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
@@ -1498,6 +1674,52 @@ class FuoPlayerController(
         return track.sourceType == TrackSourceType.Provider &&
             isProviderLoggedIn(providerId) &&
             providerCapabilities[providerId]?.canAddSongToPlaylist == true
+    }
+
+    fun creatablePlaylistProviders(): List<ProviderInfo> = providers.filter { provider ->
+        isProviderLoggedIn(provider.providerId) &&
+            providerCapabilities[provider.providerId]?.canCreatePlaylist == true
+    }
+
+    fun createPlaylist(providerId: String, name: String) {
+        if (name.isBlank() || providerId !in creatablePlaylistProviders().map { it.providerId }) return
+        scope.launch {
+            isLoading = true
+            message = "正在新建歌单"
+            runCatching { providerRepository.createPlaylist(providerId, name.trim()) }
+                .onSuccess { result ->
+                    message = result.message.ifBlank { if (result.success) "歌单已新建" else "新建歌单失败" }
+                    if (result.success) refreshAfterProviderMutation(providerId)
+                }
+                .onFailure(::setError)
+            isLoading = false
+        }
+    }
+
+    fun canDeleteSelectedPlaylist(): Boolean {
+        val playlist = selectedPlaylist ?: return false
+        return selectedPlaylistCategory == ProviderFeatureCategory.MinePlaylists &&
+            isProviderLoggedIn(playlist.providerId) &&
+            providerCapabilities[playlist.providerId]?.canDeletePlaylist == true
+    }
+
+    fun deleteSelectedPlaylist() {
+        val playlist = selectedPlaylist ?: return
+        if (!canDeleteSelectedPlaylist()) return
+        scope.launch {
+            isLoading = true
+            message = "正在删除歌单"
+            runCatching { providerRepository.deletePlaylist(playlist) }
+                .onSuccess { result ->
+                    message = result.message.ifBlank { if (result.success) "歌单已删除" else "删除歌单失败" }
+                    if (result.success) {
+                        closePlaylist()
+                        refreshAfterProviderMutation(playlist.providerId)
+                    }
+                }
+                .onFailure(::setError)
+            isLoading = false
+        }
     }
 
     fun openPlaylistTargetPicker(track: MusicTrack) {
@@ -1537,16 +1759,19 @@ class FuoPlayerController(
                 .onSuccess { result ->
                     if (result.success) {
                         message = result.message.ifBlank { "已添加到：${playlist.title}" }
+                        playlistOperationFeedback = message
                         closePlaylistTargetPicker()
                         refreshAfterProviderMutation(playlist.providerId)
                     } else {
                         playlistOperationError = result.message.ifBlank { "添加失败" }
                         message = playlistOperationError.orEmpty()
+                        playlistOperationFeedback = message
                     }
                 }
                 .onFailure {
                     playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
                     setError(it)
+                    playlistOperationFeedback = message
                 }
             isLoading = false
         }
@@ -1561,6 +1786,58 @@ class FuoPlayerController(
             providerCapabilities[playlist.providerId]?.canRemoveSongFromPlaylist == true
     }
 
+    fun canSetSongDisliked(track: MusicTrack, disliked: Boolean): Boolean {
+        val providerId = trackProviderId(track) ?: return false
+        val capabilities = providerCapabilities[providerId] ?: return false
+        return track.sourceType == TrackSourceType.Provider &&
+            isProviderLoggedIn(providerId) &&
+            if (disliked) capabilities.canAddDislikedSong else capabilities.canRemoveDislikedSong
+    }
+
+    fun setSongDisliked(track: MusicTrack, disliked: Boolean) {
+        if (!canSetSongDisliked(track, disliked)) return
+        scope.launch {
+            isLoading = true
+            message = if (disliked) "正在设为不喜欢" else "正在取消不喜欢"
+            runCatching { providerRepository.setSongDisliked(track, disliked) }
+                .onSuccess { result ->
+                    if (result.success) {
+                        if (disliked) removeDislikedTrack(track) else refreshMineContent()
+                        message = result.message.ifBlank { if (disliked) "已设为不喜欢" else "已取消不喜欢" }
+                    } else {
+                        message = result.message.ifBlank { "操作失败" }
+                    }
+                }
+                .onFailure(::setError)
+            isLoading = false
+        }
+    }
+
+    private fun removeDislikedTrack(track: MusicTrack) {
+        val isCurrent = currentQueueTrack()?.id == track.id
+        if (isCurrent) {
+            val hasNext = upNextQueue.isNotEmpty() || mainQueueIndex + 1 < mainQueue.size
+            if (hasNext) next() else playbackEngine.stop()
+        }
+        val removedBeforeCurrent = mainQueue
+            .take(mainQueueIndex.coerceIn(0, mainQueue.size))
+            .count { it.id == track.id }
+        mainQueue = mainQueue.filterNot { it.id == track.id }
+        originalMainQueue = originalMainQueue.filterNot { it.id == track.id }
+        upNextQueue = upNextQueue.filterNot { it.id == track.id }
+        mainQueueIndex = (mainQueueIndex - removedBeforeCurrent).coerceIn(-1, mainQueue.lastIndex)
+        recommendSections = recommendSections.withoutTrack(track.id)
+        musicSections = musicSections.withoutTrack(track.id)
+        mineSections = mineSections.withoutTrack(track.id)
+        selectedFeatureTracks = selectedFeatureTracks.filterNot { it.id == track.id }
+        selectedFeatureContent = selectedFeatureContent?.copy(
+            tracks = selectedFeatureContent.orEmptyTracks().filterNot { it.id == track.id },
+        )
+        selectedPlaylistTracks = selectedPlaylistTracks.filterNot { it.id == track.id }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+    }
+
     fun removeTrackFromSelectedPlaylist(track: MusicTrack) {
         val playlist = selectedPlaylist ?: return
         if (!canRemoveTrackFromSelectedPlaylist(track)) return
@@ -1572,24 +1849,37 @@ class FuoPlayerController(
                     if (result.success) {
                         selectedPlaylistTracks = selectedPlaylistTracks.filterNot { it.id == track.id }
                         message = result.message.ifBlank { "已从歌单移除：${track.title}" }
+                        playlistOperationFeedback = message
                         refreshAfterProviderMutation(playlist.providerId)
                     } else {
                         selectedPlaylistError = result.message.ifBlank { "移除失败" }
                         message = selectedPlaylistError.orEmpty()
+                        playlistOperationFeedback = message
                     }
                 }
-                .onFailure { setError(it) }
+                .onFailure {
+                    setError(it)
+                    playlistOperationFeedback = message
+                }
             isLoading = false
         }
     }
 
+    fun dismissPlaylistOperationFeedback(feedback: String) {
+        if (playlistOperationFeedback == feedback) {
+            playlistOperationFeedback = null
+        }
+    }
+
     fun openPlaylist(playlist: ProviderPlaylist, category: ProviderFeatureCategory? = null) {
+        selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = playlist
         selectedPlaylistCategory = category
         selectedPlaylistTracks = emptyList()
         selectedPlaylistTracksNextOffset = 0
         selectedPlaylistTracksHasMore = false
         selectedPlaylistLoadMoreJob = null
+        selectedPlaylistBackgroundLoadJob = null
         selectedPlaylistError = null
         scope.launch {
             isLoading = true
@@ -1626,12 +1916,14 @@ class FuoPlayerController(
     }
 
     fun closePlaylist() {
+        selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = null
         selectedPlaylistCategory = null
         selectedPlaylistTracks = emptyList()
         selectedPlaylistTracksNextOffset = 0
         selectedPlaylistTracksHasMore = false
         selectedPlaylistLoadMoreJob = null
+        selectedPlaylistBackgroundLoadJob = null
         selectedPlaylistError = null
     }
 
@@ -1746,13 +2038,13 @@ class FuoPlayerController(
                 val newTracks = section.tracks.filter { seenIds.add(it.id) }
                 if (newTracks.isNotEmpty()) {
                     selectedFeatureTracks = selectedFeatureTracks + newTracks
-                    updateHomeFeatureSection(
-                        section.copy(
-                            tracks = selectedFeatureTracks,
-                            nextOffset = section.nextOffset,
-                            hasMore = section.hasMore,
-                        ),
+                    val updatedSection = section.copy(
+                        tracks = selectedFeatureTracks,
+                        nextOffset = section.nextOffset,
+                        hasMore = section.hasMore,
                     )
+                    selectedFeatureContent = updatedSection
+                    updateHomeFeatureSection(updatedSection)
                 }
                 selectedFeatureTracksNextOffset = section.nextOffset
                 selectedFeatureTracksHasMore = section.hasMore
@@ -1890,6 +2182,13 @@ class FuoPlayerController(
         }
     }
 
+    private suspend fun ensureSelectedPlaylistTracksAtLeast(count: Int) {
+        selectedPlaylistLoadMoreJob?.join()
+        while (selectedPlaylistTracksHasMore && selectedPlaylistTracks.size < count) {
+            if (!appendSelectedPlaylistTracksPage()) break
+        }
+    }
+
     private suspend fun ensureAllSelectedMediaItemTracks() {
         selectedMediaItemTracksLoadMoreJob?.join()
         while (selectedMediaItemTracksHasMore) {
@@ -1980,18 +2279,33 @@ class FuoPlayerController(
     }
 
     fun playFromSelectedPlaylist(index: Int) {
-        val track = selectedPlaylistTracks.getOrNull(index) ?: return
-        play(track, selectedPlaylistTracks, index)
+        if (selectedPlaylistTracks.getOrNull(index) == null) return
+        playSelectedPlaylistFrom(index)
     }
 
     fun playAllFromSelectedPlaylist() {
+        playSelectedPlaylistFrom(0)
+    }
+
+    private fun playSelectedPlaylistFrom(index: Int) {
         val playlist = selectedPlaylist ?: return
+        selectedPlaylistBackgroundLoadJob?.cancel()
         scope.launch {
             isLoading = true
-            message = "正在加载完整歌单：${playlist.title}"
-            ensureAllSelectedPlaylistTracks()
-            playFirst(selectedPlaylistTracks)
+            message = "正在加载前 $PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT 首：${playlist.title}"
+            ensureSelectedPlaylistTracksAtLeast(maxOf(PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT, index + 1))
+            selectedPlaylistTracks.getOrNull(index)?.let { track ->
+                play(track, selectedPlaylistTracks, index, sourcePlaylistId = playlist.id)
+            }
             isLoading = false
+            if (selectedPlaylistTracksHasMore && queuePlaylistId == playlist.id) {
+                selectedPlaylistBackgroundLoadJob = scope.launch {
+                    ensureAllSelectedPlaylistTracks()
+                    if (!selectedPlaylistTracksHasMore) {
+                        syncPlaylistPlaybackQueue(playlist)
+                    }
+                }
+            }
         }
     }
 
@@ -2199,6 +2513,7 @@ class FuoPlayerController(
         currentIsUpNext = false
         mainQueueIndex = -1
         queueFeature = null
+        queuePlaylistId = null
         isFmQueue = false
         shuffleBeforeFm = null
         if (currentTrack != null) {
@@ -2229,6 +2544,7 @@ class FuoPlayerController(
     }
 
     fun toggleRepeat() {
+        if (isFmQueue) return
         _repeatMode = when (_repeatMode) {
             RepeatMode.OFF -> RepeatMode.QUEUE
             RepeatMode.QUEUE -> RepeatMode.SINGLE
@@ -2240,16 +2556,29 @@ class FuoPlayerController(
 
     fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        downloadQueueFeedback = "已加入下载队列：${track.title}"
         scope.launch {
-            runCatching { downloadRepository.download(track) }
-                .onSuccess {
-                    if (hasLocalMusicPermission) {
-                        refreshLocalMusic(forceRefresh = true, showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic)
-                    }
-                    message = "已下载：${track.title}"
-                }
+            runCatching {
+                val payload = providerRepository.resolve(
+                    track,
+                    unavailablePlaybackPolicy,
+                    selectedSmartReplacementProviderIds(),
+                    smartReplacementMinScore,
+                    !smartReplacementUseReplacementMetadata,
+                    !smartReplacementUseReplacementLyrics,
+                )
+                downloadRepository.download(track, payload)
+            }
                 .onFailure { setError(it) }
         }
+    }
+
+    fun pauseDownload(taskId: String) = runDownloadAction { downloadRepository.pause(taskId) }
+    fun resumeDownload(taskId: String) = runDownloadAction { downloadRepository.resume(taskId) }
+    fun retryDownload(taskId: String) = runDownloadAction { downloadRepository.retry(taskId) }
+
+    fun deleteDownloadTask(taskId: String, deleteFile: Boolean) = runDownloadAction {
+        downloadRepository.deleteTask(taskId, deleteFile)
     }
 
     fun deleteDownload(track: MusicTrack) {
@@ -2261,6 +2590,13 @@ class FuoPlayerController(
                     }
                     message = "已删除下载：${track.title}"
                 }
+                .onFailure { setError(it) }
+        }
+    }
+
+    private fun runDownloadAction(action: suspend () -> Unit) {
+        scope.launch {
+            runCatching { action() }
                 .onFailure { setError(it) }
         }
     }
@@ -2363,12 +2699,14 @@ class FuoPlayerController(
     }
 
     private fun clearProviderContent() {
+        selectedPlaylistBackgroundLoadJob?.cancel()
         recommendSections = emptyList()
         musicSections = emptyList()
         mineSections = emptyList()
         minePlaylistSections = emptyList()
         mineFavoritePlaylistSections = emptyList()
         selectedFeature = null
+        selectedFeatureContent = null
         selectedTrack = null
         selectedPlaylist = null
         selectedPlaylistCategory = null
@@ -2382,6 +2720,7 @@ class FuoPlayerController(
         selectedPlaylistTracksNextOffset = 0
         selectedPlaylistTracksHasMore = false
         selectedPlaylistLoadMoreJob = null
+        selectedPlaylistBackgroundLoadJob = null
         selectedMediaItemTracks = emptyList()
         selectedMediaItemTracksNextOffset = 0
         selectedMediaItemTracksHasMore = false
@@ -2401,15 +2740,21 @@ class FuoPlayerController(
         mineFavoritePlaylistSections = mineFavoritePlaylistSections.sortedSectionsByOrder()
     }
 
-    private fun refreshAllProviderAuthStates() {
+    private fun refreshAllProviderAuthStates(refreshUserInfo: Boolean = false) {
         scope.launch {
-            refreshProviderAuthStates()
+            refreshProviderAuthStates(refreshUserInfo)
         }
     }
 
-    private suspend fun refreshProviderAuthStates() {
+    private suspend fun refreshProviderAuthStates(refreshUserInfo: Boolean = false) {
         providers.forEach { provider ->
-            runCatching { providerRepository.authState(provider.providerId) }
+            runCatching {
+                if (refreshUserInfo) {
+                    providerRepository.refreshAuthState(provider.providerId)
+                } else {
+                    providerRepository.authState(provider.providerId)
+                }
+            }
                 .onSuccess { providerAuthStates = providerAuthStates + (provider.providerId to it) }
         }
     }
@@ -2428,11 +2773,18 @@ class FuoPlayerController(
         sourceQueue: List<MusicTrack>,
         index: Int,
         sourceFeature: ProviderFeature? = null,
+        sourcePlaylistId: String? = null,
         skippedUnavailableCount: Int = 0,
     ) {
         var playbackIndex = index
         if (skippedUnavailableCount == 0) {
-            playbackIndex = replaceMainQueue(sourceQueue, index, sourceFeature, keepSelectedTrack = true)
+            playbackIndex = replaceMainQueue(
+                sourceQueue,
+                index,
+                sourceFeature,
+                sourcePlaylistId,
+                keepSelectedTrack = true,
+            )
         }
         playMainIndex(playbackIndex, skippedUnavailableCount)
     }
@@ -2543,9 +2895,19 @@ class FuoPlayerController(
         }
     }
 
-    private fun playFirst(sourceQueue: List<MusicTrack>, sourceFeature: ProviderFeature? = null) {
+    private fun playFirst(
+        sourceQueue: List<MusicTrack>,
+        sourceFeature: ProviderFeature? = null,
+        sourcePlaylistId: String? = null,
+    ) {
         if (sourceQueue.isEmpty()) return
-        val playbackIndex = replaceMainQueue(sourceQueue, 0, sourceFeature, keepSelectedTrack = false)
+        val playbackIndex = replaceMainQueue(
+            sourceQueue,
+            0,
+            sourceFeature,
+            sourcePlaylistId,
+            keepSelectedTrack = false,
+        )
         playMainIndex(playbackIndex)
     }
 
@@ -2553,6 +2915,7 @@ class FuoPlayerController(
         sourceQueue: List<MusicTrack>,
         index: Int,
         sourceFeature: ProviderFeature?,
+        sourcePlaylistId: String?,
         keepSelectedTrack: Boolean,
     ): Int {
         if (sourceQueue.isEmpty()) return -1
@@ -2568,6 +2931,7 @@ class FuoPlayerController(
         }
         isFmQueue = enteringFm
         queueFeature = sourceFeature
+        queuePlaylistId = sourcePlaylistId
         currentUpNextTrack = null
         currentIsUpNext = false
         originalMainQueue = emptyList()
@@ -2585,6 +2949,28 @@ class FuoPlayerController(
         updatePlaybackQueueState()
         persistPlaybackQueue()
         return mainQueueIndex
+    }
+
+    private fun syncPlaylistPlaybackQueue(playlist: ProviderPlaylist) {
+        if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) return
+        val currentMainTrack = mainQueue.getOrNull(mainQueueIndex)
+        originalMainQueue = selectedPlaylistTracks
+        if (shuffleEnabled) {
+            mainQueue = listOfNotNull(currentMainTrack) + selectedPlaylistTracks
+                .filterNot { it.id == currentMainTrack?.id }
+                .shuffled()
+            mainQueueIndex = currentMainTrack?.let { 0 } ?: mainQueueIndex.coerceIn(0, mainQueue.lastIndex)
+        } else {
+            mainQueue = selectedPlaylistTracks.map { track ->
+                currentMainTrack?.takeIf { it.id == track.id } ?: track
+            }
+            mainQueueIndex = currentMainTrack?.let { track ->
+                mainQueue.indexOfFirst { it.id == track.id }
+            }?.takeIf { it >= 0 } ?: mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
+            originalMainQueue = emptyList()
+        }
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
     }
 
     private fun playMainIndex(index: Int, skippedUnavailableCount: Int = 0) {
@@ -2934,14 +3320,27 @@ class FuoPlayerController(
     private fun List<ProviderContentSection>.sortedSectionsByOrder(): List<ProviderContentSection> =
         sortedWith(compareBy<ProviderContentSection> { providerOrderIndex(it.feature.providerId) }.thenBy { it.feature.id })
 
+    private fun List<ProviderContentSection>.withoutTrack(trackId: String): List<ProviderContentSection> =
+        map { section -> section.copy(tracks = section.tracks.filterNot { it.id == trackId }) }
+
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
-        return category == ProviderFeatureCategory.Recommend &&
-            (id.endsWith("_daily_songs") || isDynamicQueueFeature())
+        return category == ProviderFeatureCategory.Music ||
+            (category == ProviderFeatureCategory.Recommend &&
+                (id.endsWith("_daily_songs") || isDynamicQueueFeature() || isBilibiliRecommendedVideos()))
     }
 
     private fun ProviderFeature.isDynamicQueueFeature(): Boolean {
         return id.endsWith("_radio")
     }
+
+    private fun ProviderContentSection.contentCount(): Int = maxOf(
+        tracks.size,
+        playlists.size,
+        mediaItems.size,
+        videos.size,
+    )
+
+    private fun ProviderContentSection?.orEmptyTracks(): List<MusicTrack> = this?.tracks.orEmpty()
 
     private fun ProviderSearchResults.totalCount(): Int {
         return tracks.size + playlists.size + artists.size + albums.size + videos.size
@@ -2968,8 +3367,13 @@ class FuoPlayerController(
         providerHeaderInputs = settings.providerHeaderInputs
         enabledProviderIds = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
         providerOrderIds = settings.providerOrderIds.ifEmpty { DEFAULT_PROVIDER_ORDER_IDS }
+        searchProviderIds = settings.searchProviderIds
+        recommendProviderIds = settings.recommendProviderIds
+        exploreProviderIds = settings.exploreProviderIds
+        mineProviderIds = settings.mineProviderIds
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
+        downloadParallelism = settings.downloadParallelism.coerceIn(1, 5)
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
         cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
@@ -2978,6 +3382,7 @@ class FuoPlayerController(
         smartReplacementUseReplacementMetadata = settings.smartReplacementUseReplacementMetadata
         smartReplacementUseReplacementLyrics = settings.smartReplacementUseReplacementLyrics
         lyricFontSize = settings.lyricFontSize
+        playbackSpectrumStyle = settings.playbackSpectrumStyle
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
     }
@@ -2998,8 +3403,13 @@ class FuoPlayerController(
             providerHeaderInputs = providerHeaderInputs,
             enabledProviderIds = enabledProviderIds,
             providerOrderIds = providerOrderIds,
+            searchProviderIds = searchProviderIds,
+            recommendProviderIds = recommendProviderIds,
+            exploreProviderIds = exploreProviderIds,
+            mineProviderIds = mineProviderIds,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
+            downloadParallelism = downloadParallelism,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,
             cellularAudioQualityPolicy = cellularAudioQualityPolicy,
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,
@@ -3008,6 +3418,7 @@ class FuoPlayerController(
             smartReplacementUseReplacementMetadata = smartReplacementUseReplacementMetadata,
             smartReplacementUseReplacementLyrics = smartReplacementUseReplacementLyrics,
             lyricFontSize = lyricFontSize,
+            playbackSpectrumStyle = playbackSpectrumStyle,
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
         )
@@ -3034,6 +3445,40 @@ class FuoPlayerController(
             .ifEmpty { enabledProviderIds }
         return smartReplacementProviderIds.intersect(availableEnabledIds).ifEmpty { availableEnabledIds }
     }
+
+    private fun selectedProviderIdsFor(section: ProviderDisplaySection): Set<String> {
+        val configured = configuredProviderIdsFor(section)
+        return if (configured.isEmpty() && section != ProviderDisplaySection.Replace) {
+            availableProviders.map { it.providerId }.toSet()
+        } else {
+            configured.intersect(enabledProviderIds)
+        }
+    }
+
+    private fun configuredProviderIdsFor(section: ProviderDisplaySection): Set<String> {
+        return when (section) {
+            ProviderDisplaySection.Search -> searchProviderIds
+            ProviderDisplaySection.Recommend -> recommendProviderIds
+            ProviderDisplaySection.Explore -> exploreProviderIds
+            ProviderDisplaySection.Mine -> mineProviderIds
+            ProviderDisplaySection.Replace -> selectedSmartReplacementProviderIds()
+        }
+    }
+
+    private fun searchProviderIdsForSearch(): List<String> =
+        orderedProviders().map { it.providerId }.filter { it in selectedProviderIdsFor(ProviderDisplaySection.Search) }
+
+    private fun isMineProviderFeature(feature: ProviderFeature): Boolean =
+        feature.providerId in selectedProviderIdsFor(ProviderDisplaySection.Mine)
+
+    private fun List<ProviderSearchResults>.mergeSearchResults(): ProviderSearchResults = ProviderSearchResults(
+        tracks = flatMap { it.tracks },
+        playlists = flatMap { it.playlists },
+        artists = flatMap { it.artists },
+        albums = flatMap { it.albums },
+        videos = flatMap { it.videos },
+        errorMessage = firstNotNullOfOrNull { it.errorMessage },
+    )
 
     private fun refreshLocalMusicDirectories() {
         scope.launch {

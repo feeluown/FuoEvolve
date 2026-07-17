@@ -2,11 +2,15 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaCodecList
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -16,26 +20,58 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
+@OptIn(UnstableApi::class)
 class FuoPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
+    private val spectrumAnalyzer = AudioSpectrumAnalyzer { levels ->
+        mutableSpectrumLevels.value = levels
+    }
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val renderersFactory = DefaultRenderersFactory(this)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        val renderersFactory = spectrumRenderersFactory()
         val exoPlayer = ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
             .build()
             .also { player ->
+                player.addAnalyticsListener(object : AnalyticsListener {
+                    override fun onAudioInputFormatChanged(
+                        eventTime: AnalyticsListener.EventTime,
+                        format: Format,
+                        decoderReuseEvaluation: DecoderReuseEvaluation?,
+                    ) {
+                        mutableAudioFormatInfo.value = format.toAudioFormatInfo()
+                    }
+
+                    override fun onAudioDecoderInitialized(
+                        eventTime: AnalyticsListener.EventTime,
+                        decoderName: String,
+                        initializedTimestampMs: Long,
+                        initializationDurationMs: Long,
+                    ) {
+                        mutableAudioDecoderInfo.value = AudioDecoderInfo(
+                            type = decoderName.toAudioDecoderType(),
+                            name = decoderName,
+                        )
+                    }
+                })
                 player.addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         val item = player.currentMediaItem
@@ -61,6 +97,14 @@ class FuoPlaybackService : MediaSessionService() {
                         .setAvailablePlayerCommands(queuePlayerCommands(exoPlayer.getAvailableCommands()))
                         .build()
                 }
+
+                override fun onMediaButtonEvent(
+                    session: MediaSession,
+                    controllerInfo: MediaSession.ControllerInfo,
+                    intent: Intent,
+                ): Boolean {
+                    return handleMediaButtonEvent(intent)
+                }
             })
             .setMediaButtonPreferences(mediaButtonPreferences())
             .build()
@@ -84,6 +128,9 @@ class FuoPlaybackService : MediaSessionService() {
             ACTION_RESUME -> player?.play()
             ACTION_STOP -> {
                 player?.stop()
+                mutableAudioDecoderInfo.value = null
+                mutableAudioFormatInfo.value = null
+                spectrumAnalyzer.clear()
                 stopSelf()
             }
         }
@@ -97,12 +144,16 @@ class FuoPlaybackService : MediaSessionService() {
         }
         mediaSession = null
         player = null
+        mutableAudioDecoderInfo.value = null
+        mutableAudioFormatInfo.value = null
+        spectrumAnalyzer.clear()
         super.onDestroy()
     }
 
     @OptIn(UnstableApi::class)
     private fun playPayload(raw: String) {
         val payload = JSONObject(raw)
+        mutableAudioFormatInfo.value = null
         val url = payload.getString("url")
         require(url.isNotBlank()) { "Playback URL is blank" }
         val extras = Bundle().apply {
@@ -184,6 +235,38 @@ class FuoPlaybackService : MediaSessionService() {
         return scheme == "http" || scheme == "https"
     }
 
+    private fun String.toAudioDecoderType(): AudioDecoderType {
+        val codecInfo = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+            .firstOrNull { it.name.equals(this, ignoreCase = true) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && codecInfo != null) {
+            return if (codecInfo.isHardwareAccelerated) {
+                AudioDecoderType.Hardware
+            } else {
+                AudioDecoderType.Software
+            }
+        }
+        return if (
+            startsWith("ffmpeg", ignoreCase = true) ||
+            startsWith("omx.google.", ignoreCase = true) ||
+            startsWith("c2.android.", ignoreCase = true)
+        ) {
+            AudioDecoderType.Software
+        } else {
+            AudioDecoderType.Hardware
+        }
+    }
+
+    private fun Format.toAudioFormatInfo(): AudioFormatInfo {
+        val average = averageBitrate.takeIf { it > 0 }?.toLong()
+        val peak = peakBitrate.takeIf { it > 0 }?.toLong()
+        return AudioFormatInfo(
+            format = sampleMimeType ?: containerMimeType,
+            codec = codecs,
+            averageBitrate = average,
+            peakBitrate = peak,
+        )
+    }
+
     private fun String.playbackPayloadSummary(): String {
         return runCatching {
             val payload = JSONObject(this)
@@ -254,6 +337,15 @@ class FuoPlaybackService : MediaSessionService() {
         @Volatile
         var transportControls: TransportControls? = null
 
+        private val mutableAudioDecoderInfo = MutableStateFlow<AudioDecoderInfo?>(null)
+        val audioDecoderInfo: StateFlow<AudioDecoderInfo?> = mutableAudioDecoderInfo.asStateFlow()
+
+        private val mutableAudioFormatInfo = MutableStateFlow<AudioFormatInfo?>(null)
+        val audioFormatInfo: StateFlow<AudioFormatInfo?> = mutableAudioFormatInfo.asStateFlow()
+
+        private val mutableSpectrumLevels = MutableStateFlow<List<Float>>(emptyList())
+        val spectrumLevels: StateFlow<List<Float>> = mutableSpectrumLevels.asStateFlow()
+
         fun play(context: Context, payload: String) {
             start(context, Intent(context, FuoPlaybackService::class.java).apply {
                 action = ACTION_PLAY
@@ -292,11 +384,33 @@ class FuoPlaybackService : MediaSessionService() {
         )
 
         @OptIn(UnstableApi::class)
+        @Suppress("WrongConstant")
         private fun queuePlayerCommands(commands: Player.Commands): Player.Commands {
             return Player.Commands.Builder()
                 .addAll(commands)
                 .addAll(*queueNavigationCommands.toIntArray())
                 .build()
+        }
+
+        @Suppress("DEPRECATION")
+        private fun handleMediaButtonEvent(intent: Intent): Boolean {
+            if (intent.action != Intent.ACTION_MEDIA_BUTTON) return false
+            val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
+            return when (event.keyCode) {
+                KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        transportControls?.next()
+                    }
+                    true
+                }
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        transportControls?.previous()
+                    }
+                    true
+                }
+                else -> false
+            }
         }
     }
 
@@ -306,5 +420,22 @@ class FuoPlaybackService : MediaSessionService() {
         fun pause()
         fun previous()
         fun next()
+    }
+
+    private fun spectrumRenderersFactory(): DefaultRenderersFactory {
+        return object : DefaultRenderersFactory(this@FuoPlaybackService) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessors(arrayOf(TeeAudioProcessor(spectrumAnalyzer)))
+                    .build()
+            }
+        }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
     }
 }

@@ -1,0 +1,6 @@
+<resources>
+    <string name="close">关闭</string>
+    <string name="done">完成</string>
+    <string name="provider_login_cookie_hint">完成登录后会自动获取 Cookie</string>
+    <string name="provider_browser_login_title">%1$s 浏览器登录</string>
+</resources>

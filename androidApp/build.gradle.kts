@@ -105,6 +105,9 @@ android {
             }
         }
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             if (hasFuoSigningConfig) {
                 signingConfig = signingConfigs.getByName("fuo")
             }
@@ -128,6 +131,12 @@ kotlin {
 }
 
 chaquopy {
+    sourceSets {
+        getByName("main") {
+            srcDir(rootProject.file("shared/src/commonMain/python"))
+        }
+    }
+
     defaultConfig {
         version = "3.12"
         configuredBuildPython?.let { buildPython(it) }

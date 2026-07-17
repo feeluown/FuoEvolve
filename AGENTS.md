@@ -7,8 +7,8 @@ FuoEvolve is a Kotlin Multiplatform mobile player prototype. The root Gradle pro
 - `shared/src/commonMain/kotlin/org/feeluown/mobile`: shared Compose UI, contracts, and player state.
 - `shared/src/androidMain` and `shared/src/iosMain`: platform-specific Kotlin implementations.
 - `shared/src/commonTest`: multiplatform unit tests.
-- `androidApp/src/main`: Android app manifest, resources, assets, Chaquopy Python bridge, and playback integration.
-- `androidApp/src/main/python/fuo_mobile`: Python adapter around the FeelUOwn core.
+- `androidApp/src/main`: Android app manifest, resources, assets, Chaquopy packaging, and playback integration.
+- `shared/src/commonMain/python/fuo_mobile`: Shared Python adapter around the FeelUOwn core.
 - `iosApp/FuoEvolve`: Swift app shell and AVPlayer bridge.
 
 ## Build, Test, and Development Commands

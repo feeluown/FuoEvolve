@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.compose.material3.expressive)
             implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

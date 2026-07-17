@@ -9,20 +9,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 
+@OptIn(UnstableApi::class)
 @Composable
 actual fun PlatformVideoPlayer(
     payload: VideoPlaybackPayload?,
@@ -38,25 +45,45 @@ actual fun PlatformVideoPlayer(
         return
     }
     val context = LocalContext.current
-    val player = remember { ExoPlayer.Builder(context).build() }
+    var playbackError by remember { mutableStateOf<String?>(null) }
+    val player = remember(context) {
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
+        ExoPlayer.Builder(context)
+            .setRenderersFactory(renderersFactory)
+            .build()
+            .also { exoPlayer ->
+                exoPlayer.addListener(object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        playbackError = "视频播放失败：${error.errorCodeName}"
+                    }
+                })
+            }
+    }
     DisposableEffect(Unit) {
         onDispose { player.release() }
     }
     LaunchedEffect(payload.url, payload.videoUrl, payload.audioUrl, payload.headers) {
+        playbackError = null
         player.setMediaSource(payload.toMediaSource(context))
         player.prepare()
         player.playWhenReady = true
     }
-    AndroidView(
-        modifier = modifier,
-        factory = { viewContext ->
-            PlayerView(viewContext).apply {
-                this.player = player
-                useController = true
-            }
-        },
-        update = { it.player = player },
-    )
+    if (playbackError != null) {
+        VideoPlaceholder(playbackError.orEmpty(), modifier)
+    } else {
+        AndroidView(
+            modifier = modifier,
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    this.player = player
+                    useController = true
+                }
+            },
+            update = { it.player = player },
+        )
+    }
 }
 
 @Composable
@@ -89,6 +116,7 @@ private fun VideoPlaybackPayload.toMediaSource(context: android.content.Context)
         )
     }
 
+@OptIn(UnstableApi::class)
 private fun dataSourceFactory(context: android.content.Context, headers: Map<String, String>): DefaultDataSource.Factory {
     val httpFactory = DefaultHttpDataSource.Factory()
         .setDefaultRequestProperties(headers)

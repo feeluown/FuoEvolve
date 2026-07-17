@@ -2,13 +2,367 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="refresh" content="0; url=/FuoEvolve/">
-  <title>FuoEvolve</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101a35">
+  <title>打开 FuoEvolve</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ink: #18223e;
+      --muted: #64718c;
+      --line: #dde3ef;
+      --surface: rgba(255, 255, 255, .8);
+      --primary: #5268df;
+      --primary-dark: #3c50c0;
+      --violet: #a65de6;
+      --shadow: 0 24px 70px rgba(35, 53, 111, .14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 8%, rgba(166, 93, 230, .2), transparent 26rem),
+        radial-gradient(circle at 92% 88%, rgba(79, 204, 199, .18), transparent 25rem),
+        #f7f8fc;
+    }
+
+    .page {
+      width: min(720px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 36px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 720;
+      letter-spacing: -.01em;
+      text-decoration: none;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 11px;
+      color: white;
+      background: linear-gradient(135deg, var(--primary), var(--violet));
+      box-shadow: 0 7px 18px rgba(82, 104, 223, .3);
+      font-size: 19px;
+    }
+
+    .card {
+      position: relative;
+      margin-top: 30px;
+      padding: clamp(28px, 6vw, 48px);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .8);
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    .card::after {
+      position: absolute;
+      right: -66px;
+      top: -70px;
+      width: 210px;
+      height: 210px;
+      border: 34px solid rgba(82, 104, 223, .07);
+      border-radius: 50%;
+      content: "";
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0 0 15px;
+      color: var(--primary-dark);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .eyebrow::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(82, 104, 223, .12);
+      content: "";
+    }
+
+    h1, h2, p { margin-top: 0; }
+
+    h1 {
+      max-width: 560px;
+      margin-bottom: 14px;
+      font-size: clamp(30px, 7vw, 48px);
+      line-height: 1.12;
+      letter-spacing: -.055em;
+    }
+
+    .summary {
+      max-width: 540px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    .resource {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin: 25px 0 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, .65);
+    }
+
+    .resource.visible { display: flex; }
+
+    .resource-icon {
+      display: grid;
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 12px;
+      color: #7451c3;
+      background: #f0eafd;
+      font-size: 18px;
+    }
+
+    .resource-copy { min-width: 0; }
+    .resource-copy span, .resource-copy strong { display: block; }
+    .resource-copy span { color: var(--muted); font-size: 12px; }
+    .resource-copy strong { overflow: hidden; margin-top: 2px; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 11px;
+      margin-top: 26px;
+    }
+
+    .button {
+      display: inline-flex;
+      min-height: 48px;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 15px;
+      font-weight: 680;
+      text-decoration: none;
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+
+    .button:hover { transform: translateY(-2px); box-shadow: 0 9px 18px rgba(34, 49, 96, .13); }
+    .button:focus-visible { outline: 3px solid rgba(82, 104, 223, .35); outline-offset: 3px; }
+    .button.primary { border-color: var(--primary); color: #fff; background: linear-gradient(135deg, var(--primary), #697bdc); }
+    .button.hidden { display: none; }
+    .button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+
+    .open-note { min-height: 20px; margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+    .install {
+      margin-top: 34px;
+      padding-top: 30px;
+      border-top: 1px solid var(--line);
+    }
+
+    h2 { margin-bottom: 7px; font-size: 20px; letter-spacing: -.025em; }
+    .install > p { margin-bottom: 16px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+    .download {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, .55);
+    }
+
+    .download-icon {
+      display: grid;
+      flex: 0 0 auto;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border-radius: 13px;
+      color: white;
+      background: linear-gradient(135deg, #435dd1, #8b67db);
+      font-size: 20px;
+    }
+
+    .download-info { min-width: 0; flex: 1; }
+    .download-info strong, .download-info span { display: block; }
+    .download-info strong { font-size: 15px; }
+    .download-info span { margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .download .button { min-height: 40px; padding: 0 14px; font-size: 13px; }
+
+    .other-platform { margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .other-platform a { color: var(--primary-dark); font-weight: 650; text-decoration: none; }
+    .other-platform a:hover { text-decoration: underline; }
+
+    footer { margin-top: 21px; color: #7d879d; font-size: 12px; text-align: center; }
+    footer a { color: inherit; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 520px) {
+      .page { width: min(100% - 24px, 720px); padding-top: 18px; }
+      .card { margin-top: 20px; border-radius: 22px; }
+      .actions .button { width: 100%; }
+      .download { align-items: flex-start; flex-wrap: wrap; }
+      .download .button { width: 100%; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #eef1ff; --muted: #b9c1d5; --line: #38415b; --surface: rgba(24, 31, 53, .82); --primary: #8c9cff; --primary-dark: #b6c0ff; --shadow: 0 24px 70px rgba(0, 0, 0, .27); }
+      body { background: radial-gradient(circle at 10% 8%, rgba(158, 86, 221, .23), transparent 26rem), radial-gradient(circle at 92% 88%, rgba(54, 144, 142, .17), transparent 25rem), #101526; }
+      .resource, .download { background: rgba(19, 26, 45, .62); }
+      .button { border-color: var(--line); color: var(--ink); background: #202940; }
+      .resource-icon { color: #cfbdff; background: #342c58; }
+    }
+  </style>
 </head>
 <body>
+  <main class="page">
+    <a class="brand" href="https://github.com/feeluown/FuoEvolve" aria-label="FuoEvolve 项目主页">
+      <span class="brand-mark" aria-hidden="true">♪</span>
+      <span>FuoEvolve</span>
+    </a>
+
+    <section class="card" aria-labelledby="title">
+      <p class="eyebrow">朋友分享给你的音乐</p>
+      <h1 id="title">正在打开这条分享</h1>
+      <p id="summary" class="summary">正在读取朋友分享的音乐。</p>
+
+      <div id="resource" class="resource">
+        <span class="resource-icon" aria-hidden="true">♫</span>
+        <div class="resource-copy">
+          <span id="resourceType">共享资源</span>
+          <strong id="resourceName"></strong>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a id="openLink" class="button primary hidden" href="#">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          在 FuoEvolve 中打开
+        </a>
+        <a class="button" href="https://github.com/feeluown/FuoEvolve">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0-2.85 17.54c.45.08.62-.2.62-.44v-1.54c-2.52.55-3.05-1.07-3.05-1.07-.41-1.05-1-1.33-1-1.33-.83-.56.06-.55.06-.55.92.06 1.4.94 1.4.94.82 1.4 2.14 1 2.66.77.08-.59.32-1 .58-1.23-2.01-.23-4.13-1-4.13-4.48 0-.99.35-1.79.93-2.43-.09-.23-.4-1.15.09-2.39 0 0 .76-.24 2.48.93A8.6 8.6 0 0 1 12 6.45c.77 0 1.54.1 2.26.31 1.72-1.17 2.48-.93 2.48-.93.49 1.24.18 2.16.09 2.39.58.64.93 1.44.93 2.43 0 3.49-2.13 4.24-4.15 4.47.33.28.62.82.62 1.65v2.45c0 .24.16.52.63.44A9 9 0 0 0 12 3Z"/></svg>
+          了解 FuoEvolve
+        </a>
+      </div>
+      <p id="openNote" class="open-note" aria-live="polite"></p>
+
+      <section class="install" aria-labelledby="installTitle">
+        <h2 id="installTitle">想马上打开这条分享？</h2>
+        <p id="installDescription">安装客户端后，以后收到的分享链接都能一键打开。</p>
+        <div class="download">
+          <span id="downloadIcon" class="download-icon" aria-hidden="true">▾</span>
+          <div class="download-info">
+            <strong id="downloadName">FuoEvolve 手机版</strong>
+            <span id="downloadDetail">Android APK，支持手机和平板</span>
+          </div>
+          <a id="downloadLink" class="button primary" href="https://github.com/feeluown/FuoEvolve/releases/latest">前往下载</a>
+        </div>
+        <p id="otherPlatform" class="other-platform"></p>
+      </section>
+    </section>
+    <footer><a href="https://github.com/feeluown/FeelUOwn">FeelUOwn</a> 生态的跨设备音乐体验</footer>
+  </main>
+
   <script>
-    sessionStorage.setItem("fuoevolve:path", location.pathname);
-    location.replace("/FuoEvolve/");
+    const labels = { songs: "歌曲", playlists: "歌单", artists: "歌手", albums: "专辑" };
+    const links = {
+      desktop: "https://github.com/feeluown/FeelUOwn/releases/latest",
+      mobile: "https://github.com/feeluown/FuoEvolve/releases/latest",
+    };
+
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    const title = document.getElementById("title");
+    const summary = document.getElementById("summary");
+    const openLink = document.getElementById("openLink");
+    const openNote = document.getElementById("openNote");
+    const resource = document.getElementById("resource");
+    const resourceType = document.getElementById("resourceType");
+    const resourceName = document.getElementById("resourceName");
+    const downloadIcon = document.getElementById("downloadIcon");
+    const downloadName = document.getElementById("downloadName");
+    const downloadDetail = document.getElementById("downloadDetail");
+    const downloadLink = document.getElementById("downloadLink");
+    const otherPlatform = document.getElementById("otherPlatform");
+    const match = location.pathname.match(/^\/FuoEvolve\/r\/([A-Za-z0-9_]+)\/(songs|playlists|artists|albums)\/([A-Za-z0-9_-]+)\/?$/);
+
+    function sharedTitle() {
+      const data = new URLSearchParams(location.search).get("d");
+      if (!data) return "";
+      try {
+        const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+        const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+        return new TextDecoder().decode(bytes).trim();
+      } catch {
+        return "";
+      }
+    }
+
+    if (isMobile) {
+      downloadIcon.textContent = "♬";
+      downloadName.textContent = "安装 FuoEvolve，继续聆听";
+      downloadDetail.textContent = "Android 手机和平板上的 FeelUOwn 音乐体验";
+      downloadLink.href = links.mobile;
+      otherPlatform.innerHTML = `想在电脑上使用？<a href="${links.desktop}">下载 FeelUOwn 桌面端</a>`;
+    } else {
+      downloadIcon.textContent = "⌘";
+      downloadName.textContent = "在电脑上继续听";
+      downloadDetail.textContent = "安装 FeelUOwn，适用于 Windows、macOS 和 Linux";
+      downloadLink.href = links.desktop;
+      otherPlatform.innerHTML = `想在手机上使用？<a href="${links.mobile}">下载 FuoEvolve Android 版</a>`;
+    }
+
+    if (match) {
+      const [, provider, type, identifier] = match;
+      const fuoUri = `fuo://${provider}/${type}/${identifier}`;
+      const label = labels[type];
+      const sharedName = sharedTitle();
+      title.textContent = sharedName ? `朋友分享了《${sharedName}》` : `朋友分享了${type === "songs" ? "一首" : "一个"}${label}`;
+      summary.textContent = `来自 ${provider} 的${label}。用 FuoEvolve 打开，继续聆听。`;
+      resourceType.textContent = `${provider} · ${label}`;
+      resourceName.textContent = sharedName || `来自朋友的${label}`;
+      resource.classList.add("visible");
+      openLink.href = fuoUri;
+      openLink.classList.remove("hidden");
+      openNote.textContent = "正在尝试打开应用；若没有自动跳转，请点击上方按钮。";
+      window.setTimeout(() => { location.href = fuoUri; }, 350);
+    } else {
+      title.textContent = "这条分享链接似乎不完整";
+      summary.textContent = "可以请朋友重新分享一次，或先安装客户端探索更多音乐。";
+    }
   </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -11,6 +12,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +72,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +83,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
 fun MiniPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
     val isLoadingAudio = state.status == PlayerStatus.Loading
@@ -87,16 +93,22 @@ fun MiniPlayer(controller: FuoPlayerController) {
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(220))
             .clickable(onClick = controller::openFullPlayer),
+        shape = RoundedCornerShape(if (isWideLayout) 12.dp else 18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 3.dp,
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = if (isWideLayout) 6.dp else 10.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = if (isWideLayout) 8.dp else 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 state.currentTrack?.let {
-                    CoverBox(it, modifier = Modifier.size(if (isWideLayout) 40.dp else 48.dp))
+                    PlayerSharedCover(
+                        track = it,
+                        heroEnabled = !controller.isFullPlayerOpen,
+                        modifier = Modifier.size(if (isWideLayout) 44.dp else 56.dp),
+                    )
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -120,6 +132,14 @@ fun MiniPlayer(controller: FuoPlayerController) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    state.audioQuality?.takeIf { it.isNotBlank() }?.let { quality ->
+                        Text(
+                            text = quality.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                        )
+                    }
                 }
                 PlayerControls(
                     state = state,
@@ -129,14 +149,24 @@ fun MiniPlayer(controller: FuoPlayerController) {
                     compact = true,
                 )
             }
-            if (isLoadingAudio) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            MiniPlayerProgress(state, isLoadingAudio)
         }
     }
 }
 
 @Composable
+private fun MiniPlayerProgress(state: PlaybackState, isLoadingAudio: Boolean) {
+    val duration = state.durationMs.takeIf { it > 0 }
+    if (isLoadingAudio || duration != null) {
+        LinearProgressIndicator(
+            progress = { duration?.let { state.positionMs.coerceIn(0, it).toFloat() / it } ?: 0f },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
 fun FullPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
     val currentTrack = state.currentTrack
@@ -145,11 +175,6 @@ fun FullPlayer(controller: FuoPlayerController) {
         pageCount = { PlayerVisualTab.entries.size },
     )
     val scope = rememberCoroutineScope()
-    LaunchedEffect(currentTrack?.id) {
-        if (pagerState.currentPage != PlayerVisualTab.Cover.ordinal) {
-            pagerState.scrollToPage(PlayerVisualTab.Cover.ordinal)
-        }
-    }
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -158,7 +183,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                         .fillMaxSize()
                         .statusBarsPadding()
                         .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 68.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Row(
@@ -219,7 +244,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                                     pageSpacing = 16.dp,
                                 ) { page ->
                                     when (PlayerVisualTab.entries[page]) {
-                                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
+                                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack, controller)
                                         PlayerVisualTab.Lyrics -> LyricsPanel(
                                             state = state,
                                             fontSize = controller.lyricFontSize,
@@ -235,7 +260,13 @@ fun FullPlayer(controller: FuoPlayerController) {
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
+                                PlayerTitleBlock(
+                                    currentTrack,
+                                    state.audioQuality,
+                                    currentPlaybackPartLabel(state),
+                                    state.audioFormatInfo,
+                                    state.audioDecoderInfo,
+                                )
                                 Text(
                                     text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
                                     style = MaterialTheme.typography.bodyLarge,
@@ -263,6 +294,14 @@ fun FullPlayer(controller: FuoPlayerController) {
                         }
                     }
                 }
+                FullPlayerSpectrum(
+                    controller = controller,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 8.dp),
+                )
                 QueueBottomSheet(controller)
             }
         }
@@ -277,7 +316,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 36.dp),
+                    .padding(bottom = 82.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Row(
@@ -314,7 +353,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     pageSpacing = 16.dp,
                 ) { page ->
                     when (PlayerVisualTab.entries[page]) {
-                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack)
+                        PlayerVisualTab.Cover -> PlayerCoverPage(currentTrack, controller)
                         PlayerVisualTab.Lyrics -> LyricsPanel(
                             state = state,
                             fontSize = controller.lyricFontSize,
@@ -323,7 +362,13 @@ fun FullPlayer(controller: FuoPlayerController) {
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                PlayerTitleBlock(currentTrack, state.audioQuality, currentPlaybackPartLabel(state))
+                PlayerTitleBlock(
+                    currentTrack,
+                    state.audioQuality,
+                    currentPlaybackPartLabel(state),
+                    state.audioFormatInfo,
+                    state.audioDecoderInfo,
+                )
                 Text(
                     text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
                     style = MaterialTheme.typography.bodyLarge,
@@ -348,6 +393,14 @@ fun FullPlayer(controller: FuoPlayerController) {
                     },
                 )
             }
+            FullPlayerSpectrum(
+                controller = controller,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 8.dp),
+            )
             QueueBottomSheet(controller)
         }
     }
@@ -386,21 +439,123 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
         },
         onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
         onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
+        onSetDisliked = controller.canSetSongDisliked(track, true).takeIf { it }?.let {
+            { controller.setSongDisliked(track, true) }
+        },
+        dislikedActionLabel = "不喜欢",
         onShare = sharePayload?.let { payload -> { onShare(payload) } },
         roundButton = true,
     )
 }
 
 @Composable
-fun PlayerCoverPage(track: MusicTrack?) {
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        CoverBox(
-            track = track ?: emptyDisplayTrack(),
-            modifier = Modifier.size(minOf(maxWidth, maxHeight)),
-        )
+@OptIn(ExperimentalSharedTransitionApi::class)
+fun PlayerCoverPage(track: MusicTrack?, controller: FuoPlayerController) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val coverSize = minOf(maxWidth, maxHeight * 0.82f)
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            PlayerSharedCover(
+                track = track ?: emptyDisplayTrack(),
+                heroEnabled = controller.isFullPlayerOpen,
+                modifier = Modifier.size(coverSize),
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
+fun PlayerSharedCover(track: MusicTrack, heroEnabled: Boolean, modifier: Modifier = Modifier) {
+    val sharedTransitionScope = LocalPlayerSharedTransitionScope.current
+    val sharedModifier = if (!heroEnabled || sharedTransitionScope == null) {
+        modifier
+    } else {
+        with(sharedTransitionScope) {
+            modifier.sharedElementWithCallerManagedVisibility(
+                sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
+                visible = true,
+            )
+        }
+    }
+    CoverBox(track = track, modifier = sharedModifier)
+}
+
+@Composable
+fun FullPlayerSpectrum(controller: FuoPlayerController, modifier: Modifier = Modifier) {
+    if (controller.playbackSpectrumStyle == PlaybackSpectrumStyle.None) return
+    AudioSpectrumLines(
+        levels = controller.playbackState.spectrumLevels,
+        isPlaying = controller.playbackState.status == PlayerStatus.Playing,
+        style = controller.playbackSpectrumStyle,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(64.dp),
+    )
+}
+
+@Composable
+fun AudioSpectrumLines(
+    levels: List<Float>,
+    isPlaying: Boolean,
+    style: PlaybackSpectrumStyle,
+    modifier: Modifier = Modifier,
+) {
+    if (!isPlaying || levels.isEmpty()) return
+    val color = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        val count = levels.size
+        val spacing = size.width / (count * 2f)
+        val strokeWidth = (spacing * 0.48f).coerceAtLeast(1f)
+        when (style) {
+            PlaybackSpectrumStyle.None -> Unit
+            PlaybackSpectrumStyle.Bars,
+            PlaybackSpectrumStyle.MirrorBars -> levels.forEachIndexed { index, level ->
+                val normalized = 0.12f + level.coerceIn(0f, 1f) * 0.88f
+                val height = size.height * if (style == PlaybackSpectrumStyle.Bars) normalized else normalized / 2f
+                val x = spacing * (index * 2 + 1)
+                drawLine(
+                    color = color,
+                    start = androidx.compose.ui.geometry.Offset(
+                        x,
+                        if (style == PlaybackSpectrumStyle.Bars) size.height else size.height / 2f - height,
+                    ),
+                    end = androidx.compose.ui.geometry.Offset(
+                        x,
+                        if (style == PlaybackSpectrumStyle.Bars) size.height - height else size.height / 2f + height,
+                    ),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round,
+                )
+            }
+            PlaybackSpectrumStyle.Wave -> {
+                val path = Path()
+                val points = levels.mapIndexed { index, level ->
+                    androidx.compose.ui.geometry.Offset(
+                        x = if (count == 1) size.width / 2f else size.width * index / (count - 1f),
+                        y = size.height * (1f - (0.04f + level.coerceIn(0f, 1f) * 0.92f)),
+                    )
+                }
+                path.moveTo(points.first().x, points.first().y)
+                points.zipWithNext().forEach { (previous, current) ->
+                    path.quadraticTo(
+                        x1 = previous.x,
+                        y1 = previous.y,
+                        x2 = (previous.x + current.x) / 2f,
+                        y2 = (previous.y + current.y) / 2f,
+                    )
+                }
+                points.last().let { point -> path.lineTo(point.x, point.y) }
+                drawPath(
+                    path = path,
+                    color = color,
+                    style = Stroke(width = (strokeWidth * 0.75f).coerceAtLeast(1f), cap = StrokeCap.Round),
+                )
+            }
+        }
     }
 }
 
@@ -410,7 +565,13 @@ enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
-fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?, partLabel: String?) {
+fun PlayerTitleBlock(
+    track: MusicTrack?,
+    audioQuality: String?,
+    partLabel: String?,
+    audioFormatInfo: AudioFormatInfo?,
+    audioDecoderInfo: AudioDecoderInfo?,
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -430,13 +591,21 @@ fun PlayerTitleBlock(track: MusicTrack?, audioQuality: String?, partLabel: Strin
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PlayerInfoTags(track, audioQuality)
+        PlayerInfoTags(track, audioQuality, audioFormatInfo, audioDecoderInfo)
     }
 }
 
 @Composable
-fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
+fun PlayerInfoTags(
+    track: MusicTrack?,
+    audioQuality: String?,
+    audioFormatInfo: AudioFormatInfo?,
+    audioDecoderInfo: AudioDecoderInfo?,
+) {
     var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
+    var showAudioFormatInfo by remember(track?.id) { mutableStateOf(false) }
+    var showAudioDecoderInfo by remember(track?.id) { mutableStateOf(false) }
+    val canShowAudioFormatInfo = audioFormatInfo?.hasDisplayableValue() == true
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -452,7 +621,16 @@ fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
             }
         }
         audioQuality?.takeIf { it.isNotBlank() }?.let {
-            InfoTag(it.uppercase())
+            InfoTag(
+                text = it.uppercase(),
+                onClick = if (canShowAudioFormatInfo) ({ showAudioFormatInfo = true }) else null,
+            )
+        }
+        audioDecoderInfo?.let { decoderInfo ->
+            InfoTag(
+                text = if (decoderInfo.type == AudioDecoderType.Software) "SW" else "HW",
+                onClick = { showAudioDecoderInfo = true },
+            )
         }
     }
     replacementInfoTrack?.let { infoTrack ->
@@ -461,6 +639,64 @@ fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
             onDismiss = { replacementInfoTrack = null },
         )
     }
+    if (showAudioFormatInfo) {
+        AudioFormatInfoDialog(
+            info = audioFormatInfo,
+            onDismiss = { showAudioFormatInfo = false },
+        )
+    }
+    audioDecoderInfo?.let { decoderInfo ->
+        if (!showAudioDecoderInfo) return@let
+        AlertDialog(
+            onDismissRequest = { showAudioDecoderInfo = false },
+            title = { Text("音频解码") },
+            text = {
+                Text(
+                    text = "当前音频正在使用${
+                        if (decoderInfo.type == AudioDecoderType.Software) "软件解码" else "硬件解码"
+                    }\n解码器：${decoderInfo.name}",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showAudioDecoderInfo = false }) {
+                    Text("知道了")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+fun AudioFormatInfoDialog(info: AudioFormatInfo?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("音频信息") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                info?.format?.takeIf { it.isNotBlank() }?.let { ReplacementInfoLine("当前格式", it) }
+                info?.codec?.takeIf { it.isNotBlank() }?.let { ReplacementInfoLine("编码", it) }
+                formatAudioBitrate(info?.averageBitrate)?.let { ReplacementInfoLine("平均比特率", it) }
+                formatAudioBitrate(info?.peakBitrate)?.let { ReplacementInfoLine("峰值比特率", it) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
+}
+
+fun AudioFormatInfo.hasDisplayableValue(): Boolean {
+    return !format.isNullOrBlank() ||
+        !codec.isNullOrBlank() ||
+        formatAudioBitrate(averageBitrate) != null ||
+        formatAudioBitrate(peakBitrate) != null
+}
+
+fun formatAudioBitrate(value: Long?): String? {
+    if (value == null || value <= 0) return null
+    return "${(value / 1_000.0).roundToInt()} kbps"
 }
 
 @Composable
@@ -596,6 +832,7 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             QueueRepeatModeHeader(
+                isFmQueue = controller.isFmQueueActive,
                 repeatMode = controller.repeatMode,
                 onRepeat = controller::toggleRepeat,
             )
@@ -663,7 +900,11 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
 }
 
 @Composable
-fun QueueRepeatModeHeader(repeatMode: RepeatMode, onRepeat: () -> Unit) {
+fun QueueRepeatModeHeader(
+    isFmQueue: Boolean,
+    repeatMode: RepeatMode,
+    onRepeat: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -678,11 +919,32 @@ fun QueueRepeatModeHeader(repeatMode: RepeatMode, onRepeat: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RepeatModeTextButton(
-                repeatMode = repeatMode,
-                onRepeat = onRepeat,
-            )
+            if (isFmQueue) {
+                FmModeBadge()
+            } else {
+                RepeatModeTextButton(
+                    repeatMode = repeatMode,
+                    onRepeat = onRepeat,
+                )
+            }
         }
+    }
+}
+
+@Composable
+fun FmModeBadge() {
+    Surface(
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(50),
+    ) {
+        Text(
+            text = "FM",
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
     }
 }
 
@@ -879,9 +1141,29 @@ fun PlayPauseButton(
 @Composable
 fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
     val duration = state.durationMs.takeIf { it > 0 } ?: 1L
+    var isSeeking by remember(state.currentTrack?.id) { mutableStateOf(false) }
+    var seekPosition by remember(state.currentTrack?.id) {
+        mutableStateOf(state.positionMs.coerceIn(0, duration).toFloat())
+    }
+
+    LaunchedEffect(state.positionMs, duration, isSeeking) {
+        if (!isSeeking) {
+            seekPosition = state.positionMs.coerceIn(0, duration).toFloat()
+        }
+    }
+
     Slider(
-        value = state.positionMs.coerceIn(0, duration).toFloat(),
-        onValueChange = { onSeek(it.toLong()) },
+        value = seekPosition.coerceIn(0f, duration.toFloat()),
+        onValueChange = {
+            isSeeking = true
+            seekPosition = it
+        },
+        onValueChangeFinished = {
+            if (isSeeking) {
+                onSeek(seekPosition.toLong())
+                isSeeking = false
+            }
+        },
         valueRange = 0f..duration.toFloat(),
     )
     Row(
@@ -956,7 +1238,7 @@ fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
     LazyColumn(
         modifier = modifier,
     ) {
-        itemsIndexed(queue, key = { _, item -> item.id }) { index, track ->
+        itemsIndexed(queue) { index, track ->
             if (index == 0 && currentCount == 1) {
                 Text(
                     text = "当前播放",
@@ -1113,6 +1395,7 @@ fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): String {
     val state = when (downloadState) {
         is DownloadState.Downloaded -> "已下载"
         is DownloadState.Downloading -> "下载中"
+        DownloadState.Paused -> "下载已暂停"
         is DownloadState.Failed -> "下载失败"
         DownloadState.Queued -> "等待下载"
         else -> null

@@ -4,8 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-SRC_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(SRC_ROOT / "main" / "python"))
+ROOT_DIR = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT_DIR / "shared" / "src" / "commonMain" / "python"))
 
 from fuo_mobile.bridge import (  # noqa: E402
     FuoMobileBridge,
@@ -81,6 +81,31 @@ class BridgeShareTest(unittest.TestCase):
         self.assertEqual(9, media_item_to_dict(artist, "artist", library)["album_count"])
         self.assertEqual(12, media_item_to_dict(album, "album", library)["track_count"])
         self.assertIsNone(playlist_to_dict(unknown_playlist, library)["track_count"])
+
+    def test_playlist_and_media_items_use_list_cover_fields(self):
+        library = _Library()
+        playlist = SimpleNamespace(
+            source="bilibili",
+            identifier="123",
+            name="Favorite",
+            coverUrl="https://example.com/playlist.jpg",
+        )
+        artist = SimpleNamespace(
+            source="netease",
+            identifier="456",
+            name="Artist",
+            picUrl="https://example.com/artist.jpg",
+        )
+        album = SimpleNamespace(
+            source="netease",
+            identifier="789",
+            name="Album",
+            image_url="https://example.com/album.jpg",
+        )
+
+        self.assertEqual("https://example.com/playlist.jpg", playlist_to_dict(playlist, library)["cover_url"])
+        self.assertEqual("https://example.com/artist.jpg", media_item_to_dict(artist, "artist", library)["cover_url"])
+        self.assertEqual("https://example.com/album.jpg", media_item_to_dict(album, "album", library)["cover_url"])
 
     def test_provider_web_url_returns_empty_for_unsupported_resource(self):
         self.assertEqual("", provider_web_url("bilibili", "album", "123"))

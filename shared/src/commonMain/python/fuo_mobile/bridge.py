@@ -277,6 +277,14 @@ FEATURE_DEFS = {
             "action": "current_user_fav_create_songs_rd",
         },
         {
+            "id": "netease_cloud_songs",
+            "title": "云盘歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_cloud_songs",
+        },
+        {
             "id": "netease_favorite_playlists",
             "title": "收藏歌单",
             "category": "MineFavoritePlaylists",
@@ -351,6 +359,14 @@ FEATURE_DEFS = {
             "action": "current_user_fav_create_songs_rd",
         },
         {
+            "id": "qqmusic_disliked_songs",
+            "title": "不喜欢的歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_dislike_create_songs_rd",
+        },
+        {
             "id": "qqmusic_favorite_playlists",
             "title": "收藏歌单",
             "category": "MineFavoritePlaylists",
@@ -376,6 +392,30 @@ FEATURE_DEFS = {
         },
     ],
     "bilibili": [
+        {
+            "id": "bilibili_popular_videos",
+            "title": "热门视频",
+            "category": "Music",
+            "content_type": "Songs",
+            "requires_login": False,
+            "action": "most_popular_videos",
+        },
+        {
+            "id": "bilibili_weekly_video_playlists",
+            "title": "每周必看",
+            "category": "Music",
+            "content_type": "Playlists",
+            "requires_login": False,
+            "action": "weekly_video_playlists",
+        },
+        {
+            "id": "bilibili_recommended_videos",
+            "title": "推荐视频",
+            "category": "Recommend",
+            "content_type": "Videos",
+            "requires_login": True,
+            "action": "rec_a_collection_of_videos",
+        },
         {
             "id": "bilibili_user_playlists",
             "title": "我的歌单",
@@ -515,17 +555,20 @@ class FuoMobileBridge:
         self._playlists: Dict[str, Any] = {}
         self._media_items: Dict[str, Any] = {}
         self._videos: Dict[str, Any] = {}
+        self._dynamic_features: Dict[str, Dict[str, Any]] = {}
+        self._saved_login_provider_ids = set()
+        self._authenticated_provider_ids = set()
         self._restore_saved_logins()
 
     def providers(self) -> str:
-        providers = [self._get_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
+        providers = [self._raw_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
         return json.dumps(
             {"providers": [provider_info(provider) for provider in providers]},
             ensure_ascii=False,
         )
 
     def provider_capabilities(self) -> str:
-        providers = [self._get_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
+        providers = [self._raw_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
         return json.dumps(
             {"providers": [provider_capabilities(provider) for provider in providers]},
             ensure_ascii=False,
@@ -533,14 +576,39 @@ class FuoMobileBridge:
 
     def features(self) -> str:
         features = []
+        self._dynamic_features = {}
         for provider_id in self.provider_registry.provider_ids:
-            provider = self._get_provider(provider_id)
+            provider = self._raw_provider(provider_id)
             for feature in FEATURE_DEFS.get(provider_id, []):
                 if hasattr(provider, feature["action"]):
                     features.append(feature_to_dict(feature, provider))
+            if hasattr(provider, "rec_list_collections"):
+                try:
+                    for index, collection in enumerate(provider.rec_list_collections() or []):
+                        content_type = collection_content_type(getattr(collection, "type_", None))
+                        if content_type is None:
+                            continue
+                        feature = {
+                            "id": f"{provider_id}_collection_{index}",
+                            "provider_id": provider_id,
+                            "title": getattr(collection, "name", "推荐"),
+                            "category": "Recommend",
+                            "content_type": content_type,
+                            "requires_login": False,
+                            "action": "cached_collection",
+                            "collection": collection,
+                        }
+                        self._dynamic_features[feature["id"]] = feature
+                        features.append(feature_to_dict(feature, provider))
+                except Exception as exc:  # pylint: disable=broad-except
+                    bridge_log(f"load recommendation collections failed provider_id={provider_id}: {exc}")
         return json.dumps({"features": features}, ensure_ascii=False)
 
     def search(self, keyword: str, provider_id: str = "") -> str:
+        if provider_id == "bilibili":
+            self._get_provider(provider_id)
+        elif not provider_id and "bilibili" in getattr(getattr(self, "provider_registry", None), "provider_ids", []):
+            self._get_provider("bilibili")
         tracks = []
         source_in = [provider_id] if provider_id else None
         for result in self.app.library.search(keyword, type_in=[SearchType.so], source_in=source_in):
@@ -570,6 +638,8 @@ class FuoMobileBridge:
                     },
                     ensure_ascii=False,
                 )
+        elif not provider_id and "bilibili" in getattr(getattr(self, "provider_registry", None), "provider_ids", []):
+            self._get_provider("bilibili")
         source_in = [provider_id] if provider_id else None
         for search_type in (SearchType.so, SearchType.ar, SearchType.al, SearchType.pl, SearchType.vi):
             try:
@@ -702,9 +772,19 @@ class FuoMobileBridge:
         return self.resolve(track_id)
 
     def provider_auth_state(self, provider_id: str) -> str:
-        provider = self._get_provider(provider_id)
+        provider = self._raw_provider(provider_id)
+        return json.dumps(
+            provider_auth_state(provider, None, provider_id in self._saved_login_provider_ids),
+            ensure_ascii=False,
+        )
+
+    def provider_auth_state_with_user(self, provider_id: str) -> str:
+        provider = self._raw_provider(provider_id)
+        if provider_id not in self._saved_login_provider_ids:
+            return json.dumps(provider_auth_state(provider, None, False), ensure_ascii=False)
+        self._restore_saved_login(provider_id)
         user = provider.get_current_user_or_none()
-        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+        return json.dumps(provider_auth_state(provider, user, user is not None), ensure_ascii=False)
 
     def provider_login_with_cookies(self, provider_id: str, cookies_json: str) -> str:
         provider = self._get_provider(provider_id)
@@ -713,6 +793,7 @@ class FuoMobileBridge:
             raise RuntimeError("cookies must be a non-empty JSON object")
         if provider_id == "ytmusic":
             user = self._login_ytmusic_with_cookies(provider, cookies)
+            self._saved_login_provider_ids.add(provider_id)
             return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
         if provider_id == "bilibili":
             provider._api.from_cookiedict(cookies)
@@ -727,6 +808,7 @@ class FuoMobileBridge:
             raise RuntimeError(f"provider does not support cookies login: {provider_id}")
         provider.auth(user)
         self._save_login(provider_id, user, cookies)
+        self._saved_login_provider_ids.add(provider_id)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
     def _login_ytmusic_with_cookies(self, provider, cookies: Dict[str, str]):
@@ -766,12 +848,45 @@ class FuoMobileBridge:
         current_user_changed = getattr(provider, "current_user_changed", None)
         if current_user_changed is not None:
             current_user_changed.emit(user)
+        self._saved_login_provider_ids.add(provider_id)
+        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def provider_login_with_ytmusic_headerfile(self, headerfile_json: str) -> str:
+        try:
+            headers = json.loads(headerfile_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("ytmusic_header.json 不是有效的 JSON 文件") from exc
+        if not isinstance(headers, dict):
+            raise RuntimeError("ytmusic_header.json 顶层必须是 JSON 对象")
+        authorization = headers.get("Authorization")
+        cookie = headers.get("Cookie")
+        if not isinstance(authorization, str) or not authorization.strip():
+            raise RuntimeError("ytmusic_header.json 缺少 Authorization")
+        if not isinstance(cookie, str) or not cookie.strip():
+            raise RuntimeError("ytmusic_header.json 缺少 Cookie")
+
+        provider = self._get_provider("ytmusic")
+        from fuo_ytmusic.consts import HEADER_FILE
+        from fuo_ytmusic.headerfile import YtdlpCookiefileManager
+
+        with HEADER_FILE.open("w", encoding="utf-8") as handle:
+            json.dump(headers, handle, indent=2, ensure_ascii=True)
+        YtdlpCookiefileManager(HEADER_FILE).write(cookie)
+        user = provider.try_get_user_with_headerfile()
+        if user is None:
+            raise RuntimeError("get user with ytmusic headerfile failed")
+        provider.auth(user)
+        current_user_changed = getattr(provider, "current_user_changed", None)
+        if current_user_changed is not None:
+            current_user_changed.emit(user)
+        self._saved_login_provider_ids.add("ytmusic")
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
     def provider_logout(self, provider_id: str) -> str:
         provider = self._get_provider(provider_id)
         self._clear_provider_auth(provider_id, provider)
         self._delete_saved_login(provider_id)
+        self._saved_login_provider_ids.discard(provider_id)
         return json.dumps(provider_auth_state(provider, None), ensure_ascii=False)
 
     def load_feature(self, feature_id: str, offset: int = 0, limit: int = 60) -> str:
@@ -785,6 +900,7 @@ class FuoMobileBridge:
                     "tracks": [],
                     "playlists": [],
                     "media_items": [],
+                    "videos": [],
                     "is_login_required": True,
                     "error_message": "",
                     "next_offset": 0,
@@ -793,7 +909,7 @@ class FuoMobileBridge:
                 ensure_ascii=False,
             )
         try:
-            tracks, playlists, media_items, title, page = self._load_feature_content(provider, feature, offset, limit)
+            tracks, playlists, media_items, videos, title, page = self._load_feature_content(provider, feature, offset, limit)
             if title:
                 feature_payload["title"] = title
             payload = {
@@ -801,6 +917,7 @@ class FuoMobileBridge:
                 "tracks": tracks,
                 "playlists": playlists,
                 "media_items": media_items,
+                "videos": videos,
                 "is_login_required": False,
                 "error_message": "",
                 "next_offset": page["next_offset"],
@@ -812,6 +929,7 @@ class FuoMobileBridge:
                 "tracks": [],
                 "playlists": [],
                 "media_items": [],
+                "videos": [],
                 "is_login_required": False,
                 "error_message": str(exc) or exc.__class__.__name__,
                 "next_offset": offset,
@@ -895,6 +1013,44 @@ class FuoMobileBridge:
         message = f"已从歌单移除：{title}" if ok else f"移除失败：{title}"
         return json.dumps(mutation_result(ok, message), ensure_ascii=False)
 
+    def playlist_create(self, provider_id: str, name: str) -> str:
+        provider = self._get_provider(provider_id)
+        self._require_logged_in(provider)
+        create = getattr(provider, "playlist_create_by_name", None)
+        if create is None:
+            return json.dumps(mutation_result(False, "当前音源不支持新建歌单"), ensure_ascii=False)
+        title = (name or "").strip()
+        if not title:
+            return json.dumps(mutation_result(False, "歌单名称不能为空"), ensure_ascii=False)
+        playlist = create(title)
+        if playlist is None:
+            return json.dumps(mutation_result(False, "新建歌单失败"), ensure_ascii=False)
+        return json.dumps({"result": mutation_result(True, f"已新建：{title}"), "playlist": self._remember_playlist(playlist)}, ensure_ascii=False)
+
+    def playlist_delete(self, playlist_id: str) -> str:
+        playlist = self._playlist_from_id(playlist_id)
+        provider = self._get_provider(getattr(playlist, "source", ""))
+        self._require_logged_in(provider)
+        delete = getattr(provider, "playlist_delete", None)
+        if delete is None:
+            return json.dumps(mutation_result(False, "当前音源不支持删除歌单"), ensure_ascii=False)
+        ok = bool(delete(getattr(playlist, "identifier", "")))
+        if ok:
+            self._playlists.pop(playlist_id, None)
+        return json.dumps(mutation_result(ok, f"已删除：{display(playlist, 'name')}" if ok else "删除歌单失败"), ensure_ascii=False)
+
+    def dislike_song(self, track_id: str, disliked: bool) -> str:
+        song = self._song_for_operation(track_id)
+        provider = self._get_provider(getattr(song, "source", ""))
+        self._require_logged_in(provider)
+        action_name = "current_user_dislike_add_song" if disliked else "current_user_dislike_remove_song"
+        action = getattr(provider, action_name, None)
+        if action is None:
+            return json.dumps(mutation_result(False, "当前音源不支持不喜欢操作"), ensure_ascii=False)
+        ok = bool(action(song))
+        label = "已设为不喜欢" if disliked else "已取消不喜欢"
+        return json.dumps(mutation_result(ok, label if ok else "操作失败"), ensure_ascii=False)
+
     def resource_state(self, resource_type: str, resource_id: str) -> str:
         provider_id = resource_id.split(":", 2)[1] if ":" in resource_id else ""
         return json.dumps(
@@ -943,10 +1099,35 @@ class FuoMobileBridge:
         return json.dumps(payload, ensure_ascii=False)
 
     def _get_provider(self, provider_id: str):
+        provider = self._raw_provider(provider_id)
+        if provider_id == "bilibili":
+            self._ensure_bilibili_authenticated(provider)
+        else:
+            self._ensure_saved_login_authenticated(provider_id, provider)
+        return provider
+
+    def _raw_provider(self, provider_id: str):
         provider = self.app.library.get(provider_id)
         if provider is None:
             raise RuntimeError(f"provider not found: {provider_id}")
         return provider
+
+    def _ensure_bilibili_authenticated(self, provider) -> None:
+        authenticated_provider_ids = getattr(self, "_authenticated_provider_ids", set())
+        if "bilibili" in authenticated_provider_ids:
+            return
+        if "bilibili" in getattr(self, "_saved_login_provider_ids", set()):
+            self._restore_saved_login("bilibili")
+            if "bilibili" in getattr(self, "_authenticated_provider_ids", set()):
+                return
+        current_user = getattr(provider, "get_current_user_or_none", None)
+        if current_user is None:
+            return
+        user = current_user()
+        if user is not None:
+            provider.auth(user)
+            authenticated_provider_ids.add("bilibili")
+            self._authenticated_provider_ids = authenticated_provider_ids
 
     def _require_logged_in(self, provider):
         if provider.get_current_user_or_none() is None:
@@ -1029,6 +1210,9 @@ class FuoMobileBridge:
         }
 
     def _feature_by_id(self, feature_id: str) -> Dict[str, Any]:
+        dynamic = getattr(self, "_dynamic_features", {}).get(feature_id)
+        if dynamic is not None:
+            return dynamic
         for provider_id, features in FEATURE_DEFS.items():
             for feature in features:
                 if feature["id"] == feature_id:
@@ -1039,10 +1223,10 @@ class FuoMobileBridge:
         action = feature["action"]
         if action == "rec_list_daily_songs":
             page = read_model_page(provider.rec_list_daily_songs(), offset=offset, limit=limit)
-            return [self._remember_song(song) for song in page["items"]], [], [], "", page
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
         if action == "rec_list_daily_playlists":
             page = read_model_page(provider.rec_list_daily_playlists(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_list_radio_songs":
             songs = provider.current_user_list_radio_songs(max(1, min(int_limit(limit), 60)))
             page = {
@@ -1050,29 +1234,56 @@ class FuoMobileBridge:
                 "next_offset": offset + len(songs),
                 "has_more": bool(songs),
             }
-            return [self._remember_song(song) for song in songs], [], [], "", page
+            return [self._remember_song(song) for song in songs], [], [], [], "", page
         if action == "toplist_list":
             page = read_model_page(provider.toplist_list(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "rec_a_collection_of_songs":
             collection = provider.rec_a_collection_of_songs()
             page = read_model_page(getattr(collection, "models", []) or [], offset=offset, limit=limit)
-            return [self._remember_song(song) for song in page["items"]], [], [], getattr(collection, "name", ""), page
+            return [self._remember_song(song) for song in page["items"]], [], [], [], getattr(collection, "name", ""), page
+        if action == "rec_a_collection_of_videos":
+            collection = provider.rec_a_collection_of_videos()
+            page = read_model_page(getattr(collection, "models", []) or [], offset=offset, limit=limit)
+            return [], [], [], [self._remember_video(video) for video in page["items"]], getattr(collection, "name", ""), page
+        if action == "cached_collection":
+            page = read_model_page(getattr(feature["collection"], "models", []) or [], offset=offset, limit=limit)
+            content_type = feature["content_type"]
+            if content_type == "Songs":
+                return [self._remember_song(item) for item in page["items"]], [], [], [], "", page
+            if content_type == "Playlists":
+                return [], [self._remember_playlist(item) for item in page["items"]], [], [], "", page
+            if content_type == "Videos":
+                return [], [], [], [self._remember_video(item) for item in page["items"]], "", page
+            item_type = "artist" if content_type == "Artists" else "album"
+            return [], [], [self._remember_media_item(item, item_type) for item in page["items"]], [], "", page
+        if action == "most_popular_videos":
+            page = read_model_page(provider.most_popular_videos(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
+        if action == "weekly_video_playlists":
+            page = read_model_page(provider.weekly_video_playlists(), offset=offset, limit=limit)
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_fav_create_songs_rd":
             page = read_model_page(provider.current_user_fav_create_songs_rd(), offset=offset, limit=limit)
-            return [self._remember_song(song) for song in page["items"]], [], [], "", page
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
+        if action == "current_user_cloud_songs":
+            page = read_model_page(provider.current_user_cloud_songs(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
+        if action == "current_user_dislike_create_songs_rd":
+            page = read_model_page(provider.current_user_dislike_create_songs_rd(), offset=offset, limit=limit)
+            return [self._remember_song(song) for song in page["items"]], [], [], [], "", page
         if action == "current_user_fav_create_playlists_rd":
             page = read_model_page(provider.current_user_fav_create_playlists_rd(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_list_playlists":
             page = read_model_page(provider.current_user_list_playlists(), offset=offset, limit=limit)
-            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], "", page
+            return [], [self._remember_playlist(playlist) for playlist in page["items"]], [], [], "", page
         if action == "current_user_fav_create_artists_rd":
             page = read_model_page(provider.current_user_fav_create_artists_rd(), offset=offset, limit=limit)
-            return [], [], [self._remember_media_item(artist, "artist") for artist in page["items"]], "", page
+            return [], [], [self._remember_media_item(artist, "artist") for artist in page["items"]], [], "", page
         if action == "current_user_fav_create_albums_rd":
             page = read_model_page(provider.current_user_fav_create_albums_rd(), offset=offset, limit=limit)
-            return [], [], [self._remember_media_item(album, "album") for album in page["items"]], "", page
+            return [], [], [self._remember_media_item(album, "album") for album in page["items"]], [], "", page
         raise RuntimeError(f"unsupported feature action: {action}")
 
     def _playlist_from_id(self, playlist_id: str):
@@ -1229,6 +1440,31 @@ class FuoMobileBridge:
                 if path is not None and os.path.exists(path):
                     os.remove(path)
 
+    def _ensure_saved_login_authenticated(self, provider_id: str, provider) -> None:
+        authenticated_provider_ids = getattr(self, "_authenticated_provider_ids", set())
+        if provider_id in authenticated_provider_ids:
+            return
+        current_user = getattr(provider, "get_current_user_or_none", None)
+        if not callable(current_user) or current_user() is not None:
+            return
+        if provider_id not in getattr(self, "_saved_login_provider_ids", set()):
+            return
+        try:
+            self._restore_saved_login(provider_id)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"restore login failed provider_id={provider_id}: {exc}")
+            return
+        user = current_user()
+        if user is None:
+            return
+        try:
+            provider.auth(user)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"provider auth failed provider_id={provider_id}: {exc}")
+            return
+        authenticated_provider_ids.add(provider_id)
+        self._authenticated_provider_ids = authenticated_provider_ids
+
     def _clear_provider_auth(self, provider_id: str, provider) -> None:
         try:
             provider.auth(None)
@@ -1256,12 +1492,48 @@ class FuoMobileBridge:
     def _restore_saved_logins(self) -> None:
         for provider_id in self.provider_registry.provider_ids:
             try:
-                self._restore_saved_login(provider_id)
+                if self._restore_saved_cookies(provider_id):
+                    self._saved_login_provider_ids.add(provider_id)
             except Exception as exc:  # pylint: disable=broad-except
-                bridge_log(f"restore login failed provider_id={provider_id}: {exc}")
+                bridge_log(f"restore cookies failed provider_id={provider_id}: {exc}")
+
+    def _restore_saved_cookies(self, provider_id: str) -> bool:
+        provider = self._raw_provider(provider_id)
+        if provider_id == "netease":
+            from fuo_netease.login_controller import LoginController
+
+            user = LoginController.load()
+            if user is None:
+                return False
+            provider.auth(user)
+            return True
+        if provider_id == "qqmusic":
+            from fuo_qqmusic.login import read_cookies
+
+            cookies = read_cookies()
+            if not cookies:
+                return False
+            provider.api.set_cookies(cookies)
+            return True
+        if provider_id == "bilibili":
+            from fuo_bilibili.login import load_user_cookies
+
+            cookies = load_user_cookies()
+            if not cookies:
+                return False
+            provider._api.from_cookiedict(cookies)
+            return True
+        if provider_id == "ytmusic":
+            from fuo_ytmusic.consts import HEADER_FILE
+
+            if not HEADER_FILE.exists():
+                return False
+            provider.service.reinitialize_by_headerfile(HEADER_FILE)
+            return True
+        return False
 
     def _restore_saved_login(self, provider_id: str) -> None:
-        provider = self._get_provider(provider_id)
+        provider = self._raw_provider(provider_id)
         user = None
         if provider_id == "netease":
             from fuo_netease.login_controller import LoginController
@@ -1286,6 +1558,8 @@ class FuoMobileBridge:
             user = provider.try_get_user_with_headerfile()
         if user is not None:
             provider.auth(user)
+            if provider_id == "bilibili":
+                self._authenticated_provider_ids.add(provider_id)
             current_user_changed = getattr(provider, "current_user_changed", None)
             if current_user_changed is not None:
                 current_user_changed.emit(user)
@@ -1699,6 +1973,11 @@ def provider_capabilities(provider) -> Dict[str, Any]:
         "can_remove_song_from_playlist": (
             hasattr(provider, "playlist_remove_song") and provider_id != "ytmusic"
         ),
+        "can_create_playlist": hasattr(provider, "playlist_create_by_name"),
+        "can_delete_playlist": hasattr(provider, "playlist_delete"),
+        "can_list_disliked_songs": hasattr(provider, "current_user_dislike_create_songs_rd"),
+        "can_add_disliked_song": hasattr(provider, "current_user_dislike_add_song"),
+        "can_remove_disliked_song": hasattr(provider, "current_user_dislike_remove_song"),
         "can_favorite_playlist": False,
         "can_unfavorite_playlist": False,
         "can_favorite_artist": False,
@@ -1720,6 +1999,17 @@ def feature_to_dict(feature: Dict[str, Any], provider) -> Dict[str, Any]:
     }
 
 
+def collection_content_type(type_) -> Optional[str]:
+    name = getattr(type_, "name", "")
+    return {
+        "only_songs": "Songs",
+        "only_playlists": "Playlists",
+        "only_artists": "Artists",
+        "only_albums": "Albums",
+        "only_videos": "Videos",
+    }.get(name)
+
+
 def mutation_result(success: bool, message: str) -> Dict[str, Any]:
     return {
         "success": success,
@@ -1727,11 +2017,11 @@ def mutation_result(success: bool, message: str) -> Dict[str, Any]:
     }
 
 
-def provider_auth_state(provider, user) -> Dict[str, Any]:
+def provider_auth_state(provider, user, is_logged_in: Optional[bool] = None) -> Dict[str, Any]:
     return {
         "provider_id": getattr(provider, "identifier", ""),
         "provider_name": provider_name(provider),
-        "is_logged_in": user is not None,
+        "is_logged_in": user is not None if is_logged_in is None else is_logged_in,
         "user_name": getattr(user, "name", "") if user is not None else "",
     }
 
@@ -1948,7 +2238,7 @@ def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:
         "title": display(playlist, "name"),
         "provider_id": source,
         "provider_name": provider_name(library.get(source)),
-        "cover_url": normalize_image_url(display(playlist, "cover")),
+        "cover_url": image_url(playlist),
         "description": display(playlist, "description") or display(playlist, "creator_name"),
         "play_count": play_count(playlist),
         "provider_url": provider_web_url(source, "playlist", identifier),
@@ -1965,7 +2255,7 @@ def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]
         "provider_id": source,
         "provider_name": provider_name(library.get(source)),
         "type": "Artist" if item_type == "artist" else "Album",
-        "cover_url": normalize_image_url(display(item, "pic_url") or display(item, "cover") or display(item, "cover_url")),
+        "cover_url": image_url(item),
         "description": display(item, "description") or display(item, "artists_name"),
         "provider_url": provider_web_url(source, item_type, identifier),
         "track_count": model_count(item, "song_count", "songs_count", "track_count", "tracks_count"),
@@ -2017,6 +2307,34 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
     }
 
 
+def write_m4a_tags(
+    path: str,
+    title: str,
+    artists: str,
+    album: str,
+    cover_mime_type: str = "",
+    cover_base64: str = "",
+) -> bool:
+    from base64 import b64decode
+
+    from mutagen.mp4 import MP4, MP4Cover
+
+    audio = MP4(path)
+    if audio.tags is None:
+        audio.add_tags()
+    if title:
+        audio.tags["\xa9nam"] = [title]
+    if artists:
+        audio.tags["\xa9ART"] = [artists]
+    if album:
+        audio.tags["\xa9alb"] = [album]
+    if cover_base64:
+        image_format = MP4Cover.FORMAT_PNG if cover_mime_type == "image/png" else MP4Cover.FORMAT_JPEG
+        audio.tags["covr"] = [MP4Cover(b64decode(cover_base64), imageformat=image_format)]
+    audio.save()
+    return True
+
+
 def video_media_to_payload(video, media: Media, quality, library: Library) -> Dict[str, Any]:
     video_data = video_to_dict(video, library)
     manifest = getattr(media, "manifest", None)
@@ -2046,6 +2364,27 @@ def normalize_image_url(url: Optional[str]) -> str:
     if value.startswith("http://qpic.y.qq.com/") or value.startswith("http://y.gtimg.cn/"):
         return "https://" + value[len("http://"):]
     return value
+
+
+def image_url(model) -> str:
+    for field in (
+        "cover",
+        "cover_url",
+        "coverUrl",
+        "pic_url",
+        "picUrl",
+        "picture_url",
+        "pictureUrl",
+        "image_url",
+        "imageUrl",
+        "thumbnail",
+        "avatar",
+        "face",
+    ):
+        value = display(model, field)
+        if value:
+            return normalize_image_url(value)
+    return ""
 
 
 def song_provider_url(song, library: Library) -> str:

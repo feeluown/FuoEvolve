@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Media3 必须与 Jellyfin 的 1.5 解码器产物保持一致。 -->
+    <issue id="GradleDependency" severity="ignore" />
+    <!-- AGP 升级需要协同升级 Kotlin、Compose 与 Chaquopy。 -->
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+</lint>

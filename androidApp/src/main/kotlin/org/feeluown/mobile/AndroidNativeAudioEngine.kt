@@ -37,6 +37,21 @@ class AndroidNativeAudioEngine(
     init {
         connectController()
         scope.launch {
+            FuoPlaybackService.audioDecoderInfo.collect { audioDecoderInfo ->
+                mutableState.value = mutableState.value.copy(audioDecoderInfo = audioDecoderInfo)
+            }
+        }
+        scope.launch {
+            FuoPlaybackService.audioFormatInfo.collect { audioFormatInfo ->
+                mutableState.value = mutableState.value.copy(audioFormatInfo = audioFormatInfo)
+            }
+        }
+        scope.launch {
+            FuoPlaybackService.spectrumLevels.collect { spectrumLevels ->
+                mutableState.value = mutableState.value.copy(spectrumLevels = spectrumLevels)
+            }
+        }
+        scope.launch {
             while (true) {
                 updatePosition()
                 delay(1_000)
@@ -58,6 +73,8 @@ class AndroidNativeAudioEngine(
             bufferedMs = 0,
             lyrics = track.lyrics,
             audioQuality = null,
+            audioFormatInfo = null,
+            spectrumLevels = emptyList(),
             playbackParts = emptyList(),
             currentPartIndex = -1,
             errorMessage = null,
@@ -78,6 +95,8 @@ class AndroidNativeAudioEngine(
             durationMs = payload.durationMs ?: 0,
             lyrics = payload.lyrics,
             audioQuality = payload.audioQuality,
+            audioFormatInfo = null,
+            spectrumLevels = emptyList(),
             playbackParts = payload.parts,
             currentPartIndex = payload.currentPartIndex,
             errorMessage = null,
@@ -115,7 +134,7 @@ class AndroidNativeAudioEngine(
         cancelPlaybackRetry()
         mediaController?.stop()
         FuoPlaybackService.stop(context)
-        mutableState.value = mutableState.value.copy(status = PlayerStatus.Idle, positionMs = 0)
+        mutableState.value = mutableState.value.copy(status = PlayerStatus.Idle, positionMs = 0, spectrumLevels = emptyList())
     }
 
     override fun seekTo(positionMs: Long) {

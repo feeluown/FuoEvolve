@@ -1,11 +1,13 @@
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 
-SRC_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(SRC_ROOT / "main" / "python"))
+ROOT_DIR = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT_DIR / "shared" / "src" / "commonMain" / "python"))
 
 from fuo_mobile.bridge import FuoMobileBridge, ytmusic_authorization_from_cookies  # noqa: E402
 
@@ -19,6 +21,8 @@ class _Signal:
 
 
 class _Provider:
+    identifier = "ytmusic"
+
     def __init__(self):
         self.current_user_changed = _Signal()
         self.authed_user = None
@@ -54,6 +58,35 @@ class YtmusicLoginTest(unittest.TestCase):
         self.assertEqual("__Secure-3PAPISID=papisid; SID=sid", cookie)
         self.assertIs(provider.authed_user, user)
         self.assertEqual([user], provider.current_user_changed.emitted)
+
+    def test_headerfile_import_preserves_headers_and_logs_in(self):
+        provider = _Provider()
+        bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+        bridge._get_provider = lambda provider_id: provider
+        bridge._saved_login_provider_ids = set()
+        headers = {
+            "Authorization": "SAPISIDHASH test",
+            "Cookie": "SID=sid; __Secure-3PAPISID=papisid",
+            "X-Goog-AuthUser": "0",
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            header_file = Path(directory) / "ytmusic_header.json"
+            with patch("fuo_ytmusic.consts.HEADER_FILE", header_file):
+                result = json.loads(bridge.provider_login_with_ytmusic_headerfile(json.dumps(headers)))
+
+            self.assertEqual(headers, json.loads(header_file.read_text(encoding="utf-8")))
+            self.assertTrue(header_file.with_suffix(".cookies.txt").exists())
+
+        self.assertTrue(result["is_logged_in"])
+        self.assertIsNotNone(provider.authed_user)
+        self.assertEqual({"ytmusic"}, bridge._saved_login_provider_ids)
+
+    def test_headerfile_import_requires_authorization_and_cookie(self):
+        bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+
+        with self.assertRaisesRegex(RuntimeError, "Authorization"):
+            bridge.provider_login_with_ytmusic_headerfile('{"Cookie":"SID=sid"}')
 
 
 if __name__ == "__main__":

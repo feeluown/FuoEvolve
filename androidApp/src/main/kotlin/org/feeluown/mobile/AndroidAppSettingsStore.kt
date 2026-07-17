@@ -29,8 +29,13 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             providerHeaderInputs = readHeaderInputs(),
             enabledProviderIds = readStringSet(KEY_ENABLED_PROVIDER_IDS).ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS },
             providerOrderIds = readStringList(KEY_PROVIDER_ORDER_IDS).ifEmpty { DEFAULT_PROVIDER_ORDER_IDS },
+            searchProviderIds = readStringSet(KEY_SEARCH_PROVIDER_IDS),
+            recommendProviderIds = readStringSet(KEY_RECOMMEND_PROVIDER_IDS),
+            exploreProviderIds = readStringSet(KEY_EXPLORE_PROVIDER_IDS),
+            mineProviderIds = readStringSet(KEY_MINE_PROVIDER_IDS),
             audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
+            downloadParallelism = preferences.getInt(KEY_DOWNLOAD_PARALLELISM, DEFAULT_DOWNLOAD_PARALLELISM).coerceIn(1, 5),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
             cellularAudioQualityPolicy = enumValue(
                 KEY_CELLULAR_AUDIO_QUALITY_POLICY,
@@ -54,6 +59,11 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 false,
             ),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
+            playbackSpectrumStyle = if (preferences.getBoolean(KEY_SHOW_PLAYBACK_SPECTRUM, true)) {
+                enumValue(KEY_PLAYBACK_SPECTRUM_STYLE, PlaybackSpectrumStyle.None)
+            } else {
+                PlaybackSpectrumStyle.None
+            },
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
@@ -76,8 +86,13 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_PROVIDER_HEADER_INPUTS, headerInputsJson(settings.providerHeaderInputs))
                 .putStringSet(KEY_ENABLED_PROVIDER_IDS, settings.enabledProviderIds)
                 .putString(KEY_PROVIDER_ORDER_IDS, stringListJson(settings.providerOrderIds))
+                .putStringSet(KEY_SEARCH_PROVIDER_IDS, settings.searchProviderIds)
+                .putStringSet(KEY_RECOMMEND_PROVIDER_IDS, settings.recommendProviderIds)
+                .putStringSet(KEY_EXPLORE_PROVIDER_IDS, settings.exploreProviderIds)
+                .putStringSet(KEY_MINE_PROVIDER_IDS, settings.mineProviderIds)
                 .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
+                .putInt(KEY_DOWNLOAD_PARALLELISM, settings.downloadParallelism.coerceIn(1, 5))
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
                 .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
                 .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
@@ -89,6 +104,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 )
                 .putBoolean(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, settings.smartReplacementUseReplacementLyrics)
                 .putString(KEY_LYRIC_FONT_SIZE, settings.lyricFontSize.name)
+                .remove(KEY_SHOW_PLAYBACK_SPECTRUM)
+                .putString(KEY_PLAYBACK_SPECTRUM_STYLE, settings.playbackSpectrumStyle.name)
                 .putString(KEY_THEME_MODE, settings.themeMode.name)
                 .putString(KEY_THEME_COLOR_SCHEME, settings.themeColorScheme.name)
                 .apply()
@@ -127,6 +144,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             }
         }.getOrDefault(emptyMap())
     }
+
 
     private fun cookieInputsJson(inputs: Map<String, String>): String {
         val json = JSONObject()
@@ -215,8 +233,13 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_PROVIDER_HEADER_INPUTS = "provider_header_inputs"
         private const val KEY_ENABLED_PROVIDER_IDS = "enabled_provider_ids"
         private const val KEY_PROVIDER_ORDER_IDS = "provider_order_ids"
+        private const val KEY_SEARCH_PROVIDER_IDS = "search_provider_ids"
+        private const val KEY_RECOMMEND_PROVIDER_IDS = "recommend_provider_ids"
+        private const val KEY_EXPLORE_PROVIDER_IDS = "explore_provider_ids"
+        private const val KEY_MINE_PROVIDER_IDS = "mine_provider_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
+        private const val KEY_DOWNLOAD_PARALLELISM = "download_parallelism"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
@@ -225,6 +248,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
+        private const val KEY_SHOW_PLAYBACK_SPECTRUM = "show_playback_spectrum"
+        private const val KEY_PLAYBACK_SPECTRUM_STYLE = "playback_spectrum_style"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_COLOR_SCHEME = "theme_color_scheme"
     }

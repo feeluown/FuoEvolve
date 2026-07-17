@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
@@ -9,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
@@ -29,16 +31,16 @@ class FuoPlayerControllerTest {
         val payload = track.toSharePayload()
 
         assertEquals("fuo://netease/songs/1811961337", payload?.fuoUri)
-        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337", payload?.appLinkUrl)
+        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337?d=SWdhbGx0YQ", payload?.appLinkUrl)
         assertEquals("https://y.music.163.com/m/song?id=1811961337", payload?.content(ShareMode.ProviderLink))
         assertEquals(
-            "https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337",
+            "https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337?d=SWdhbGx0YQ",
             payload?.content(ShareMode.FuoLink),
         )
         assertEquals(
             "分享一首歌：\n" +
                 "《Igallta》 - Se-U-Ra（专辑：Igallta）\n" +
-                "打开收听：https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337\n" +
+                "打开收听：https://feeluown.github.io/FuoEvolve/r/netease/songs/1811961337?d=SWdhbGx0YQ\n" +
                 "也可以在网易云音乐收听：https://y.music.163.com/m/song?id=1811961337",
             payload?.content(ShareMode.FullText),
         )
@@ -54,12 +56,12 @@ class FuoPlayerControllerTest {
         ).toSharePayload()
 
         assertEquals("fuo://netease/playlists/123", payload?.fuoUri)
-        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/playlists/123", payload?.content(ShareMode.FuoLink))
+        assertEquals("https://feeluown.github.io/FuoEvolve/r/netease/playlists/123?d=5q-P5pel5o6o6I2Q", payload?.content(ShareMode.FuoLink))
         assertNull(payload?.content(ShareMode.ProviderLink))
         assertEquals(
             "分享一个歌单：\n" +
                 "《每日推荐》\n" +
-                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123",
+                "打开查看：https://feeluown.github.io/FuoEvolve/r/netease/playlists/123?d=5q-P5pel5o6o6I2Q",
             payload?.content(ShareMode.FullText),
         )
     }
@@ -169,6 +171,66 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun downloadImmediatelyPublishesQueueFeedback() = runTest {
+        val track = providerTrack("netease:1", "Queue Song")
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(listOf(track)),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            controller.download(track)
+
+            assertEquals("已加入下载队列：Queue Song", controller.downloadQueueFeedback)
+            controller.dismissDownloadQueueFeedback("已加入下载队列：Queue Song")
+            assertNull(controller.downloadQueueFeedback)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun downloadUsesConfiguredSmartReplacementMetadataLyricsAndProviders() = runTest {
+        val track = providerTrack("netease:1", "原始歌曲")
+        val provider = FakeProviderRepository(listOf(track))
+        val downloads = FakeDownloadRepository(emptyMap())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = downloads,
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = FakeSettingsStore(
+                    AppSettings(
+                        enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
+                        smartReplacementProviderIds = setOf("qqmusic"),
+                        smartReplacementUseReplacementMetadata = false,
+                        smartReplacementUseReplacementLyrics = false,
+                    ),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.download(track)
+            advanceUntilIdle()
+
+            assertEquals(setOf("qqmusic"), provider.lastSmartReplacementProviderIds)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalMetadata)
+            assertEquals(true, provider.lastSmartReplacementUseOriginalLyrics)
+            assertEquals(track.id, downloads.lastTrack?.id)
+            assertEquals(track.title, downloads.lastPayload?.title)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun providerSearchAllStoresTypedResults() = runTest {
         val song = providerTrack("netease:1", "Song")
         val playlist = ProviderPlaylist("playlist:netease:10", "Playlist", "netease", "网易云音乐")
@@ -245,6 +307,107 @@ class FuoPlayerControllerTest {
             assertEquals("https://example.com/mv.mp4", controller.selectedVideoPayload?.url)
         } finally {
             controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun exploreEntriesLoadVideoAndPlaylistContentOnlyAfterOpeningSecondaryPage() = runTest {
+        val popularVideos = ProviderFeature(
+            id = "bilibili_recommended_videos",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+            title = "推荐视频",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Videos,
+            requiresLogin = false,
+        )
+        val weeklyVideos = ProviderFeature(
+            id = "bilibili_weekly_video_playlists",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+            title = "每周必看",
+            category = ProviderFeatureCategory.Music,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = false,
+        )
+        val video = ProviderVideo(
+            id = "video:bilibili:BV1",
+            title = "推荐视频",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val playlist = ProviderPlaylist(
+            id = "playlist:bilibili:weekly_1",
+            title = "每周必看",
+            providerId = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(popularVideos, weeklyVideos),
+            featureSections = mapOf(
+                popularVideos.id to ProviderContentSection(popularVideos, videos = listOf(video)),
+                weeklyVideos.id to ProviderContentSection(weeklyVideos, playlists = listOf(playlist)),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.refreshHomeContent(HomeSection.Recommend)
+            advanceUntilIdle()
+
+            assertEquals(listOf(popularVideos.id), controller.recommendSections.map { it.feature.id })
+            assertEquals(emptyList(), provider.loadedFeatureIds)
+
+            controller.refreshHomeContent(HomeSection.Music)
+            advanceUntilIdle()
+
+            assertEquals(listOf(weeklyVideos.id), controller.musicSections.map { it.feature.id })
+            assertEquals(emptyList(), provider.loadedFeatureIds)
+
+            controller.openFeature(popularVideos)
+            advanceUntilIdle()
+
+            assertEquals(listOf(video), controller.selectedFeatureContent?.videos)
+
+            controller.openFeature(weeklyVideos)
+            advanceUntilIdle()
+
+            assertEquals(listOf(playlist), controller.selectedFeatureContent?.playlists)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun initialHomeLoadReusesProviderCatalogAuthStateForAllSections() = runTest {
+        HomeSection.values().forEach { section ->
+            val provider = FakeProviderRepository(emptyList())
+            val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            try {
+                FuoPlayerController(
+                    providerRepository = provider,
+                    localRepository = FakeLocalMusicRepository(),
+                    downloadRepository = FakeDownloadRepository(emptyMap()),
+                    playbackEngine = FakePlaybackEngine(),
+                    settingsStore = FakeSettingsStore(AppSettings(homeSection = section)),
+                    scope = controllerScope,
+                )
+
+                advanceUntilIdle()
+
+                assertEquals(1, provider.authStateCount, section.name)
+            } finally {
+                controllerScope.cancel()
+            }
         }
     }
 
@@ -819,11 +982,16 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun playAllFromSelectedPlaylistLoadsRemainingPagesBeforePlayback() = runTest {
-        val tracks = (1..(PROVIDER_PAGE_SIZE + 5)).map { index ->
+    fun playAllFromSelectedPlaylistStartsPlaybackAfterFirst200TracksAndSyncsShuffleQueue() = runTest {
+        val tracks = (1..205).map { index ->
             providerTrack("provider:$index", "Track $index")
         }
-        val provider = FakeProviderRepository(emptyList(), playlistTracks = tracks)
+        val provider = FakeProviderRepository(
+            emptyList(),
+            playlistTracks = tracks,
+            playlistPageDelayOffset = 200,
+            playlistPageDelayMs = 1_000,
+        )
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
@@ -849,13 +1017,75 @@ class FuoPlayerControllerTest {
             assertEquals(PROVIDER_PAGE_SIZE, controller.selectedPlaylistTracks.size)
             assertEquals(true, controller.selectedPlaylistTracksHasMore)
 
+            controller.toggleShuffle()
             controller.playAllFromSelectedPlaylist()
+            runCurrent()
+
+            assertEquals(200, controller.selectedPlaylistTracks.size)
+            assertEquals(true, controller.selectedPlaylistTracksHasMore)
+            assertEquals(200, controller.playbackState.queue.size)
+            assertEquals(engine.lastTrack?.id, controller.playbackState.queue.firstOrNull()?.id)
+            assertEquals(listOf(0, 50, 100, 150), provider.playlistPageOffsets.take(4))
+
+            advanceTimeBy(1_000)
             advanceUntilIdle()
 
             assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
             assertEquals(false, controller.selectedPlaylistTracksHasMore)
-            assertEquals(tracks.map { it.id }, controller.playbackState.queue.map { it.id })
-            assertEquals("provider:1", engine.lastTrack?.id)
+            assertEquals(tracks.map { it.id }.toSet(), controller.playbackState.queue.map { it.id }.toSet())
+            assertEquals(engine.lastTrack?.id, controller.playbackState.queue.firstOrNull()?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun playFromSelectedPlaylistLoadsPlaylistQueueAndStartsAtSelectedTrack() = runTest {
+        val tracks = (1..205).map { index ->
+            providerTrack("provider:$index", "Track $index")
+        }
+        val provider = FakeProviderRepository(
+            emptyList(),
+            playlistTracks = tracks,
+            playlistPageDelayOffset = 200,
+            playlistPageDelayMs = 1_000,
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openPlaylist(
+                ProviderPlaylist(
+                    id = "playlist:netease:1",
+                    title = "榜单",
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                ),
+            )
+            advanceUntilIdle()
+
+            controller.playFromSelectedPlaylist(20)
+            runCurrent()
+
+            assertEquals("provider:21", engine.lastTrack?.id)
+            assertEquals(200, controller.selectedPlaylistTracks.size)
+            assertEquals(tracks.take(200).drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(0, controller.playbackState.queueIndex)
+
+            advanceTimeBy(1_000)
+            advanceUntilIdle()
+
+            assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
+            assertEquals(tracks.drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(0, controller.playbackState.queueIndex)
         } finally {
             controllerScope.cancel()
         }
@@ -941,6 +1171,7 @@ class FuoPlayerControllerTest {
             assertEquals(target to track, provider.lastAddedToPlaylist)
             assertNull(controller.playlistTargetTrack)
             assertEquals("已添加到：我的歌单", controller.message)
+            assertEquals("已添加到：我的歌单", controller.playlistOperationFeedback)
         } finally {
             controllerScope.cancel()
         }
@@ -987,6 +1218,7 @@ class FuoPlayerControllerTest {
 
             assertEquals(playlist to tracks.first(), provider.lastRemovedFromPlaylist)
             assertEquals(listOf("netease:2"), controller.selectedPlaylistTracks.map { it.id })
+            assertEquals("已从歌单移除：First", controller.playlistOperationFeedback)
         } finally {
             controllerScope.cancel()
         }
@@ -1587,10 +1819,13 @@ class FuoPlayerControllerTest {
             advanceUntilIdle()
 
             assertEquals(
-                listOf(favoriteArtistsFeature.id),
+                listOf(favoriteArtistsFeature.id, favoriteSongsFeature.id),
                 provider.loadedFeatureIds,
             )
-            assertEquals(favoriteArtists, controller.mineSections[0].mediaItems)
+            assertEquals(
+                favoriteArtists,
+                controller.mineSections.first { it.feature.id == favoriteArtistsFeature.id }.mediaItems,
+            )
         } finally {
             controllerScope.cancel()
         }
@@ -1671,6 +1906,7 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.isSettingsOpen)
             assertEquals("qqmusic", controller.selectedSettingsProviderId)
             assertEquals("qqmusic", controller.selectedSettingsProvider()?.providerId)
+            assertEquals(true, provider.refreshAuthStateCount > 0)
         } finally {
             controllerScope.cancel()
         }
@@ -1716,7 +1952,30 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun appliesSavedDownloadParallelismToRepositoryOnStartup() = runTest {
+        val downloads = FakeDownloadRepository(emptyMap())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = downloads,
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = FakeSettingsStore(AppSettings(downloadParallelism = 4)),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(4, downloads.lastParallelism)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun restoresAndPersistsSettings() = runTest {
+        assertEquals(PlaybackSpectrumStyle.None, AppSettings().playbackSpectrumStyle)
         val store = FakeSettingsStore(
             AppSettings(
                 homeSection = HomeSection.Mine,
@@ -1743,6 +2002,7 @@ class FuoPlayerControllerTest {
                 smartReplacementUseReplacementMetadata = true,
                 smartReplacementUseReplacementLyrics = true,
                 lyricFontSize = LyricFontSize.Large,
+                playbackSpectrumStyle = PlaybackSpectrumStyle.None,
                 themeMode = ThemeMode.Dark,
                 themeColorScheme = ThemeColorScheme.OceanBlue,
             ),
@@ -1792,6 +2052,7 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.smartReplacementUseReplacementMetadata)
             assertEquals(true, controller.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Large, controller.lyricFontSize)
+            assertEquals(PlaybackSpectrumStyle.None, controller.playbackSpectrumStyle)
             assertEquals(ThemeMode.Dark, controller.themeMode)
             assertEquals(ThemeColorScheme.OceanBlue, controller.themeColorScheme)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
@@ -1813,6 +2074,7 @@ class FuoPlayerControllerTest {
             controller.onSmartReplacementUseReplacementMetadataChange(false)
             controller.onSmartReplacementUseReplacementLyricsChange(false)
             controller.onLyricFontSizeChange(LyricFontSize.Medium)
+            controller.onPlaybackSpectrumStyleChange(PlaybackSpectrumStyle.Wave)
             controller.onThemeModeChange(ThemeMode.Light)
             controller.onThemeColorSchemeChange(ThemeColorScheme.FuoGreen)
             advanceUntilIdle()
@@ -1839,6 +2101,7 @@ class FuoPlayerControllerTest {
             assertEquals(false, store.saved.smartReplacementUseReplacementMetadata)
             assertEquals(false, store.saved.smartReplacementUseReplacementLyrics)
             assertEquals(LyricFontSize.Medium, store.saved.lyricFontSize)
+            assertEquals(PlaybackSpectrumStyle.Wave, store.saved.playbackSpectrumStyle)
             assertEquals(ThemeMode.Light, store.saved.themeMode)
             assertEquals(ThemeColorScheme.FuoGreen, store.saved.themeColorScheme)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
@@ -2452,6 +2715,104 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun dislikingCurrentTrackKeepsNextTrackAsQueueCurrent() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+            providerTrack("provider:4", "Fourth"),
+        )
+        val engine = FakePlaybackEngine()
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddDislikedSong = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            controller.setSongDisliked(tracks[1], disliked = true)
+            advanceUntilIdle()
+
+            assertEquals("provider:3", engine.lastTrack?.id)
+            assertEquals("provider:3", controller.playbackState.currentTrack?.id)
+            assertEquals(listOf("provider:3", "provider:4"), controller.playbackState.queue.map { it.id })
+
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals("provider:4", engine.lastTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun dislikingEarlierTrackKeepsCurrentTrackAtItsQueuePosition() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+            providerTrack("provider:4", "Fourth"),
+        )
+        val engine = FakePlaybackEngine()
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddDislikedSong = true,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.next()
+            controller.next()
+            advanceUntilIdle()
+
+            controller.setSongDisliked(tracks.first(), disliked = true)
+            advanceUntilIdle()
+
+            assertEquals("provider:3", engine.lastTrack?.id)
+            assertEquals("provider:3", controller.playbackState.currentTrack?.id)
+            assertEquals(listOf("provider:3", "provider:4"), controller.playbackState.queue.map { it.id })
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun upNextQueuePlaysBeforeMainQueueAndThenReturns() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -2660,6 +3021,11 @@ class FuoPlayerControllerTest {
             assertEquals(true, controller.isFmQueueActive)
             assertEquals(false, controller.isShuffleEnabled)
             assertEquals(radioTracks.map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
+
+            controller.toggleRepeat()
+
+            assertEquals(RepeatMode.QUEUE, controller.repeatMode)
 
             controller.playAllLocalTracks(normalTracks)
             advanceUntilIdle()
@@ -2764,6 +3130,8 @@ class FuoPlayerControllerTest {
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
         private val playlistTracks: List<MusicTrack> = emptyList(),
+        private val playlistPageDelayOffset: Int = Int.MAX_VALUE,
+        private val playlistPageDelayMs: Long = 0,
         private val mediaItemTracks: List<MusicTrack> = emptyList(),
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
@@ -2799,6 +3167,8 @@ class FuoPlayerControllerTest {
         private var enabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS
         var resolveCount = 0
         var logoutCount = 0
+        var authStateCount = 0
+        var refreshAuthStateCount = 0
         var lastEnabledProviderIds: Set<String>? = null
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
@@ -2809,6 +3179,7 @@ class FuoPlayerControllerTest {
         var lastTrackDetailId: String? = null
         var lastAddedToPlaylist: Pair<ProviderPlaylist, MusicTrack>? = null
         var lastRemovedFromPlaylist: Pair<ProviderPlaylist, MusicTrack>? = null
+        val playlistPageOffsets = mutableListOf<Int>()
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
         val loadedMediaItemIds = mutableListOf<String>()
@@ -2867,13 +3238,20 @@ class FuoPlayerControllerTest {
             )
         }
 
-        override suspend fun authState(providerId: String): ProviderAuthState =
-            ProviderAuthState(
+        override suspend fun authState(providerId: String): ProviderAuthState {
+            authStateCount += 1
+            return ProviderAuthState(
                 providerId = providerId,
                 providerName = providerId,
                 isLoggedIn = isLoggedIn,
                 userName = "tester".takeIf { isLoggedIn },
             )
+        }
+
+        override suspend fun refreshAuthState(providerId: String): ProviderAuthState {
+            refreshAuthStateCount += 1
+            return authState(providerId)
+        }
 
         override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
             isLoggedIn = true
@@ -2918,17 +3296,20 @@ class FuoPlayerControllerTest {
             val tracks = section.tracks.drop(offset).take(limit)
             val playlists = section.playlists.drop(offset).take(limit)
             val mediaItems = section.mediaItems.drop(offset).take(limit)
+            val videos = section.videos.drop(offset).take(limit)
             val sourceSize = when (feature.contentType) {
                 ProviderContentType.Songs -> section.tracks.size
                 ProviderContentType.Playlists -> section.playlists.size
                 ProviderContentType.Artists,
                 ProviderContentType.Albums -> section.mediaItems.size
+                ProviderContentType.Videos -> section.videos.size
             }
-            val nextOffset = offset + maxOf(tracks.size, playlists.size, mediaItems.size)
+            val nextOffset = offset + maxOf(tracks.size, playlists.size, mediaItems.size, videos.size)
             return section.copy(
                 tracks = tracks,
                 playlists = playlists,
                 mediaItems = mediaItems,
+                videos = videos,
                 nextOffset = nextOffset,
                 hasMore = nextOffset < sourceSize,
             )
@@ -2944,6 +3325,8 @@ class FuoPlayerControllerTest {
             offset: Int,
             limit: Int,
         ): ProviderPlaylistDetail {
+            playlistPageOffsets += offset
+            if (offset >= playlistPageDelayOffset) delay(playlistPageDelayMs)
             val tracks = playlistTracks.drop(offset).take(limit)
             val nextOffset = offset + tracks.size
             return ProviderPlaylistDetail(
@@ -2973,6 +3356,11 @@ class FuoPlayerControllerTest {
             lastRemovedFromPlaylist = playlist to track
             return ProviderMutationResult(true, "已从歌单移除：${track.title}")
         }
+
+        override suspend fun setSongDisliked(
+            track: MusicTrack,
+            disliked: Boolean,
+        ): ProviderMutationResult = ProviderMutationResult(true, "操作成功")
 
         override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
             loadedMediaItemIds += item.id
@@ -3109,10 +3497,22 @@ class FuoPlayerControllerTest {
     ) : DownloadRepository {
         private val mutableStates = MutableStateFlow(initialStates)
         override val states = mutableStates
+        var lastTrack: MusicTrack? = null
+        var lastPayload: PlaybackPayload? = null
+        var lastParallelism: Int? = null
 
         override suspend fun load() = Unit
 
         override suspend fun download(track: MusicTrack) = Unit
+
+        override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+            lastTrack = track
+            lastPayload = payload
+        }
+
+        override suspend fun updateParallelism(parallelism: Int) {
+            lastParallelism = parallelism
+        }
 
         override suspend fun deleteDownloaded(track: MusicTrack) = Unit
     }

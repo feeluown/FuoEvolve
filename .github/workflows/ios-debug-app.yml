@@ -1,6 +1,12 @@
 name: iOS Debug App
 
 "on":
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -9,9 +15,10 @@ permissions:
 jobs:
   build-debug-app:
     name: Build debug iOS app
-    runs-on: macos-15
-    continue-on-error: true
+    runs-on: macos-26
     timeout-minutes: 45
+    env:
+      PYTHON_APPLE_SUPPORT_TAG: 3.12-b8
 
     steps:
       - name: Checkout
@@ -23,8 +30,36 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: iosApp/python/requirements-ios.txt
+
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: Cache iOS Python distribution
+        uses: actions/cache@v4
+        with:
+          path: build/ios-python
+          key: ${{ runner.os }}-${{ runner.arch }}-python-apple-support-${{ env.PYTHON_APPLE_SUPPORT_TAG }}
+
+      - name: Prepare iOS Python runtime
+        run: bash scripts/prepare-ios-python.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Build debug simulator app
         run: |

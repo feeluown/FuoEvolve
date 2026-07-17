@@ -8,11 +8,20 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Base64
+import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,19 +30,32 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.URL
+import java.net.HttpURLConnection
+import kotlin.coroutines.coroutineContext
 
 class AndroidDownloadRepository(
     private val context: Context,
     private val providerRepository: ProviderMusicRepository,
+    private val onBackgroundWorkChanged: (List<DownloadTask>) -> Unit = {},
 ) : DownloadRepository {
     private val records = linkedMapOf<String, DownloadRecord>()
+    private val taskRecords = linkedMapOf<String, DownloadTask>()
     private val mutableStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
+    private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val taskJobs = mutableMapOf<String, Job>()
+    private val taskConnections = mutableMapOf<String, HttpURLConnection>()
+    private val taskPayloads = mutableMapOf<String, PlaybackPayload>()
+    private val taskMutex = Mutex()
+    private var parallelism = DEFAULT_DOWNLOAD_PARALLELISM
 
     override val states: StateFlow<Map<String, DownloadState>> = mutableStates.asStateFlow()
+    override val tasks: StateFlow<List<DownloadTask>> = mutableTasks.asStateFlow()
 
     override suspend fun load() {
         withContext(Dispatchers.IO) {
             records.clear()
+            taskRecords.clear()
             val file = indexFile()
             if (file.exists()) {
                 val array = JSONArray(file.readText())
@@ -42,59 +64,101 @@ class AndroidDownloadRepository(
                     records[record.trackId] = record
                 }
             }
+            val tasksFile = taskIndexFile()
+            if (tasksFile.exists()) {
+                val array = JSONArray(tasksFile.readText())
+                for (index in 0 until array.length()) {
+                    val task = array.getJSONObject(index).toTask()
+                    taskRecords[task.id] = if (task.status == DownloadTaskStatus.Downloading) {
+                        task.copy(status = DownloadTaskStatus.Paused, updatedAt = System.currentTimeMillis())
+                    } else {
+                        task
+                    }
+                }
+            } else {
+                records.values.forEach { record ->
+                    taskRecords[record.trackId] = record.toCompletedTask()
+                }
+                saveTasks()
+            }
             publishStates()
+            publishTasks()
+            schedule()
         }
     }
 
     override suspend fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
-        withContext(Dispatchers.IO) {
-            val payload = providerRepository.resolve(track)
-            mutableStates.update { it + (track.id to DownloadState.Downloading(0f)) }
-            val extension = extension(payload.url)
-            val tempFile = File.createTempFile("fuo-download-", ".$extension", context.cacheDir)
-            var target: DownloadTarget? = null
-            try {
-                writePayload(track.id, payload, tempFile)
-                writeId3TagIfNeeded(tempFile, extension, track, payload)
-                target = createTarget(track, payload, extension)
-                val bytes = copyToTarget(track.id, tempFile, target.uri)
-                writeLyricsFileIfNeeded(payload, target)
-                val finalUri = finishTarget(target, success = true)
-                val record = DownloadRecord(
-                    trackId = track.id,
-                    title = track.title,
-                    artists = track.artists,
-                    album = track.album,
-                    source = track.source,
-                    uri = finalUri.toString(),
-                    coverUrl = payload.coverUrl,
-                    durationMs = payload.durationMs ?: track.durationMs,
-                    fileSize = bytes,
-                    createdAt = System.currentTimeMillis(),
+        enqueue(track, null)
+    }
+
+    override suspend fun download(track: MusicTrack, payload: PlaybackPayload) {
+        if (track.sourceType != TrackSourceType.Provider) return
+        enqueue(track, payload)
+    }
+
+    private suspend fun enqueue(track: MusicTrack, payload: PlaybackPayload?) {
+        taskMutex.withLock {
+            val existing = taskRecords[track.id]
+            when (existing?.status) {
+                DownloadTaskStatus.Queued, DownloadTaskStatus.Downloading -> return
+                DownloadTaskStatus.Paused, DownloadTaskStatus.Failed -> updateTask(
+                    existing.copy(status = DownloadTaskStatus.Queued, failureMessage = null, updatedAt = System.currentTimeMillis()),
                 )
-                records[track.id] = record
-                saveRecords()
-                publishStates()
-            } catch (throwable: Throwable) {
-                target?.let { finishTarget(it, success = false) }
-                Log.e(TAG, "download failed trackId=${track.id} title=${track.title}", throwable)
-                mutableStates.update { it + (track.id to DownloadState.Failed(throwable.message ?: "下载失败")) }
-                throw throwable
-            } finally {
-                tempFile.delete()
+                else -> updateTask(
+                    DownloadTask(
+                        id = track.id,
+                        track = track,
+                        status = DownloadTaskStatus.Queued,
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
             }
+            payload?.let { taskPayloads[track.id] = it }
+        }
+        schedule()
+    }
+
+    override suspend fun updateParallelism(parallelism: Int) {
+        this.parallelism = parallelism.coerceIn(1, 5)
+        schedule()
+    }
+
+    override suspend fun pause(taskId: String) {
+        taskMutex.withLock {
+            val task = taskRecords[taskId] ?: return
+            if (task.status !in setOf(DownloadTaskStatus.Queued, DownloadTaskStatus.Downloading)) return
+            taskConnections.remove(taskId)?.disconnect()
+            taskJobs.remove(taskId)?.cancel()
+            updateTask(task.copy(status = DownloadTaskStatus.Paused, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    override suspend fun resume(taskId: String) = restart(taskId)
+
+    override suspend fun retry(taskId: String) = restart(taskId)
+
+    override suspend fun deleteTask(taskId: String, deleteFile: Boolean) {
+        taskMutex.withLock {
+            taskConnections.remove(taskId)?.disconnect()
+            taskJobs.remove(taskId)?.cancel()
+            val task = taskRecords.remove(taskId) ?: return
+            temporaryFile(task.id).delete()
+            val record = records.remove(task.id)
+            if (deleteFile) record?.uri?.let(::deleteUri)
+            saveRecords()
+            saveTasks()
+            publishTasks()
+            publishStates()
         }
     }
 
     override suspend fun deleteDownloaded(track: MusicTrack) {
         withContext(Dispatchers.IO) {
             val key = track.providerId ?: track.id
-            val record = records.remove(key)
-                ?: track.localUri?.let { uri ->
-                    val matched = records.entries.firstOrNull { it.value.uri == uri }
-                    if (matched != null) records.remove(matched.key) else null
-                }
+            val recordKey = records[key]?.let { key }
+                ?: track.localUri?.let { uri -> records.entries.firstOrNull { it.value.uri == uri }?.key }
+            val record = recordKey?.let(records::remove)
             val uri = record?.uri ?: track.localUri
             if ((record != null || track.sourceType == TrackSourceType.Downloaded) && uri != null) {
                 runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
@@ -103,36 +167,133 @@ class AndroidDownloadRepository(
                 }
             }
             saveRecords()
+            taskRecords.remove(recordKey ?: key)
+            saveTasks()
+            publishTasks()
             publishStates()
         }
     }
 
-    private fun writePayload(trackId: String, payload: PlaybackPayload, targetFile: File): Long {
+    private suspend fun restart(taskId: String) {
+        taskMutex.withLock {
+            val task = taskRecords[taskId] ?: return
+            if (task.status == DownloadTaskStatus.Completed) return
+            updateTask(task.copy(status = DownloadTaskStatus.Queued, failureMessage = null, updatedAt = System.currentTimeMillis()))
+        }
+        schedule()
+    }
+
+    private fun schedule() {
+        scope.launch {
+            val ids = taskMutex.withLock {
+                val capacity = parallelism - taskJobs.values.count { it.isActive }
+                if (capacity <= 0) return@withLock emptyList()
+                taskRecords.values
+                    .filter { it.status == DownloadTaskStatus.Queued && it.id !in taskJobs }
+                    .sortedBy { it.createdAt }
+                    .take(capacity)
+                    .map { it.id }
+            }
+            ids.forEach { taskId ->
+                taskJobs[taskId] = scope.launch { runTask(taskId) }
+            }
+        }
+    }
+
+    private suspend fun runTask(taskId: String) {
+        var target: DownloadTarget? = null
+        try {
+            val task = taskMutex.withLock {
+                val current = taskRecords[taskId] ?: return
+                val downloading = current.copy(status = DownloadTaskStatus.Downloading, updatedAt = System.currentTimeMillis())
+                updateTask(downloading)
+                downloading
+            }
+            val payload = taskMutex.withLock { taskPayloads.remove(taskId) } ?: providerRepository.resolve(task.track)
+            val extension = extension(payload.url)
+            val tempFile = temporaryFile(taskId, extension)
+            writePayload(taskId, payload, tempFile)
+            writeEmbeddedMetadataIfNeeded(tempFile, extension, task.track, payload)
+            target = createTarget(task.track, payload, extension)
+            val bytes = copyToTarget(taskId, tempFile, target.uri)
+            writeLyricsFileIfNeeded(payload, target)
+            val finalUri = finishTarget(target, success = true)
+            val record = DownloadRecord(
+                trackId = task.id, title = task.track.title, artists = task.track.artists, album = task.track.album,
+                source = task.track.source, uri = finalUri.toString(), coverUrl = payload.coverUrl,
+                durationMs = payload.durationMs ?: task.track.durationMs, fileSize = bytes, createdAt = System.currentTimeMillis(),
+            )
+            taskMutex.withLock {
+                records[task.id] = record
+                updateTask(taskRecords.getValue(task.id).copy(
+                    status = DownloadTaskStatus.Completed, completedUri = finalUri.toString(), downloadedBytes = bytes,
+                    totalBytes = bytes, failureMessage = null, updatedAt = System.currentTimeMillis(),
+                ))
+                saveRecords()
+            }
+            tempFile.delete()
+        } catch (cancelled: CancellationException) {
+            // pause() has already persisted the paused state and intentionally retains the partial file.
+        } catch (throwable: Throwable) {
+            target?.let { finishTarget(it, success = false) }
+            Log.e(TAG, "download failed taskId=$taskId", throwable)
+            taskMutex.withLock {
+                taskRecords[taskId]?.let { updateTask(it.copy(
+                    status = DownloadTaskStatus.Failed,
+                    failureMessage = throwable.message ?: "下载失败",
+                    updatedAt = System.currentTimeMillis(),
+                )) }
+            }
+        } finally {
+            taskMutex.withLock { taskJobs.remove(taskId) }
+            schedule()
+        }
+    }
+
+    private suspend fun writePayload(taskId: String, payload: PlaybackPayload, targetFile: File): Long {
+        coroutineContext.ensureActive()
         val connection = URL(payload.url).openConnection()
-        payload.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
-        val total = connection.contentLengthLong.takeIf { it > 0 }
-        var written = 0L
-        connection.getInputStream().use { input ->
-            FileOutputStream(targetFile).use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
-                    written += read
-                    if (total != null) {
-                        val progress = (written.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                        mutableStates.update { current ->
-                            current + (trackId to DownloadState.Downloading(progress))
+        val httpConnection = connection as? HttpURLConnection
+        taskMutex.withLock { httpConnection?.let { taskConnections[taskId] = it } }
+        try {
+            coroutineContext.ensureActive()
+            payload.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+            val existing = targetFile.length()
+            if (existing > 0) connection.setRequestProperty("Range", "bytes=$existing-")
+            val responseCode = httpConnection?.responseCode
+            val append = existing > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL
+            val start = if (append) existing else 0L
+            val total = connection.contentLengthLong.takeIf { it > 0 }?.plus(start)
+            var written = start
+            connection.getInputStream().use { input ->
+                FileOutputStream(targetFile, append).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        written += read
+                        if (total != null) {
+                            val progress = (written.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                            scope.launch { taskMutex.withLock {
+                                taskRecords[taskId]?.let { updateTask(it.copy(downloadedBytes = written, totalBytes = total, updatedAt = System.currentTimeMillis())) }
+                            } }
                         }
                     }
                 }
             }
+            return written
+        } catch (throwable: Throwable) {
+            coroutineContext.ensureActive()
+            throw throwable
+        } finally {
+            taskMutex.withLock { taskConnections.remove(taskId) }
+            httpConnection?.disconnect()
         }
-        return written
     }
 
-    private fun copyToTarget(trackId: String, sourceFile: File, targetUri: Uri): Long {
+    private fun copyToTarget(taskId: String, sourceFile: File, targetUri: Uri): Long {
         var written = 0L
         sourceFile.inputStream().use { input ->
             val outputStream = if (targetUri.scheme == "file") {
@@ -150,7 +311,6 @@ class AndroidDownloadRepository(
                 }
             } ?: error("无法写入下载文件")
         }
-        mutableStates.update { it + (trackId to DownloadState.Downloading(1f)) }
         return written
     }
 
@@ -233,10 +393,54 @@ class AndroidDownloadRepository(
     }
 
     private fun publishStates() {
-        mutableStates.value = records.mapValues { DownloadState.Downloaded(it.value.uri) }
+        val active = taskRecords.values.associate { task ->
+            task.id to when (task.status) {
+                DownloadTaskStatus.Queued -> DownloadState.Queued
+                DownloadTaskStatus.Downloading -> DownloadState.Downloading(
+                    task.totalBytes?.takeIf { it > 0 }?.let { task.downloadedBytes.toFloat() / it } ?: 0f,
+                )
+                DownloadTaskStatus.Paused -> DownloadState.Paused
+                DownloadTaskStatus.Failed -> DownloadState.Failed(task.failureMessage ?: "下载失败")
+                DownloadTaskStatus.Completed -> DownloadState.Downloaded(task.completedUri ?: records[task.id]?.uri.orEmpty())
+            }
+        }
+        mutableStates.value = records.mapValues { DownloadState.Downloaded(it.value.uri) } + active
+    }
+
+    private fun publishTasks() {
+        mutableTasks.value = taskRecords.values.sortedWith(
+            compareBy<DownloadTask> { if (it.status == DownloadTaskStatus.Downloading) 0 else 1 }
+                .thenByDescending { it.createdAt },
+        )
+        onBackgroundWorkChanged(mutableTasks.value)
+    }
+
+    private fun updateTask(task: DownloadTask) {
+        taskRecords[task.id] = task
+        saveTasks()
+        publishTasks()
+        publishStates()
     }
 
     private fun indexFile(): File = File(context.filesDir, "downloads.json")
+    private fun taskIndexFile(): File = File(context.filesDir, "download_tasks.json")
+
+    private fun temporaryFile(taskId: String, extension: String = "part"): File {
+        val directory = File(context.filesDir, "download_parts")
+        if (!directory.exists()) directory.mkdirs()
+        return File(directory, "${taskId.hashCode().toUInt().toString(16)}.$extension.part")
+    }
+
+    private fun deleteUri(uri: String) {
+        runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
+        if (uri.startsWith("file:")) runCatching { File(requireNotNull(Uri.parse(uri).path)).delete() }
+    }
+
+    private fun saveTasks() {
+        val array = JSONArray()
+        taskRecords.values.forEach { array.put(it.toJson()) }
+        taskIndexFile().writeText(array.toString())
+    }
 
     private fun JSONObject.toRecord(): DownloadRecord = DownloadRecord(
         trackId = getString("trackId"),
@@ -263,12 +467,71 @@ class AndroidDownloadRepository(
         .put("fileSize", fileSize)
         .put("createdAt", createdAt)
 
+    private fun DownloadRecord.toCompletedTask(): DownloadTask = DownloadTask(
+        id = trackId,
+        track = MusicTrack(
+            id = trackId, title = title, artists = artists, album = album, source = source,
+            sourceType = TrackSourceType.Provider, coverUrl = coverUrl, durationMs = durationMs,
+        ),
+        status = DownloadTaskStatus.Completed,
+        createdAt = createdAt,
+        updatedAt = createdAt,
+        downloadedBytes = fileSize,
+        totalBytes = fileSize.takeIf { it > 0 },
+        completedUri = uri,
+    )
+
+    private fun DownloadTask.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("trackId", track.id)
+        .put("title", track.title)
+        .put("artists", track.artists)
+        .put("album", track.album)
+        .put("source", track.source)
+        .put("sourceType", track.sourceType.name)
+        .put("coverUrl", track.coverUrl ?: "")
+        .put("durationMs", track.durationMs ?: 0)
+        .put("providerId", track.providerId ?: "")
+        .put("providerName", track.providerName ?: "")
+        .put("status", status.name)
+        .put("createdAt", createdAt)
+        .put("updatedAt", updatedAt)
+        .put("downloadedBytes", downloadedBytes)
+        .put("totalBytes", totalBytes ?: 0)
+        .put("failureMessage", failureMessage ?: "")
+        .put("completedUri", completedUri ?: "")
+
+    private fun JSONObject.toTask(): DownloadTask {
+        val trackId = optString("trackId").ifBlank { getString("id") }
+        return DownloadTask(
+            id = getString("id"),
+            track = MusicTrack(
+                id = trackId,
+                title = optString("title"), artists = optString("artists"), album = optString("album"),
+                source = optString("source"),
+                sourceType = runCatching { TrackSourceType.valueOf(optString("sourceType")) }.getOrDefault(TrackSourceType.Provider),
+                coverUrl = optString("coverUrl").takeIf { it.isNotBlank() },
+                durationMs = optLong("durationMs").takeIf { it > 0 },
+                providerId = optString("providerId").takeIf { it.isNotBlank() },
+                providerName = optString("providerName").takeIf { it.isNotBlank() },
+            ),
+            status = runCatching { DownloadTaskStatus.valueOf(optString("status")) }.getOrDefault(DownloadTaskStatus.Paused),
+            createdAt = optLong("createdAt").takeIf { it > 0 } ?: System.currentTimeMillis(),
+            updatedAt = optLong("updatedAt").takeIf { it > 0 } ?: System.currentTimeMillis(),
+            downloadedBytes = optLong("downloadedBytes"),
+            totalBytes = optLong("totalBytes").takeIf { it > 0 },
+            failureMessage = optString("failureMessage").takeIf { it.isNotBlank() },
+            completedUri = optString("completedUri").takeIf { it.isNotBlank() },
+        )
+    }
+
     private fun sanitize(value: String): String {
         val sanitized = value.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
         return sanitized.ifBlank { "unknown" }.take(80)
     }
 
     private fun extension(url: String): String {
+        if (M4S_EXTENSION_PATTERN.containsMatchIn(url)) return "m4a"
         val clean = url.substringBefore('?').substringAfterLast('/', "")
         val ext = clean.substringAfterLast('.', "mp3").lowercase()
         return ext.takeIf { it.length in 2..5 } ?: "mp3"
@@ -285,13 +548,19 @@ class AndroidDownloadRepository(
         }
     }
 
-    private fun writeId3TagIfNeeded(
+    private fun writeEmbeddedMetadataIfNeeded(
         file: File,
         extension: String,
         track: MusicTrack,
         payload: PlaybackPayload,
     ) {
-        if (extension.lowercase() != "mp3") return
+        when (extension.lowercase()) {
+            "mp3" -> writeId3Tag(file, track, payload)
+            "m4a" -> writeM4aTag(file, track, payload)
+        }
+    }
+
+    private fun writeId3Tag(file: File, track: MusicTrack, payload: PlaybackPayload) {
         val title = payload.title.ifBlank { track.title }
         val artists = payload.artists.ifBlank { track.artists }
         val album = payload.album.ifBlank { track.album }
@@ -308,6 +577,28 @@ class AndroidDownloadRepository(
         FileOutputStream(file, false).use { output ->
             output.write(tagBytes)
             output.write(audioBytes)
+        }
+    }
+
+    private fun writeM4aTag(file: File, track: MusicTrack, payload: PlaybackPayload) {
+        val title = payload.title.ifBlank { track.title }
+        val artists = payload.artists.ifBlank { track.artists }
+        val album = payload.album.ifBlank { track.album }
+        val coverImage = loadCoverImage(payload.coverUrl ?: track.coverUrl)
+        if (title.isBlank() && artists.isBlank() && album.isBlank() && coverImage == null) return
+
+        runCatching {
+            Python.getInstance().getModule("fuo_mobile.bridge").callAttr(
+                "write_m4a_tags",
+                file.absolutePath,
+                title,
+                artists,
+                album,
+                coverImage?.mimeType.orEmpty(),
+                coverImage?.bytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }.orEmpty(),
+            )
+        }.onFailure { throwable ->
+            Log.w(TAG, "failed to write m4a metadata file=${file.name}", throwable)
         }
     }
 
@@ -481,6 +772,7 @@ class AndroidDownloadRepository(
     )
 
     private companion object {
+        val M4S_EXTENSION_PATTERN = Regex("\\.m4s(?:[./?#]|$)", RegexOption.IGNORE_CASE)
         private const val ID3_HEADER_SIZE = 10
         private const val MAX_COVER_BYTES = 5 * 1024 * 1024
         private const val COVER_CONNECT_TIMEOUT_MS = 10_000

@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -21,6 +22,7 @@ import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
@@ -35,6 +37,7 @@ class ProviderWebLoginActivity : Activity() {
     private lateinit var statusView: TextView
     private lateinit var webView: WebView
 
+    @SuppressLint("SetJavaScriptEnabled") // 提供方登录页完成认证需要 JavaScript。
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         providerId = intent.getStringExtra(EXTRA_PROVIDER_ID).orEmpty()
@@ -55,7 +58,7 @@ class ProviderWebLoginActivity : Activity() {
         configureSystemBars(darkTheme)
 
         statusView = TextView(this).apply {
-            text = "完成登录后会自动获取 Cookie"
+            text = getString(R.string.provider_login_cookie_hint)
             textSize = 13f
             setTextColor(colors.onSurfaceVariant)
             setPadding(dp(20), dp(10), dp(20), dp(10))
@@ -64,7 +67,6 @@ class ProviderWebLoginActivity : Activity() {
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.databaseEnabled = true
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.userAgentString = userAgent
             settings.useWideViewPort = !useMobileViewport
@@ -81,7 +83,7 @@ class ProviderWebLoginActivity : Activity() {
         }
 
         val titleView = TextView(this).apply {
-            text = "$providerName 浏览器登录"
+            text = getString(R.string.provider_browser_login_title, providerName)
             textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(colors.onSurface)
@@ -91,11 +93,11 @@ class ProviderWebLoginActivity : Activity() {
             setPadding(0, 0, dp(12), 0)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val closeButton = toolbarButton(text = "关闭", filled = false, colors = colors) {
+        val closeButton = toolbarButton(text = getString(R.string.close), filled = false, colors = colors) {
             setResult(RESULT_CANCELED)
             finish()
         }
-        val doneButton = toolbarButton(text = "完成", filled = true, colors = colors) {
+        val doneButton = toolbarButton(text = getString(R.string.done), filled = true, colors = colors) {
             finishWithCookies(webView.url, auto = false)
         }
         val toolbarDivider = View(this).apply {
@@ -194,6 +196,7 @@ class ProviderWebLoginActivity : Activity() {
         )
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     private fun dynamicWebLoginColors(darkTheme: Boolean): WebLoginColors {
         val primary = if (darkTheme) {
             getColor(android.R.color.system_accent1_200)
