@@ -199,7 +199,7 @@ private fun packagedResourceRoots(): List<File> {
 private fun pythonPathEntries(androidPythonDir: File): List<String> {
     return buildList {
         add(androidPythonDir.absolutePath)
-        val resourceRoot = androidPythonDir.parentFile?.parentFile
+        val resourceRoot = androidPythonDir.parentFile
         val venvLib = resourceRoot?.let { File(it, "venv/lib") }
         venvLib
             ?.walkTopDown()

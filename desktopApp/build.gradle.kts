@@ -157,6 +157,7 @@ val packageAppImageFile = tasks.register<Exec>("packageAppImageFile") {
             "rm -rf \"\$app_dir\"",
             "mkdir -p \"\$app_dir/usr/lib\" \"$(dirname \"\$artifact\")\"",
             "cp -a \"\$app_image_dir\" \"\$app_dir/usr/lib/FuoEvolve\"",
+            "find \"\$app_dir/usr/lib/FuoEvolve/lib/app/resources/desktop-python/venv/bin\" -maxdepth 1 -type f -exec chmod +x {} +",
             "cat > \"\$app_dir/AppRun\" <<'EOF'",
             "#!/usr/bin/env bash",
             "set -euo pipefail",
