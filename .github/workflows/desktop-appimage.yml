@@ -44,66 +44,22 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build desktop app image
-        run: ./gradlew :desktopApp:packageAppImage
+      - name: Build desktop AppImage
+        run: ./gradlew :desktopApp:packageAppImageFile
 
-      - name: Check desktop app image artifact
+      - name: Check desktop AppImage artifact
         run: |
-          app_dir="desktopApp/build/compose/binaries/main/app/FuoEvolve"
-          if [ ! -x "${app_dir}/bin/FuoEvolve" ]; then
-            echo "::error::Desktop app image was not produced at ${app_dir}"
-            find desktopApp/build/compose/binaries/main -maxdepth 4 -type f -o -type d || true
+          artifact="build/artifacts/FuoEvolve.AppImage"
+          if [ ! -x "${artifact}" ]; then
+            echo "::error::Desktop AppImage was not produced at ${artifact}"
+            find desktopApp/build build/artifacts -maxdepth 5 -type f -o -type d || true
             exit 1
           fi
-
-      - name: Build AppImage file
-        run: |
-          set -euo pipefail
-
-          app_image_dir="desktopApp/build/compose/binaries/main/app/FuoEvolve"
-          app_dir="build/appimage/FuoEvolve.AppDir"
-          artifact_dir="build/artifacts"
-          artifact_path="${artifact_dir}/FuoEvolve-${GITHUB_SHA}.AppImage"
-          appimagetool="build/appimagetool-x86_64.AppImage"
-
-          rm -rf "${app_dir}"
-          mkdir -p "${app_dir}/usr/lib" "${artifact_dir}"
-          cp -a "${app_image_dir}" "${app_dir}/usr/lib/FuoEvolve"
-
-          cat > "${app_dir}/AppRun" <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          export APPDIR="${APPDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-          exec "${APPDIR}/usr/lib/FuoEvolve/bin/FuoEvolve" "$@"
-          EOF
-          chmod +x "${app_dir}/AppRun"
-
-          cat > "${app_dir}/fuo-evolve.desktop" <<'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=FuoEvolve
-          Exec=FuoEvolve
-          Icon=fuo-evolve
-          Categories=AudioVideo;Audio;Player;
-          Terminal=false
-          EOF
-          cp androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png "${app_dir}/fuo-evolve.png"
-
-          curl -L \
-            --retry 3 \
-            --retry-delay 5 \
-            -o "${appimagetool}" \
-            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x "${appimagetool}"
-
-          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "${appimagetool}" "${app_dir}" "${artifact_path}"
-          test -f "${artifact_path}"
-          chmod +x "${artifact_path}"
 
       - name: Upload desktop app image
         uses: actions/upload-artifact@v7
         with:
           name: fuo-evolve-desktop-linux-x64-appimage-${{ github.sha }}
-          path: build/artifacts/FuoEvolve-${{ github.sha }}.AppImage
+          path: build/artifacts/FuoEvolve.AppImage
           archive: false
           if-no-files-found: error

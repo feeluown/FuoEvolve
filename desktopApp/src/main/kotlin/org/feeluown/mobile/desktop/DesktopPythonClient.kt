@@ -23,7 +23,7 @@ internal class DesktopPythonClient(
         propertyName = "fuo.desktop.androidPythonDir",
         envName = "FUO_DESKTOP_ANDROID_PYTHON_DIR",
         packagedRelativePath = "desktop-python/android-python",
-        sourceRelativePath = "androidApp/src/main/python",
+        sourceRelativePath = "shared/src/commonMain/python",
     ),
 ) : AutoCloseable {
     private val serial = AtomicLong()

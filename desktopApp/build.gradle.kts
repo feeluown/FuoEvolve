@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.Sync
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
@@ -22,6 +23,7 @@ java {
 dependencies {
     implementation(project(":shared"))
     implementation(compose.desktop.currentOs)
+    implementation(libs.compose.material3.expressive)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.org.json)
@@ -49,7 +51,7 @@ compose.desktop {
 
 val desktopPythonDir = layout.projectDirectory.dir("../.gradle/desktop-python")
 val desktopBridgeScript = layout.projectDirectory.file("src/main/python/desktop_bridge.py")
-val androidPythonDir = layout.projectDirectory.dir("../androidApp/src/main/python")
+val androidPythonDir = layout.projectDirectory.dir("../shared/src/commonMain/python")
 val feelUOwnSource = providers.environmentVariable("FUO_FEELUOWN_SOURCE")
     .orElse("https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz")
 
@@ -129,6 +131,56 @@ val syncDesktopAppResources = tasks.register<Sync>("syncDesktopAppResources") {
         exclude("**/*.pyc")
         exclude("bin/𝜋thon")
     }
+}
+
+val packageAppImageFile = tasks.register<Exec>("packageAppImageFile") {
+    val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/FuoEvolve")
+    val appDir = layout.buildDirectory.dir("appimage/FuoEvolve.AppDir")
+    val artifact = layout.buildDirectory.file("artifacts/FuoEvolve.AppImage")
+    val appImageTool = layout.buildDirectory.file("appimagetool-x86_64.AppImage")
+    val iconFile = layout.projectDirectory.file("../androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png")
+
+    dependsOn("packageAppImage")
+    inputs.dir(appImageDir)
+    inputs.file(iconFile)
+    outputs.file(artifact)
+    commandLine(
+        "bash",
+        "-c",
+        listOf(
+            "set -euo pipefail",
+            "app_image_dir=\"${appImageDir.get().asFile.absolutePath}\"",
+            "app_dir=\"${appDir.get().asFile.absolutePath}\"",
+            "artifact=\"${artifact.get().asFile.absolutePath}\"",
+            "appimagetool=\"${appImageTool.get().asFile.absolutePath}\"",
+            "icon_file=\"${iconFile.asFile.absolutePath}\"",
+            "rm -rf \"\$app_dir\"",
+            "mkdir -p \"\$app_dir/usr/lib\" \"$(dirname \"\$artifact\")\"",
+            "cp -a \"\$app_image_dir\" \"\$app_dir/usr/lib/FuoEvolve\"",
+            "cat > \"\$app_dir/AppRun\" <<'EOF'",
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "export APPDIR=\"\${APPDIR:-\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")\" && pwd)}\"",
+            "exec \"\$APPDIR/usr/lib/FuoEvolve/bin/FuoEvolve\" \"\$@\"",
+            "EOF",
+            "chmod +x \"\$app_dir/AppRun\"",
+            "cat > \"\$app_dir/fuo-evolve.desktop\" <<'EOF'",
+            "[Desktop Entry]",
+            "Type=Application",
+            "Name=FuoEvolve",
+            "Exec=FuoEvolve",
+            "Icon=fuo-evolve",
+            "Categories=AudioVideo;Audio;Player;",
+            "Terminal=false",
+            "EOF",
+            "cp \"\$icon_file\" \"\$app_dir/fuo-evolve.png\"",
+            "curl -L --retry 3 --retry-delay 5 -o \"\$appimagetool\" https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage",
+            "chmod +x \"\$appimagetool\"",
+            "APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 \"\$appimagetool\" \"\$app_dir\" \"\$artifact\"",
+            "test -f \"\$artifact\"",
+            "chmod +x \"\$artifact\"",
+        ).joinToString("\n"),
+    )
 }
 
 tasks.withType<JavaExec>().configureEach {
