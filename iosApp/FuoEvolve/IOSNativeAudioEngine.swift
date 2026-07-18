@@ -10,8 +10,8 @@ import WebKit
 
 final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
     static let shared = IOSNativeAudioEngine()
-    private let player = AVQueuePlayer()
-    private var itemTokens: [ObjectIdentifier: String] = [:]
+    private let player = AVPlayer()
+    private var currentPayload: PlaybackPayload?
     private var didReachEnd = false
     private var playbackError: String?
     private var endObserver: NSObjectProtocol?
@@ -27,7 +27,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
             queue: .main
         ) { [weak self] notification in
             guard let self, notification.object as? AVPlayerItem === self.player.currentItem else { return }
-            self.didReachEnd = self.player.items().count <= 1
+            self.didReachEnd = true
         }
     }
 
@@ -38,42 +38,25 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
     }
 
     func play(_ payload: PlaybackPayload) {
-        play(
-            url: payload.url,
-            headers: payload.headers,
-            title: payload.title,
-            artists: payload.artists,
-            album: payload.album,
-            token: "legacy:\(UUID().uuidString)"
-        )
-    }
-
-    func play(url: String, headers: [String: String], title: String, artists: String, album: String, token: String) {
-        guard let item = makePlayerItem(url: url, headers: headers) else { return }
+        guard let url = preferredMediaURL(payload.url) else {
+            playbackError = "音频地址无效"
+            return
+        }
         didReachEnd = false
         playbackError = nil
-        player.removeAllItems()
-        itemTokens.removeAll()
-        itemTokens[ObjectIdentifier(item)] = token
-        player.insert(item, after: nil)
-        updateNowPlaying(title: title, artists: artists, album: album)
+        currentPayload = payload
+        var assetOptions: [String: Any] = [:]
+        if !payload.headers.isEmpty {
+            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = payload.headers
+        }
+        let asset = AVURLAsset(url: url, options: assetOptions)
+        player.replaceCurrentItem(with: playerItem(asset: asset))
+        updateNowPlaying(payload: payload)
         player.play()
     }
 
-    func enqueue(url: String, headers: [String: String], title: String, artists: String, album: String, token: String) {
-        guard let item = makePlayerItem(url: url, headers: headers) else { return }
-        itemTokens[ObjectIdentifier(item)] = token
-        player.insert(item, after: nil)
-        if didReachEnd {
-            didReachEnd = false
-            player.advanceToNextItem()
-            updateNowPlaying(title: title, artists: artists, album: album)
-            player.play()
-        }
-    }
-
-    func currentItemToken() -> String? {
-        player.currentItem.map { itemTokens[ObjectIdentifier($0)] }
+    func play(url: String, headers: [String: String], title: String, artists: String, album: String) {
+        play(PlaybackPayload(url: url, title: title, artists: artists, album: album, source: "", headers: headers, coverUrl: nil))
     }
 
     func pause() {
@@ -86,8 +69,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
 
     func stop() {
         player.pause()
-        player.removeAllItems()
-        itemTokens.removeAll()
+        player.replaceCurrentItem(with: nil)
         didReachEnd = false
         playbackError = nil
         spectrumAnalyzer.clear()
@@ -168,18 +150,6 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         mix.inputParameters = [parameters]
         item.audioMix = mix
         return item
-    }
-
-    private func makePlayerItem(url rawURL: String, headers: [String: String]) -> AVPlayerItem? {
-        guard let url = preferredMediaURL(rawURL) else {
-            playbackError = "音频地址无效"
-            return nil
-        }
-        var assetOptions: [String: Any] = [:]
-        if !headers.isEmpty {
-            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
-        }
-        return playerItem(asset: AVURLAsset(url: url, options: assetOptions))
     }
 
     private func makeAudioTap() -> MTAudioProcessingTap? {
@@ -281,11 +251,11 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         }
     }
 
-    private func updateNowPlaying(title: String, artists: String, album: String) {
+    private func updateNowPlaying(payload: PlaybackPayload) {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-            MPMediaItemPropertyTitle: title,
-            MPMediaItemPropertyArtist: artists,
-            MPMediaItemPropertyAlbumTitle: album,
+            MPMediaItemPropertyTitle: payload.title,
+            MPMediaItemPropertyArtist: payload.artists,
+            MPMediaItemPropertyAlbumTitle: payload.album,
         ]
     }
 }

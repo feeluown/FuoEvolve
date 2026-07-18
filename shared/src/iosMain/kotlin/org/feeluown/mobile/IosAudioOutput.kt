@@ -1,9 +1,7 @@
 package org.feeluown.mobile
 
 interface IosAudioOutput {
-    fun play(url: String, headers: Map<String, String>, title: String, artists: String, album: String, token: String)
-    fun enqueue(url: String, headers: Map<String, String>, title: String, artists: String, album: String, token: String)
-    fun currentItemToken(): String?
+    fun play(url: String, headers: Map<String, String>, title: String, artists: String, album: String)
     fun pause()
     fun resume()
     fun stop()
