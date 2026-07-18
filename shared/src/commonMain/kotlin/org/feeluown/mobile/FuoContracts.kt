@@ -211,6 +211,30 @@ data class PlaybackPayload(
     val currentPartIndex: Int = -1,
 )
 
+/**
+ * A logical request for the platform playback runtime. The runtime, rather
+ * than the UI controller, resolves provider media into a playable URL.
+ */
+data class PlaybackRequest(
+    val track: MusicTrack,
+    val resolveTrack: MusicTrack = track,
+    val requestedPartIndex: Int? = null,
+    val unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
+    val smartReplacementProviderIds: Set<String> = emptySet(),
+    val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    val smartReplacementUseOriginalMetadata: Boolean = false,
+    val smartReplacementUseOriginalLyrics: Boolean = false,
+)
+
+/**
+ * The current item plus its ordered look-ahead window. The first entry is
+ * always the item that must start immediately.
+ */
+data class PlaybackPlan(
+    val generation: Long,
+    val requests: List<PlaybackRequest>,
+)
+
 enum class PlayerStatus {
     Idle,
     Loading,
@@ -258,6 +282,7 @@ data class PlaybackState(
     val spectrumLevels: List<Float> = emptyList(),
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
+    val playbackGeneration: Long = 0,
     val errorMessage: String? = null,
 )
 
@@ -778,8 +803,11 @@ private val EMPTY_DOWNLOAD_TASKS = MutableStateFlow<List<DownloadTask>>(emptyLis
 
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>
+    val resolvesResourcesInternally: Boolean
+        get() = false
     fun prepareLoading(track: MusicTrack) = Unit
     fun play(track: MusicTrack, payload: PlaybackPayload)
+    fun play(plan: PlaybackPlan) = Unit
     fun pause()
     fun resume()
     fun stop()

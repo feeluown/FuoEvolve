@@ -10,7 +10,7 @@ import kotlinx.coroutines.cancel
 class FuoEvolveApplication : PyApplication() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private val providerRepository: AndroidFuoCoreBridge by lazy {
+    internal val providerRepository: AndroidFuoCoreBridge by lazy {
         AndroidFuoCoreBridge(applicationContext)
     }
 
