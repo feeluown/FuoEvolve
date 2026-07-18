@@ -272,6 +272,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.mediaItems(
                 title = item.title,
                 subtitle = listOf(item.type.name, item.providerName).joinToString(" · "),
                 coverUrl = item.coverUrl,
+                placeholder = when (item.type) {
+                    ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
+                    ProviderMediaItemType.Album -> CoverPlaceholder.Album
+                },
                 onClick = { controller.openMediaItem(item) },
             )
             HorizontalDivider()
@@ -291,6 +295,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlists(
                 title = playlist.title,
                 subtitle = playlist.providerName,
                 coverUrl = playlist.coverUrl,
+                placeholder = CoverPlaceholder.Playlist,
                 onClick = { controller.openPlaylist(playlist) },
             )
             HorizontalDivider()
@@ -322,6 +327,7 @@ private fun ProviderSearchRow(
     title: String,
     subtitle: String,
     coverUrl: String?,
+    placeholder: CoverPlaceholder = CoverPlaceholder.Song,
     onClick: () -> Unit,
 ) {
     Row(
@@ -343,6 +349,7 @@ private fun ProviderSearchRow(
                 coverUrl = coverUrl,
             ),
             modifier = Modifier.size(48.dp),
+            placeholder = placeholder,
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(

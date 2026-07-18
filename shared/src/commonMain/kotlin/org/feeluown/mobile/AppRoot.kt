@@ -351,6 +351,7 @@ fun ProviderPlaylistTargetDialog(controller: FuoPlayerController, track: MusicTr
                         CoverBox(
                             track = playlist.toDisplayTrack(),
                             modifier = Modifier.size(40.dp),
+                            placeholder = CoverPlaceholder.Playlist,
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(

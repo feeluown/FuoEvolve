@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -214,6 +215,7 @@ fun ProviderVideoList(videos: List<ProviderVideo>, onClick: (ProviderVideo) -> U
                     title = video.title,
                     imageUrl = video.coverUrl,
                     modifier = Modifier.size(48.dp),
+                    placeholder = CoverPlaceholder.Song,
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -335,6 +337,11 @@ fun ProviderFeatureCoverCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f),
+            placeholder = if (feature.isDailySongs()) {
+                CoverPlaceholder.DailyRecommendation
+            } else {
+                CoverPlaceholder.Song
+            },
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
         Text(
@@ -425,10 +432,10 @@ fun DailyRecommendationButton(
         title = feature.title.ifBlank { "每日推荐" },
         providerName = feature.providerName,
     ) {
-        Text(
-            text = "Daily",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.SemiBold,
+        Icon(
+            imageVector = Icons.Filled.CalendarMonth,
+            contentDescription = "${feature.providerName}每日推荐",
+            modifier = Modifier.size(if (isWideLayout) 28.dp else 32.dp),
         )
     }
 }
@@ -546,6 +553,7 @@ fun ProviderPlaylistCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f),
+            placeholder = CoverPlaceholder.Playlist,
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
         Text(
@@ -623,6 +631,10 @@ fun ProviderMediaItemCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f),
+            placeholder = when (item.type) {
+                ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
+                ProviderMediaItemType.Album -> CoverPlaceholder.Album
+            },
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
         Text(
@@ -722,6 +734,7 @@ fun ProviderDetailHeader(
     title: String,
     subtitle: String,
     description: String,
+    placeholder: CoverPlaceholder = CoverPlaceholder.Song,
     action: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -733,6 +746,7 @@ fun ProviderDetailHeader(
         CoverBox(
             track = track,
             modifier = Modifier.size(112.dp),
+            placeholder = placeholder,
         )
         Column(
             modifier = Modifier.weight(1f),

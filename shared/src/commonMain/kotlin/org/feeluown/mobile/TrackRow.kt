@@ -112,6 +112,7 @@ fun CoverBox(
     track: MusicTrack,
     cornerRadius: androidx.compose.ui.unit.Dp = 8.dp,
     modifier: Modifier = Modifier.size(48.dp),
+    placeholder: CoverPlaceholder = CoverPlaceholder.Song,
 ) {
     PlatformCoverArt(
         title = track.title,
@@ -119,6 +120,7 @@ fun CoverBox(
         modifier = Modifier
             .then(modifier)
             .clip(RoundedCornerShape(cornerRadius)),
+        placeholder = placeholder,
     )
 }
 

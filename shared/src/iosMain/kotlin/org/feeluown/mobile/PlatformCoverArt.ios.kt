@@ -1,10 +1,17 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +38,12 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 @Composable
-actual fun PlatformCoverArt(title: String, imageUrl: String?, modifier: Modifier) {
+actual fun PlatformCoverArt(
+    title: String,
+    imageUrl: String?,
+    modifier: Modifier,
+    placeholder: CoverPlaceholder,
+) {
     var image by remember(imageUrl) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(imageUrl) {
         image = imageUrl?.takeIf { it.isNotBlank() }?.let { loadImage(it) }
@@ -41,11 +53,19 @@ actual fun PlatformCoverArt(title: String, imageUrl: String?, modifier: Modifier
         Image(bitmap, title, modifier, contentScale = ContentScale.Crop)
     } else {
         Surface(modifier = modifier, color = MaterialTheme.colorScheme.primaryContainer) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    title.firstOrNull()?.uppercase() ?: "F",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+            BoxWithConstraints(contentAlignment = Alignment.Center) {
+                val containerSize = minOf(maxWidth, maxHeight)
+                Icon(
+                    imageVector = when (placeholder) {
+                        CoverPlaceholder.Song -> Icons.Filled.MusicNote
+                        CoverPlaceholder.Album -> Icons.Filled.Album
+                        CoverPlaceholder.Artist -> Icons.Filled.Mic
+                        CoverPlaceholder.Playlist -> Icons.AutoMirrored.Filled.QueueMusic
+                        CoverPlaceholder.DailyRecommendation -> Icons.Filled.CalendarMonth
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(containerSize * 0.45f),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
         }
