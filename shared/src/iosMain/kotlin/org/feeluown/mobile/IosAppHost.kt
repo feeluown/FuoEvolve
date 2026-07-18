@@ -74,7 +74,7 @@ private class IosAppContainer(
     private val providerRepository = IosFuoCoreBridge(pythonRuntime, networkStatusOutput)
     private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
     private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
-    private val playbackEngine = IosNativeAudioEngine(scope, audioOutput)
+    private val playbackEngine = IosNativeAudioEngine(scope, audioOutput, providerRepository)
     private val settingsStore = IosAppSettingsStore()
     private val playbackQueueStore = IosPlaybackQueueStore()
     private val resourceCacheRepository = IosResourceCacheRepository()

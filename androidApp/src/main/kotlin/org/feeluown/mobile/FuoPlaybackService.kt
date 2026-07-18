@@ -30,15 +30,37 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
 import org.json.JSONObject
 
 @OptIn(UnstableApi::class)
 class FuoPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var loadJob: Job? = null
+    private var preloadJob: Job? = null
+    private val pendingLock = Any()
+    private val pendingRequests = ArrayDeque<PlaybackRequest>()
+    private var preloadingGeneration: Long? = null
+    private val preparedItems = mutableMapOf<String, PreparedPlayback>()
+    private var activePlayback: PreparedPlayback? = null
+    private var pendingPreloadError: String? = null
+    @Volatile
+    private var activeGeneration: Long = 0L
+    private var itemSerial: Long = 0L
     private val spectrumAnalyzer = AudioSpectrumAnalyzer { levels ->
         mutableSpectrumLevels.value = levels
     }
@@ -73,6 +95,22 @@ class FuoPlaybackService : MediaSessionService() {
                     }
                 })
                 player.addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        val prepared = mediaItem?.mediaId?.let(preparedItems::get) ?: return
+                        activePlayback = prepared
+                        enqueueRemainingParts(prepared)
+                        publishPlaybackState()
+                        preloadNext()
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        publishPlaybackState()
+                    }
+
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        publishPlaybackState()
+                    }
+
                     override fun onPlayerError(error: PlaybackException) {
                         val item = player.currentMediaItem
                         Log.e(
@@ -82,6 +120,10 @@ class FuoPlaybackService : MediaSessionService() {
                                 "url=${item?.localConfiguration?.uri?.toString()?.summarizePlaybackUrl().orEmpty()} " +
                                 "code=${error.errorCodeName} state=${player.playbackState}",
                             error,
+                        )
+                        mutablePlaybackState.value = mutablePlaybackState.value.copy(
+                            status = PlayerStatus.Error,
+                            errorMessage = playbackErrorMessage(error),
                         )
                     }
                 })
@@ -118,11 +160,15 @@ class FuoPlaybackService : MediaSessionService() {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_PLAY -> runCatching {
-                val rawPayload = intent.getStringExtra(EXTRA_PAYLOAD) ?: error("Missing playback payload")
-                playPayload(rawPayload)
+                val rawPlan = intent.getStringExtra(EXTRA_PLAN) ?: error("Missing playback plan")
+                playPlan(rawPlan.toPlaybackPlan())
             }.onFailure { throwable ->
-                Log.e(TAG, "play payload failed ${intent.getStringExtra(EXTRA_PAYLOAD)?.playbackPayloadSummary().orEmpty()}", throwable)
+                Log.e(TAG, "play plan failed", throwable)
                 player?.stop()
+                mutablePlaybackState.value = PlaybackState(
+                    status = PlayerStatus.Error,
+                    errorMessage = throwable.message ?: "播放计划无效",
+                )
             }
             ACTION_PAUSE -> player?.pause()
             ACTION_RESUME -> player?.play()
@@ -138,6 +184,13 @@ class FuoPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        loadJob?.cancel()
+        preloadJob?.cancel()
+        synchronized(pendingLock) {
+            pendingRequests.clear()
+            preloadingGeneration = null
+        }
+        serviceScope.cancel()
         mediaSession?.run {
             player.release()
             release()
@@ -146,55 +199,245 @@ class FuoPlaybackService : MediaSessionService() {
         player = null
         mutableAudioDecoderInfo.value = null
         mutableAudioFormatInfo.value = null
+        mutablePlaybackState.value = PlaybackState()
         spectrumAnalyzer.clear()
         super.onDestroy()
     }
 
     @OptIn(UnstableApi::class)
-    private fun playPayload(raw: String) {
-        val payload = JSONObject(raw)
+    private fun playPlan(plan: PlaybackPlan) {
+        val first = plan.requests.firstOrNull() ?: error("Playback plan is empty")
+        loadJob?.cancel()
+        preloadJob?.cancel()
+        synchronized(pendingLock) {
+            pendingRequests.clear()
+            pendingRequests.addAll(plan.requests.drop(1))
+            preloadingGeneration = null
+        }
+        preparedItems.clear()
+        activePlayback = null
+        pendingPreloadError = null
+        activeGeneration = plan.generation
         mutableAudioFormatInfo.value = null
-        val url = payload.getString("url")
+        mutablePlaybackState.value = PlaybackState(
+            status = PlayerStatus.Loading,
+            currentTrack = first.track,
+            durationMs = first.track.durationMs ?: 0L,
+            lyrics = first.track.lyrics,
+            playbackGeneration = plan.generation,
+        )
+        loadJob = serviceScope.launch {
+            try {
+                val prepared = resolvePlayback(first)
+                if (activeGeneration != plan.generation) return@launch
+                withContext(Dispatchers.Main) {
+                    if (activeGeneration != plan.generation) return@withContext
+                    activePlayback = prepared
+                    preparedItems[prepared.mediaItem.mediaId] = prepared
+                    player?.run {
+                        setMediaSource(prepared.mediaSource)
+                        prepare()
+                        play()
+                    }
+                    publishPlaybackState()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                if (activeGeneration != plan.generation) return@launch
+                Log.e(TAG, "resolve failed trackId=${first.track.id} generation=${plan.generation}", throwable)
+                mutablePlaybackState.value = PlaybackState(
+                    status = PlayerStatus.Error,
+                    currentTrack = first.track,
+                    playbackGeneration = plan.generation,
+                    errorMessage = throwable.message ?: "音频资源加载失败",
+                )
+            }
+        }
+    }
+
+    private fun preloadNext() {
+        val generation = activeGeneration
+        val request = synchronized(pendingLock) {
+            if (preloadingGeneration != null) {
+                null
+            } else {
+                pendingRequests.removeFirstOrNull()?.also { preloadingGeneration = generation }
+            }
+        } ?: return
+        preloadJob = serviceScope.launch {
+            var retryNext = false
+            var stopMessage: String? = null
+            try {
+                val prepared = resolvePlayback(request)
+                if (activeGeneration != generation) return@launch
+                withContext(Dispatchers.Main) {
+                    if (activeGeneration != generation) return@withContext
+                    preparedItems[prepared.mediaItem.mediaId] = prepared
+                    player?.run {
+                        addMediaSource(prepared.mediaSource)
+                        if (playbackState == Player.STATE_ENDED) {
+                            seekToNextMediaItem()
+                            play()
+                        }
+                    }
+                    Log.i(TAG, "preloaded trackId=${prepared.track.id} generation=$generation")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                if (activeGeneration == generation) {
+                    Log.w(TAG, "preload failed trackId=${request.track.id}", throwable)
+                    if (request.unavailablePolicy == UnavailablePlaybackPolicy.Skip ||
+                        request.unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace
+                    ) {
+                        retryNext = true
+                    } else {
+                        stopMessage = "下一首资源加载失败：${request.track.title}（${throwable.message ?: "未知错误"}）"
+                    }
+                }
+            } finally {
+                synchronized(pendingLock) {
+                    if (preloadingGeneration == generation) preloadingGeneration = null
+                }
+            }
+            if (retryNext) {
+                withContext(Dispatchers.Main) {
+                    publishPlaybackState()
+                    preloadNext()
+                }
+            } else if (stopMessage != null) {
+                withContext(Dispatchers.Main) {
+                    if (activeGeneration == generation) {
+                        pendingPreloadError = stopMessage
+                        publishPlaybackState()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun enqueueRemainingParts(prepared: PreparedPlayback) {
+        val currentPartIndex = prepared.payload.currentPartIndex
+            .takeIf { it in prepared.payload.parts.indices }
+            ?: prepared.request.requestedPartIndex?.takeIf { it in prepared.payload.parts.indices }
+            ?: -1
+        if (currentPartIndex < 0 || currentPartIndex >= prepared.payload.parts.lastIndex) return
+        val parts = prepared.payload.parts.drop(currentPartIndex + 1).map { part ->
+            prepared.request.copy(
+                resolveTrack = part.toTrack(prepared.request.track),
+                requestedPartIndex = prepared.payload.parts.indexOf(part),
+            )
+        }
+        synchronized(pendingLock) {
+            parts.asReversed().forEach(pendingRequests::addFirst)
+        }
+    }
+
+    private suspend fun resolvePlayback(request: PlaybackRequest): PreparedPlayback {
+        val payload = withTimeout(PLAYBACK_RESOLVE_TIMEOUT_MS) {
+            request.resolveTrack.localUri?.let { uri -> request.resolveTrack.toLocalPayload(uri) }
+                ?: (application as FuoEvolveApplication).providerRepository.resolve(
+                    request.resolveTrack,
+                    request.unavailablePolicy,
+                    request.smartReplacementProviderIds,
+                    request.smartReplacementMinScore,
+                    request.smartReplacementUseOriginalMetadata,
+                    request.smartReplacementUseOriginalLyrics,
+                )
+        }
+        val parts = payload.parts
+        val currentPartIndex = when {
+            parts.isEmpty() -> -1
+            payload.currentPartIndex in parts.indices -> payload.currentPartIndex
+            request.requestedPartIndex?.let { it in parts.indices } == true -> request.requestedPartIndex ?: -1
+            else -> -1
+        }
+        val track = request.track.copy(
+            title = if (parts.isEmpty()) payload.title.ifBlank { request.track.title } else request.track.title,
+            artists = payload.artists.ifBlank { request.track.artists },
+            album = payload.album.ifBlank { request.track.album },
+            source = payload.source.ifBlank { request.track.source },
+            coverUrl = payload.coverUrl ?: request.track.coverUrl,
+            durationMs = if (parts.isEmpty()) payload.durationMs ?: request.track.durationMs else request.track.durationMs,
+            providerName = payload.providerName ?: request.track.providerName,
+            isSmartReplacement = payload.isSmartReplacement,
+            originalTitle = payload.originalTitle,
+            originalProviderName = payload.originalProviderName,
+            originalCoverUrl = payload.originalCoverUrl,
+            replacementTitle = payload.replacementTitle,
+            replacementArtists = payload.replacementArtists,
+            replacementSource = payload.replacementSource,
+            replacementProviderName = payload.replacementProviderName,
+            replacementCoverUrl = payload.replacementCoverUrl,
+            replacementStrategy = payload.replacementStrategy,
+            replacementScore = payload.replacementScore,
+            isUnavailable = false,
+        )
+        val mediaItem = createMediaItem(track, payload, parts, currentPartIndex)
+        return PreparedPlayback(
+            request = request,
+            track = track,
+            payload = payload.copy(currentPartIndex = currentPartIndex),
+            mediaItem = mediaItem,
+            mediaSource = createMediaSource(mediaItem, payload.headers),
+        )
+    }
+
+    private fun createMediaItem(
+        track: MusicTrack,
+        payload: PlaybackPayload,
+        parts: List<PlaybackPart>,
+        currentPartIndex: Int,
+    ): MediaItem {
+        val url = payload.url
         require(url.isNotBlank()) { "Playback URL is blank" }
         val extras = Bundle().apply {
-            putString("source", payload.optString("source"))
-            putString("source_type", payload.optString("source_type"))
-            putString("local_uri", payload.optString("local_uri"))
-            putString("provider_id", payload.optString("provider_id"))
-            putString("provider_name", payload.optString("provider_name"))
-            putBoolean("smart_replacement", payload.optBoolean("smart_replacement", false))
-            putString("original_title", payload.optString("original_title"))
-            putString("original_provider_name", payload.optString("original_provider_name"))
-            putString("original_cover_url", payload.optString("original_cover_url"))
-            putString("replacement_title", payload.optString("replacement_title"))
-            putString("replacement_artists", payload.optString("replacement_artists"))
-            putString("replacement_source", payload.optString("replacement_source"))
-            putString("replacement_provider_name", payload.optString("replacement_provider_name"))
-            putString("replacement_cover_url", payload.optString("replacement_cover_url"))
-            putString("replacement_strategy", payload.optString("replacement_strategy"))
-            putDouble("replacement_score", payload.optDouble("replacement_score", 0.0))
-            putString("lyrics", payload.optString("lyrics"))
-            putString("audio_quality", payload.optString("audio_quality"))
+            putString("source", track.source)
+            putString("source_type", track.sourceType.name)
+            putString("local_uri", track.localUri.orEmpty())
+            putString("provider_id", track.providerId.orEmpty())
+            putString("provider_name", track.providerName.orEmpty())
+            putBoolean("smart_replacement", track.isSmartReplacement)
+            putString("original_title", track.originalTitle.orEmpty())
+            putString("original_provider_name", track.originalProviderName.orEmpty())
+            putString("original_cover_url", track.originalCoverUrl.orEmpty())
+            putString("replacement_title", track.replacementTitle.orEmpty())
+            putString("replacement_artists", track.replacementArtists.orEmpty())
+            putString("replacement_source", track.replacementSource.orEmpty())
+            putString("replacement_provider_name", track.replacementProviderName.orEmpty())
+            putString("replacement_cover_url", track.replacementCoverUrl.orEmpty())
+            putString("replacement_strategy", track.replacementStrategy.orEmpty())
+            putDouble("replacement_score", track.replacementScore ?: 0.0)
+            putString("lyrics", payload.lyrics.orEmpty())
+            putString("audio_quality", payload.audioQuality.orEmpty())
+            putString("playback_parts", JSONArray().apply {
+                parts.forEach { part -> put(JSONObject().put("id", part.id).put("title", part.title).put("duration_ms", part.durationMs)) }
+            }.toString())
+            putInt("current_part_index", currentPartIndex)
+            putLong("playback_generation", activeGeneration)
         }
-        val mediaItem = MediaItem.Builder()
-            .setMediaId(payload.optString("track_id").ifBlank { url })
+        return MediaItem.Builder()
+            .setMediaId("$activeGeneration:${++itemSerial}:${track.id}")
             .setUri(url)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle(payload.optString("title"))
-                    .setArtist(payload.optString("artists"))
-                    .setAlbumTitle(payload.optString("album"))
-                    .setArtworkUri(payload.optString("cover_url").takeIf { it.isNotBlank() }?.let(Uri::parse))
+                    .setTitle(track.title)
+                    .setArtist(track.artists)
+                    .setAlbumTitle(track.album)
+                    .setArtworkUri(track.coverUrl?.let(Uri::parse))
                     .setExtras(extras)
                     .build()
             )
             .build()
+    }
 
-        val headers = payload.optJSONObject("headers").toStringMap()
+    private fun createMediaSource(mediaItem: MediaItem, headers: Map<String, String>): ProgressiveMediaSource {
+        val url = mediaItem.localConfiguration?.uri?.toString().orEmpty()
         Log.i(
             TAG,
-            "play payload trackId=${payload.optString("track_id")} " +
-                "source=${payload.optString("source")} url=${url.summarizePlaybackUrl()} " +
+            "play source trackId=${mediaItem.mediaId} " +
+                "source=${mediaItem.mediaMetadata.extras?.getString("source").orEmpty()} url=${mediaItem.localConfiguration?.uri.toString().summarizePlaybackUrl()} " +
                 "headerKeys=${headers.keys.joinToString(prefix = "[", postfix = "]")}",
         )
         val httpFactory = DefaultHttpDataSource.Factory()
@@ -210,25 +453,98 @@ class FuoPlaybackService : MediaSessionService() {
         } else {
             upstreamFactory
         }
-        val source = ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(mediaItem)
-
-        player?.run {
-            setMediaSource(source)
-            prepare()
-            play()
-        }
+        return ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(mediaItem)
     }
 
-    private fun JSONObject?.toStringMap(): Map<String, String> {
-        if (this == null) return emptyMap()
-        val keys = keys()
-        val result = linkedMapOf<String, String>()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            result[key] = optString(key)
+    private fun publishPlaybackState() {
+        val prepared = activePlayback ?: return
+        val currentPlayer = player ?: return
+        if (currentPlayer.playbackState == Player.STATE_ENDED && pendingPreloadError != null) {
+            mutablePlaybackState.value = PlaybackState(
+                status = PlayerStatus.Error,
+                currentTrack = prepared.track,
+                positionMs = currentPlayer.currentPosition.coerceAtLeast(0L),
+                durationMs = currentPlayer.duration.takeIf { it > 0L } ?: prepared.payload.durationMs ?: 0L,
+                bufferedMs = currentPlayer.bufferedPosition.coerceAtLeast(0L),
+                lyrics = prepared.payload.lyrics,
+                audioQuality = prepared.payload.audioQuality,
+                playbackParts = prepared.payload.parts,
+                currentPartIndex = prepared.payload.currentPartIndex,
+                playbackGeneration = activeGeneration,
+                errorMessage = pendingPreloadError,
+            )
+            return
         }
-        return result
+        val status = when {
+            currentPlayer.playbackState == Player.STATE_ENDED && hasPendingOrLoadingRequest() -> PlayerStatus.Loading
+            currentPlayer.playbackState == Player.STATE_ENDED -> PlayerStatus.Ended
+            currentPlayer.playbackState == Player.STATE_BUFFERING -> PlayerStatus.Loading
+            currentPlayer.isPlaying -> PlayerStatus.Playing
+            currentPlayer.playbackState == Player.STATE_READY -> PlayerStatus.Paused
+            else -> PlayerStatus.Loading
+        }
+        mutablePlaybackState.value = PlaybackState(
+            status = status,
+            currentTrack = prepared.track,
+            positionMs = currentPlayer.currentPosition.coerceAtLeast(0L),
+            durationMs = currentPlayer.duration.takeIf { it > 0L } ?: prepared.payload.durationMs ?: 0L,
+            bufferedMs = currentPlayer.bufferedPosition.coerceAtLeast(0L),
+            lyrics = prepared.payload.lyrics,
+            audioQuality = prepared.payload.audioQuality,
+            playbackParts = prepared.payload.parts,
+            currentPartIndex = prepared.payload.currentPartIndex,
+            playbackGeneration = activeGeneration,
+        )
     }
+
+    private fun hasPendingOrLoadingRequest(): Boolean = synchronized(pendingLock) {
+        preloadingGeneration == activeGeneration || pendingRequests.isNotEmpty()
+    }
+
+    private fun PlaybackPart.toTrack(parent: MusicTrack): MusicTrack = parent.copy(
+        id = id,
+        title = title.ifBlank { parent.title },
+        durationMs = durationMs ?: parent.durationMs,
+        providerId = id,
+    )
+
+    private fun MusicTrack.toLocalPayload(uri: String): PlaybackPayload = PlaybackPayload(
+        url = uri,
+        title = title,
+        artists = artists,
+        album = album,
+        source = source,
+        coverUrl = coverUrl,
+        durationMs = durationMs,
+        lyrics = lyrics,
+        providerName = providerName,
+        isSmartReplacement = isSmartReplacement,
+        originalTitle = originalTitle,
+        originalProviderName = originalProviderName,
+        originalCoverUrl = originalCoverUrl,
+        replacementTitle = replacementTitle,
+        replacementArtists = replacementArtists,
+        replacementSource = replacementSource,
+        replacementProviderName = replacementProviderName,
+        replacementCoverUrl = replacementCoverUrl,
+        replacementStrategy = replacementStrategy,
+        replacementScore = replacementScore,
+    )
+
+    private fun playbackErrorMessage(error: PlaybackException): String {
+        return listOf(error.errorCodeName, error.message)
+            .filterNot { it.isNullOrBlank() }
+            .joinToString(": ")
+            .ifBlank { "播放失败" }
+    }
+
+    private data class PreparedPlayback(
+        val request: PlaybackRequest,
+        val track: MusicTrack,
+        val payload: PlaybackPayload,
+        val mediaItem: MediaItem,
+        val mediaSource: ProgressiveMediaSource,
+    )
 
     private fun String.isRemoteUrl(): Boolean {
         val scheme = Uri.parse(this).scheme
@@ -265,14 +581,6 @@ class FuoPlaybackService : MediaSessionService() {
             averageBitrate = average,
             peakBitrate = peak,
         )
-    }
-
-    private fun String.playbackPayloadSummary(): String {
-        return runCatching {
-            val payload = JSONObject(this)
-            "trackId=${payload.optString("track_id")} source=${payload.optString("source")} " +
-                "url=${payload.optString("url").summarizePlaybackUrl()}"
-        }.getOrDefault("payload=<invalid>")
     }
 
     private fun String.summarizePlaybackUrl(): String {
@@ -325,7 +633,8 @@ class FuoPlaybackService : MediaSessionService() {
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
         private const val ACTION_RESUME = "org.feeluown.mobile.action.RESUME"
         private const val ACTION_STOP = "org.feeluown.mobile.action.STOP"
-        private const val EXTRA_PAYLOAD = "payload"
+        private const val EXTRA_PLAN = "plan"
+        private const val PLAYBACK_RESOLVE_TIMEOUT_MS = 30_000L
         private const val TAG = "FuoPlaybackService"
         private val queueNavigationCommands = setOf(
             Player.COMMAND_SEEK_TO_PREVIOUS,
@@ -346,10 +655,13 @@ class FuoPlaybackService : MediaSessionService() {
         private val mutableSpectrumLevels = MutableStateFlow<List<Float>>(emptyList())
         val spectrumLevels: StateFlow<List<Float>> = mutableSpectrumLevels.asStateFlow()
 
-        fun play(context: Context, payload: String) {
+        private val mutablePlaybackState = MutableStateFlow(PlaybackState())
+        val playbackState: StateFlow<PlaybackState> = mutablePlaybackState.asStateFlow()
+
+        fun play(context: Context, plan: String) {
             start(context, Intent(context, FuoPlaybackService::class.java).apply {
                 action = ACTION_PLAY
-                putExtra(EXTRA_PAYLOAD, payload)
+                putExtra(EXTRA_PLAN, plan)
             })
         }
 
