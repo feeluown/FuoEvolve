@@ -41,7 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -335,16 +335,12 @@ class FuoPlaybackService : MediaSessionService() {
     }
 
     private suspend fun resolvePlayback(request: PlaybackRequest): PreparedPlayback {
-        val payload = withTimeout(PLAYBACK_RESOLVE_TIMEOUT_MS) {
-            request.resolveTrack.localUri?.let { uri -> request.resolveTrack.toLocalPayload(uri) }
-                ?: (application as FuoEvolveApplication).providerRepository.resolve(
-                    request.resolveTrack,
-                    request.unavailablePolicy,
-                    request.smartReplacementProviderIds,
-                    request.smartReplacementMinScore,
-                    request.smartReplacementUseOriginalMetadata,
-                    request.smartReplacementUseOriginalLyrics,
-                )
+        val payload = if (request.unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace) {
+            resolvePlaybackPayload(request)
+        } else {
+            withTimeoutOrNull(PLAYBACK_RESOLVE_TIMEOUT_MS) {
+                resolvePlaybackPayload(request)
+            } ?: error("音频资源加载超时，请检查网络后重试")
         }
         val parts = payload.parts
         val currentPartIndex = when {
@@ -382,6 +378,18 @@ class FuoPlaybackService : MediaSessionService() {
             mediaItem = mediaItem,
             mediaSource = createMediaSource(mediaItem, payload.headers),
         )
+    }
+
+    private suspend fun resolvePlaybackPayload(request: PlaybackRequest): PlaybackPayload {
+        return request.resolveTrack.localUri?.let { uri -> request.resolveTrack.toLocalPayload(uri) }
+            ?: (application as FuoEvolveApplication).providerRepository.resolve(
+                request.resolveTrack,
+                request.unavailablePolicy,
+                request.smartReplacementProviderIds,
+                request.smartReplacementMinScore,
+                request.smartReplacementUseOriginalMetadata,
+                request.smartReplacementUseOriginalLyrics,
+            )
     }
 
     private fun createMediaItem(
