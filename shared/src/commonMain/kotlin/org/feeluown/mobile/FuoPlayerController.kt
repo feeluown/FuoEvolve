@@ -618,47 +618,49 @@ class FuoPlayerController(
                 toggleVideoFullscreen()
                 true
             }
-            isDebugLogOpen -> {
-                closeDebugLogs()
-                true
+            else -> when (navigator.currentRoute) {
+                AppRoute.DebugLogs -> {
+                    closeDebugLogs()
+                    true
+                }
+                AppRoute.DownloadManager -> {
+                    closeDownloadManager()
+                    true
+                }
+                AppRoute.Settings -> {
+                    if (settingsLoginProviderId != null) {
+                        closeSettingsProviderLogin()
+                    } else {
+                        closeSettings()
+                    }
+                    true
+                }
+                AppRoute.Video -> {
+                    closeVideo()
+                    true
+                }
+                AppRoute.Track -> {
+                    closeTrack()
+                    true
+                }
+                AppRoute.MediaItem -> {
+                    closeMediaItem()
+                    true
+                }
+                AppRoute.Playlist -> {
+                    closePlaylist()
+                    true
+                }
+                AppRoute.Feature -> {
+                    closeFeature()
+                    true
+                }
+                AppRoute.Search -> {
+                    closeSearch()
+                    true
+                }
+                AppRoute.Home -> false
             }
-            isDownloadManagerOpen -> {
-                closeDownloadManager()
-                true
-            }
-            isSettingsOpen && settingsLoginProviderId != null -> {
-                closeSettingsProviderLogin()
-                true
-            }
-            isSettingsOpen -> {
-                closeSettings()
-                true
-            }
-            selectedVideo != null -> {
-                closeVideo()
-                true
-            }
-            selectedTrack != null -> {
-                closeTrack()
-                true
-            }
-            selectedMediaItem != null -> {
-                closeMediaItem()
-                true
-            }
-            selectedPlaylist != null -> {
-                closePlaylist()
-                true
-            }
-            selectedFeature != null -> {
-                closeFeature()
-                true
-            }
-            isSearchOpen -> {
-                closeSearch()
-                true
-            }
-            else -> false
         }
     }
 

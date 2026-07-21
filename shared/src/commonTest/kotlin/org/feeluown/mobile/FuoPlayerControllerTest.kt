@@ -1782,6 +1782,37 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun navigateBackClosesSearchAboveTrackWithoutDiscardingTrack() = runTest {
+        val track = providerTrack("provider:1", "First")
+        val navigator = AppNavigator()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                navigator = navigator,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openTrackDetail(track)
+            controller.openTrackArtist(track)
+            advanceUntilIdle()
+
+            assertEquals(AppRoute.Search, navigator.currentRoute)
+            assertEquals(track.id, controller.selectedTrack?.id)
+
+            assertTrue(controller.navigateBack())
+            assertEquals(AppRoute.Track, navigator.currentRoute)
+            assertEquals(track.id, controller.selectedTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun navigateBackClosesPlaylistBeforeFeature() = runTest {
         val feature = ProviderFeature(
             id = "netease_daily_songs",
