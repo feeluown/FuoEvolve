@@ -6,10 +6,10 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
+internal class AndroidLegacySettingsLoader(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    override suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
+    suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
         val rawHomeSection = preferences.getString(KEY_HOME_SECTION, null)
         AppSettings(
             homeSection = homeSectionValue(rawHomeSection),
@@ -69,49 +69,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         )
     }
 
-    override suspend fun save(settings: AppSettings) {
-        withContext(Dispatchers.IO) {
-            preferences.edit()
-                .putString(KEY_HOME_SECTION, settings.homeSection.name)
-                .putString(KEY_MINE_SECTION, settings.mineSection.name)
-                .putString(KEY_PLAYLIST_FILTER, settings.playlistFilter.name)
-                .putString(KEY_LOCAL_MUSIC_VIEW_MODE, settings.localMusicViewMode.name)
-                .putStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS, settings.excludedLocalMusicDirectoryIds)
-                .putInt(KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS, settings.localMusicMinDurationSeconds)
-                .putString(KEY_SEARCH_SCOPE, settings.searchScope.name)
-                .putNullableString(KEY_SELECTED_SEARCH_PROVIDER_ID, settings.selectedSearchProviderId)
-                .putNullableString(KEY_SELECTED_SETTINGS_PROVIDER_ID, settings.selectedSettingsProviderId)
-                .putString(KEY_PROVIDER_LOGIN_MODE, settings.providerLoginMode.name)
-                .putString(KEY_PROVIDER_COOKIE_INPUTS, cookieInputsJson(settings.providerCookieInputs))
-                .putString(KEY_PROVIDER_HEADER_INPUTS, headerInputsJson(settings.providerHeaderInputs))
-                .putStringSet(KEY_ENABLED_PROVIDER_IDS, settings.enabledProviderIds)
-                .putString(KEY_PROVIDER_ORDER_IDS, stringListJson(settings.providerOrderIds))
-                .putStringSet(KEY_SEARCH_PROVIDER_IDS, settings.searchProviderIds)
-                .putStringSet(KEY_RECOMMEND_PROVIDER_IDS, settings.recommendProviderIds)
-                .putStringSet(KEY_EXPLORE_PROVIDER_IDS, settings.exploreProviderIds)
-                .putStringSet(KEY_MINE_PROVIDER_IDS, settings.mineProviderIds)
-                .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
-                .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
-                .putInt(KEY_DOWNLOAD_PARALLELISM, settings.downloadParallelism.coerceIn(1, 5))
-                .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
-                .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
-                .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
-                .putStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS, settings.smartReplacementProviderIds)
-                .putFloat(KEY_SMART_REPLACEMENT_MIN_SCORE, settings.smartReplacementMinScore.toFloat())
-                .putBoolean(
-                    KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA,
-                    settings.smartReplacementUseReplacementMetadata,
-                )
-                .putBoolean(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, settings.smartReplacementUseReplacementLyrics)
-                .putString(KEY_LYRIC_FONT_SIZE, settings.lyricFontSize.name)
-                .remove(KEY_SHOW_PLAYBACK_SPECTRUM)
-                .putString(KEY_PLAYBACK_SPECTRUM_STYLE, settings.playbackSpectrumStyle.name)
-                .putString(KEY_THEME_MODE, settings.themeMode.name)
-                .putString(KEY_THEME_COLOR_SCHEME, settings.themeColorScheme.name)
-                .apply()
-        }
-    }
-
     private inline fun <reified T : Enum<T>> enumValue(key: String, fallback: T): T {
         val raw = preferences.getString(key, null) ?: return fallback
         return runCatching { enumValueOf<T>(raw) }.getOrDefault(fallback)
@@ -146,16 +103,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
     }
 
 
-    private fun cookieInputsJson(inputs: Map<String, String>): String {
-        val json = JSONObject()
-        inputs.forEach { (key, value) ->
-            if (key.isNotBlank() && value.isNotBlank()) {
-                json.put(key, value)
-            }
-        }
-        return json.toString()
-    }
-
     private fun readHeaderInputs(): Map<String, ProviderHeaderInput> {
         val raw = preferences.getString(KEY_PROVIDER_HEADER_INPUTS, null).orEmpty()
         if (raw.isBlank()) return emptyMap()
@@ -178,21 +125,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         }.getOrDefault(emptyMap())
     }
 
-    private fun headerInputsJson(inputs: Map<String, ProviderHeaderInput>): String {
-        val json = JSONObject()
-        inputs.forEach { (providerId, input) ->
-            if (providerId.isNotBlank() && (input.authorization.isNotBlank() || input.cookie.isNotBlank())) {
-                json.put(
-                    providerId,
-                    JSONObject()
-                        .put("authorization", input.authorization)
-                        .put("cookie", input.cookie),
-                )
-            }
-        }
-        return json.toString()
-    }
-
     private fun readStringSet(key: String): Set<String> {
         return preferences.getStringSet(key, emptySet()).orEmpty().filter { it.isNotBlank() }.toSet()
     }
@@ -207,15 +139,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .distinct()
         }.getOrDefault(emptyList())
     }
-
-    private fun stringListJson(values: List<String>): String {
-        val array = JSONArray()
-        values.filter { it.isNotBlank() }.distinct().forEach { array.put(it) }
-        return array.toString()
-    }
-
-    private fun android.content.SharedPreferences.Editor.putNullableString(key: String, value: String?) =
-        if (value == null) remove(key) else putString(key, value)
 
     private companion object {
         private const val PREFS_NAME = "fuo_settings"

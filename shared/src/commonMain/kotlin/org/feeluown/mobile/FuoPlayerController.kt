@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -12,13 +13,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class SearchScope {
     Local,
     Provider,
     All,
 }
 
+@Serializable
 enum class ProviderSearchTab {
     Songs,
     Artists,
@@ -27,12 +31,14 @@ enum class ProviderSearchTab {
     Videos,
 }
 
+@Serializable
 enum class HomeSection {
     Recommend,
     Music,
     Mine,
 }
 
+@Serializable
 enum class ProviderDisplaySection(val label: String) {
     Search("搜索"),
     Recommend("推荐"),
@@ -41,6 +47,7 @@ enum class ProviderDisplaySection(val label: String) {
     Replace("替换"),
 }
 
+@Serializable
 enum class MineSection {
     Playlists,
     Songs,
@@ -49,12 +56,14 @@ enum class MineSection {
     LocalMusic,
 }
 
+@Serializable
 enum class PlaylistFilter {
     All,
     UserPlaylists,
     FavoritePlaylists,
 }
 
+@Serializable
 enum class LocalMusicViewMode {
     All,
     Artist,
@@ -71,7 +80,10 @@ class FuoPlayerController(
     private val localRepository: LocalMusicRepository,
     private val downloadRepository: DownloadRepository,
     private val playbackEngine: PlaybackEngine,
-    private val settingsStore: AppSettingsStore = NoOpAppSettingsStore,
+    private val settingsRepository: AppSettingsRepository = InMemoryAppSettingsRepository(),
+    private val providerSessionRepository: ProviderSessionRepository =
+        DefaultProviderSessionRepository(providerRepository),
+    private val navigator: AppNavigator = AppNavigator(),
     private val playbackQueueStore: PlaybackQueueStore = NoOpPlaybackQueueStore,
     private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository,
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
@@ -205,18 +217,18 @@ class FuoPlayerController(
         private set
     var localMusicMinDurationSeconds by mutableStateOf(DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS)
         private set
-    var isSearchOpen by mutableStateOf(false)
-        private set
+    val isSearchOpen: Boolean
+        get() = navigator.contains(AppRoute.Search)
     var isFullPlayerOpen by mutableStateOf(false)
         private set
     var isVideoFullscreen by mutableStateOf(false)
         private set
-    var isSettingsOpen by mutableStateOf(false)
-        private set
-    var isDebugLogOpen by mutableStateOf(false)
-        private set
-    var isDownloadManagerOpen by mutableStateOf(false)
-        private set
+    val isSettingsOpen: Boolean
+        get() = navigator.contains(AppRoute.Settings)
+    val isDebugLogOpen: Boolean
+        get() = navigator.contains(AppRoute.DebugLogs)
+    val isDownloadManagerOpen: Boolean
+        get() = navigator.contains(AppRoute.DownloadManager)
     var isQueueOpen by mutableStateOf(false)
         private set
     var isLoading by mutableStateOf(false)
@@ -286,15 +298,7 @@ class FuoPlayerController(
     val displayUpNextCount: Int
         get() = upNextQueue.size
     val canNavigateBack: Boolean
-        get() = isFullPlayerOpen ||
-            isDebugLogOpen ||
-            isSettingsOpen ||
-            isSearchOpen ||
-            selectedFeature != null ||
-            selectedTrack != null ||
-            selectedVideo != null ||
-            selectedMediaItem != null ||
-            selectedPlaylist != null
+        get() = isFullPlayerOpen || navigator.backStack.value.size > 1
 
     private var mainQueue: List<MusicTrack> = emptyList()
     private var originalMainQueue: List<MusicTrack> = emptyList()
@@ -328,10 +332,17 @@ class FuoPlayerController(
     private var pendingLocalMusicMediaRefresh: Job? = null
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
+    private val settingsUpdates = Channel<AppSettings>(capacity = Channel.UNLIMITED)
 
     init {
         scope.launch {
-            val loadedSettings = runCatching { settingsStore.load() }
+            for (settings in settingsUpdates) {
+                runCatching { settingsRepository.update { settings } }
+                    .onFailure { setError(it) }
+            }
+        }
+        scope.launch {
+            val loadedSettings = runCatching { settingsRepository.awaitSettings() }
             loadedSettings.getOrNull()?.let {
                 applySettings(it)
                 downloadRepository.updateParallelism(downloadParallelism)
@@ -356,6 +367,18 @@ class FuoPlayerController(
                 refreshHomeContent(homeSection, refreshCatalog = false)
             }.onFailure {
                 setError(it)
+            }
+        }
+        scope.launch {
+            providerSessionRepository.state.collect { sessionState ->
+                providerAuthStates = sessionState.authStates
+            }
+        }
+        scope.launch {
+            settingsRepository.state.collect { settingsState ->
+                if (settingsState.isLoaded) {
+                    applySettings(settingsState.settings)
+                }
             }
         }
         scope.launch {
@@ -443,12 +466,18 @@ class FuoPlayerController(
     }
 
     fun authStateFor(provider: ProviderInfo): ProviderAuthState {
-        return providerAuthStates[provider.providerId] ?: ProviderAuthState(
+        return providerSessionRepository.state.value.authStates[provider.providerId] ?: ProviderAuthState(
             providerId = provider.providerId,
             providerName = provider.providerName,
             isLoggedIn = false,
         )
     }
+
+    fun isProviderAuthBusy(providerId: String): Boolean =
+        providerId in providerSessionRepository.state.value.operations
+
+    fun providerAuthError(providerId: String): String? =
+        providerSessionRepository.state.value.errors[providerId]
 
     fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
 
@@ -563,11 +592,11 @@ class FuoPlayerController(
     }
 
     fun openSearch() {
-        isSearchOpen = true
+        navigator.navigate(AppRoute.Search)
     }
 
     fun closeSearch() {
-        isSearchOpen = false
+        navigator.pop(AppRoute.Search)
     }
 
     fun navigateBack(): Boolean {
@@ -631,16 +660,14 @@ class FuoPlayerController(
     fun openSettings(providerId: String? = null) {
         providerId?.takeIf { it.isNotBlank() }?.let { selectedSettingsProviderId = it }
         providerId?.takeIf { it.isNotBlank() }?.let { settingsLoginProviderId = it }
-        isSettingsOpen = true
+        navigator.navigate(AppRoute.Settings)
         refreshAllProviderAuthStates(refreshUserInfo = true)
         refreshResourceCacheUsage()
         refreshLocalMusicDirectories()
     }
 
     fun closeSettings() {
-        isSettingsOpen = false
-        isDebugLogOpen = false
-        isDownloadManagerOpen = false
+        navigator.pop(AppRoute.Settings)
         settingsLoginProviderId = null
     }
 
@@ -656,20 +683,20 @@ class FuoPlayerController(
 
     fun openDebugLogs() {
         if (!debugLogRepository.isAvailable) return
-        isDebugLogOpen = true
+        navigator.navigate(AppRoute.DebugLogs)
         refreshDebugLogs()
     }
 
     fun closeDebugLogs() {
-        isDebugLogOpen = false
+        navigator.pop(AppRoute.DebugLogs)
     }
 
     fun openDownloadManager() {
-        isDownloadManagerOpen = true
+        navigator.navigate(AppRoute.DownloadManager)
     }
 
     fun closeDownloadManager() {
-        isDownloadManagerOpen = false
+        navigator.pop(AppRoute.DownloadManager)
     }
 
     fun dismissDownloadQueueFeedback(feedback: String) {
@@ -715,19 +742,16 @@ class FuoPlayerController(
 
     fun onProviderCookiesChange(providerId: String, value: String) {
         providerCookieInputs = providerCookieInputs + (providerId to value)
-        persistSettings()
     }
 
     fun onProviderHeaderAuthorizationChange(providerId: String, value: String) {
         val input = providerHeaderInputFor(providerId).copy(authorization = value)
         providerHeaderInputs = providerHeaderInputs + (providerId to input)
-        persistSettings()
     }
 
     fun onProviderHeaderCookieChange(providerId: String, value: String) {
         val input = providerHeaderInputFor(providerId).copy(cookie = value)
         providerHeaderInputs = providerHeaderInputs + (providerId to input)
-        persistSettings()
     }
 
     fun onSettingsProviderChange(providerId: String) {
@@ -868,11 +892,9 @@ class FuoPlayerController(
             return
         }
         scope.launch {
-            isLoading = true
             message = "正在登录 $providerName"
-            runCatching { providerRepository.loginWithCookies(providerId, cookies) }
+            runCatching { providerSessionRepository.loginWithCookies(providerId, cookies) }
                 .onSuccess {
-                    providerAuthStates = providerAuthStates + (providerId to it)
                     providerCookieInputs = providerCookieInputs - providerId
                     persistSettings()
                     message = if (it.isLoggedIn) {
@@ -887,7 +909,6 @@ class FuoPlayerController(
                     }
                 }
                 .onFailure { setError(it) }
-            isLoading = false
         }
     }
 
@@ -901,11 +922,9 @@ class FuoPlayerController(
             return
         }
         scope.launch {
-            isLoading = true
             message = "正在登录 $providerName"
-            runCatching { providerRepository.loginWithHeaders(providerId, authorization, cookie) }
+            runCatching { providerSessionRepository.loginWithHeaders(providerId, authorization, cookie) }
                 .onSuccess {
-                    providerAuthStates = providerAuthStates + (providerId to it)
                     persistSettings()
                     message = if (it.isLoggedIn) {
                         "${it.providerName} 已登录：${it.userName.orEmpty()}"
@@ -919,7 +938,6 @@ class FuoPlayerController(
                     }
                 }
                 .onFailure { setError(it) }
-            isLoading = false
         }
     }
 
@@ -930,11 +948,9 @@ class FuoPlayerController(
         }
         val providerName = providerName("ytmusic")
         scope.launch {
-            isLoading = true
             message = "正在登录 $providerName"
-            runCatching { providerRepository.loginWithYtmusicHeaderFile(headerFileJson) }
+            runCatching { providerSessionRepository.loginWithYtmusicHeaderFile(headerFileJson) }
                 .onSuccess {
-                    providerAuthStates = providerAuthStates + ("ytmusic" to it)
                     message = if (it.isLoggedIn) {
                         "${it.providerName} 已登录：${it.userName.orEmpty()}"
                     } else {
@@ -947,18 +963,15 @@ class FuoPlayerController(
                     }
                 }
                 .onFailure { setError(it) }
-            isLoading = false
         }
     }
 
     fun logoutProvider(providerId: String) {
         val providerName = providerName(providerId)
         scope.launch {
-            isLoading = true
             message = "正在退出 $providerName"
-            runCatching { providerRepository.logout(providerId) }
+            runCatching { providerSessionRepository.logout(providerId) }
                 .onSuccess {
-                    providerAuthStates = providerAuthStates + (providerId to it)
                     providerCookieInputs = providerCookieInputs - providerId
                     providerHeaderInputs = providerHeaderInputs - providerId
                     persistSettings()
@@ -970,7 +983,6 @@ class FuoPlayerController(
                     }
                 }
                 .onFailure { setError(it) }
-            isLoading = false
         }
     }
 
@@ -1315,7 +1327,7 @@ class FuoPlayerController(
             searchScope = SearchScope.Provider
             selectedSearchProviderId = providerId
         }
-        isSearchOpen = true
+        navigator.navigate(AppRoute.Search)
         search()
     }
 
@@ -1463,6 +1475,7 @@ class FuoPlayerController(
     }
 
     fun openFeature(feature: ProviderFeature) {
+        navigator.navigate(AppRoute.Feature)
         selectedFeature = feature
         selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
@@ -1509,6 +1522,7 @@ class FuoPlayerController(
     }
 
     fun closeFeature() {
+        navigator.pop(AppRoute.Feature)
         selectedFeature = null
         selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
@@ -1520,6 +1534,7 @@ class FuoPlayerController(
 
     fun openTrackDetail(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
+        navigator.navigate(AppRoute.Track)
         selectedTrack = track
         selectedTrackError = null
         selectedTrackSimilar = emptyList()
@@ -1569,6 +1584,7 @@ class FuoPlayerController(
     }
 
     private suspend fun openSharedTrack(resource: ShareResourceRef) {
+        navigator.navigate(AppRoute.Track)
         val placeholder = MusicTrack(
             id = resource.toProviderTrackId(),
             title = resource.title,
@@ -1597,6 +1613,7 @@ class FuoPlayerController(
     }
 
     fun closeTrack() {
+        navigator.pop(AppRoute.Track)
         selectedTrack = null
         selectedTrackError = null
         selectedTrackSimilar = emptyList()
@@ -1634,6 +1651,7 @@ class FuoPlayerController(
     }
 
     fun openVideo(video: ProviderVideo) {
+        navigator.navigate(AppRoute.Video)
         selectedVideo = video
         selectedVideoPayload = null
         selectedVideoError = null
@@ -1665,6 +1683,7 @@ class FuoPlayerController(
     }
 
     fun closeVideo() {
+        navigator.pop(AppRoute.Video)
         isVideoFullscreen = false
         selectedVideo = null
         selectedVideoPayload = null
@@ -1878,6 +1897,7 @@ class FuoPlayerController(
     }
 
     fun openPlaylist(playlist: ProviderPlaylist, category: ProviderFeatureCategory? = null) {
+        navigator.navigate(AppRoute.Playlist)
         selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = playlist
         selectedPlaylistCategory = category
@@ -1922,6 +1942,7 @@ class FuoPlayerController(
     }
 
     fun closePlaylist() {
+        navigator.pop(AppRoute.Playlist)
         selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = null
         selectedPlaylistCategory = null
@@ -1934,6 +1955,7 @@ class FuoPlayerController(
     }
 
     fun openMediaItem(item: ProviderMediaItem) {
+        navigator.navigate(AppRoute.MediaItem)
         selectedMediaItem = item
         selectedMediaItemTracks = emptyList()
         selectedMediaItemTracksNextOffset = 0
@@ -1984,6 +2006,7 @@ class FuoPlayerController(
     }
 
     fun closeMediaItem() {
+        navigator.pop(AppRoute.MediaItem)
         selectedMediaItem = null
         selectedMediaItemTracks = emptyList()
         selectedMediaItemTracksNextOffset = 0
@@ -2681,13 +2704,7 @@ class FuoPlayerController(
                 searchScope = SearchScope.All
             }
         }
-        providerAuthStates = loadedProviders.associate { provider ->
-            provider.providerId to (providerAuthStates[provider.providerId] ?: ProviderAuthState(
-                providerId = provider.providerId,
-                providerName = provider.providerName,
-                isLoggedIn = false,
-            ))
-        }
+        providerSessionRepository.updateProviders(loadedProviders)
         providerCapabilities = providerRepository.providerCapabilities()
             .associateBy { it.providerId }
         providerFeatures = providerRepository.features().sortedFeaturesByOrder()
@@ -2705,6 +2722,15 @@ class FuoPlayerController(
     }
 
     private fun clearProviderContent() {
+        navigator.remove(
+            setOf(
+                AppRoute.Feature,
+                AppRoute.Track,
+                AppRoute.Video,
+                AppRoute.Playlist,
+                AppRoute.MediaItem,
+            ),
+        )
         selectedPlaylistBackgroundLoadJob?.cancel()
         recommendSections = emptyList()
         musicSections = emptyList()
@@ -2756,17 +2782,17 @@ class FuoPlayerController(
         providers.forEach { provider ->
             runCatching {
                 if (refreshUserInfo) {
-                    providerRepository.refreshAuthState(provider.providerId)
+                    providerSessionRepository.refresh(provider.providerId, refreshUserInfo = true)
                 } else {
-                    providerRepository.authState(provider.providerId)
+                    providerSessionRepository.refresh(provider.providerId)
                 }
             }
-                .onSuccess { providerAuthStates = providerAuthStates + (provider.providerId to it) }
+                .onFailure { setError(it) }
         }
     }
 
     private fun isProviderLoggedIn(providerId: String): Boolean {
-        return providerAuthStates[providerId]?.isLoggedIn == true
+        return providerSessionRepository.state.value.authStates[providerId]?.isLoggedIn == true
     }
 
     private fun trackProviderId(track: MusicTrack): String? {
@@ -3422,8 +3448,6 @@ class FuoPlayerController(
         selectedSearchProviderId = settings.selectedSearchProviderId
         selectedSettingsProviderId = settings.selectedSettingsProviderId
         providerLoginMode = settings.providerLoginMode
-        providerCookieInputs = settings.providerCookieInputs
-        providerHeaderInputs = settings.providerHeaderInputs
         enabledProviderIds = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
         providerOrderIds = settings.providerOrderIds.ifEmpty { DEFAULT_PROVIDER_ORDER_IDS }
         searchProviderIds = settings.searchProviderIds
@@ -3458,8 +3482,6 @@ class FuoPlayerController(
             selectedSearchProviderId = selectedSearchProviderId,
             selectedSettingsProviderId = selectedSettingsProviderId,
             providerLoginMode = providerLoginMode,
-            providerCookieInputs = providerCookieInputs,
-            providerHeaderInputs = providerHeaderInputs,
             enabledProviderIds = enabledProviderIds,
             providerOrderIds = providerOrderIds,
             searchProviderIds = searchProviderIds,
@@ -3481,9 +3503,7 @@ class FuoPlayerController(
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
         )
-        scope.launch {
-            settingsStore.save(settings)
-        }
+        settingsUpdates.trySend(settings)
     }
 
     private suspend fun updateResourceCacheLimit() {

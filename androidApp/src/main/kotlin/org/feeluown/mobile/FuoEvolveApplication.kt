@@ -28,9 +28,15 @@ class FuoEvolveApplication : PyApplication() {
         AndroidNativeAudioEngine(applicationContext, appScope)
     }
 
-    private val settingsStore: AndroidAppSettingsStore by lazy {
-        AndroidAppSettingsStore(applicationContext)
+    private val settingsRepository: AppSettingsRepository by lazy {
+        createAndroidAppSettingsRepository(applicationContext, appScope)
     }
+
+    private val providerSessionRepository: ProviderSessionRepository by lazy {
+        DefaultProviderSessionRepository(providerRepository)
+    }
+
+    private val navigator by lazy { AppNavigator() }
 
     private val playbackQueueStore: AndroidPlaybackQueueStore by lazy {
         AndroidPlaybackQueueStore(applicationContext)
@@ -50,7 +56,9 @@ class FuoEvolveApplication : PyApplication() {
             localRepository = localRepository,
             downloadRepository = downloadRepository,
             playbackEngine = playbackEngine,
-            settingsStore = settingsStore,
+            settingsRepository = settingsRepository,
+            providerSessionRepository = providerSessionRepository,
+            navigator = navigator,
             playbackQueueStore = playbackQueueStore,
             resourceCacheRepository = resourceCacheRepository,
             debugLogRepository = debugLogRepository,
@@ -82,6 +90,15 @@ class FuoEvolveApplication : PyApplication() {
                 }
             }
         }
+    }
+
+    val appViewModel: FuoAppViewModel by lazy {
+        FuoAppViewModel(
+            controller = controller,
+            settingsRepository = settingsRepository,
+            providerSessionRepository = providerSessionRepository,
+            navigator = navigator,
+        )
     }
 
     override fun onTerminate() {

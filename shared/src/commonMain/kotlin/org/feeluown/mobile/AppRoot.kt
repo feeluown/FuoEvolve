@@ -1,20 +1,15 @@
 package org.feeluown.mobile
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -133,6 +128,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation3.runtime.NavEntry
+import androidx.navigation3.ui.NavDisplay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
@@ -152,7 +150,7 @@ data class AppLayoutInfo(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun AppRoot(
-    controller: FuoPlayerController,
+    appViewModel: FuoAppViewModel,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
@@ -161,9 +159,11 @@ fun AppRoot(
     onShareText: (String) -> Unit = {},
     appVersionInfo: String? = null,
 ) {
+    val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
+    val controller = appViewModel.controller
     FuoEvolveTheme(
-        themeMode = controller.themeMode,
-        themeColorScheme = controller.themeColorScheme,
+        themeMode = appUiState.settings.settings.themeMode,
+        themeColorScheme = appUiState.settings.settings.themeColorScheme,
     ) {
         val snackbarHostState = remember { SnackbarHostState() }
         val playlistOperationFeedback = controller.playlistOperationFeedback
@@ -193,7 +193,6 @@ fun AppRoot(
                 )
             }
 
-            val destination = appDestination(controller)
             val currentFeature = controller.selectedFeature
             val currentTrack = controller.selectedTrack
             val currentVideo = controller.selectedVideo
@@ -238,42 +237,37 @@ fun AppRoot(
                 SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalPlayerSharedTransitionScope provides this) {
                         Box(modifier = Modifier.fillMaxSize()) {
-                            AnimatedContent(
-                                targetState = destination,
+                            NavDisplay(
+                                backStack = appUiState.backStack,
                                 modifier = Modifier.fillMaxSize(),
-                                transitionSpec = {
-                                    val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                                    (slideInHorizontally(animationSpec = tween(220)) { it / 5 * direction } + fadeIn(tween(180)))
-                                        .togetherWith(
-                                            slideOutHorizontally(animationSpec = tween(180)) { -it / 6 * direction } +
-                                                fadeOut(tween(160)),
-                                        )
-                                        .using(SizeTransform(clip = false))
+                                onBack = { appViewModel.dispatch(AppIntent.NavigateBack) },
+                                entryProvider = { route ->
+                                    NavEntry(route) {
+                                        when (route) {
+                                            AppRoute.Home -> HomeScreen(
+                                                controller = controller,
+                                                hasAudioPermission = hasAudioPermission,
+                                                onRequestAudioPermission = onRequestAudioPermission,
+                                            )
+                                            AppRoute.DebugLogs -> DebugLogScreen(controller)
+                                            AppRoute.DownloadManager -> DownloadManagerScreen(controller)
+                                            AppRoute.Settings -> SettingsScreen(
+                                                controller,
+                                                onOpenProviderWebLogin,
+                                                onLogoutProvider,
+                                                onImportYtmusicHeaderFile,
+                                                appVersionInfo,
+                                            )
+                                            AppRoute.Search -> SearchScreen(controller)
+                                            AppRoute.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
+                                            AppRoute.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
+                                            AppRoute.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
+                                            AppRoute.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
+                                            AppRoute.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
+                                        }
+                                    }
                                 },
-                            ) { target ->
-                                when (target) {
-                                    AppDestination.Home -> HomeScreen(
-                                        controller = controller,
-                                        hasAudioPermission = hasAudioPermission,
-                                        onRequestAudioPermission = onRequestAudioPermission,
-                                    )
-                                    AppDestination.DebugLogs -> DebugLogScreen(controller)
-                                    AppDestination.DownloadManager -> DownloadManagerScreen(controller)
-                                    AppDestination.Settings -> SettingsScreen(
-                                        controller,
-                                        onOpenProviderWebLogin,
-                                        onLogoutProvider,
-                                        onImportYtmusicHeaderFile,
-                                        appVersionInfo,
-                                    )
-                                    AppDestination.Search -> SearchScreen(controller)
-                                    AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
-                                    AppDestination.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
-                                    AppDestination.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
-                                    AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
-                                    AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
-                                }
-                            }
+                            )
                             AnimatedVisibility(
                                 visible = controller.isFullPlayerOpen,
                                 modifier = Modifier.fillMaxSize(),
@@ -380,31 +374,4 @@ fun ProviderPlaylistTargetDialog(controller: FuoPlayerController, track: MusicTr
             }
         },
     )
-}
-private enum class AppDestination {
-    Home,
-    Feature,
-    Track,
-    Video,
-    Playlist,
-    Search,
-    Settings,
-    DebugLogs,
-    DownloadManager,
-    MediaItem,
-}
-
-private fun appDestination(controller: FuoPlayerController): AppDestination {
-    return when {
-        controller.isDebugLogOpen -> AppDestination.DebugLogs
-        controller.isDownloadManagerOpen -> AppDestination.DownloadManager
-        controller.isSettingsOpen -> AppDestination.Settings
-        controller.selectedVideo != null -> AppDestination.Video
-        controller.selectedTrack != null -> AppDestination.Track
-        controller.selectedMediaItem != null -> AppDestination.MediaItem
-        controller.selectedPlaylist != null -> AppDestination.Playlist
-        controller.selectedFeature != null -> AppDestination.Feature
-        controller.isSearchOpen -> AppDestination.Search
-        else -> AppDestination.Home
-    }
 }

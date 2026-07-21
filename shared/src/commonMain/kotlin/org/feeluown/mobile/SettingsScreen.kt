@@ -485,6 +485,8 @@ fun ProviderLoginPanel(
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val authState = controller.authStateFor(provider)
+    val isAuthBusy = controller.isProviderAuthBusy(provider.providerId)
+    val authError = controller.providerAuthError(provider.providerId)
     val supportedLoginModes = listOf(
         ProviderLoginMode.WebView,
         ProviderLoginMode.Cookie,
@@ -532,12 +534,19 @@ fun ProviderLoginPanel(
                     },
                 )
             }
+            authError?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             if (authState.isLoggedIn) {
                 Button(
-                    enabled = !controller.isLoading,
+                    enabled = !isAuthBusy,
                     onClick = { onLogoutProvider(provider) },
                 ) {
-                    Text(if (controller.isLoading) "退出中" else "退出登录")
+                    Text(if (isAuthBusy) "退出中" else "退出登录")
                 }
                 return@Column
             }
@@ -558,12 +567,12 @@ fun ProviderLoginPanel(
             when (activeLoginMode) {
                 ProviderLoginMode.WebView -> {
                     Button(
-                        enabled = !controller.isLoading && provider.loginConfig != null,
+                        enabled = !isAuthBusy && provider.loginConfig != null,
                         onClick = { onOpenProviderWebLogin(provider) },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text(if (controller.isLoading) "登录中" else "WebView 登录")
+                        Text(if (isAuthBusy) "登录中" else "WebView 登录")
                     }
                 }
                 ProviderLoginMode.Cookie -> {
@@ -578,7 +587,7 @@ fun ProviderLoginPanel(
                         maxLines = 8,
                     )
                     Button(
-                        enabled = !controller.isLoading,
+                        enabled = !isAuthBusy,
                         onClick = {
                             controller.loginProviderWithCookies(
                                 provider.providerId,
@@ -588,14 +597,14 @@ fun ProviderLoginPanel(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text(if (controller.isLoading) "登录中" else "登录")
+                        Text(if (isAuthBusy) "登录中" else "登录")
                     }
                 }
                 ProviderLoginMode.Headers -> {
                     val headerInput = controller.providerHeaderInputFor(provider.providerId)
                     if (provider.providerId == "ytmusic" && onImportYtmusicHeaderFile != null) {
                         Button(
-                            enabled = !controller.isLoading,
+                            enabled = !isAuthBusy,
                             onClick = onImportYtmusicHeaderFile,
                         ) {
                             Text("导入 ytmusic_header.json")
@@ -619,12 +628,12 @@ fun ProviderLoginPanel(
                         maxLines = 8,
                     )
                     Button(
-                        enabled = !controller.isLoading,
+                        enabled = !isAuthBusy,
                         onClick = { controller.loginProviderWithHeaders(provider.providerId) },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text(if (controller.isLoading) "登录中" else "登录")
+                        Text(if (isAuthBusy) "登录中" else "登录")
                     }
                 }
             }

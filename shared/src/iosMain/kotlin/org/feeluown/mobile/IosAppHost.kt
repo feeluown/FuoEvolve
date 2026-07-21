@@ -53,7 +53,7 @@ private fun IosApp(
         )
     }
     AppRoot(
-        controller = container.controller,
+        appViewModel = container.appViewModel,
         hasAudioPermission = container.hasAudioPermission,
         onRequestAudioPermission = container::requestAudioPermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
@@ -75,7 +75,9 @@ private class IosAppContainer(
     private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
     private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
     private val playbackEngine = IosNativeAudioEngine(scope, audioOutput)
-    private val settingsStore = IosAppSettingsStore()
+    private val settingsRepository = createIosAppSettingsRepository(scope)
+    private val providerSessionRepository = DefaultProviderSessionRepository(providerRepository)
+    private val navigator = AppNavigator()
     private val playbackQueueStore = IosPlaybackQueueStore()
     private val resourceCacheRepository = IosResourceCacheRepository()
 
@@ -84,10 +86,19 @@ private class IosAppContainer(
         localRepository = localRepository,
         downloadRepository = downloadRepository,
         playbackEngine = playbackEngine,
-        settingsStore = settingsStore,
+        settingsRepository = settingsRepository,
+        providerSessionRepository = providerSessionRepository,
+        navigator = navigator,
         playbackQueueStore = playbackQueueStore,
         resourceCacheRepository = resourceCacheRepository,
         scope = scope,
+    )
+
+    val appViewModel = FuoAppViewModel(
+        controller = controller,
+        settingsRepository = settingsRepository,
+        providerSessionRepository = providerSessionRepository,
+        navigator = navigator,
     )
 
     val hasAudioPermission: Boolean

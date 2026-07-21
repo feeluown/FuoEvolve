@@ -4,10 +4,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import platform.Foundation.NSUserDefaults
 
-class IosAppSettingsStore : AppSettingsStore {
+internal class IosLegacySettingsLoader {
     private val defaults = NSUserDefaults.standardUserDefaults
 
-    override suspend fun load(): AppSettings = withContext(Dispatchers.Default) {
+    suspend fun load(): AppSettings = withContext(Dispatchers.Default) {
         AppSettings(
             homeSection = enumValue(KEY_HOME_SECTION, HomeSection.Recommend),
             mineSection = enumValue(KEY_MINE_SECTION, MineSection.Playlists),
@@ -50,43 +50,6 @@ class IosAppSettingsStore : AppSettingsStore {
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
-    }
-
-    override suspend fun save(settings: AppSettings) {
-        withContext(Dispatchers.Default) {
-            defaults.setObject(settings.homeSection.name, KEY_HOME_SECTION)
-            defaults.setObject(settings.mineSection.name, KEY_MINE_SECTION)
-            defaults.setObject(settings.localMusicViewMode.name, KEY_LOCAL_MUSIC_VIEW_MODE)
-            defaults.setObject(settings.excludedLocalMusicDirectoryIds.joinToString(LIST_SEPARATOR), KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS)
-            defaults.setInteger(settings.localMusicMinDurationSeconds.toLong(), KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS)
-            defaults.setObject(settings.searchScope.name, KEY_SEARCH_SCOPE)
-            defaults.setNullableString(settings.selectedSearchProviderId, KEY_SELECTED_SEARCH_PROVIDER_ID)
-            defaults.setNullableString(settings.selectedSettingsProviderId, KEY_SELECTED_SETTINGS_PROVIDER_ID)
-            defaults.setObject(settings.providerLoginMode.name, KEY_PROVIDER_LOGIN_MODE)
-            defaults.setObject(stringMapValue(settings.providerCookieInputs), KEY_PROVIDER_COOKIE_INPUTS)
-            defaults.setObject(headerInputsValue(settings.providerHeaderInputs), KEY_PROVIDER_HEADER_INPUTS)
-            defaults.setObject(settings.enabledProviderIds.joinToString(LIST_SEPARATOR), KEY_ENABLED_PROVIDER_IDS)
-            defaults.setObject(settings.providerOrderIds.joinToString(LIST_SEPARATOR), KEY_PROVIDER_ORDER_IDS)
-            defaults.setObject(settings.searchProviderIds.joinToString(LIST_SEPARATOR), KEY_SEARCH_PROVIDER_IDS)
-            defaults.setObject(settings.recommendProviderIds.joinToString(LIST_SEPARATOR), KEY_RECOMMEND_PROVIDER_IDS)
-            defaults.setObject(settings.exploreProviderIds.joinToString(LIST_SEPARATOR), KEY_EXPLORE_PROVIDER_IDS)
-            defaults.setObject(settings.mineProviderIds.joinToString(LIST_SEPARATOR), KEY_MINE_PROVIDER_IDS)
-            defaults.setInteger(settings.audioCacheLimitMb.toLong(), KEY_AUDIO_CACHE_LIMIT_MB)
-            defaults.setInteger(settings.imageCacheLimitMb.toLong(), KEY_IMAGE_CACHE_LIMIT_MB)
-            defaults.setInteger(settings.downloadParallelism.coerceIn(1, 5).toLong(), KEY_DOWNLOAD_PARALLELISM)
-            defaults.setObject(settings.wifiAudioQualityPolicy.name, KEY_WIFI_AUDIO_QUALITY_POLICY)
-            defaults.setObject(settings.cellularAudioQualityPolicy.name, KEY_CELLULAR_AUDIO_QUALITY_POLICY)
-            defaults.setObject(settings.unavailablePlaybackPolicy.name, KEY_UNAVAILABLE_PLAYBACK_POLICY)
-            defaults.setDouble(settings.smartReplacementMinScore, KEY_SMART_REPLACEMENT_MIN_SCORE)
-            defaults.setBool(settings.smartReplacementUseReplacementMetadata, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA)
-            defaults.setBool(settings.smartReplacementUseReplacementLyrics, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS)
-            defaults.setObject(settings.lyricFontSize.name, KEY_LYRIC_FONT_SIZE)
-            defaults.removeObjectForKey(KEY_SHOW_PLAYBACK_SPECTRUM)
-            defaults.setObject(settings.playbackSpectrumStyle.name, KEY_PLAYBACK_SPECTRUM_STYLE)
-            defaults.setObject(settings.themeMode.name, KEY_THEME_MODE)
-            defaults.setObject(settings.themeColorScheme.name, KEY_THEME_COLOR_SCHEME)
-            defaults.synchronize()
-        }
     }
 
     private inline fun <reified T : Enum<T>> enumValue(key: String, fallback: T): T {
@@ -144,26 +107,6 @@ class IosAppSettingsStore : AppSettingsStore {
                 authorization = parts.getOrElse(0) { "" },
                 cookie = parts.getOrElse(1) { "" },
             )
-        }
-    }
-
-    private fun stringMapValue(values: Map<String, String>): String {
-        return values.entries
-            .filter { it.key.isNotBlank() && it.value.isNotBlank() }
-            .joinToString("\n") { "${it.key}$MAP_SEPARATOR${it.value}" }
-    }
-
-    private fun headerInputsValue(values: Map<String, ProviderHeaderInput>): String {
-        return stringMapValue(values.mapValues { (_, input) ->
-            "${input.authorization}$HEADER_SEPARATOR${input.cookie}"
-        })
-    }
-
-    private fun NSUserDefaults.setNullableString(value: String?, key: String) {
-        if (value == null) {
-            removeObjectForKey(key)
-        } else {
-            setObject(value, key)
         }
     }
 
