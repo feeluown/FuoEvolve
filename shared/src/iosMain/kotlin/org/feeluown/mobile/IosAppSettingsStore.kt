@@ -9,6 +9,7 @@ class IosAppSettingsStore : AppSettingsStore {
 
     override suspend fun load(): AppSettings = withContext(Dispatchers.Default) {
         AppSettings(
+            onboardingCompleted = boolValue(KEY_ONBOARDING_COMPLETED, false),
             homeSection = enumValue(KEY_HOME_SECTION, HomeSection.Recommend),
             mineSection = enumValue(KEY_MINE_SECTION, MineSection.Playlists),
             localMusicViewMode = enumValue(KEY_LOCAL_MUSIC_VIEW_MODE, LocalMusicViewMode.All),
@@ -35,6 +36,7 @@ class IosAppSettingsStore : AppSettingsStore {
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
             cellularAudioQualityPolicy = enumValue(KEY_CELLULAR_AUDIO_QUALITY_POLICY, DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY),
             unavailablePlaybackPolicy = enumValue(KEY_UNAVAILABLE_PLAYBACK_POLICY, DEFAULT_UNAVAILABLE_PLAYBACK_POLICY),
+            smartReplacementProviderIds = readStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS),
             smartReplacementMinScore = doubleValue(
                 KEY_SMART_REPLACEMENT_MIN_SCORE,
                 DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
@@ -54,6 +56,7 @@ class IosAppSettingsStore : AppSettingsStore {
 
     override suspend fun save(settings: AppSettings) {
         withContext(Dispatchers.Default) {
+            defaults.setBool(settings.onboardingCompleted, KEY_ONBOARDING_COMPLETED)
             defaults.setObject(settings.homeSection.name, KEY_HOME_SECTION)
             defaults.setObject(settings.mineSection.name, KEY_MINE_SECTION)
             defaults.setObject(settings.localMusicViewMode.name, KEY_LOCAL_MUSIC_VIEW_MODE)
@@ -77,6 +80,10 @@ class IosAppSettingsStore : AppSettingsStore {
             defaults.setObject(settings.wifiAudioQualityPolicy.name, KEY_WIFI_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.cellularAudioQualityPolicy.name, KEY_CELLULAR_AUDIO_QUALITY_POLICY)
             defaults.setObject(settings.unavailablePlaybackPolicy.name, KEY_UNAVAILABLE_PLAYBACK_POLICY)
+            defaults.setObject(
+                settings.smartReplacementProviderIds.joinToString(LIST_SEPARATOR),
+                KEY_SMART_REPLACEMENT_PROVIDER_IDS,
+            )
             defaults.setDouble(settings.smartReplacementMinScore, KEY_SMART_REPLACEMENT_MIN_SCORE)
             defaults.setBool(settings.smartReplacementUseReplacementMetadata, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA)
             defaults.setBool(settings.smartReplacementUseReplacementLyrics, KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS)
@@ -171,6 +178,7 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val LIST_SEPARATOR = "\u001f"
         private const val MAP_SEPARATOR = "\u001e"
         private const val HEADER_SEPARATOR = "\u001d"
+        private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_HOME_SECTION = "home_section"
         private const val KEY_MINE_SECTION = "mine_section"
         private const val KEY_LOCAL_MUSIC_VIEW_MODE = "local_music_view_mode"
@@ -194,6 +202,7 @@ class IosAppSettingsStore : AppSettingsStore {
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
+        private const val KEY_SMART_REPLACEMENT_PROVIDER_IDS = "smart_replacement_provider_ids"
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"

@@ -77,6 +77,10 @@ class FuoPlayerController(
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val scope: CoroutineScope,
 ) {
+    var isSettingsLoaded by mutableStateOf(false)
+        private set
+    var onboardingCompleted by mutableStateOf(false)
+        private set
     var availableProviders by mutableStateOf<List<ProviderInfo>>(emptyList())
         private set
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
@@ -336,6 +340,7 @@ class FuoPlayerController(
                 applySettings(it)
                 downloadRepository.updateParallelism(downloadParallelism)
             }
+            isSettingsLoaded = true
             runCatching { playbackQueueStore.load() }
                 .onSuccess { restorePlaybackQueue(it) }
             updateLocalMusicScanSettings()
@@ -760,6 +765,88 @@ class FuoPlayerController(
             }.onFailure {
                 setError(it)
             }
+            isLoading = false
+        }
+    }
+
+    suspend fun configureOnboardingProviders(
+        selectedProviderIds: Set<String>,
+        bilibiliReplacementOnly: Boolean,
+    ): Boolean {
+        val availableProviderIds = availableProviders.map { it.providerId }.toSet()
+        val selectedIds = selectedProviderIds.intersect(availableProviderIds)
+        if (selectedIds.isEmpty()) {
+            message = "请至少选择一个音源"
+            return false
+        }
+        if (bilibiliReplacementOnly && selectedIds == setOf("bilibili")) {
+            message = "Bilibili 仅作为替换音源时，请再选择一个常规音源"
+            return false
+        }
+
+        val previousSettings = currentSettings()
+        isLoading = true
+        message = "正在初始化音源"
+        return runCatching {
+            enabledProviderIds = selectedIds
+            if (bilibiliReplacementOnly && "bilibili" in selectedIds) {
+                val regularProviderIds = selectedIds - "bilibili"
+                searchProviderIds = regularProviderIds
+                recommendProviderIds = regularProviderIds
+                exploreProviderIds = regularProviderIds
+                mineProviderIds = regularProviderIds
+                smartReplacementProviderIds = setOf("bilibili")
+                unavailablePlaybackPolicy = UnavailablePlaybackPolicy.SmartReplace
+            } else {
+                searchProviderIds = emptySet()
+                recommendProviderIds = emptySet()
+                exploreProviderIds = emptySet()
+                mineProviderIds = emptySet()
+                smartReplacementProviderIds = emptySet()
+            }
+            providerRepository.updateEnabledProviders(enabledProviderIds)
+            clearProviderContent()
+            refreshProviderCatalog()
+            settingsStore.save(currentSettings())
+        }.fold(
+            onSuccess = {
+                message = "音源初始化完成"
+                refreshHomeContent(homeSection)
+                true
+            },
+            onFailure = { throwable ->
+                applySettings(previousSettings)
+                runCatching {
+                    providerRepository.updateEnabledProviders(enabledProviderIds)
+                    clearProviderContent()
+                    refreshProviderCatalog()
+                    settingsStore.save(previousSettings)
+                }
+                setError(throwable)
+                false
+            },
+        ).also {
+            isLoading = false
+        }
+    }
+
+    suspend fun completeOnboarding(): Boolean {
+        if (onboardingCompleted) return true
+        isLoading = true
+        message = "正在保存初始设置"
+        return runCatching {
+            settingsStore.save(currentSettings().copy(onboardingCompleted = true))
+        }.fold(
+            onSuccess = {
+                onboardingCompleted = true
+                message = "初始设置已完成"
+                true
+            },
+            onFailure = {
+                setError(it)
+                false
+            },
+        ).also {
             isLoading = false
         }
     }
@@ -3412,6 +3499,7 @@ class FuoPlayerController(
     }
 
     private fun applySettings(settings: AppSettings) {
+        onboardingCompleted = settings.onboardingCompleted
         homeSection = settings.homeSection
         mineSection = settings.mineSection
         playlistFilter = settings.playlistFilter
@@ -3447,7 +3535,15 @@ class FuoPlayerController(
     }
 
     private fun persistSettings() {
-        val settings = AppSettings(
+        val settings = currentSettings()
+        scope.launch {
+            settingsStore.save(settings)
+        }
+    }
+
+    private fun currentSettings(): AppSettings {
+        return AppSettings(
+            onboardingCompleted = onboardingCompleted,
             homeSection = homeSection,
             mineSection = mineSection,
             playlistFilter = playlistFilter,
@@ -3481,9 +3577,6 @@ class FuoPlayerController(
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
         )
-        scope.launch {
-            settingsStore.save(settings)
-        }
     }
 
     private suspend fun updateResourceCacheLimit() {
