@@ -98,7 +98,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = settings,
+                settingsRepository = settings,
                 scope = controllerScope,
             )
 
@@ -151,7 +151,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = settings,
+                settingsRepository = settings,
                 scope = controllerScope,
             )
 
@@ -195,7 +195,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = settings,
+                settingsRepository = settings,
                 scope = controllerScope,
             )
 
@@ -281,7 +281,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = downloads,
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(
                         enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
                         smartReplacementProviderIds = setOf("qqmusic"),
@@ -474,7 +474,7 @@ class FuoPlayerControllerTest {
                     localRepository = FakeLocalMusicRepository(),
                     downloadRepository = FakeDownloadRepository(emptyMap()),
                     playbackEngine = FakePlaybackEngine(),
-                    settingsStore = FakeSettingsStore(AppSettings(homeSection = section)),
+                    settingsRepository = FakeSettingsStore(AppSettings(homeSection = section)),
                     scope = controllerScope,
                 )
 
@@ -545,7 +545,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = engine,
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(
                         enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
                         smartReplacementProviderIds = setOf("qqmusic", "bilibili"),
@@ -578,7 +578,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = engine,
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(smartReplacementMinScore = 0.75),
                 ),
                 scope = controllerScope,
@@ -608,7 +608,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = engine,
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(
                         smartReplacementUseReplacementMetadata = true,
                         smartReplacementUseReplacementLyrics = true,
@@ -643,7 +643,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = engine,
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(
                         enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
                         unavailablePlaybackPolicy = UnavailablePlaybackPolicy.SmartReplace,
@@ -962,7 +962,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = engine,
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip),
                 ),
                 scope = controllerScope,
@@ -998,7 +998,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = engine,
-                settingsStore = FakeSettingsStore(
+                settingsRepository = FakeSettingsStore(
                     AppSettings(unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip),
                 ),
                 scope = controllerScope,
@@ -1782,6 +1782,37 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun navigateBackClosesSearchAboveTrackWithoutDiscardingTrack() = runTest {
+        val track = providerTrack("provider:1", "First")
+        val navigator = AppNavigator()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                navigator = navigator,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openTrackDetail(track)
+            controller.openTrackArtist(track)
+            advanceUntilIdle()
+
+            assertEquals(AppRoute.Search, navigator.currentRoute)
+            assertEquals(track.id, controller.selectedTrack?.id)
+
+            assertTrue(controller.navigateBack())
+            assertEquals(AppRoute.Track, navigator.currentRoute)
+            assertEquals(track.id, controller.selectedTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun navigateBackClosesPlaylistBeforeFeature() = runTest {
         val feature = ProviderFeature(
             id = "netease_daily_songs",
@@ -2156,7 +2187,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = downloads,
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = FakeSettingsStore(AppSettings(downloadParallelism = 4)),
+                settingsRepository = FakeSettingsStore(AppSettings(downloadParallelism = 4)),
                 scope = controllerScope,
             )
 
@@ -2214,7 +2245,7 @@ class FuoPlayerControllerTest {
                 localRepository = local,
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = store,
+                settingsRepository = store,
                 resourceCacheRepository = cache,
                 scope = controllerScope,
             )
@@ -2231,11 +2262,11 @@ class FuoPlayerControllerTest {
             assertEquals(30, controller.localMusicMinDurationSeconds)
             assertEquals(LocalMusicScanSettings(setOf("Podcasts/"), 30), local.lastSettings)
             assertEquals(ProviderLoginMode.Cookie, controller.providerLoginMode)
-            assertEquals("""{"MUSIC_U":"saved"}""", controller.cookieInputFor("netease"))
+            assertEquals("", controller.cookieInputFor("netease"))
             assertEquals(setOf("netease", "ytmusic"), controller.enabledProviderIds)
             assertEquals(listOf("ytmusic", "netease"), controller.providers.map { it.providerId })
             assertEquals(
-                ProviderHeaderInput("SAPISIDHASH saved", "SID=saved"),
+                ProviderHeaderInput(),
                 controller.providerHeaderInputFor("ytmusic"),
             )
             assertEquals(256, controller.audioCacheLimitMb)
@@ -2275,11 +2306,8 @@ class FuoPlayerControllerTest {
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
-            assertEquals("""{"MUSIC_U":"draft"}""", store.saved.providerCookieInputs["netease"])
-            assertEquals(
-                ProviderHeaderInput("SAPISIDHASH draft", "SID=draft"),
-                store.saved.providerHeaderInputs["ytmusic"],
-            )
+            assertEquals(null, store.saved.providerCookieInputs["netease"])
+            assertEquals(null, store.saved.providerHeaderInputs["ytmusic"])
             assertEquals(setOf("netease", "ytmusic"), store.saved.enabledProviderIds)
             assertEquals(listOf("ytmusic", "netease", "qqmusic", "bilibili"), store.saved.providerOrderIds)
             assertEquals(MineSection.Artists, store.saved.mineSection)
@@ -2512,7 +2540,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = store,
+                settingsRepository = store,
                 scope = controllerScope,
             )
 
@@ -2599,7 +2627,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = store,
+                settingsRepository = store,
                 scope = controllerScope,
             )
 
@@ -2627,7 +2655,7 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
-                settingsStore = store,
+                settingsRepository = store,
                 scope = controllerScope,
             )
 
@@ -3794,14 +3822,17 @@ class FuoPlayerControllerTest {
         override fun seekTo(positionMs: Long) = Unit
     }
 
-    private class FakeSettingsStore(initial: AppSettings = AppSettings()) : AppSettingsStore {
+    private class FakeSettingsStore(initial: AppSettings = AppSettings()) : AppSettingsRepository {
+        private val mutableState = MutableStateFlow(SettingsState(isLoaded = true, settings = initial))
+        override val state = mutableState
         var saved = initial
             private set
 
-        override suspend fun load(): AppSettings = saved
+        override suspend fun awaitSettings(): AppSettings = saved
 
-        override suspend fun save(settings: AppSettings) {
-            saved = settings
+        override suspend fun update(transform: (AppSettings) -> AppSettings) {
+            saved = transform(saved)
+            mutableState.value = SettingsState(isLoaded = true, settings = saved)
         }
     }
 

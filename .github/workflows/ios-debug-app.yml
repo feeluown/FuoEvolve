@@ -69,6 +69,7 @@ jobs:
             -configuration Debug \
             -sdk iphonesimulator \
             -derivedDataPath build/ios-ci \
+            ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \

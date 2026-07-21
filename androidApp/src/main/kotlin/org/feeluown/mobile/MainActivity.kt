@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,10 +37,12 @@ class MainActivity : ComponentActivity() {
             ) {
                 hasAudioPermission = hasAudioPermission()
             }
-            val controller = fuoApplication.controller
+            val appViewModel = fuoApplication.appViewModel
+            val controller = appViewModel.controller
+            val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
             val systemDark = LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
                 Configuration.UI_MODE_NIGHT_YES
-            val darkTheme = resolveDarkTheme(controller.themeMode, systemDark)
+            val darkTheme = resolveDarkTheme(appUiState.settings.settings.themeMode, systemDark)
             SideEffect {
                 configureSystemBars(darkTheme)
             }
@@ -84,7 +87,7 @@ class MainActivity : ComponentActivity() {
             }
 
             AppRoot(
-                controller = controller,
+                appViewModel = appViewModel,
                 hasAudioPermission = hasAudioPermission,
                 appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                 onRequestAudioPermission = {
