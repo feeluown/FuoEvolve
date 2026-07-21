@@ -12,6 +12,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
     override suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
         val rawHomeSection = preferences.getString(KEY_HOME_SECTION, null)
         AppSettings(
+            onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, false),
             homeSection = homeSectionValue(rawHomeSection),
             mineSection = mineSectionValue(rawHomeSection),
             playlistFilter = enumValue(KEY_PLAYLIST_FILTER, PlaylistFilter.All),
@@ -72,6 +73,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
     override suspend fun save(settings: AppSettings) {
         withContext(Dispatchers.IO) {
             preferences.edit()
+                .putBoolean(KEY_ONBOARDING_COMPLETED, settings.onboardingCompleted)
                 .putString(KEY_HOME_SECTION, settings.homeSection.name)
                 .putString(KEY_MINE_SECTION, settings.mineSection.name)
                 .putString(KEY_PLAYLIST_FILTER, settings.playlistFilter.name)
@@ -219,6 +221,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
 
     private companion object {
         private const val PREFS_NAME = "fuo_settings"
+        private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_HOME_SECTION = "home_section"
         private const val KEY_MINE_SECTION = "mine_section"
         private const val KEY_PLAYLIST_FILTER = "playlist_filter"

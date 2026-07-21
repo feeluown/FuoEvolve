@@ -165,6 +165,19 @@ fun AppRoot(
         themeMode = controller.themeMode,
         themeColorScheme = controller.themeColorScheme,
     ) {
+        if (!controller.isSettingsLoaded) {
+            AppInitializationLoadingScreen()
+            return@FuoEvolveTheme
+        }
+        if (!controller.onboardingCompleted) {
+            OnboardingScreen(
+                controller = controller,
+                onOpenProviderWebLogin = onOpenProviderWebLogin,
+                onLogoutProvider = onLogoutProvider,
+                onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
+            )
+            return@FuoEvolveTheme
+        }
         val snackbarHostState = remember { SnackbarHostState() }
         val playlistOperationFeedback = controller.playlistOperationFeedback
         val downloadQueueFeedback = controller.downloadQueueFeedback
