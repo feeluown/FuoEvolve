@@ -1614,6 +1614,8 @@ class FuoMobileBridge:
         if not source_in:
             bridge_log(f"standby skipped no source track={song_log_label(song)}")
             return None
+        if "bilibili" in source_in:
+            self._get_provider("bilibili")
         bridge_log(
             f"standby start track={song_log_label(song)} source_in={source_in} "
             f"policy={audio_select_policy} min_score={standby_min_score}"

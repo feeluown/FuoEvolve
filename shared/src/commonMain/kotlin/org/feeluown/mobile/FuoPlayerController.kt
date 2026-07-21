@@ -3583,7 +3583,7 @@ class FuoPlayerController(
         } else {
             "播放失败：${failedTrack.title}（$errorMessage）"
         }
-        if (!shouldRecoverPlaybackEngineError(failedTrack)) return
+        if (!shouldRecoverPlaybackEngineError(failedTrack, errorMessage)) return
         val playableCount = upNextQueue.size + mainQueue.size
         if (playableCount <= 1 || _repeatMode == RepeatMode.SINGLE) return
         updateCurrentTrack(failedTrack.copy(isUnavailable = true))
@@ -3611,12 +3611,12 @@ class FuoPlayerController(
         }
     }
 
-    private fun shouldRecoverPlaybackEngineError(track: MusicTrack): Boolean {
-        return track.sourceType == TrackSourceType.Provider &&
-            (
-                unavailablePlaybackPolicy == UnavailablePlaybackPolicy.Skip ||
-                    unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace
-                )
+    private fun shouldRecoverPlaybackEngineError(track: MusicTrack, errorMessage: String): Boolean {
+        if (track.sourceType != TrackSourceType.Provider) return false
+        return when (unavailablePlaybackPolicy) {
+            UnavailablePlaybackPolicy.Skip -> true
+            UnavailablePlaybackPolicy.SmartReplace -> errorMessage.isMediaNotFoundMessage()
+        }
     }
 
     private fun skipUnavailableTrack(
@@ -3667,10 +3667,11 @@ class FuoPlayerController(
             current.message?.let { messages += it }
             current = current.cause
         }
-        val text = messages.joinToString(" ")
-        return text.contains("media not found", ignoreCase = true) ||
-            text.contains("MediaNotFound", ignoreCase = true)
+        return messages.joinToString(" ").isMediaNotFoundMessage()
     }
+
+    private fun String.isMediaNotFoundMessage(): Boolean =
+        contains("media not found", ignoreCase = true) || contains("MediaNotFound", ignoreCase = true)
 
     private fun Int.mbToBytes(): Long = this.toLong() * 1024L * 1024L
 }
