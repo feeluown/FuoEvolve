@@ -556,6 +556,51 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun smartReplacementPlanKeepsSettingsForInternalResourceResolver() = runTest {
+        val track = providerTrack("provider:1", "First")
+        val provider = FakeProviderRepository(listOf(track))
+        val engine = FakeInternalResolverPlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                settingsStore = FakeSettingsStore(
+                    AppSettings(
+                        enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
+                        unavailablePlaybackPolicy = UnavailablePlaybackPolicy.SmartReplace,
+                        smartReplacementProviderIds = setOf("qqmusic", "bilibili"),
+                        smartReplacementMinScore = 0.75,
+                        smartReplacementUseReplacementMetadata = true,
+                        smartReplacementUseReplacementLyrics = true,
+                    ),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("first")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            val request = engine.lastPlan?.requests?.first()
+            assertEquals(0, provider.resolveCount)
+            assertEquals(track.id, request?.track?.id)
+            assertEquals(UnavailablePlaybackPolicy.SmartReplace, request?.unavailablePolicy)
+            assertEquals(setOf("qqmusic", "bilibili"), request?.smartReplacementProviderIds)
+            assertEquals(0.75, request?.smartReplacementMinScore)
+            assertEquals(false, request?.smartReplacementUseOriginalMetadata)
+            assertEquals(false, request?.smartReplacementUseOriginalLyrics)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun nextUsesKotlinQueueOrder() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -3576,6 +3621,27 @@ class FuoPlayerControllerTest {
         override fun seekTo(positionMs: Long) {
             mutableState.value = mutableState.value.copy(positionMs = positionMs)
         }
+    }
+
+    private class FakeInternalResolverPlaybackEngine : PlaybackEngine {
+        private val mutableState = MutableStateFlow(PlaybackState())
+        override val state = mutableState
+        override val resolvesResourcesInternally = true
+        var lastPlan: PlaybackPlan? = null
+
+        override fun play(track: MusicTrack, payload: PlaybackPayload) = Unit
+
+        override fun play(plan: PlaybackPlan) {
+            lastPlan = plan
+        }
+
+        override fun pause() = Unit
+
+        override fun resume() = Unit
+
+        override fun stop() = Unit
+
+        override fun seekTo(positionMs: Long) = Unit
     }
 
     private class FakeSettingsStore(initial: AppSettings = AppSettings()) : AppSettingsStore {

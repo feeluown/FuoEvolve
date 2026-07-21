@@ -104,6 +104,11 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                     CoverBox(
                         track = feature.toDisplayTrack(),
                         modifier = Modifier.size(160.dp),
+                        placeholder = if (feature.isDailySongs()) {
+                            CoverPlaceholder.DailyRecommendation
+                        } else {
+                            CoverPlaceholder.Song
+                        },
                     )
                     Text(
                         text = feature.title.ifBlank { "推荐" },
@@ -611,6 +616,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                     CoverBox(
                         track = displayPlaylist.toDisplayTrack(),
                         modifier = Modifier.size(168.dp),
+                        placeholder = CoverPlaceholder.Playlist,
                     )
                     Text(
                         text = displayPlaylist.title.ifBlank { "未命名歌单" },
@@ -689,6 +695,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                     displayPlaylist.trackCount?.let { add("$it 首") }
                 }.joinToString(" · "),
                 description = displayPlaylist.description,
+                placeholder = CoverPlaceholder.Playlist,
                 action = if (controller.selectedPlaylistTracks.isNotEmpty()) {
                     {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -834,6 +841,11 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                     CoverBox(
                         track = displayItem.toDisplayTrack(),
                         modifier = Modifier.size(168.dp),
+                        placeholder = if (isArtist) {
+                            CoverPlaceholder.Artist
+                        } else {
+                            CoverPlaceholder.Album
+                        },
                     )
                     Text(
                         text = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
@@ -928,6 +940,11 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                     if (isArtist) displayItem.albumCount?.let { add("$it 张专辑") }
                 }.joinToString(" · "),
                 description = displayItem.description,
+                placeholder = if (isArtist) {
+                    CoverPlaceholder.Artist
+                } else {
+                    CoverPlaceholder.Album
+                },
                 action = if (controller.selectedMediaItemTracks.isNotEmpty()) {
                     {
                         Row(verticalAlignment = Alignment.CenterVertically) {
