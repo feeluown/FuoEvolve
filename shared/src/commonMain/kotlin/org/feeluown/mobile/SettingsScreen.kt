@@ -891,7 +891,7 @@ fun ThemeColorSchemeOption(
             .clip(shape)
             .background(
                 if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer
+                    MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.surface
                 },
@@ -912,7 +912,7 @@ fun ThemeColorSchemeOption(
             text = scheme.label,
             style = MaterialTheme.typography.labelMedium,
             color = if (selected) {
-                MaterialTheme.colorScheme.onPrimaryContainer
+                MaterialTheme.colorScheme.onPrimary
             } else {
                 MaterialTheme.colorScheme.onSurface
             },
@@ -1111,6 +1111,7 @@ fun DownloadSettingsPanel(controller: FuoPlayerController) {
                         selected = controller.downloadParallelism == value,
                         onClick = { controller.onDownloadParallelismChange(value) },
                         shape = SegmentedButtonDefaults.itemShape(index = value - 1, count = 5),
+                        colors = settingsSegmentedButtonColors(),
                     ) { Text(value.toString()) }
                 }
             }
@@ -1265,6 +1266,7 @@ fun DebugLogScreen(controller: FuoPlayerController) {
                             )
                         },
                         label = { Text(debugLogLevelLabel(level)) },
+                        colors = settingsFilterChipColors(),
                     )
                 }
             }
@@ -1448,6 +1450,7 @@ fun CacheLimitRow(
                     selected = selected == value,
                     onClick = { onSelect(value) },
                     label = { Text(formatCacheLimit(value)) },
+                    colors = settingsFilterChipColors(),
                 )
             }
         }
