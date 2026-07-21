@@ -91,6 +91,7 @@ enum class PlaybackSpectrumStyle(
 
 @Serializable
 data class AppSettings(
+    val onboardingCompleted: Boolean = false,
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
     val playlistFilter: PlaylistFilter = PlaylistFilter.All,

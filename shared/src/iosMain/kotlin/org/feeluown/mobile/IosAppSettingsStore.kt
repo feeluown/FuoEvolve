@@ -9,6 +9,7 @@ internal class IosLegacySettingsLoader {
 
     suspend fun load(): AppSettings = withContext(Dispatchers.Default) {
         AppSettings(
+            onboardingCompleted = boolValue(KEY_ONBOARDING_COMPLETED, false),
             homeSection = enumValue(KEY_HOME_SECTION, HomeSection.Recommend),
             mineSection = enumValue(KEY_MINE_SECTION, MineSection.Playlists),
             localMusicViewMode = enumValue(KEY_LOCAL_MUSIC_VIEW_MODE, LocalMusicViewMode.All),
@@ -35,6 +36,7 @@ internal class IosLegacySettingsLoader {
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
             cellularAudioQualityPolicy = enumValue(KEY_CELLULAR_AUDIO_QUALITY_POLICY, DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY),
             unavailablePlaybackPolicy = enumValue(KEY_UNAVAILABLE_PLAYBACK_POLICY, DEFAULT_UNAVAILABLE_PLAYBACK_POLICY),
+            smartReplacementProviderIds = readStringSet(KEY_SMART_REPLACEMENT_PROVIDER_IDS),
             smartReplacementMinScore = doubleValue(
                 KEY_SMART_REPLACEMENT_MIN_SCORE,
                 DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
@@ -114,6 +116,7 @@ internal class IosLegacySettingsLoader {
         private const val LIST_SEPARATOR = "\u001f"
         private const val MAP_SEPARATOR = "\u001e"
         private const val HEADER_SEPARATOR = "\u001d"
+        private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_HOME_SECTION = "home_section"
         private const val KEY_MINE_SECTION = "mine_section"
         private const val KEY_LOCAL_MUSIC_VIEW_MODE = "local_music_view_mode"
@@ -137,6 +140,7 @@ internal class IosLegacySettingsLoader {
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
         private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
+        private const val KEY_SMART_REPLACEMENT_PROVIDER_IDS = "smart_replacement_provider_ids"
         private const val KEY_SMART_REPLACEMENT_MIN_SCORE = "smart_replacement_min_score"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"

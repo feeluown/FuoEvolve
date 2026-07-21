@@ -12,6 +12,7 @@ internal class AndroidLegacySettingsLoader(context: Context) {
     suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
         val rawHomeSection = preferences.getString(KEY_HOME_SECTION, null)
         AppSettings(
+            onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, false),
             homeSection = homeSectionValue(rawHomeSection),
             mineSection = mineSectionValue(rawHomeSection),
             playlistFilter = enumValue(KEY_PLAYLIST_FILTER, PlaylistFilter.All),
@@ -142,6 +143,7 @@ internal class AndroidLegacySettingsLoader(context: Context) {
 
     private companion object {
         private const val PREFS_NAME = "fuo_settings"
+        private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_HOME_SECTION = "home_section"
         private const val KEY_MINE_SECTION = "mine_section"
         private const val KEY_PLAYLIST_FILTER = "playlist_filter"

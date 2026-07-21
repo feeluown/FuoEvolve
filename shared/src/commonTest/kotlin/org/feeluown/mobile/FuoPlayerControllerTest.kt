@@ -17,6 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FuoPlayerControllerTest {
@@ -134,6 +135,81 @@ class FuoPlayerControllerTest {
             assertNull(controller.selectedPlaylist)
             assertNull(controller.selectedMediaItem)
             assertEquals("无法识别分享链接", controller.message)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun onboardingConfiguresBilibiliAsReplacementOnlyAndPersistsCompletion() = runTest {
+        val settings = FakeSettingsStore(AppSettings())
+        val provider = FakeProviderRepository(emptyList())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsRepository = settings,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertTrue(controller.isSettingsLoaded)
+            assertFalse(controller.onboardingCompleted)
+            assertTrue(
+                controller.configureOnboardingProviders(
+                    selectedProviderIds = setOf("netease", "bilibili"),
+                    bilibiliReplacementOnly = true,
+                ),
+            )
+            advanceUntilIdle()
+
+            assertEquals(setOf("netease", "bilibili"), controller.enabledProviderIds)
+            assertEquals(setOf("netease", "bilibili"), provider.lastEnabledProviderIds)
+            assertFalse(controller.isProviderShownIn("bilibili", ProviderDisplaySection.Search))
+            assertFalse(controller.isProviderShownIn("bilibili", ProviderDisplaySection.Recommend))
+            assertFalse(controller.isProviderShownIn("bilibili", ProviderDisplaySection.Explore))
+            assertFalse(controller.isProviderShownIn("bilibili", ProviderDisplaySection.Mine))
+            assertTrue(controller.isProviderShownIn("bilibili", ProviderDisplaySection.Replace))
+            assertEquals(setOf("bilibili"), settings.saved.smartReplacementProviderIds)
+            assertEquals(UnavailablePlaybackPolicy.SmartReplace, settings.saved.unavailablePlaybackPolicy)
+
+            assertTrue(controller.completeOnboarding())
+            assertTrue(controller.onboardingCompleted)
+            assertTrue(settings.saved.onboardingCompleted)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun onboardingRejectsBilibiliAsTheOnlyReplacementProvider() = runTest {
+        val settings = FakeSettingsStore(AppSettings())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsRepository = settings,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertFalse(
+                controller.configureOnboardingProviders(
+                    selectedProviderIds = setOf("bilibili"),
+                    bilibiliReplacementOnly = true,
+                ),
+            )
+            assertEquals("Bilibili 仅作为替换音源时，请再选择一个常规音源", controller.message)
+            assertEquals(DEFAULT_ENABLED_PROVIDER_IDS, controller.enabledProviderIds)
+            assertFalse(settings.saved.onboardingCompleted)
         } finally {
             controllerScope.cancel()
         }

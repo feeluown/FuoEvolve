@@ -54,9 +54,6 @@ class MainActivity : ComponentActivity() {
                     ?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID)
                     .orEmpty()
                 val providerId = returnedProviderId.ifBlank { pendingWebLoginProviderId.orEmpty() }
-                if (providerId.isNotBlank()) {
-                    controller.openSettings(providerId)
-                }
                 if (result.resultCode == RESULT_OK) {
                     val cookiesJson = result.data
                         ?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON)
@@ -99,7 +96,6 @@ class MainActivity : ComponentActivity() {
                 onOpenProviderWebLogin = { provider ->
                     if (provider.loginConfig != null) {
                         pendingWebLoginProviderId = provider.providerId
-                        controller.openSettings(provider.providerId)
                         webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
                     }
                 },
