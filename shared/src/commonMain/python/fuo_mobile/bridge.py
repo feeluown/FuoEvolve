@@ -8,6 +8,47 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
+def _install_i18n_stub() -> None:
+    """Avoid loading FeelUOwn's desktop localization stack on mobile."""
+    if "feeluown.i18n" in sys.modules:
+        return
+
+    module = types.ModuleType("feeluown.i18n")
+
+    def rfc1766_langcode() -> str:
+        import locale
+
+        lang, _ = locale.getlocale(locale.LC_CTYPE)
+        return "en_US" if lang in ("C", None, "") else lang
+
+    def translate(
+        msg_id: str,
+        locale: str = None,
+        domain: str = None,
+        **kwargs,
+    ) -> str:
+        return msg_id
+
+    def human_readable_number(number: int, locale: str = None) -> str:
+        language = locale or rfc1766_langcode()
+        levels = (
+            ((100_000_000, "亿"), (10_000, "万"))
+            if language.startswith("zh")
+            else ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K"))
+        )
+        for value, unit in levels:
+            if number > value:
+                first = number // value
+                second = (number % value) // (value // 10)
+                return f"{first}.{second}{unit}"
+        return str(number)
+
+    module.t = translate
+    module.rfc1766_langcode = rfc1766_langcode
+    module.human_readable_number = human_readable_number
+    sys.modules["feeluown.i18n"] = module
+
+
 def _install_mpv_stub() -> None:
     """Allow importing feeluown.player without loading desktop libmpv."""
     if "feeluown.mpv" in sys.modules:
@@ -38,6 +79,7 @@ def _install_mpv_stub() -> None:
     sys.modules["feeluown.mpv"] = module
 
 
+_install_i18n_stub()
 _install_mpv_stub()
 
 

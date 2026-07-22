@@ -85,9 +85,28 @@ jobs:
           if-no-files-found: error
 
   build-release-apks:
-    name: Build signed release APKs
+    name: Build signed release APK (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: arm64
+            label: arm64-v8a
+            gradle_task: assembleArm64Release
+            apk_glob: androidApp/build/outputs/apk/arm64/release/*-arm64-release.apk
+            asset_suffix: arm64-v8a
+          - id: x86_64
+            label: x86_64
+            gradle_task: assembleX86Release
+            apk_glob: androidApp/build/outputs/apk/x86/release/*-x86-release.apk
+            asset_suffix: x86_64
+          - id: universal
+            label: universal
+            gradle_task: assembleUniversalRelease
+            apk_glob: androidApp/build/outputs/apk/universal/release/*-universal-release.apk
+            asset_suffix: universal
     env:
       FUO_BUILD_PYTHON: python
       FUO_FEELUOWN_SOURCE: https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz
@@ -136,54 +155,30 @@ jobs:
           mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
           printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
-      - name: Build signed release APKs
-        run: ./gradlew :androidApp:assembleRelease -Pfuo.releaseAbiSplits=true
+      - name: Build signed release APK
+        run: ./gradlew :androidApp:${{ matrix.gradle_task }} -Pfuo.releasePerAbi=true
 
-      - name: Prepare signed release APK artifacts
+      - name: Prepare signed release APK artifact
+        id: artifact
+        env:
+          RELEASE_APK_GLOB: ${{ matrix.apk_glob }}
+          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
         run: |
           mkdir -p build/artifacts
-          shopt -s nullglob
-          arm64_apks=(androidApp/build/outputs/apk/release/*-arm64-v8a-release.apk)
-          x86_64_apks=(androidApp/build/outputs/apk/release/*-x86_64-release.apk)
-          universal_apks=(androidApp/build/outputs/apk/release/*-universal-release.apk)
-
-          if [ "${#arm64_apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one arm64-v8a release APK, found ${#arm64_apks[@]}"
-            printf '%s\n' "${arm64_apks[@]}"
+          mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one ${ASSET_SUFFIX} release APK, found ${#apks[@]}"
+            printf '%s\n' "${apks[@]}"
             exit 1
           fi
-          if [ "${#x86_64_apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one x86_64 release APK, found ${#x86_64_apks[@]}"
-            printf '%s\n' "${x86_64_apks[@]}"
-            exit 1
-          fi
-          if [ "${#universal_apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one universal release APK, found ${#universal_apks[@]}"
-            printf '%s\n' "${universal_apks[@]}"
-            exit 1
-          fi
+          artifact_path="build/artifacts/fuo-evolve-release-${ASSET_SUFFIX}-signed-${GITHUB_SHA}.apk"
+          cp "${apks[0]}" "$artifact_path"
+          echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
 
-          cp "${arm64_apks[0]}" "build/artifacts/fuo-evolve-release-arm64-v8a-signed-${GITHUB_SHA}.apk"
-          cp "${x86_64_apks[0]}" "build/artifacts/fuo-evolve-release-x86_64-signed-${GITHUB_SHA}.apk"
-          cp "${universal_apks[0]}" "build/artifacts/fuo-evolve-release-universal-signed-${GITHUB_SHA}.apk"
-
-      - name: Upload signed release arm64-v8a APK
+      - name: Upload signed release APK
         uses: actions/upload-artifact@v7
         with:
-          path: build/artifacts/fuo-evolve-release-arm64-v8a-signed-${{ github.sha }}.apk
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload signed release x86_64 APK
-        uses: actions/upload-artifact@v7
-        with:
-          path: build/artifacts/fuo-evolve-release-x86_64-signed-${{ github.sha }}.apk
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload signed release universal APK
-        uses: actions/upload-artifact@v7
-        with:
-          path: build/artifacts/fuo-evolve-release-universal-signed-${{ github.sha }}.apk
+          name: fuo-evolve-release-${{ matrix.asset_suffix }}-signed-${{ github.sha }}
+          path: ${{ steps.artifact.outputs.path }}
           archive: false
           if-no-files-found: error

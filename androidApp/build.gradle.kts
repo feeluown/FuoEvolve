@@ -47,13 +47,9 @@ val hasFuoSigningConfig = listOf(
     fuoSigningKeyAlias,
     fuoSigningKeyPassword,
 ).all { !it.isNullOrBlank() }
-val releaseApkTasks = setOf("assembleRelease", "packageRelease", "packageReleaseUniversalApk")
-val inferredReleaseAbiSplits = gradle.startParameter.taskNames.any {
-    it.substringAfterLast(':') in releaseApkTasks
-}
-val releaseAbiSplitsEnabled = providers.gradleProperty("fuo.releaseAbiSplits")
+val releasePerAbiEnabled = providers.gradleProperty("fuo.releasePerAbi")
     .map(String::toBoolean)
-    .orElse(inferredReleaseAbiSplits)
+    .orElse(false)
     .get()
 
 android {
@@ -67,8 +63,28 @@ android {
         versionCode = gitVersionCode
         versionName = gitVersionName
 
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+        if (!releasePerAbiEnabled) {
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
+        }
+    }
+
+    if (releasePerAbiEnabled) {
+        flavorDimensions += "pythonAbi"
+        productFlavors {
+            create("arm64") {
+                dimension = "pythonAbi"
+                ndk { abiFilters += "arm64-v8a" }
+            }
+            create("x86") {
+                dimension = "pythonAbi"
+                ndk { abiFilters += "x86_64" }
+            }
+            create("universal") {
+                dimension = "pythonAbi"
+                ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+            }
         }
     }
 
@@ -113,15 +129,6 @@ android {
             }
         }
     }
-
-    splits {
-        abi {
-            isEnable = releaseAbiSplitsEnabled
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = true
-        }
-    }
 }
 
 kotlin {
@@ -147,14 +154,10 @@ chaquopy {
             install("fuo-qqmusic==1.0.16")
             install("feeluown-bilibili==0.5.5")
             install("fuo-ytmusic==0.4.18")
-            install("attrs")
             install("beautifulsoup4")
-            install("babel")
             install("cachetools")
             install("certifi")
             install("charset-normalizer")
-            install("fluent-runtime==0.4.0")
-            install("fluent.syntax")
             install("idna")
             install("janus")
             install("marshmallow==3.26.2")
@@ -162,8 +165,6 @@ chaquopy {
             install("packaging")
             install("pydantic==1.10.26")
             install("pycryptodome==3.21.0")
-            install("pytz")
-            install("qasync")
             install("requests")
             install("soupsieve")
             install("tomlkit")
