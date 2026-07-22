@@ -454,6 +454,7 @@ class IosFuoCoreBridge(
             providerName = string("provider_name").ifBlank { source }.takeIf { it.isNotBlank() },
             artistItemId = string("artist_item_id").takeIf { it.isNotBlank() },
             albumItemId = string("album_item_id").takeIf { it.isNotBlank() },
+            artistItems = array("artist_items").map { it.jsonObject.toMediaItem() },
             providerUrl = string("provider_url").takeIf { it.isNotBlank() },
         )
     }

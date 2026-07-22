@@ -1813,6 +1813,91 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun openTrackAlbumLoadsMissingDetailAndNavigatesToAlbum() = runTest {
+        val detailedTrack = providerTrack("netease:1", "First").copy(
+            albumItemId = "album:netease:album1",
+        )
+        val provider = FakeProviderRepository(listOf(detailedTrack))
+        val navigator = AppNavigator()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                navigator = navigator,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openFullPlayer()
+            controller.openTrackAlbum(detailedTrack.copy(albumItemId = null))
+            advanceUntilIdle()
+
+            assertEquals("netease:1", provider.lastTrackDetailId)
+            assertEquals(AppRoute.MediaItem, navigator.currentRoute)
+            assertEquals("album:netease:album1", controller.selectedMediaItem?.id)
+            assertFalse(controller.isFullPlayerOpen)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun openTrackArtistListsAllCollaboratingArtistsBeforeNavigating() = runTest {
+        val firstArtist = ProviderMediaItem(
+            id = "artist:netease:artist1",
+            title = "Artist One",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            type = ProviderMediaItemType.Artist,
+        )
+        val secondArtist = firstArtist.copy(
+            id = "artist:netease:artist2",
+            title = "Artist Two",
+        )
+        val detailedTrack = providerTrack("netease:1", "Collaboration").copy(
+            artists = "Artist One / Artist Two",
+            artistItemId = firstArtist.id,
+            artistItems = listOf(firstArtist, secondArtist),
+        )
+        val provider = FakeProviderRepository(listOf(detailedTrack))
+        val navigator = AppNavigator()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                navigator = navigator,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openFullPlayer()
+            controller.openTrackArtist(detailedTrack.copy(artistItemId = null, artistItems = emptyList()))
+            advanceUntilIdle()
+
+            assertEquals("netease:1", provider.lastTrackDetailId)
+            assertEquals(listOf("Artist One", "Artist Two"), controller.artistTargets.map { it.name })
+            assertEquals(AppRoute.Home, navigator.currentRoute)
+            assertTrue(controller.isFullPlayerOpen)
+
+            controller.openArtistTarget(controller.artistTargets[1])
+            advanceUntilIdle()
+
+            assertEquals(AppRoute.MediaItem, navigator.currentRoute)
+            assertEquals(secondArtist.id, controller.selectedMediaItem?.id)
+            assertNull(controller.artistTargetTrack)
+            assertFalse(controller.isFullPlayerOpen)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun navigateBackClosesPlaylistBeforeFeature() = runTest {
         val feature = ProviderFeature(
             id = "netease_daily_songs",

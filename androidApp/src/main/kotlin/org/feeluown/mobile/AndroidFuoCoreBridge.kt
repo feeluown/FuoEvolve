@@ -618,6 +618,7 @@ class AndroidFuoCoreBridge(
     private fun JSONObject.toTrack(): MusicTrack {
         val id = getString("id")
         val source = optString("source")
+        val artistItemsArray = optJSONArray("artist_items") ?: JSONArray()
         return MusicTrack(
             id = id,
             title = optString("title"),
@@ -631,6 +632,9 @@ class AndroidFuoCoreBridge(
             providerName = optString("provider_name").ifBlank { source }.takeIf { it.isNotBlank() },
             artistItemId = optString("artist_item_id").takeIf { it.isNotBlank() },
             albumItemId = optString("album_item_id").takeIf { it.isNotBlank() },
+            artistItems = List(artistItemsArray.length()) { index ->
+                artistItemsArray.getJSONObject(index).toMediaItem()
+            },
             providerUrl = optString("provider_url").takeIf { it.isNotBlank() },
         )
     }

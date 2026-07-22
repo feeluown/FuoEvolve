@@ -2181,6 +2181,7 @@ def song_to_dict(song, library: Library) -> Dict[str, Any]:
         "cover_url": normalize_image_url(display(song, "pic_url")),
         "artist_item_id": first_artist_item_id(song),
         "album_item_id": album_item_id(song),
+        "artist_items": artist_items(song, library),
         "provider_url": song_provider_url(song, library),
     }
 
@@ -2455,6 +2456,24 @@ def first_artist_item_id(song) -> str:
     if source and identifier:
         return f"artist:{source}:{identifier}"
     return ""
+
+
+def artist_items(song, library: Library) -> List[Dict[str, Any]]:
+    song_source = getattr(song, "source", "")
+    items = []
+    for artist in getattr(song, "artists", []) or []:
+        identifier = getattr(artist, "identifier", "")
+        if not identifier:
+            continue
+        item = media_item_to_dict(artist, "artist", library)
+        if not item["provider_id"] and song_source:
+            item["id"] = f"artist:{song_source}:{identifier}"
+            item["provider_id"] = song_source
+            item["provider_name"] = provider_name(library.get(song_source))
+            item["provider_url"] = provider_web_url(song_source, "artist", identifier)
+        if item["provider_id"]:
+            items.append(item)
+    return items
 
 
 def album_item_id(song) -> str:

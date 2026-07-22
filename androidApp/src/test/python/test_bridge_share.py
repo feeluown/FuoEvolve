@@ -50,6 +50,23 @@ class BridgeShareTest(unittest.TestCase):
 
         self.assertEqual("https://provider.example/songs/1811961337", data["provider_url"])
 
+    def test_song_to_dict_includes_all_artist_items(self):
+        collaboration = song()
+        collaboration.artists.append(
+            SimpleNamespace(name="RiraN", identifier="artist2", source="netease")
+        )
+
+        data = song_to_dict(collaboration, _Library())
+
+        self.assertEqual(
+            ["artist:netease:artist1", "artist:netease:artist2"],
+            [item["id"] for item in data["artist_items"]],
+        )
+        self.assertEqual(
+            ["Se-U-Ra", "RiraN"],
+            [item["title"] for item in data["artist_items"]],
+        )
+
     def test_playlist_and_media_items_include_provider_url(self):
         library = _Library()
         playlist = SimpleNamespace(source="netease", identifier="123", name="Daily")

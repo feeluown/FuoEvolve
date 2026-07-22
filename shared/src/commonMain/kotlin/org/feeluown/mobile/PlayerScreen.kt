@@ -403,14 +403,8 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
         onAddToUpNext = { controller.addToUpNext(track) },
         onDownload = { controller.download(track) },
         onDeleteDownload = { controller.deleteDownload(track) },
-        onOpenArtist = {
-            controller.closeFullPlayer()
-            controller.openTrackArtist(track)
-        },
-        onOpenAlbum = {
-            controller.closeFullPlayer()
-            controller.openTrackAlbum(track)
-        },
+        onOpenArtist = { controller.openTrackArtist(track) },
+        onOpenAlbum = { controller.openTrackAlbum(track) },
         onOpenDetail = if (track.sourceType == TrackSourceType.Provider) {
             {
                 controller.closeFullPlayer()

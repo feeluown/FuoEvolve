@@ -70,6 +70,11 @@ enum class LocalMusicViewMode {
     Album,
 }
 
+data class TrackArtistTarget(
+    val name: String,
+    val mediaItem: ProviderMediaItem? = null,
+)
+
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
 private const val PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT = 200
@@ -186,6 +191,10 @@ class FuoPlayerController(
     var playlistOperationError by mutableStateOf<String?>(null)
         private set
     var playlistOperationFeedback by mutableStateOf<String?>(null)
+        private set
+    var artistTargetTrack by mutableStateOf<MusicTrack?>(null)
+        private set
+    var artistTargets by mutableStateOf<List<TrackArtistTarget>>(emptyList())
         private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
@@ -2720,31 +2729,65 @@ class FuoPlayerController(
     }
 
     fun openTrackArtist(track: MusicTrack) {
-        val artistName = track.artists.substringBefore("·").substringBefore(",").trim()
-        val providerId = track.source.takeIf { it.isNotBlank() }
-        val providerName = track.providerName ?: providerId.orEmpty()
-        val itemId = track.artistItemId
-        if (!itemId.isNullOrBlank() && providerId != null && artistName.isNotBlank()) {
-            openMediaItem(
-                ProviderMediaItem(
-                    id = itemId,
-                    title = artistName,
-                    providerId = providerId,
-                    providerName = providerName,
-                    type = ProviderMediaItemType.Artist,
-                )
-            )
+        openTrackArtist(track, loadDetailWhenMissing = true)
+    }
+
+    fun closeArtistTargetPicker() {
+        artistTargetTrack = null
+        artistTargets = emptyList()
+    }
+
+    fun openArtistTarget(target: TrackArtistTarget) {
+        val track = artistTargetTrack ?: return
+        closeArtistTargetPicker()
+        closeFullPlayer()
+        target.mediaItem?.let(::openMediaItem)
+            ?: searchTrackText(target.name, track.source.takeIf { it.isNotBlank() })
+    }
+
+    private fun openTrackArtist(track: MusicTrack, loadDetailWhenMissing: Boolean) {
+        val targets = track.artistNavigationTargets()
+        if (
+            loadDetailWhenMissing &&
+            targets.any { it.mediaItem == null } &&
+            track.canLoadProviderDetail()
+        ) {
+            scope.launch {
+                isLoading = true
+                val detail = runCatching { providerRepository.trackDetail(track.providerTrackId()) }
+                isLoading = false
+                detail
+                    .onSuccess { openTrackArtist(it, loadDetailWhenMissing = false) }
+                    .onFailure { openTrackArtist(track, loadDetailWhenMissing = false) }
+            }
             return
         }
-        searchTrackText(artistName.ifBlank { track.artists }, providerId)
+        if (targets.size > 1) {
+            artistTargetTrack = track
+            artistTargets = targets
+            return
+        }
+        targets.singleOrNull()?.mediaItem?.let {
+            closeFullPlayer()
+            openMediaItem(it)
+            return
+        }
+        val target = targets.singleOrNull()?.name.orEmpty().ifBlank { track.artists.trim() }
+        closeFullPlayer()
+        searchTrackText(target, track.source.takeIf { it.isNotBlank() })
     }
 
     fun openTrackAlbum(track: MusicTrack) {
+        openTrackAlbum(track, loadDetailWhenMissing = true)
+    }
+
+    private fun openTrackAlbum(track: MusicTrack, loadDetailWhenMissing: Boolean) {
         val albumName = track.album.trim()
         val providerId = track.source.takeIf { it.isNotBlank() }
         val providerName = track.providerName ?: providerId.orEmpty()
         val itemId = track.albumItemId
         if (!itemId.isNullOrBlank() && providerId != null && albumName.isNotBlank()) {
+            closeFullPlayer()
             openMediaItem(
                 ProviderMediaItem(
                     id = itemId,
@@ -2756,8 +2799,51 @@ class FuoPlayerController(
             )
             return
         }
+        if (loadDetailWhenMissing && track.canLoadProviderDetail()) {
+            scope.launch {
+                isLoading = true
+                val detail = runCatching { providerRepository.trackDetail(track.providerTrackId()) }
+                isLoading = false
+                detail
+                    .onSuccess { openTrackAlbum(it, loadDetailWhenMissing = false) }
+                    .onFailure { openTrackAlbum(track, loadDetailWhenMissing = false) }
+            }
+            return
+        }
+        closeFullPlayer()
         searchTrackText(albumName, providerId)
     }
+
+    private fun MusicTrack.artistNavigationTargets(): List<TrackArtistTarget> {
+        if (artistItems.isNotEmpty()) {
+            return artistItems.distinctBy { it.id }.map { TrackArtistTarget(it.title, it) }
+        }
+        val names = artists
+            .split(" / ", "/", "·", ",", "，", "、")
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        val providerId = source.takeIf { it.isNotBlank() }
+        val firstItem = if (!artistItemId.isNullOrBlank() && providerId != null && names.isNotEmpty()) {
+            ProviderMediaItem(
+                id = artistItemId,
+                title = names.first(),
+                providerId = providerId,
+                providerName = providerName ?: providerId,
+                type = ProviderMediaItemType.Artist,
+            )
+        } else {
+            null
+        }
+        return names.mapIndexed { index, name ->
+            TrackArtistTarget(name, firstItem.takeIf { index == 0 })
+        }
+    }
+
+    private fun MusicTrack.canLoadProviderDetail(): Boolean =
+        sourceType != TrackSourceType.LocalMediaStore && providerTrackId().isNotBlank()
+
+    private fun MusicTrack.providerTrackId(): String = providerId?.takeIf { it.isNotBlank() } ?: id
 
     private suspend fun refreshProviderCatalog() {
         val loadedAvailableProviders = providerRepository.availableProviders()
@@ -2851,6 +2937,7 @@ class FuoPlayerController(
         selectedMediaItemTracksLoadMoreJob = null
         selectedMediaItemAlbumsLoadMoreJob = null
         closePlaylistTargetPicker()
+        closeArtistTargetPicker()
     }
 
     private fun reorderProviderContent() {

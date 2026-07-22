@@ -188,6 +188,7 @@ data class MusicTrack(
     val isUnavailable: Boolean = false,
     val artistItemId: String? = null,
     val albumItemId: String? = null,
+    val artistItems: List<ProviderMediaItem> = emptyList(),
     val providerUrl: String? = null,
 )
 

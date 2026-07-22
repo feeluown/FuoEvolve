@@ -295,6 +295,9 @@ fun AppRoot(
                             controller.playlistTargetTrack?.let { track ->
                                 ProviderPlaylistTargetDialog(controller = controller, track = track)
                             }
+                            controller.artistTargetTrack?.let { track ->
+                                TrackArtistTargetDialog(controller = controller, track = track)
+                            }
                             SnackbarHost(
                                 hostState = snackbarHostState,
                                 modifier = Modifier
@@ -308,6 +311,53 @@ fun AppRoot(
             }
         }
     }
+}
+
+@Composable
+fun TrackArtistTargetDialog(controller: FuoPlayerController, track: MusicTrack) {
+    AlertDialog(
+        onDismissRequest = controller::closeArtistTargetPicker,
+        title = { Text("查看歌手") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = track.title.ifBlank { "未知歌曲" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                controller.artistTargets.forEach { target ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { controller.openArtistTarget(target) }
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Person, contentDescription = null)
+                        Text(
+                            text = target.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = controller::closeArtistTargetPicker) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable
