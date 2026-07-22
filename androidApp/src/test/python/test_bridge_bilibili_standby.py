@@ -7,7 +7,7 @@ from types import SimpleNamespace
 ROOT_DIR = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT_DIR / "shared" / "src" / "commonMain" / "python"))
 
-from fuo_mobile.bridge import duration_ms, standby_score, standby_searches  # noqa: E402
+from fuo_mobile.bridge import FuoMobileBridge, duration_ms, standby_score, standby_searches  # noqa: E402
 
 
 def song(source, title, artists=None, duration=None, duration_ms=None):
@@ -24,6 +24,32 @@ def song(source, title, artists=None, duration=None, duration_ms=None):
 
 
 class BilibiliStandbyTest(unittest.TestCase):
+    def test_standby_authenticates_bilibili_before_library_lookup(self):
+        class EmptyLibrary:
+            async def a_list_song_standby_v2(self, *args, **kwargs):
+                return []
+
+            def search(self, *args, **kwargs):
+                return []
+
+        authenticated_provider_ids = []
+        bridge = FuoMobileBridge.__new__(FuoMobileBridge)
+        bridge.app = SimpleNamespace(library=EmptyLibrary())
+        bridge.provider_registry = SimpleNamespace(provider_ids=["netease", "bilibili"])
+        bridge._get_provider = authenticated_provider_ids.append
+
+        payload = bridge._prepare_standby_payload(
+            song("netease", "晴天", ["周杰伦"]),
+            "",
+            ["bilibili"],
+            0.55,
+            False,
+            False,
+        )
+
+        self.assertIsNone(payload)
+        self.assertEqual(["bilibili"], authenticated_provider_ids)
+
     def test_bilibili_search_uses_title_and_artist_only(self):
         origin = song("netease", "晴天", ["周杰伦"])
 

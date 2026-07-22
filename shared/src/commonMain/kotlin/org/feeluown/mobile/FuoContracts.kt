@@ -4,19 +4,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class TrackSourceType {
     Provider,
     LocalMediaStore,
     Downloaded,
 }
 
+@Serializable
 enum class ProviderLoginMode {
     WebView,
     Cookie,
     Headers,
 }
 
+@Serializable
 enum class AudioQualityPolicy(
     val label: String,
     val policy: String,
@@ -27,6 +31,7 @@ enum class AudioQualityPolicy(
     Low("低流量", "lq<>"),
 }
 
+@Serializable
 enum class UnavailablePlaybackPolicy(
     val label: String,
 ) {
@@ -34,6 +39,7 @@ enum class UnavailablePlaybackPolicy(
     Skip("跳过"),
 }
 
+@Serializable
 enum class LyricFontSize(
     val label: String,
 ) {
@@ -42,6 +48,7 @@ enum class LyricFontSize(
     Large("大"),
 }
 
+@Serializable
 enum class ThemeMode(
     val label: String,
 ) {
@@ -50,6 +57,7 @@ enum class ThemeMode(
     Dark("暗色"),
 }
 
+@Serializable
 enum class RepeatMode(
     val label: String,
 ) {
@@ -58,6 +66,7 @@ enum class RepeatMode(
     SINGLE("单曲循环"),
 }
 
+@Serializable
 enum class ThemeColorScheme(
     val label: String,
 ) {
@@ -70,6 +79,7 @@ enum class ThemeColorScheme(
     Amber("琥珀"),
 }
 
+@Serializable
 enum class PlaybackSpectrumStyle(
     val label: String,
 ) {
@@ -79,7 +89,9 @@ enum class PlaybackSpectrumStyle(
     Wave("波形"),
 }
 
+@Serializable
 data class AppSettings(
+    val onboardingCompleted: Boolean = false,
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
     val playlistFilter: PlaylistFilter = PlaylistFilter.All,
@@ -114,6 +126,7 @@ data class AppSettings(
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
 
+@Serializable
 data class ProviderHeaderInput(
     val authorization: String = "",
     val cookie: String = "",
@@ -814,15 +827,32 @@ interface PlaybackEngine {
     fun seekTo(positionMs: Long)
 }
 
-interface AppSettingsStore {
-    suspend fun load(): AppSettings
-    suspend fun save(settings: AppSettings)
+data class SettingsState(
+    val isLoaded: Boolean = false,
+    val settings: AppSettings = AppSettings(),
+    val errorMessage: String? = null,
+)
+
+interface AppSettingsRepository {
+    val state: StateFlow<SettingsState>
+    suspend fun awaitSettings(): AppSettings
+    suspend fun update(transform: (AppSettings) -> AppSettings)
 }
 
-object NoOpAppSettingsStore : AppSettingsStore {
-    override suspend fun load(): AppSettings = AppSettings()
+class InMemoryAppSettingsRepository(
+    initialSettings: AppSettings = AppSettings(),
+) : AppSettingsRepository {
+    private val mutableState = MutableStateFlow(SettingsState(isLoaded = true, settings = initialSettings))
+    override val state: StateFlow<SettingsState> = mutableState
 
-    override suspend fun save(settings: AppSettings) = Unit
+    override suspend fun awaitSettings(): AppSettings = mutableState.value.settings
+
+    override suspend fun update(transform: (AppSettings) -> AppSettings) {
+        mutableState.value = SettingsState(
+            isLoaded = true,
+            settings = transform(mutableState.value.settings),
+        )
+    }
 }
 
 data class CacheUsage(

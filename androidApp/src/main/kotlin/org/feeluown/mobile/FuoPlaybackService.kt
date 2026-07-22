@@ -288,8 +288,12 @@ class FuoPlaybackService : MediaSessionService() {
             } catch (throwable: Throwable) {
                 if (activeGeneration == generation) {
                     Log.w(TAG, "preload failed trackId=${request.track.id}", throwable)
-                    if (request.unavailablePolicy == UnavailablePlaybackPolicy.Skip ||
-                        request.unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace
+                    if (
+                        request.unavailablePolicy == UnavailablePlaybackPolicy.Skip ||
+                        (
+                            request.unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace &&
+                                throwable.isMediaNotFound()
+                            )
                     ) {
                         retryNext = true
                     } else {
@@ -544,6 +548,21 @@ class FuoPlaybackService : MediaSessionService() {
             .filterNot { it.isNullOrBlank() }
             .joinToString(": ")
             .ifBlank { "播放失败" }
+    }
+
+    private fun Throwable.isMediaNotFound(): Boolean {
+        var current: Throwable? = this
+        while (current != null) {
+            val message = current.message.orEmpty()
+            if (
+                message.contains("media not found", ignoreCase = true) ||
+                message.contains("MediaNotFound", ignoreCase = true)
+            ) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
     }
 
     private data class PreparedPlayback(

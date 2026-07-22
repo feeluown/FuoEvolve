@@ -1,14 +1,17 @@
 [versions]
-agp = "8.7.3"
+agp = "8.13.2"
 chaquopy = "17.0.0"
-compose = "1.9.3"
-kotlin = "2.1.20"
+compose = "1.11.1"
+kotlin = "2.3.20"
 media3 = "1.5.1"
 activityCompose = "1.10.1"
 coreKtx = "1.15.0"
-coroutines = "1.10.1"
+coroutines = "1.10.2"
 json = "20240303"
 serializationJson = "1.8.1"
+lifecycle = "2.10.0"
+navigation3 = "1.1.1"
+datastore = "1.2.1"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -23,7 +26,13 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serializationJson" }
-compose-material3-expressive = { module = "org.jetbrains.compose.material3:material3", version = "1.9.0-alpha04" }
+compose-material3-expressive = { module = "org.jetbrains.compose.material3:material3", version = "1.11.0-alpha07" }
+androidx-lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-navigation3 = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "lifecycle" }
+androidx-navigation3-ui = { module = "org.jetbrains.androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+androidx-datastore = { module = "androidx.datastore:datastore", version.ref = "datastore" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 org-json = { module = "org.json:json", version.ref = "json" }
 
 [plugins]
@@ -35,3 +44,4 @@ compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose" 
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

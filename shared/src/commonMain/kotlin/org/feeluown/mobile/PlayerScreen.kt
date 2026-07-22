@@ -231,31 +231,38 @@ fun FullPlayer(controller: FuoPlayerController) {
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState()),
+                                    .fillMaxHeight(),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                PlayerCoverPage(
-                                    track = currentTrack,
-                                    controller = controller,
+                                Column(
                                     modifier = Modifier
+                                        .weight(1f)
                                         .fillMaxWidth()
-                                        .heightIn(max = 260.dp),
-                                )
-                                PlayerTitleBlock(
-                                    currentTrack,
-                                    state.audioQuality,
-                                    currentPlaybackPartLabel(state),
-                                    state.audioFormatInfo,
-                                    state.audioDecoderInfo,
-                                )
-                                Text(
-                                    text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    PlayerCoverPage(
+                                        track = currentTrack,
+                                        controller = controller,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 260.dp),
+                                    )
+                                    PlayerTitleBlock(
+                                        currentTrack,
+                                        state.audioQuality,
+                                        currentPlaybackPartLabel(state),
+                                        state.audioFormatInfo,
+                                        state.audioDecoderInfo,
+                                    )
+                                    Text(
+                                        text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                                 ProgressBlock(state, controller::seekTo)
                                 PlayerControls(
                                     state = state,
@@ -291,7 +298,6 @@ fun FullPlayer(controller: FuoPlayerController) {
     }
     Surface(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val visualHeight = (maxHeight * 0.42f).coerceAtMost(360.dp)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -331,7 +337,7 @@ fun FullPlayer(controller: FuoPlayerController) {
                     state = pagerState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(visualHeight),
+                        .weight(1f),
                     pageSpacing = 16.dp,
                 ) { page ->
                     when (PlayerVisualTab.entries[page]) {
@@ -343,7 +349,6 @@ fun FullPlayer(controller: FuoPlayerController) {
                         )
                     }
                 }
-                Spacer(Modifier.weight(1f))
                 PlayerTitleBlock(
                     currentTrack,
                     state.audioQuality,

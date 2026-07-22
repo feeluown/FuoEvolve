@@ -58,7 +58,7 @@ val releaseAbiSplitsEnabled = providers.gradleProperty("fuo.releaseAbiSplits")
 
 android {
     namespace = "org.feeluown.mobile"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.feeluown.mobile"
@@ -182,6 +182,9 @@ dependencies {
     implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.datastore)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.jellyfin.media3.ffmpeg.decoder)
     implementation(libs.kotlinx.coroutines.android)
 }
