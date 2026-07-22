@@ -270,29 +270,6 @@ internal fun JSONObject.toMutationResult(): ProviderMutationResult = ProviderMut
     message = optString("message"),
 )
 
-internal fun providerCookieInputsJson(inputs: Map<String, String>): String {
-    val json = JSONObject()
-    inputs.forEach { (key, value) ->
-        if (key.isNotBlank() && value.isNotBlank()) json.put(key, value)
-    }
-    return json.toString()
-}
-
-internal fun providerHeaderInputsJson(inputs: Map<String, ProviderHeaderInput>): String {
-    val json = JSONObject()
-    inputs.forEach { (providerId, input) ->
-        if (providerId.isNotBlank() && (input.authorization.isNotBlank() || input.cookie.isNotBlank())) {
-            json.put(
-                providerId,
-                JSONObject()
-                    .put("authorization", input.authorization)
-                    .put("cookie", input.cookie),
-            )
-        }
-    }
-    return json.toString()
-}
-
 internal fun JSONObject.readProviderCookieInputs(): Map<String, String> {
     val result = linkedMapOf<String, String>()
     val keys = keys()

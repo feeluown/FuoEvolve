@@ -284,6 +284,7 @@ data class PlaybackState(
     val currentTrack: MusicTrack? = null,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
+    val volume: Double = 1.0,
     val bufferedMs: Long = 0,
     val queue: List<MusicTrack> = emptyList(),
     val queueIndex: Int = -1,
@@ -825,6 +826,7 @@ interface PlaybackEngine {
     fun resume()
     fun stop()
     fun seekTo(positionMs: Long)
+    fun setVolume(volume: Double) = Unit
 }
 
 data class SettingsState(

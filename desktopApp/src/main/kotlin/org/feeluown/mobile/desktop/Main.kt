@@ -5,18 +5,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.DialogWindow
-import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
-import androidx.compose.ui.window.isTraySupported
-import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -24,7 +21,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import org.feeluown.mobile.AppNavigator
 import org.feeluown.mobile.AppRoot
+import org.feeluown.mobile.DefaultProviderSessionRepository
+import org.feeluown.mobile.FuoAppViewModel
 import org.feeluown.mobile.FuoPlayerController
 import org.feeluown.mobile.NoOpDebugLogRepository
 import org.feeluown.mobile.ProviderInfo
@@ -45,39 +45,24 @@ fun main() = application {
         size = initialWindowBounds.size,
         position = initialWindowBounds.position,
     )
-    var isMainWindowVisible by remember { mutableStateOf(true) }
     var isExitConfirmationVisible by remember { mutableStateOf(false) }
-    val traySupported = isTraySupported
-    val trayState = rememberTrayState()
-    DisposableEffect(Unit) {
+    var raiseRequest by remember { mutableStateOf(0) }
+    DisposableEffect(container) {
+        container.startMpris { raiseRequest += 1 }
         onDispose { container.close() }
     }
 
-    if (traySupported) {
-        Tray(
-            icon = painterResource("fuo-evolve.png"),
-            state = trayState,
-            tooltip = "FuoEvolve",
-            onAction = { isMainWindowVisible = true },
-            menu = {
-                Item("显示主窗口", onClick = { isMainWindowVisible = true })
-                Item("退出应用", onClick = { isExitConfirmationVisible = true })
-            },
-        )
-    }
-
     Window(
-        onCloseRequest = {
-            if (traySupported) {
-                isMainWindowVisible = false
-            } else {
-                isExitConfirmationVisible = true
-            }
-        },
-        visible = isMainWindowVisible,
+        onCloseRequest = { isExitConfirmationVisible = true },
         state = windowState,
         title = "FuoEvolve",
     ) {
+        LaunchedEffect(raiseRequest) {
+            if (raiseRequest > 0) {
+                window.toFront()
+                window.requestFocus()
+            }
+        }
         DesktopApp(container)
     }
 
@@ -150,7 +135,7 @@ private const val DEFAULT_WINDOW_HEIGHT = 800
 @Composable
 private fun DesktopApp(container: DesktopAppContainer) {
     AppRoot(
-        controller = container.controller,
+        appViewModel = container.appViewModel,
         hasAudioPermission = true,
         appVersionInfo = "桌面开发版",
         onRequestAudioPermission = container::requestAudioPermission,
@@ -166,20 +151,33 @@ private class DesktopAppContainer : AutoCloseable {
     private val localRepository = DesktopLocalMusicRepository()
     private val downloadRepository = DesktopDownloadRepository(providerRepository)
     private val playbackEngine = DesktopNativeAudioEngine(scope)
-    private val settingsStore = DesktopAppSettingsStore()
+    private val settingsRepository = createDesktopAppSettingsRepository(scope)
+    private val providerSessionRepository = DefaultProviderSessionRepository(providerRepository)
+    private val navigator = AppNavigator()
     private val playbackQueueStore = DesktopPlaybackQueueStore()
     private val resourceCacheRepository = DesktopResourceCacheRepository()
+    private var mprisService: LinuxMprisService? = null
+    private var closed = false
 
     val controller = FuoPlayerController(
         providerRepository = providerRepository,
         localRepository = localRepository,
         downloadRepository = downloadRepository,
         playbackEngine = playbackEngine,
-        settingsStore = settingsStore,
+        settingsRepository = settingsRepository,
+        providerSessionRepository = providerSessionRepository,
+        navigator = navigator,
         playbackQueueStore = playbackQueueStore,
         resourceCacheRepository = resourceCacheRepository,
         debugLogRepository = NoOpDebugLogRepository,
         scope = scope,
+    )
+
+    val appViewModel = FuoAppViewModel(
+        controller = controller,
+        settingsRepository = settingsRepository,
+        providerSessionRepository = providerSessionRepository,
+        navigator = navigator,
     )
 
     fun requestAudioPermission() {
@@ -202,9 +200,24 @@ private class DesktopAppContainer : AutoCloseable {
         controller.logoutProvider(provider.providerId)
     }
 
+    fun startMpris(onRaise: () -> Unit) {
+        if (mprisService == null && !closed) {
+            mprisService = LinuxMprisService.start(
+                controller = controller,
+                scope = scope,
+                onRaise = onRaise,
+                positionSourceMs = playbackEngine::currentPositionMs,
+            )
+        }
+    }
+
     override fun close() {
+        if (closed) return
+        closed = true
         providerRepository.close()
         playbackEngine.stop()
+        mprisService?.close()
+        mprisService = null
         scope.cancel()
     }
 }

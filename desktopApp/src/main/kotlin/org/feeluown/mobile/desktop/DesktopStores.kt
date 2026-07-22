@@ -1,5 +1,9 @@
 package org.feeluown.mobile.desktop
 
+import androidx.datastore.core.okio.OkioStorage
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferencesSerializer
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -7,7 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import org.feeluown.mobile.AppSettings
-import org.feeluown.mobile.AppSettingsStore
+import org.feeluown.mobile.APP_SETTINGS_FILE_NAME
+import org.feeluown.mobile.AppSettingsRepository
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.CacheLimit
 import org.feeluown.mobile.CacheUsage
@@ -20,10 +25,12 @@ import org.feeluown.mobile.DEFAULT_PROVIDER_ORDER_IDS
 import org.feeluown.mobile.DEFAULT_SMART_REPLACEMENT_MIN_SCORE
 import org.feeluown.mobile.DEFAULT_UNAVAILABLE_PLAYBACK_POLICY
 import org.feeluown.mobile.DEFAULT_WIFI_AUDIO_QUALITY_POLICY
+import org.feeluown.mobile.DataStoreAppSettingsRepository
 import org.feeluown.mobile.DownloadRepository
 import org.feeluown.mobile.DownloadState
 import org.feeluown.mobile.HomeSection
 import org.feeluown.mobile.LocalMusicViewMode
+import org.feeluown.mobile.LegacyAppSettingsLoader
 import org.feeluown.mobile.LyricFontSize
 import org.feeluown.mobile.MineSection
 import org.feeluown.mobile.MusicTrack
@@ -39,16 +46,36 @@ import org.feeluown.mobile.SearchScope
 import org.feeluown.mobile.ThemeColorScheme
 import org.feeluown.mobile.ThemeMode
 import org.feeluown.mobile.UnavailablePlaybackPolicy
+import org.feeluown.mobile.createSettingsDataStore
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.URL
 import java.util.Properties
 
-internal class DesktopAppSettingsStore(
+internal fun createDesktopAppSettingsRepository(scope: CoroutineScope): AppSettingsRepository {
+    val dataStore = createSettingsDataStore(
+        storage = OkioStorage<Preferences>(
+            fileSystem = FileSystem.SYSTEM,
+            serializer = PreferencesSerializer,
+            producePath = {
+                File(DesktopPaths.configDir, APP_SETTINGS_FILE_NAME).absolutePath.toPath()
+            },
+        ),
+    )
+    return DataStoreAppSettingsRepository(
+        dataStore = dataStore,
+        legacyLoader = LegacyAppSettingsLoader { DesktopLegacySettingsLoader().load() },
+        scope = scope,
+    )
+}
+
+internal class DesktopLegacySettingsLoader(
     private val file: File = File(DesktopPaths.configDir, "settings.properties"),
-) : AppSettingsStore {
-    override suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
+) {
+    suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
         val props = Properties().apply {
             if (file.isFile) file.inputStream().use(::load)
         }
@@ -104,44 +131,6 @@ internal class DesktopAppSettingsStore(
         )
     }
 
-    override suspend fun save(settings: AppSettings) {
-        withContext(Dispatchers.IO) {
-            val props = Properties().apply {
-                setProperty(KEY_HOME_SECTION, settings.homeSection.name)
-                setProperty(KEY_MINE_SECTION, settings.mineSection.name)
-                setProperty(KEY_PLAYLIST_FILTER, settings.playlistFilter.name)
-                setProperty(KEY_LOCAL_MUSIC_VIEW_MODE, settings.localMusicViewMode.name)
-                setProperty(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS, stringListJson(settings.excludedLocalMusicDirectoryIds.toList()))
-                setProperty(KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS, settings.localMusicMinDurationSeconds.toString())
-                setProperty(KEY_SEARCH_SCOPE, settings.searchScope.name)
-                settings.selectedSearchProviderId?.let { setProperty(KEY_SELECTED_SEARCH_PROVIDER_ID, it) }
-                settings.selectedSettingsProviderId?.let { setProperty(KEY_SELECTED_SETTINGS_PROVIDER_ID, it) }
-                setProperty(KEY_PROVIDER_LOGIN_MODE, settings.providerLoginMode.name)
-                setProperty(KEY_PROVIDER_COOKIE_INPUTS, providerCookieInputsJson(settings.providerCookieInputs))
-                setProperty(KEY_PROVIDER_HEADER_INPUTS, providerHeaderInputsJson(settings.providerHeaderInputs))
-                setProperty(KEY_ENABLED_PROVIDER_IDS, stringListJson(settings.enabledProviderIds.toList()))
-                setProperty(KEY_PROVIDER_ORDER_IDS, stringListJson(settings.providerOrderIds))
-                setProperty(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb.toString())
-                setProperty(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb.toString())
-                setProperty(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
-                setProperty(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
-                setProperty(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
-                setProperty(KEY_SMART_REPLACEMENT_PROVIDER_IDS, stringListJson(settings.smartReplacementProviderIds.toList()))
-                setProperty(KEY_SMART_REPLACEMENT_MIN_SCORE, settings.smartReplacementMinScore.toString())
-                setProperty(
-                    KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA,
-                    settings.smartReplacementUseReplacementMetadata.toString(),
-                )
-                setProperty(KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS, settings.smartReplacementUseReplacementLyrics.toString())
-                setProperty(KEY_LYRIC_FONT_SIZE, settings.lyricFontSize.name)
-                setProperty(KEY_THEME_MODE, settings.themeMode.name)
-                setProperty(KEY_THEME_COLOR_SCHEME, settings.themeColorScheme.name)
-            }
-            file.parentFile?.mkdirs()
-            file.outputStream().use { props.store(it, "FuoEvolve desktop settings") }
-        }
-    }
-
     private inline fun <reified T : Enum<T>> enumValue(props: Properties, key: String, fallback: T): T {
         val raw = props.getProperty(key) ?: return fallback
         return runCatching { enumValueOf<T>(raw) }.getOrDefault(fallback)
@@ -158,12 +147,6 @@ internal class DesktopAppSettingsStore(
                 .filter { it.isNotBlank() }
                 .distinct()
         }.getOrDefault(emptyList())
-    }
-
-    private fun stringListJson(values: List<String>): String {
-        val array = JSONArray()
-        values.filter { it.isNotBlank() }.distinct().forEach { array.put(it) }
-        return array.toString()
     }
 
     private companion object {

@@ -26,7 +26,15 @@ dependencies {
     implementation(libs.compose.material3.expressive)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
+    implementation(libs.androidx.datastore)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.dbus.java.core)
+    implementation(libs.dbus.java.transport.native.unixsocket)
+    implementation(libs.jna)
     implementation(libs.org.json)
+    testImplementation(kotlin("test"))
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 compose.desktop {
@@ -34,6 +42,7 @@ compose.desktop {
         mainClass = "org.feeluown.mobile.desktop.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.AppImage)
+            modules("jdk.security.auth")
             packageName = "FuoEvolve"
             packageVersion = "0.1.0"
             description = "FeelUOwn-based Compose Multiplatform music player"
