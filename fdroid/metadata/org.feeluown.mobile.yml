@@ -1,0 +1,25 @@
+Categories:
+  - Multimedia
+License: GPL-3.0-only
+AuthorName: FeelUOwn contributors
+AuthorWebSite: https://feeluown.github.io/
+WebSite: https://feeluown.github.io/FuoEvolve/
+SourceCode: https://github.com/feeluown/FuoEvolve
+IssueTracker: https://github.com/feeluown/FuoEvolve/issues
+Changelog: https://github.com/feeluown/FuoEvolve/releases
+
+Name: FuoEvolve
+Summary: Open-source Android music player based on FeelUOwn
+Description: |-
+  FuoEvolve is an open-source Android music player built on the FeelUOwn
+  ecosystem. It supports searching across enabled music providers, playback,
+  lyrics, local music, downloads, playlists, and provider account login.
+
+  Provider availability and media access depend on the selected third-party
+  services, account state, region, and the corresponding FeelUOwn plugins.
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: >-
+      Connects to proprietary third-party music services selected by the user.
+    zh-CN: 连接用户选择的第三方专有音乐服务。
