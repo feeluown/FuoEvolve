@@ -123,7 +123,7 @@ jobs:
       - name: Download release APK assets
         uses: actions/download-artifact@v8
         with:
-          pattern: release-apk-*
+          pattern: fuo-evolve-*-signed.apk
           path: build/artifacts
           merge-multiple: true
 
