@@ -123,9 +123,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         val controller = (application as FuoEvolveApplication).controller
-        if (controller.isRecognitionOpen) {
-            controller.cancelRecognition()
-        }
+        controller.onAppBackgrounded()
         super.onStop()
     }
 

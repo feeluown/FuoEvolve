@@ -632,7 +632,6 @@ class FuoPlayerController(
             playbackEngine.pause()
         }
         recognitionUiState = RecognitionUiState.Capturing(
-            attempt = 1,
             capturedMs = 0,
             windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
         )
@@ -646,17 +645,14 @@ class FuoPlayerController(
                 }
             }.onSuccess { songs ->
                 if (recognitionSerial == audioRecognitionSerial) {
-                    recognitionUiState = RecognitionUiState.Success(
-                        songs = songs.distinctBy {
-                            it.neteaseSongId ?: "${it.title}\u0000${it.artists.joinToString()}"
-                        },
-                    )
+                    recognitionUiState = recognitionResultState(songs)
                 }
             }.onFailure { throwable ->
                 if (
                     recognitionSerial == audioRecognitionSerial &&
                     throwable !is CancellationException &&
-                    recognitionUiState != RecognitionUiState.Cancelled
+                    recognitionUiState != RecognitionUiState.Cancelled &&
+                    recognitionUiState != RecognitionUiState.NoResult
                 ) {
                     recognitionUiState = RecognitionUiState.Error(
                         throwable.message ?: "听歌识曲失败",
@@ -693,13 +689,22 @@ class FuoPlayerController(
     }
 
     fun onRecognitionScreenDisposed() {
-        if (audioRecognitionJob?.isActive == true) {
+        if (isRecognitionInProgress()) {
             cancelRecognition()
         }
     }
 
+    fun onAppBackgrounded() {
+        if (isRecognitionInProgress()) {
+            cancelRecognition()
+        }
+    }
+
+    private fun isRecognitionInProgress(): Boolean =
+        recognitionUiState is RecognitionUiState.Capturing ||
+            recognitionUiState == RecognitionUiState.Matching
+
     fun searchRecognizedSong(song: RecognizedSong) {
-        closeRecognition()
         query = buildList {
             song.title.trim().takeIf { it.isNotBlank() }?.let(::add)
             song.artists.joinToString(" / ").trim().takeIf { it.isNotBlank() }?.let(::add)
@@ -717,7 +722,6 @@ class FuoPlayerController(
     fun openRecognizedNeteaseDetail(song: RecognizedSong) {
         val songId = song.neteaseSongId?.takeIf { it.isNotBlank() } ?: return
         if ("netease" !in enabledProviderIds) return
-        closeRecognition()
         val trackId = "netease:$songId"
         navigator.navigate(AppRoute.Track)
         selectedTrack = MusicTrack(
@@ -751,23 +755,42 @@ class FuoPlayerController(
     private fun handleAudioRecognitionEvent(event: AudioRecognitionEvent) {
         recognitionUiState = when (event) {
             is AudioRecognitionEvent.Capturing -> RecognitionUiState.Capturing(
-                attempt = event.attempt,
                 capturedMs = event.capturedMs,
                 windowDurationMs = event.windowDurationMs,
             )
-            is AudioRecognitionEvent.Matching -> RecognitionUiState.Matching(event.attempt)
-            is AudioRecognitionEvent.NoMatch -> RecognitionUiState.Capturing(
-                attempt = event.attempt + 1,
-                capturedMs = 0,
-                windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
-            )
-            is AudioRecognitionEvent.Success -> RecognitionUiState.Success(
-                event.songs.distinctBy {
-                    it.neteaseSongId ?: "${it.title}\u0000${it.artists.joinToString()}"
-                },
-            )
+            is AudioRecognitionEvent.Matching -> RecognitionUiState.Matching
+            is AudioRecognitionEvent.NoMatch -> {
+                if (event.attempt >= AUDIO_RECOGNITION_MAX_ATTEMPTS) {
+                    stopRecognitionWithoutResult()
+                    RecognitionUiState.NoResult
+                } else {
+                    RecognitionUiState.Capturing(
+                        capturedMs = 0,
+                        windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
+                    )
+                }
+            }
+            is AudioRecognitionEvent.Success -> recognitionResultState(event.songs)
             is AudioRecognitionEvent.Error -> RecognitionUiState.Error(event.message)
             AudioRecognitionEvent.Cancelled -> RecognitionUiState.Cancelled
+        }
+    }
+
+    private fun stopRecognitionWithoutResult() {
+        audioRecognitionSerial += 1
+        audioRecognitionJob?.cancel()
+        audioRecognitionRepository.cancel()
+        audioRecognitionJob = null
+    }
+
+    private fun recognitionResultState(songs: List<RecognizedSong>): RecognitionUiState {
+        val distinctSongs = songs.distinctBy {
+            it.neteaseSongId ?: "${it.title}\u0000${it.artists.joinToString()}"
+        }
+        return if (distinctSongs.isEmpty()) {
+            RecognitionUiState.NoResult
+        } else {
+            RecognitionUiState.Success(distinctSongs)
         }
     }
 

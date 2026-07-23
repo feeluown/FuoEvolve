@@ -145,19 +145,26 @@ private fun RecognitionContent(
         is RecognitionUiState.Capturing -> ListeningContent(
             modifier = modifier,
             title = "正在聆听",
-            subtitle = "第 ${state.attempt} 次采样 · 每次 6 秒",
+            subtitle = "请靠近声音来源，并保持周围环境安静",
             progress = (state.capturedMs.toFloat() / state.windowDurationMs).coerceIn(0f, 1f),
         )
-        is RecognitionUiState.Matching -> ListeningContent(
+        RecognitionUiState.Matching -> ListeningContent(
             modifier = modifier,
-            title = "正在识别",
-            subtitle = "正在匹配第 ${state.attempt} 段录音",
+            title = "正在寻找这首歌",
+            subtitle = "马上就好，请继续让音乐播放",
             progress = null,
         )
         is RecognitionUiState.Success -> RecognitionResults(
             controller = controller,
             songs = state.songs,
             modifier = modifier,
+        )
+        RecognitionUiState.NoResult -> RecognitionMessage(
+            modifier = modifier,
+            title = "暂未识别到歌曲",
+            message = "可以让手机更靠近声音来源，或换到安静一点的环境再试一次。",
+            actionLabel = "重新识别",
+            onAction = controller::retryRecognition,
         )
         is RecognitionUiState.Error -> RecognitionMessage(
             modifier = modifier,
@@ -169,7 +176,7 @@ private fun RecognitionContent(
         RecognitionUiState.Cancelled -> RecognitionMessage(
             modifier = modifier,
             title = "已停止识别",
-            message = "可以重新开始采样。",
+            message = "准备好后，可以再次开始识别。",
             actionLabel = "重新识别",
             onAction = controller::retryRecognition,
         )

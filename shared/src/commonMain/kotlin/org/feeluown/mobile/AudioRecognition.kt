@@ -31,14 +31,15 @@ sealed interface RecognitionUiState {
     data object Idle : RecognitionUiState
 
     data class Capturing(
-        val attempt: Int,
         val capturedMs: Long,
         val windowDurationMs: Long,
     ) : RecognitionUiState
 
-    data class Matching(val attempt: Int) : RecognitionUiState
+    data object Matching : RecognitionUiState
 
     data class Success(val songs: List<RecognizedSong>) : RecognitionUiState
+
+    data object NoResult : RecognitionUiState
 
     data class Error(val message: String) : RecognitionUiState
 
@@ -60,6 +61,7 @@ object UnsupportedAudioRecognitionRepository : AudioRecognitionRepository {
 }
 
 const val AUDIO_RECOGNITION_WINDOW_MS = 6_000L
+const val AUDIO_RECOGNITION_MAX_ATTEMPTS = 6
 const val AUDIO_RECOGNITION_SAMPLE_RATE = 48_000
 const val AUDIO_RECOGNITION_FINGERPRINT_SAMPLE_RATE = 8_000
 const val AUDIO_RECOGNITION_WINDOW_SAMPLES =

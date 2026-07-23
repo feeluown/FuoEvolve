@@ -3476,13 +3476,73 @@ class FuoPlayerControllerTest {
 
             assertEquals(
                 RecognitionUiState.Capturing(
-                    attempt = 2,
                     capturedMs = 0,
                     windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
                 ),
                 controller.recognitionUiState,
             )
             assertTrue(controller.isRecognitionOpen)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun recognitionStopsWithNoResultAfterSixAttempts() = runTest {
+        val recognition = FakeAudioRecognitionRepository(
+            events = buildList {
+                repeat(AUDIO_RECOGNITION_MAX_ATTEMPTS) { index ->
+                    val attempt = index + 1
+                    add(AudioRecognitionEvent.Matching(attempt))
+                    add(AudioRecognitionEvent.NoMatch(attempt))
+                }
+            },
+            suspendForever = true,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                audioRecognitionRepository = recognition,
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+
+            controller.openRecognition()
+            controller.startRecognition()
+            runCurrent()
+
+            assertEquals(RecognitionUiState.NoResult, controller.recognitionUiState)
+            assertEquals(1, recognition.cancelCount)
+            assertTrue(controller.isRecognitionOpen)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun emptyRecognitionResultShowsNoResult() = runTest {
+        val recognition = FakeAudioRecognitionRepository(result = emptyList())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                audioRecognitionRepository = recognition,
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+
+            controller.openRecognition()
+            controller.startRecognition()
+            advanceUntilIdle()
+
+            assertEquals(RecognitionUiState.NoResult, controller.recognitionUiState)
         } finally {
             controllerScope.cancel()
         }
@@ -3522,7 +3582,9 @@ class FuoPlayerControllerTest {
     @Test
     fun recognizedSongSearchUsesAllEnabledProviders() = runTest {
         val provider = FakeProviderRepository(emptyList())
-        val recognition = FakeAudioRecognitionRepository()
+        val song = RecognizedSong("42", "Song", listOf("Artist A", "Artist B"), "Album")
+        val recognition = FakeAudioRecognitionRepository(result = listOf(song))
+        val navigator = AppNavigator()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
             val controller = FuoPlayerController(
@@ -3531,21 +3593,30 @@ class FuoPlayerControllerTest {
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
                 audioRecognitionRepository = recognition,
+                navigator = navigator,
                 scope = controllerScope,
             )
             advanceUntilIdle()
+            controller.openSearch()
             controller.openRecognition()
+            controller.startRecognition()
+            advanceUntilIdle()
 
-            controller.searchRecognizedSong(
-                RecognizedSong("42", "Song", listOf("Artist A", "Artist B"), "Album"),
-            )
+            controller.searchRecognizedSong(song)
             advanceUntilIdle()
 
             assertEquals("Song Artist A / Artist B", controller.query)
             assertEquals(SearchScope.All, controller.searchScope)
             assertNull(controller.selectedSearchProviderId)
             assertTrue(controller.isSearchOpen)
-            assertFalse(controller.isRecognitionOpen)
+            assertTrue(controller.isRecognitionOpen)
+            assertEquals(RecognitionUiState.Success(listOf(song)), controller.recognitionUiState)
+
+            controller.navigateBack()
+
+            assertEquals(AppRoute.AudioRecognition, navigator.currentRoute)
+            assertTrue(controller.isRecognitionOpen)
+            assertEquals(RecognitionUiState.Success(listOf(song)), controller.recognitionUiState)
         } finally {
             controllerScope.cancel()
         }
@@ -3555,6 +3626,9 @@ class FuoPlayerControllerTest {
     fun recognizedNeteaseDetailRequiresEnabledProviderAndLoadsTrackId() = runTest {
         val detail = providerTrack("netease:42", "Recognized")
         val provider = FakeProviderRepository(listOf(detail))
+        val song = RecognizedSong("42", "Recognized", listOf("Artist"), "Album")
+        val recognition = FakeAudioRecognitionRepository(result = listOf(song))
+        val navigator = AppNavigator()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
             val controller = FuoPlayerController(
@@ -3562,19 +3636,85 @@ class FuoPlayerControllerTest {
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
+                audioRecognitionRepository = recognition,
+                navigator = navigator,
                 scope = controllerScope,
             )
             advanceUntilIdle()
-            val song = RecognizedSong("42", "Recognized", listOf("Artist"), "Album")
 
             assertTrue(controller.canOpenRecognizedNeteaseDetail(song))
             controller.openRecognition()
+            controller.startRecognition()
+            advanceUntilIdle()
             controller.openRecognizedNeteaseDetail(song)
             advanceUntilIdle()
 
             assertEquals("netease:42", provider.lastTrackDetailId)
             assertEquals("Recognized", controller.selectedTrack?.title)
-            assertFalse(controller.isRecognitionOpen)
+            assertTrue(controller.isRecognitionOpen)
+            assertEquals(RecognitionUiState.Success(listOf(song)), controller.recognitionUiState)
+
+            controller.navigateBack()
+
+            assertEquals(AppRoute.AudioRecognition, navigator.currentRoute)
+            assertTrue(controller.isRecognitionOpen)
+            assertEquals(RecognitionUiState.Success(listOf(song)), controller.recognitionUiState)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun backgroundPreservesRecognitionResult() = runTest {
+        val song = RecognizedSong("42", "Song", listOf("Artist"), "Album")
+        val recognition = FakeAudioRecognitionRepository(result = listOf(song))
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                audioRecognitionRepository = recognition,
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+            controller.openRecognition()
+            controller.startRecognition()
+            advanceUntilIdle()
+
+            controller.onAppBackgrounded()
+
+            assertEquals(RecognitionUiState.Success(listOf(song)), controller.recognitionUiState)
+            assertEquals(0, recognition.cancelCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun backgroundStopsActiveRecognition() = runTest {
+        val recognition = FakeAudioRecognitionRepository(suspendForever = true)
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                audioRecognitionRepository = recognition,
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+            controller.openRecognition()
+            controller.startRecognition()
+            runCurrent()
+
+            controller.onAppBackgrounded()
+            runCurrent()
+
+            assertEquals(RecognitionUiState.Cancelled, controller.recognitionUiState)
+            assertEquals(1, recognition.cancelCount)
         } finally {
             controllerScope.cancel()
         }
