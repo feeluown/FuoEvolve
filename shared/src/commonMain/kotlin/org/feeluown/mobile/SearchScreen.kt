@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -30,6 +31,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,7 +44,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun SearchScreen(controller: FuoPlayerController) {
+fun SearchScreen(
+    controller: FuoPlayerController,
+    onOpenRecognition: () -> Unit,
+) {
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Scaffold { paddingValues ->
             Row(
@@ -79,6 +84,14 @@ fun SearchScreen(controller: FuoPlayerController) {
                             onClick = controller::search,
                         ) {
                             Icon(Icons.Filled.Search, contentDescription = "搜索")
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = onOpenRecognition,
+                        ) {
+                            Icon(Icons.Filled.Mic, contentDescription = null)
+                            Spacer(Modifier.size(8.dp))
+                            Text("听歌识曲")
                         }
                         Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -150,6 +163,9 @@ fun SearchScreen(controller: FuoPlayerController) {
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = { controller.search() }),
                         )
+                        IconButton(onClick = onOpenRecognition) {
+                            Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
+                        }
                         IconButton(
                             enabled = !controller.isLoading,
                             onClick = controller::search,

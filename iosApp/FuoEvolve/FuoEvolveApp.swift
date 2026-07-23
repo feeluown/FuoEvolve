@@ -37,7 +37,8 @@ private struct SharedComposeRoot: UIViewControllerRepresentable {
             downloadOutput: IOSDownloadOutput.shared,
             webLoginOutput: IOSWebLoginOutput.shared,
             shareOutput: IOSShareOutput.shared,
-            networkStatusOutput: IOSNetworkStatusOutput.shared
+            networkStatusOutput: IOSNetworkStatusOutput.shared,
+            audioRecognitionOutput: IOSAudioRecognitionOutput.shared
         )
         IOSWebLoginOutput.shared.hostViewController = viewController
         return viewController

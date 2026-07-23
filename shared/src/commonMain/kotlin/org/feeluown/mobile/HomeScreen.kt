@@ -19,6 +19,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -64,6 +65,7 @@ fun HomeScreen(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    onOpenRecognition: () -> Unit,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     Scaffold(
@@ -77,6 +79,9 @@ fun HomeScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = onOpenRecognition) {
+                            Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
+                        }
                         IconButton(onClick = controller::openSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "搜索")
                         }
@@ -105,6 +110,7 @@ fun HomeScreen(
                 controller = controller,
                 hasAudioPermission = hasAudioPermission,
                 onRequestAudioPermission = onRequestAudioPermission,
+                onOpenRecognition = onOpenRecognition,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -116,6 +122,7 @@ fun HomeSectionPager(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    onOpenRecognition: () -> Unit,
     modifier: Modifier,
 ) {
     val sections = listOf(
@@ -158,6 +165,7 @@ fun HomeSectionPager(
                 selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
                 onSettings = { controller.openSettings() },
                 onSearch = controller::openSearch,
+                onRecognition = onOpenRecognition,
                 onClick = { index, section ->
                     if (section != controller.homeSection || index != pagerState.currentPage) {
                         scope.launch { pagerState.animateScrollToPage(index) }
@@ -243,6 +251,7 @@ fun HomeSectionRail(
     selectedIndex: Int,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
+    onRecognition: () -> Unit,
     onClick: (Int, HomeSection) -> Unit,
 ) {
     Surface(
@@ -293,6 +302,9 @@ fun HomeSectionRail(
                 }
             }
             Spacer(Modifier.weight(1f))
+            IconButton(onClick = onRecognition) {
+                Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
+            }
             IconButton(onClick = onSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "搜索")
             }

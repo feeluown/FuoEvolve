@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Deferred
@@ -92,6 +93,7 @@ class FuoPlayerController(
     private val playbackQueueStore: PlaybackQueueStore = NoOpPlaybackQueueStore,
     private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository,
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
+    private val audioRecognitionRepository: AudioRecognitionRepository = UnsupportedAudioRecognitionRepository,
     private val scope: CoroutineScope,
 ) {
     var isSettingsLoaded by mutableStateOf(false)
@@ -232,6 +234,10 @@ class FuoPlayerController(
         private set
     val isSearchOpen: Boolean
         get() = navigator.contains(AppRoute.Search)
+    val isRecognitionOpen: Boolean
+        get() = navigator.contains(AppRoute.AudioRecognition)
+    var recognitionUiState by mutableStateOf<RecognitionUiState>(RecognitionUiState.Idle)
+        private set
     var isFullPlayerOpen by mutableStateOf(false)
         private set
     var isVideoFullscreen by mutableStateOf(false)
@@ -343,6 +349,8 @@ class FuoPlayerController(
     private var hasLocalMusicPermission: Boolean = false
     private var observedCompletedDownloadTaskIds = emptySet<String>()
     private var pendingLocalMusicMediaRefresh: Job? = null
+    private var audioRecognitionJob: Job? = null
+    private var audioRecognitionSerial: Long = 0
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
     private val settingsUpdates = Channel<AppSettings>(capacity = Channel.UNLIMITED)
@@ -613,6 +621,156 @@ class FuoPlayerController(
         navigator.pop(AppRoute.Search)
     }
 
+    fun openRecognition() {
+        recognitionUiState = RecognitionUiState.Idle
+        navigator.navigate(AppRoute.AudioRecognition)
+    }
+
+    fun startRecognition() {
+        if (audioRecognitionJob?.isActive == true) return
+        if (playbackState.status == PlayerStatus.Playing) {
+            playbackEngine.pause()
+        }
+        recognitionUiState = RecognitionUiState.Capturing(
+            attempt = 1,
+            capturedMs = 0,
+            windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
+        )
+        val recognitionSerial = ++audioRecognitionSerial
+        audioRecognitionJob = scope.launch {
+            runCatching {
+                audioRecognitionRepository.recognize { event ->
+                    if (recognitionSerial == audioRecognitionSerial) {
+                        handleAudioRecognitionEvent(event)
+                    }
+                }
+            }.onSuccess { songs ->
+                if (recognitionSerial == audioRecognitionSerial) {
+                    recognitionUiState = RecognitionUiState.Success(
+                        songs = songs.distinctBy {
+                            it.neteaseSongId ?: "${it.title}\u0000${it.artists.joinToString()}"
+                        },
+                    )
+                }
+            }.onFailure { throwable ->
+                if (
+                    recognitionSerial == audioRecognitionSerial &&
+                    throwable !is CancellationException &&
+                    recognitionUiState != RecognitionUiState.Cancelled
+                ) {
+                    recognitionUiState = RecognitionUiState.Error(
+                        throwable.message ?: "听歌识曲失败",
+                    )
+                }
+            }
+            if (recognitionSerial == audioRecognitionSerial) {
+                audioRecognitionJob = null
+            }
+        }
+    }
+
+    fun cancelRecognition() {
+        audioRecognitionSerial += 1
+        audioRecognitionRepository.cancel()
+        audioRecognitionJob?.cancel()
+        audioRecognitionJob = null
+        recognitionUiState = RecognitionUiState.Cancelled
+    }
+
+    fun retryRecognition() {
+        cancelRecognition()
+        recognitionUiState = RecognitionUiState.Idle
+        startRecognition()
+    }
+
+    fun closeRecognition() {
+        audioRecognitionSerial += 1
+        audioRecognitionRepository.cancel()
+        audioRecognitionJob?.cancel()
+        audioRecognitionJob = null
+        navigator.pop(AppRoute.AudioRecognition)
+        recognitionUiState = RecognitionUiState.Idle
+    }
+
+    fun onRecognitionScreenDisposed() {
+        if (audioRecognitionJob?.isActive == true) {
+            cancelRecognition()
+        }
+    }
+
+    fun searchRecognizedSong(song: RecognizedSong) {
+        closeRecognition()
+        query = buildList {
+            song.title.trim().takeIf { it.isNotBlank() }?.let(::add)
+            song.artists.joinToString(" / ").trim().takeIf { it.isNotBlank() }?.let(::add)
+        }.joinToString(" ")
+        searchScope = SearchScope.All
+        selectedSearchProviderId = null
+        providerSearchTab = ProviderSearchTab.Songs
+        navigator.navigate(AppRoute.Search)
+        search()
+    }
+
+    fun canOpenRecognizedNeteaseDetail(song: RecognizedSong): Boolean =
+        "netease" in enabledProviderIds && !song.neteaseSongId.isNullOrBlank()
+
+    fun openRecognizedNeteaseDetail(song: RecognizedSong) {
+        val songId = song.neteaseSongId?.takeIf { it.isNotBlank() } ?: return
+        if ("netease" !in enabledProviderIds) return
+        closeRecognition()
+        val trackId = "netease:$songId"
+        navigator.navigate(AppRoute.Track)
+        selectedTrack = MusicTrack(
+            id = trackId,
+            title = song.title,
+            artists = song.artists.joinToString(" / "),
+            album = song.album,
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            coverUrl = song.coverUrl,
+            providerId = trackId,
+            providerName = "网易云音乐",
+        )
+        selectedTrackError = null
+        scope.launch {
+            isLoading = true
+            runCatching { providerRepository.trackDetail(trackId) }
+                .onSuccess {
+                    selectedTrack = it
+                    loadSelectedTrackRelated(it)
+                    message = it.title.ifBlank { "歌曲已加载" }
+                }
+                .onFailure {
+                    selectedTrackError = it.message ?: "资源加载失败"
+                    message = "资源加载失败"
+                }
+            isLoading = false
+        }
+    }
+
+    private fun handleAudioRecognitionEvent(event: AudioRecognitionEvent) {
+        recognitionUiState = when (event) {
+            is AudioRecognitionEvent.Capturing -> RecognitionUiState.Capturing(
+                attempt = event.attempt,
+                capturedMs = event.capturedMs,
+                windowDurationMs = event.windowDurationMs,
+            )
+            is AudioRecognitionEvent.Matching -> RecognitionUiState.Matching(event.attempt)
+            is AudioRecognitionEvent.NoMatch -> RecognitionUiState.Capturing(
+                attempt = event.attempt + 1,
+                capturedMs = 0,
+                windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
+            )
+            is AudioRecognitionEvent.Success -> RecognitionUiState.Success(
+                event.songs.distinctBy {
+                    it.neteaseSongId ?: "${it.title}\u0000${it.artists.joinToString()}"
+                },
+            )
+            is AudioRecognitionEvent.Error -> RecognitionUiState.Error(event.message)
+            AudioRecognitionEvent.Cancelled -> RecognitionUiState.Cancelled
+        }
+    }
+
     fun navigateBack(): Boolean {
         return when {
             isFullPlayerOpen && isQueueOpen -> {
@@ -666,6 +824,10 @@ class FuoPlayerController(
                 }
                 AppRoute.Search -> {
                     closeSearch()
+                    true
+                }
+                AppRoute.AudioRecognition -> {
+                    closeRecognition()
                     true
                 }
                 AppRoute.Home -> false

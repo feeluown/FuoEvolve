@@ -153,6 +153,8 @@ fun AppRoot(
     appViewModel: FuoAppViewModel,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    hasMicrophonePermission: Boolean,
+    onRequestMicrophonePermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
@@ -261,6 +263,7 @@ fun AppRoot(
                                                 controller = controller,
                                                 hasAudioPermission = hasAudioPermission,
                                                 onRequestAudioPermission = onRequestAudioPermission,
+                                                onOpenRecognition = controller::openRecognition,
                                             )
                                             AppRoute.DebugLogs -> DebugLogScreen(controller)
                                             AppRoute.DownloadManager -> DownloadManagerScreen(controller)
@@ -271,7 +274,15 @@ fun AppRoot(
                                                 onImportYtmusicHeaderFile,
                                                 appVersionInfo,
                                             )
-                                            AppRoute.Search -> SearchScreen(controller)
+                                            AppRoute.Search -> SearchScreen(
+                                                controller = controller,
+                                                onOpenRecognition = controller::openRecognition,
+                                            )
+                                            AppRoute.AudioRecognition -> AudioRecognitionScreen(
+                                                controller = controller,
+                                                hasMicrophonePermission = hasMicrophonePermission,
+                                                onRequestMicrophonePermission = onRequestMicrophonePermission,
+                                            )
                                             AppRoute.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
                                             AppRoute.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
                                             AppRoute.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)

@@ -1,7 +1,10 @@
 package org.feeluown.mobile
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.window.ComposeUIViewController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +20,7 @@ fun MainViewController(
     webLoginOutput: IosWebLoginOutput,
     shareOutput: IosShareOutput,
     networkStatusOutput: IosNetworkStatusOutput,
+    audioRecognitionOutput: IosAudioRecognitionOutput,
 ): UIViewController = ComposeUIViewController {
     IosApp(
         pythonRuntime,
@@ -27,6 +31,7 @@ fun MainViewController(
         webLoginOutput,
         shareOutput,
         networkStatusOutput,
+        audioRecognitionOutput,
     )
 }
 
@@ -40,6 +45,7 @@ private fun IosApp(
     webLoginOutput: IosWebLoginOutput,
     shareOutput: IosShareOutput,
     networkStatusOutput: IosNetworkStatusOutput,
+    audioRecognitionOutput: IosAudioRecognitionOutput,
 ) {
     IosVideoOutputHolder.output = videoOutput
     val container = remember {
@@ -50,12 +56,15 @@ private fun IosApp(
             downloadOutput,
             webLoginOutput,
             networkStatusOutput,
+            audioRecognitionOutput,
         )
     }
     AppRoot(
         appViewModel = container.appViewModel,
         hasAudioPermission = container.hasAudioPermission,
         onRequestAudioPermission = container::requestAudioPermission,
+        hasMicrophonePermission = container.hasMicrophonePermission,
+        onRequestMicrophonePermission = container::requestMicrophonePermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
         onLogoutProvider = container::logoutProvider,
         onShareText = shareOutput::share,
@@ -69,6 +78,7 @@ private class IosAppContainer(
     downloadOutput: IosDownloadOutput,
     private val webLoginOutput: IosWebLoginOutput,
     networkStatusOutput: IosNetworkStatusOutput,
+    private val audioRecognitionOutput: IosAudioRecognitionOutput,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val providerRepository = IosFuoCoreBridge(pythonRuntime, networkStatusOutput)
@@ -80,6 +90,9 @@ private class IosAppContainer(
     private val navigator = AppNavigator()
     private val playbackQueueStore = IosPlaybackQueueStore()
     private val resourceCacheRepository = IosResourceCacheRepository()
+    private val audioRecognitionRepository = IosAudioRecognitionRepository(audioRecognitionOutput)
+    var hasMicrophonePermission by mutableStateOf(audioRecognitionOutput.hasPermission())
+        private set
 
     val controller = FuoPlayerController(
         providerRepository = providerRepository,
@@ -91,6 +104,7 @@ private class IosAppContainer(
         navigator = navigator,
         playbackQueueStore = playbackQueueStore,
         resourceCacheRepository = resourceCacheRepository,
+        audioRecognitionRepository = audioRecognitionRepository,
         scope = scope,
     )
 
@@ -108,6 +122,12 @@ private class IosAppContainer(
         localRepository.requestPermission {
             controller.onLocalMusicPermissionChange(true)
             controller.refreshLocalMusic()
+        }
+    }
+
+    fun requestMicrophonePermission() {
+        audioRecognitionOutput.requestPermission { granted ->
+            hasMicrophonePermission = granted
         }
     }
 

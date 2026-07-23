@@ -50,6 +50,10 @@ class FuoEvolveApplication : PyApplication() {
         AndroidDebugLogRepository(applicationContext, (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
     }
 
+    private val audioRecognitionRepository: AndroidAudioRecognitionRepository by lazy {
+        AndroidAudioRecognitionRepository(applicationContext)
+    }
+
     val controller: FuoPlayerController by lazy {
         FuoPlayerController(
             providerRepository = providerRepository,
@@ -62,6 +66,7 @@ class FuoEvolveApplication : PyApplication() {
             playbackQueueStore = playbackQueueStore,
             resourceCacheRepository = resourceCacheRepository,
             debugLogRepository = debugLogRepository,
+            audioRecognitionRepository = audioRecognitionRepository,
             scope = appScope,
         ).also { controller ->
             FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {

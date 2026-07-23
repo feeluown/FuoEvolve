@@ -70,6 +70,12 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main").assets.srcDir(
+            rootProject.file("shared/src/commonMain/resources"),
+        )
+    }
+
     if (releasePerAbiEnabled) {
         flavorDimensions += "pythonAbi"
         productFlavors {
