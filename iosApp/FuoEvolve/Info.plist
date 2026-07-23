@@ -24,6 +24,8 @@
     <true/>
     <key>NSAppleMusicUsageDescription</key>
     <string>用于扫描并播放本地音乐库。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>用于采样环境音乐并生成听歌识曲所需的音频指纹。</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>用于访问音源服务和播放媒体资源。</string>
     <key>NSAppTransportSecurity</key>

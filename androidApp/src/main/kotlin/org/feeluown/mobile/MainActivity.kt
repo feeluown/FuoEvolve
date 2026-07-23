@@ -32,10 +32,16 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var hasAudioPermission by remember { mutableStateOf(hasAudioPermission()) }
+            var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
             ) {
                 hasAudioPermission = hasAudioPermission()
+            }
+            val microphonePermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission(),
+            ) {
+                hasMicrophonePermission = hasMicrophonePermission()
             }
             val appViewModel = fuoApplication.appViewModel
             val controller = appViewModel.controller
@@ -93,6 +99,10 @@ class MainActivity : ComponentActivity() {
                 onRequestAudioPermission = {
                     permissionLauncher.launch(audioPermissions())
                 },
+                hasMicrophonePermission = hasMicrophonePermission,
+                onRequestMicrophonePermission = {
+                    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
                 onOpenProviderWebLogin = { provider ->
                     if (provider.loginConfig != null) {
                         pendingWebLoginProviderId = provider.providerId
@@ -109,6 +119,12 @@ class MainActivity : ComponentActivity() {
                 onShareText = ::shareText,
             )
         }
+    }
+
+    override fun onStop() {
+        val controller = (application as FuoEvolveApplication).controller
+        controller.onAppBackgrounded()
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -135,6 +151,10 @@ class MainActivity : ComponentActivity() {
             else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
+
+    private fun hasMicrophonePermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
 
     private fun shareText(text: String) {
         val sendIntent = Intent(Intent.ACTION_SEND)

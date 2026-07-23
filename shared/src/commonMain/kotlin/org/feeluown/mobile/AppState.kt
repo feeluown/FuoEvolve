@@ -20,6 +20,9 @@ sealed interface AppRoute : NavKey {
     data object Search : AppRoute
 
     @Serializable
+    data object AudioRecognition : AppRoute
+
+    @Serializable
     data object Feature : AppRoute
 
     @Serializable

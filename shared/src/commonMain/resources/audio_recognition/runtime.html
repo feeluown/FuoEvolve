@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <script src="fingerprint.js"></script>
+</head>
+<body>
+<script>
+    function decodeFloat32(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+        return new Float32Array(bytes.buffer);
+    }
+
+    function fingerprintWithTimeout(samples) {
+        return Promise.race([
+            globalThis.NeteaseFingerprint.EncodeFingerprintSamples(samples),
+            new Promise((_, reject) => {
+                setTimeout(
+                    () => reject(new Error("音频指纹运行时初始化超时")),
+                    10000
+                );
+            })
+        ]);
+    }
+
+    globalThis.fuoFingerprint = {
+        generate: async function(requestId, base64) {
+            try {
+                const fingerprint = await fingerprintWithTimeout(
+                    decodeFloat32(base64)
+                );
+                deliverFingerprint(requestId, fingerprint, "");
+            } catch (error) {
+                deliverFingerprint(
+                    requestId,
+                    "",
+                    error && error.message ? error.message : String(error)
+                );
+            }
+        },
+        verifyRuntime: async function() {
+            const expected = "Oxx8fV/EFTodkOd6OGfINlloG4c6o/Pl/brdhHqA/CD/u/mJHB/w7MHuD7isMM5qQHPDgkTSuB5ibZmJuLbl5UIpsOf/RwaY3JYBIH/WviQGnAEo3+0WfrOAtljkY4X9T95hnU5gv/fVE4Tsx9Kybjv1wORt1HIG3X0NzvS8PPfj3/RylFOTa2ADTOAkuA5nNOJZaHjd36dExYZy5Uuo8QvyJhbycR/XgOqEjQuegHA23iIeZgjsKt82VjlCJSB5uwaJ6ukC//LFmAGBEqw/n2n7gLLeUa0USNEFGQVBccw=";
+            try {
+                const samples = new Float32Array(48000);
+                for (let index = 0; index < samples.length; index += 1) {
+                    samples[index] = Math.fround(
+                        0.5 * Math.sin(2 * Math.PI * 440 * index / 8000)
+                    );
+                }
+                const actual = await fingerprintWithTimeout(samples);
+                deliverRuntimeReady(actual === expected ? "" : "固定音频指纹校验不一致");
+            } catch (error) {
+                deliverRuntimeReady(
+                    error && error.message ? error.message : String(error)
+                );
+            }
+        }
+    };
+
+    function deliverFingerprint(requestId, fingerprint, error) {
+        if (globalThis.FuoFingerprintBridge) {
+            globalThis.FuoFingerprintBridge.onFingerprint(requestId, fingerprint, error);
+            return;
+        }
+        if (globalThis.webkit && globalThis.webkit.messageHandlers.FuoFingerprintBridge) {
+            globalThis.webkit.messageHandlers.FuoFingerprintBridge.postMessage({
+                requestId: requestId,
+                fingerprint: fingerprint,
+                error: error
+            });
+        }
+    }
+
+    function deliverRuntimeReady(error) {
+        if (globalThis.FuoFingerprintBridge) {
+            globalThis.FuoFingerprintBridge.onRuntimeReady(error);
+            return;
+        }
+        if (globalThis.webkit && globalThis.webkit.messageHandlers.FuoFingerprintBridge) {
+            globalThis.webkit.messageHandlers.FuoFingerprintBridge.postMessage({
+                runtimeReady: true,
+                error: error
+            });
+        }
+    }
+</script>
+</body>
+</html>
