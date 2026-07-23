@@ -859,6 +859,7 @@ class FuoMobileBridge:
         from fuo_ytmusic.consts import HEADER_FILE
         from fuo_ytmusic.headerfile import write_headerfile
 
+        os.makedirs(os.fspath(HEADER_FILE.parent), exist_ok=True)
         write_headerfile(auth, cookie_value, HEADER_FILE)
         user = provider.try_get_user_with_headerfile()
         if user is None:
@@ -880,6 +881,7 @@ class FuoMobileBridge:
         from fuo_ytmusic.consts import HEADER_FILE
         from fuo_ytmusic.headerfile import write_headerfile
 
+        os.makedirs(os.fspath(HEADER_FILE.parent), exist_ok=True)
         write_headerfile(auth, cookie_value, HEADER_FILE)
         user = provider.try_get_user_with_headerfile()
         if user is None:

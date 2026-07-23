@@ -303,7 +303,7 @@ class FuoPlayerController(
     val isDebugLogViewerAvailable: Boolean
         get() = debugLogRepository.isAvailable
     val isShuffleEnabled: Boolean
-        get() = shuffleEnabled
+        get() = shuffleEnabledState
     val repeatMode: RepeatMode
         get() = _repeatMode
     val isFmQueueActive: Boolean
@@ -321,8 +321,8 @@ class FuoPlayerController(
     private var currentIsUpNext: Boolean = false
     private var queueFeature: ProviderFeature? = null
     private var queuePlaylistId: String? = null
-    private var shuffleEnabled: Boolean = false
-    private var _repeatMode: RepeatMode = RepeatMode.QUEUE
+    private var shuffleEnabledState by mutableStateOf(false)
+    private var _repeatMode by mutableStateOf(RepeatMode.QUEUE)
     private var isFmQueue: Boolean = false
     private var shuffleBeforeFm: Boolean? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
@@ -2514,7 +2514,14 @@ class FuoPlayerController(
 
     fun toggle() {
         when (playbackState.status) {
-            PlayerStatus.Playing -> playbackEngine.pause()
+            PlayerStatus.Playing -> pause()
+            PlayerStatus.Paused, PlayerStatus.Idle, PlayerStatus.Ended -> play()
+            else -> Unit
+        }
+    }
+
+    fun play() {
+        when (playbackState.status) {
             PlayerStatus.Paused -> {
                 if (playbackState.currentTrack != null) playbackEngine.resume()
             }
@@ -2522,6 +2529,18 @@ class FuoPlayerController(
                 (currentQueueTrack() ?: playbackState.currentTrack)?.let(::startPlayback)
             }
             else -> Unit
+        }
+    }
+
+    fun pause() {
+        if (playbackState.status == PlayerStatus.Playing) {
+            playbackEngine.pause()
+        }
+    }
+
+    fun stop() {
+        if (playbackState.status != PlayerStatus.Idle) {
+            playbackEngine.stop()
         }
     }
 
@@ -2588,6 +2607,10 @@ class FuoPlayerController(
 
     fun seekTo(positionMs: Long) {
         playbackEngine.seekTo(positionMs)
+    }
+
+    fun setVolume(volume: Double) {
+        playbackEngine.setVolume(volume.coerceIn(0.0, 1.0))
     }
 
     fun openFullPlayer() {
@@ -2660,23 +2683,33 @@ class FuoPlayerController(
     }
 
     fun toggleShuffle() {
-        if (isFmQueue) return
-        if (shuffleEnabled) {
-            disableShuffle()
-        } else {
+        setShuffleEnabled(!shuffleEnabledState)
+    }
+
+    fun setShuffleEnabled(enabled: Boolean) {
+        if (isFmQueue || shuffleEnabledState == enabled) return
+        if (enabled) {
             enableShuffle()
+        } else {
+            disableShuffle()
         }
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
 
     fun toggleRepeat() {
-        if (isFmQueue) return
-        _repeatMode = when (_repeatMode) {
-            RepeatMode.OFF -> RepeatMode.QUEUE
-            RepeatMode.QUEUE -> RepeatMode.SINGLE
-            RepeatMode.SINGLE -> RepeatMode.OFF
-        }
+        setRepeatMode(
+            when (_repeatMode) {
+                RepeatMode.OFF -> RepeatMode.QUEUE
+                RepeatMode.QUEUE -> RepeatMode.SINGLE
+                RepeatMode.SINGLE -> RepeatMode.OFF
+            },
+        )
+    }
+
+    fun setRepeatMode(repeatMode: RepeatMode) {
+        if (isFmQueue || _repeatMode == repeatMode) return
+        _repeatMode = repeatMode
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
@@ -3161,10 +3194,10 @@ class FuoPlayerController(
         val enteringFm = sourceFeature?.isDynamicQueueFeature() == true
         val restoreShuffle = if (isFmQueue && !enteringFm) shuffleBeforeFm else null
         if (enteringFm && !isFmQueue) {
-            shuffleBeforeFm = shuffleEnabled
-            shuffleEnabled = false
+            shuffleBeforeFm = shuffleEnabledState
+            shuffleEnabledState = false
         } else if (!enteringFm && restoreShuffle != null) {
-            shuffleEnabled = restoreShuffle
+            shuffleEnabledState = restoreShuffle
             shuffleBeforeFm = null
         }
         isFmQueue = enteringFm
@@ -3175,7 +3208,7 @@ class FuoPlayerController(
         originalMainQueue = emptyList()
         mainQueue = sourceQueue
         mainQueueIndex = normalizedIndex
-        if (shuffleEnabled && !enteringFm) {
+        if (shuffleEnabledState && !enteringFm) {
             if (keepSelectedTrack) {
                 enableShuffle()
             } else {
@@ -3193,7 +3226,7 @@ class FuoPlayerController(
         if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) return
         val currentMainTrack = mainQueue.getOrNull(mainQueueIndex)
         originalMainQueue = selectedPlaylistTracks
-        if (shuffleEnabled) {
+        if (shuffleEnabledState) {
             mainQueue = listOfNotNull(currentMainTrack) + selectedPlaylistTracks
                 .filterNot { it.id == currentMainTrack?.id }
                 .shuffled()
@@ -3479,7 +3512,7 @@ class FuoPlayerController(
         originalMainQueue = snapshot.originalMainQueue
         upNextQueue = snapshot.upNextQueue
         mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
-        shuffleEnabled = snapshot.shuffleEnabled
+        shuffleEnabledState = snapshot.shuffleEnabled
         _repeatMode = snapshot.repeatMode
         isFmQueue = snapshot.isFmQueue
         shuffleBeforeFm = snapshot.shuffleBeforeFm
@@ -3502,7 +3535,7 @@ class FuoPlayerController(
             originalMainQueue = originalMainQueue,
             upNextQueue = upNextQueue,
             queueIndex = mainQueueIndex,
-            shuffleEnabled = shuffleEnabled,
+            shuffleEnabled = shuffleEnabledState,
             repeatMode = _repeatMode,
             isFmQueue = isFmQueue,
             shuffleBeforeFm = shuffleBeforeFm,
@@ -3514,7 +3547,7 @@ class FuoPlayerController(
 
     private fun enableShuffle() {
         if (isFmQueue || mainQueue.size <= 1) {
-            shuffleEnabled = !isFmQueue
+            shuffleEnabledState = !isFmQueue
             return
         }
         val current = currentQueueTrack()
@@ -3523,7 +3556,7 @@ class FuoPlayerController(
         val shuffledRest = mainQueue.filterNot { it.id == currentInMain?.id }.shuffled()
         mainQueue = listOfNotNull(currentInMain) + shuffledRest
         mainQueueIndex = currentInMain?.let { 0 } ?: mainQueueIndex.coerceIn(0, mainQueue.lastIndex)
-        shuffleEnabled = true
+        shuffleEnabledState = true
     }
 
     private fun List<MusicTrack>.shuffledForPlaybackStart(): List<MusicTrack> {
@@ -3545,7 +3578,7 @@ class FuoPlayerController(
                 ?: mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
         }
         originalMainQueue = emptyList()
-        shuffleEnabled = false
+        shuffleEnabledState = false
     }
 
     private fun mergeResults(local: List<MusicTrack>, provider: List<MusicTrack>): List<MusicTrack> {

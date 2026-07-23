@@ -18,3 +18,4 @@ rootProject.name = "FuoEvolve"
 
 include(":shared")
 include(":androidApp")
+include(":desktopApp")

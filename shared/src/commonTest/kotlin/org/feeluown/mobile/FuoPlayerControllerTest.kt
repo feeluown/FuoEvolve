@@ -2876,6 +2876,52 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun explicitPlaybackControlsAreIdempotentAndClampVolume() = runTest {
+        val track = providerTrack("provider:1", "First")
+        val queueStore = FakePlaybackQueueStore(
+            PlaybackQueueSnapshot(mainQueue = listOf(track), queueIndex = 0),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(listOf(track)),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                playbackQueueStore = queueStore,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.play()
+            advanceUntilIdle()
+            controller.pause()
+            controller.pause()
+            controller.play()
+            controller.play()
+            controller.setVolume(1.5)
+            controller.setRepeatMode(RepeatMode.SINGLE)
+            controller.setShuffleEnabled(true)
+            advanceUntilIdle()
+            controller.stop()
+            controller.stop()
+            advanceUntilIdle()
+
+            assertEquals(1, engine.pauseCount)
+            assertEquals(1, engine.resumeCount)
+            assertEquals(1, engine.stopCount)
+            assertEquals(1.0, engine.lastVolume)
+            assertEquals(RepeatMode.SINGLE, controller.repeatMode)
+            assertEquals(true, controller.isShuffleEnabled)
+            assertEquals(RepeatMode.SINGLE, queueStore.saved.repeatMode)
+            assertEquals(true, queueStore.saved.shuffleEnabled)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun disablingShuffleRestoresOriginalMainQueue() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -3831,6 +3877,9 @@ class FuoPlayerControllerTest {
         var lastTrack: MusicTrack? = null
         var lastPayload: PlaybackPayload? = null
         var resumeCount = 0
+        var pauseCount = 0
+        var stopCount = 0
+        var lastVolume = 1.0
 
         override fun prepareLoading(track: MusicTrack) {
             mutableState.value = PlaybackState(
@@ -3869,6 +3918,7 @@ class FuoPlayerControllerTest {
         }
 
         override fun pause() {
+            pauseCount += 1
             mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
         }
 
@@ -3878,11 +3928,17 @@ class FuoPlayerControllerTest {
         }
 
         override fun stop() {
+            stopCount += 1
             mutableState.value = PlaybackState()
         }
 
         override fun seekTo(positionMs: Long) {
             mutableState.value = mutableState.value.copy(positionMs = positionMs)
+        }
+
+        override fun setVolume(volume: Double) {
+            lastVolume = volume
+            mutableState.value = mutableState.value.copy(volume = volume)
         }
     }
 
