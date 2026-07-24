@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -8,8 +9,11 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -147,6 +151,41 @@ data class AppLayoutInfo(
     val gridColumns: Int = 3,
 )
 
+private const val PAGE_TRANSITION_DURATION_MILLIS = 320
+private const val PAGE_FADE_DURATION_MILLIS = 180
+
+private fun pageTransition(
+    initialOffsetX: (Int) -> Int,
+    targetOffsetX: (Int) -> Int,
+): ContentTransform = (
+    slideInHorizontally(
+        initialOffsetX = initialOffsetX,
+        animationSpec = tween(PAGE_TRANSITION_DURATION_MILLIS),
+    ) + fadeIn(animationSpec = tween(PAGE_FADE_DURATION_MILLIS))
+    ) togetherWith (
+    slideOutHorizontally(
+        targetOffsetX = targetOffsetX,
+        animationSpec = tween(PAGE_TRANSITION_DURATION_MILLIS),
+    ) + fadeOut(animationSpec = tween(PAGE_FADE_DURATION_MILLIS))
+    )
+
+private fun forwardPageTransition(): ContentTransform =
+    pageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+
+private fun popPageTransition(): ContentTransform =
+    pageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+
+private fun settingsForwardPageTransition(): ContentTransform =
+    pageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+
+private fun settingsPopPageTransition(): ContentTransform =
+    pageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+
+private fun settingsNavigationMetadata(): Map<String, Any> =
+    NavDisplay.transitionSpec { settingsForwardPageTransition() } +
+        NavDisplay.popTransitionSpec { settingsPopPageTransition() } +
+        NavDisplay.predictivePopTransitionSpec { settingsPopPageTransition() }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun AppRoot(
@@ -256,8 +295,18 @@ fun AppRoot(
                                 backStack = appUiState.backStack,
                                 modifier = Modifier.fillMaxSize(),
                                 onBack = { appViewModel.dispatch(AppIntent.NavigateBack) },
+                                transitionSpec = { forwardPageTransition() },
+                                popTransitionSpec = { popPageTransition() },
+                                predictivePopTransitionSpec = { popPageTransition() },
                                 entryProvider = { route ->
-                                    NavEntry(route) {
+                                    NavEntry(
+                                        key = route,
+                                        metadata = if (route == AppRoute.Settings) {
+                                            settingsNavigationMetadata()
+                                        } else {
+                                            emptyMap()
+                                        },
+                                    ) {
                                         when (route) {
                                             AppRoute.Home -> HomeScreen(
                                                 controller = controller,

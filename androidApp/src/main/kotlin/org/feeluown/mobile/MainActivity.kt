@@ -84,7 +84,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            BackHandler(enabled = controller.canNavigateBack) {
+            BackHandler(
+                enabled = controller.isFullPlayerOpen ||
+                    controller.isVideoFullscreen ||
+                    controller.settingsLoginProviderId != null,
+            ) {
                 controller.navigateBack()
             }
 
