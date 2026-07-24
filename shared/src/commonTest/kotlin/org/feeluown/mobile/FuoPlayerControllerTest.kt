@@ -1178,16 +1178,11 @@ class FuoPlayerControllerTest {
     }
 
     @Test
-    fun playAllFromSelectedPlaylistStartsPlaybackAfterFirst200TracksAndSyncsShuffleQueue() = runTest {
-        val tracks = (1..205).map { index ->
+    fun playAllFromSelectedPlaylistStartsWithLoadedTracksAndAppendsPagesEveryThreeSeconds() = runTest {
+        val tracks = (1..105).map { index ->
             providerTrack("provider:$index", "Track $index")
         }
-        val provider = FakeProviderRepository(
-            emptyList(),
-            playlistTracks = tracks,
-            playlistPageDelayOffset = 200,
-            playlistPageDelayMs = 1_000,
-        )
+        val provider = FakeProviderRepository(emptyList(), playlistTracks = tracks)
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
@@ -1216,36 +1211,53 @@ class FuoPlayerControllerTest {
             controller.toggleShuffle()
             controller.playAllFromSelectedPlaylist()
             runCurrent()
+            controller.prefetchSelectedPlaylistIfNeeded(49)
+            runCurrent()
 
-            assertEquals(200, controller.selectedPlaylistTracks.size)
+            assertEquals(PROVIDER_PAGE_SIZE, controller.selectedPlaylistTracks.size)
             assertEquals(true, controller.selectedPlaylistTracksHasMore)
-            assertEquals(200, controller.playbackState.queue.size)
+            assertEquals(PROVIDER_PAGE_SIZE, controller.playbackState.queue.size)
             assertEquals(engine.lastTrack?.id, controller.playbackState.queue.firstOrNull()?.id)
-            assertEquals(listOf(0, 50, 100, 150), provider.playlistPageOffsets.take(4))
+            assertEquals(listOf(0), provider.playlistPageOffsets)
 
-            advanceTimeBy(1_000)
-            advanceUntilIdle()
+            advanceTimeBy(2_999)
+            runCurrent()
+
+            assertEquals(PROVIDER_PAGE_SIZE, controller.selectedPlaylistTracks.size)
+            assertEquals(listOf(0), provider.playlistPageOffsets)
+
+            advanceTimeBy(1)
+            runCurrent()
+
+            assertEquals(100, controller.selectedPlaylistTracks.size)
+            assertEquals(100, controller.playbackState.queue.size)
+            assertEquals(listOf(0, 50), provider.playlistPageOffsets)
+            assertEquals(
+                tracks.drop(50).take(50).map { it.id },
+                controller.playbackState.queue.takeLast(50).map { it.id },
+            )
+            val nextTrackBeforeFinalShuffle = controller.playbackState.queue.getOrNull(1)?.id
+
+            advanceTimeBy(3_000)
+            runCurrent()
 
             assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
             assertEquals(false, controller.selectedPlaylistTracksHasMore)
             assertEquals(tracks.map { it.id }.toSet(), controller.playbackState.queue.map { it.id }.toSet())
             assertEquals(engine.lastTrack?.id, controller.playbackState.queue.firstOrNull()?.id)
+            assertFalse(nextTrackBeforeFinalShuffle == controller.playbackState.queue.getOrNull(1)?.id)
+            assertEquals(listOf(0, 50, 100), provider.playlistPageOffsets)
         } finally {
             controllerScope.cancel()
         }
     }
 
     @Test
-    fun playFromSelectedPlaylistLoadsPlaylistQueueAndStartsAtSelectedTrack() = runTest {
-        val tracks = (1..205).map { index ->
+    fun playFromSelectedPlaylistStartsImmediatelyAndAppendsLoadedPages() = runTest {
+        val tracks = (1..105).map { index ->
             providerTrack("provider:$index", "Track $index")
         }
-        val provider = FakeProviderRepository(
-            emptyList(),
-            playlistTracks = tracks,
-            playlistPageDelayOffset = 200,
-            playlistPageDelayMs = 1_000,
-        )
+        val provider = FakeProviderRepository(emptyList(), playlistTracks = tracks)
         val engine = FakePlaybackEngine()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
@@ -1272,16 +1284,25 @@ class FuoPlayerControllerTest {
             runCurrent()
 
             assertEquals("provider:21", engine.lastTrack?.id)
-            assertEquals(200, controller.selectedPlaylistTracks.size)
-            assertEquals(tracks.take(200).drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(PROVIDER_PAGE_SIZE, controller.selectedPlaylistTracks.size)
+            assertEquals(tracks.take(50).drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
             assertEquals(0, controller.playbackState.queueIndex)
+            assertEquals(listOf(0), provider.playlistPageOffsets)
 
-            advanceTimeBy(1_000)
-            advanceUntilIdle()
+            advanceTimeBy(3_000)
+            runCurrent()
+
+            assertEquals(100, controller.selectedPlaylistTracks.size)
+            assertEquals(tracks.take(100).drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
+            assertEquals(listOf(0, 50), provider.playlistPageOffsets)
+
+            advanceTimeBy(3_000)
+            runCurrent()
 
             assertEquals(tracks.size, controller.selectedPlaylistTracks.size)
             assertEquals(tracks.drop(20).map { it.id }, controller.playbackState.queue.map { it.id })
             assertEquals(0, controller.playbackState.queueIndex)
+            assertEquals(listOf(0, 50, 100), provider.playlistPageOffsets)
         } finally {
             controllerScope.cancel()
         }
@@ -3808,8 +3829,6 @@ class FuoPlayerControllerTest {
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
         private val playlistTracks: List<MusicTrack> = emptyList(),
-        private val playlistPageDelayOffset: Int = Int.MAX_VALUE,
-        private val playlistPageDelayMs: Long = 0,
         private val mediaItemTracks: List<MusicTrack> = emptyList(),
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
@@ -4004,7 +4023,6 @@ class FuoPlayerControllerTest {
             limit: Int,
         ): ProviderPlaylistDetail {
             playlistPageOffsets += offset
-            if (offset >= playlistPageDelayOffset) delay(playlistPageDelayMs)
             val tracks = playlistTracks.drop(offset).take(limit)
             val nextOffset = offset + tracks.size
             return ProviderPlaylistDetail(

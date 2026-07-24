@@ -78,7 +78,7 @@ data class TrackArtistTarget(
 
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
-private const val PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT = 200
+private const val PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS = 3_000L
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
 class FuoPlayerController(
@@ -2371,6 +2371,7 @@ class FuoPlayerController(
 
     private fun loadMoreSelectedPlaylistTracks() {
         if (selectedPlaylist == null || !selectedPlaylistTracksHasMore) return
+        if (selectedPlaylistBackgroundLoadJob?.isActive == true) return
         if (selectedPlaylistLoadMoreJob?.isActive == true) return
         selectedPlaylistLoadMoreJob = scope.launch {
             appendSelectedPlaylistTracksPage()
@@ -2487,20 +2488,6 @@ class FuoPlayerController(
         }
     }
 
-    private suspend fun ensureAllSelectedPlaylistTracks() {
-        selectedPlaylistLoadMoreJob?.join()
-        while (selectedPlaylistTracksHasMore) {
-            if (!appendSelectedPlaylistTracksPage()) break
-        }
-    }
-
-    private suspend fun ensureSelectedPlaylistTracksAtLeast(count: Int) {
-        selectedPlaylistLoadMoreJob?.join()
-        while (selectedPlaylistTracksHasMore && selectedPlaylistTracks.size < count) {
-            if (!appendSelectedPlaylistTracksPage()) break
-        }
-    }
-
     private suspend fun ensureAllSelectedMediaItemTracks() {
         selectedMediaItemTracksLoadMoreJob?.join()
         while (selectedMediaItemTracksHasMore) {
@@ -2601,21 +2588,28 @@ class FuoPlayerController(
 
     private fun playSelectedPlaylistFrom(index: Int) {
         val playlist = selectedPlaylist ?: return
+        val loadedTracks = selectedPlaylistTracks
+        val track = loadedTracks.getOrNull(index) ?: return
         selectedPlaylistBackgroundLoadJob?.cancel()
-        scope.launch {
-            isLoading = true
-            message = "正在加载前 $PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT 首：${playlist.title}"
-            ensureSelectedPlaylistTracksAtLeast(maxOf(PLAYLIST_PLAYBACK_INITIAL_TRACK_COUNT, index + 1))
-            selectedPlaylistTracks.getOrNull(index)?.let { track ->
-                play(track, selectedPlaylistTracks, index, sourcePlaylistId = playlist.id)
-            }
-            isLoading = false
-            if (selectedPlaylistTracksHasMore && queuePlaylistId == playlist.id) {
-                selectedPlaylistBackgroundLoadJob = scope.launch {
-                    ensureAllSelectedPlaylistTracks()
-                    if (!selectedPlaylistTracksHasMore) {
-                        syncPlaylistPlaybackQueue(playlist)
-                    }
+        play(track, loadedTracks, index, sourcePlaylistId = playlist.id)
+        if (selectedPlaylistTracksHasMore && queuePlaylistId == playlist.id) {
+            selectedPlaylistBackgroundLoadJob = scope.launch {
+                val queuedTrackIds = loadedTracks.mapTo(mutableSetOf()) { it.id }
+                while (
+                    selectedPlaylistTracksHasMore &&
+                    queuePlaylistId == playlist.id &&
+                    selectedPlaylist?.id == playlist.id
+                ) {
+                    delay(PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS)
+                    selectedPlaylistLoadMoreJob?.join()
+                    if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) break
+                    val progressed = appendSelectedPlaylistTracksPage()
+                    val newTracks = selectedPlaylistTracks.filter { queuedTrackIds.add(it.id) }
+                    appendPlaylistPlaybackQueue(playlist, newTracks)
+                    if (!progressed) break
+                }
+                if (!selectedPlaylistTracksHasMore) {
+                    reshuffleCompletedPlaylistQueue(playlist)
                 }
             }
         }
@@ -3374,24 +3368,34 @@ class FuoPlayerController(
         return mainQueueIndex
     }
 
-    private fun syncPlaylistPlaybackQueue(playlist: ProviderPlaylist) {
-        if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) return
-        val currentMainTrack = mainQueue.getOrNull(mainQueueIndex)
-        originalMainQueue = selectedPlaylistTracks
-        if (shuffleEnabled) {
-            mainQueue = listOfNotNull(currentMainTrack) + selectedPlaylistTracks
-                .filterNot { it.id == currentMainTrack?.id }
-                .shuffled()
-            mainQueueIndex = currentMainTrack?.let { 0 } ?: mainQueueIndex.coerceIn(0, mainQueue.lastIndex)
-        } else {
-            mainQueue = selectedPlaylistTracks.map { track ->
-                currentMainTrack?.takeIf { it.id == track.id } ?: track
-            }
-            mainQueueIndex = currentMainTrack?.let { track ->
-                mainQueue.indexOfFirst { it.id == track.id }
-            }?.takeIf { it >= 0 } ?: mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
-            originalMainQueue = emptyList()
+    private fun appendPlaylistPlaybackQueue(
+        playlist: ProviderPlaylist,
+        tracks: List<MusicTrack>,
+    ) {
+        if (
+            tracks.isEmpty() ||
+            queuePlaylistId != playlist.id ||
+            selectedPlaylist?.id != playlist.id
+        ) {
+            return
         }
+        val existingIds = (mainQueue + originalMainQueue).mapTo(mutableSetOf()) { it.id }
+        val newTracks = tracks.filter { existingIds.add(it.id) }
+        if (newTracks.isEmpty()) return
+        if (shuffleEnabled) {
+            val sourceQueue = originalMainQueue.ifEmpty { mainQueue }
+            originalMainQueue = sourceQueue + newTracks
+        }
+        mainQueue = mainQueue + newTracks
+        updatePlaybackQueueState()
+        persistPlaybackQueue()
+    }
+
+    private fun reshuffleCompletedPlaylistQueue(playlist: ProviderPlaylist) {
+        if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) return
+        if (!shuffleEnabled || mainQueue.isEmpty()) return
+        val nextIndex = (mainQueueIndex + 1).coerceIn(0, mainQueue.size)
+        mainQueue = mainQueue.take(nextIndex) + mainQueue.drop(nextIndex).shuffledForPlaybackStart()
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
