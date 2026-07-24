@@ -75,6 +75,20 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
+      - name: Build debug device app
+        run: |
+          xcodebuild \
+            -project iosApp/FuoEvolve.xcodeproj \
+            -scheme FuoEvolve \
+            -configuration Debug \
+            -sdk iphoneos \
+            -derivedDataPath build/ios-ci \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
       - name: Package debug app bundle
         run: |
           mkdir -p build/artifacts
@@ -82,9 +96,28 @@ jobs:
             -C build/ios-ci/Build/Products/Debug-iphonesimulator \
             FuoEvolve.app
 
+      - name: Package debug IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          ditto \
+            build/ios-ci/Build/Products/Debug-iphoneos/FuoEvolve.app \
+            build/ipa/Payload/FuoEvolve.app
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/ipa/Payload \
+            build/artifacts/FuoEvolve-debug-ios.ipa
+
       - name: Upload debug app
         uses: actions/upload-artifact@v7
         with:
+          name: FuoEvolve-debug-ios-simulator
           path: build/artifacts/FuoEvolve-debug-ios-simulator.tar
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload debug IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: FuoEvolve-debug-ios-ipa
+          path: build/artifacts/FuoEvolve-debug-ios.ipa
           archive: false
           if-no-files-found: error
