@@ -41,7 +41,12 @@ GitHub Releases or supported for end-user installation.
 - 🏠 Provider home sections for recommendations, exploration, user playlists, and
   favorites.
 - ▶️ Media3 audio playback, video/MV playback, queue management, shuffle, repeat,
-  up-next, multi-part tracks, covers, and LRC lyrics.
+  up-next, multi-part tracks, covers, LRC lyrics, and artist/album detail
+  navigation from the full player.
+- 🎙️ Audio recognition on Android and experimental iOS builds, with recognized
+  song results, direct search, and NetEase detail links.
+- 📚 Playlist playback starts from loaded tracks and incrementally loads the
+  remaining tracks in the background, including large shuffled playlists.
 - 🔁 Smart replacement for unavailable tracks, with configurable provider pool,
   score threshold, metadata policy, and lyric policy.
 - ⬇️ Downloads, app-private lyrics, local music database, local metadata edits, and
@@ -49,6 +54,16 @@ GitHub Releases or supported for end-user installation.
 - 🔗 Direct system sharing with App Link-friendly share URLs.
 - ⚙️ Runtime settings for providers, login, quality, playback behavior, local scan
   filters, cache limits, lyrics, and theme.
+
+## Audio Recognition
+
+Open audio recognition from the microphone action in Search. Android and
+experimental iOS builds request microphone permission, keep the captured audio
+in memory while generating a fingerprint, and send only the audio fingerprint
+to the recognition service. The app displays recognized songs and lets you search
+for them or open their NetEase details. Recognition results remain available when
+you return from Search or a detail page; an unsuccessful run ends with a retry
+option.
 
 ## Provider Support
 
@@ -112,6 +127,8 @@ state, and the exact FeelUOwn provider implementation.
   assets, resources, and provider bridge wiring.
 - `shared/src/commonMain/python/fuo_mobile`: Python adapter around the FeelUOwn
   core and provider plugins.
+- `shared/src/commonMain/resources/audio_recognition`: bundled fingerprint runtime
+  assets used by mobile audio recognition.
 - `iosApp/FuoEvolve`: Swift app shell for experimental iOS builds.
 - `.github/workflows`: Android APK and release workflows, plus the experimental
   iOS debug workflow.
@@ -144,10 +161,11 @@ declared in `androidApp/build.gradle.kts`.
 ## iOS Status
 
 The iOS project under `iosApp/FuoEvolve.xcodeproj` has experimental debug-build
-support, including shared UI integration and Python runtime preparation. Every
-push to `master` builds a simulator debug artifact in GitHub Actions. iOS is not
-released: do not treat its artifacts as production-ready or expect a GitHub
-Release, App Store distribution, or end-user installation support.
+support, including shared UI integration, Python runtime preparation, and audio
+recognition integration. Every push to `master` builds a simulator debug artifact
+in GitHub Actions. iOS is not released: do not treat its artifacts as
+production-ready or expect a GitHub Release, App Store distribution, or end-user
+installation support.
 
 Prepare the Python runtime locally before building in Xcode:
 
