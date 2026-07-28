@@ -15,6 +15,7 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
     private var didReachEnd = false
     private var playbackError: String?
     private var endObserver: NSObjectProtocol?
+    private var periodicTimeObserver: Any?
     private let spectrumAnalyzer = AudioTapSpectrumAnalyzer()
 
     override init() {
@@ -28,12 +29,22 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         ) { [weak self] notification in
             guard let self, notification.object as? AVPlayerItem === self.player.currentItem else { return }
             self.didReachEnd = true
+            self.updateNowPlaying()
+        }
+        periodicTimeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 1, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateNowPlaying()
         }
     }
 
     deinit {
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
+        }
+        if let periodicTimeObserver {
+            player.removeTimeObserver(periodicTimeObserver)
         }
     }
 
@@ -51,8 +62,8 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         }
         let asset = AVURLAsset(url: url, options: assetOptions)
         player.replaceCurrentItem(with: playerItem(asset: asset))
-        updateNowPlaying(payload: payload)
         player.play()
+        updateNowPlaying(payload: payload, playbackRate: 1)
     }
 
     func play(url: String, headers: [String: String], title: String, artists: String, album: String) {
@@ -61,10 +72,12 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
 
     func pause() {
         player.pause()
+        updateNowPlaying()
     }
 
     func resume() {
         player.play()
+        updateNowPlaying(playbackRate: 1)
     }
 
     func stop() {
@@ -72,12 +85,19 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
         player.replaceCurrentItem(with: nil)
         didReachEnd = false
         playbackError = nil
+        currentPayload = nil
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         spectrumAnalyzer.clear()
     }
 
     func seekTo(positionMs: Int64) {
         didReachEnd = false
-        player.seek(to: CMTime(value: positionMs, timescale: 1000))
+        let duration = durationMs()
+        let nonNegativePosition = max(positionMs, 0)
+        let normalizedPosition = duration > 0 ? min(nonNegativePosition, duration) : nonNegativePosition
+        player.seek(to: CMTime(value: normalizedPosition, timescale: 1000)) { [weak self] _ in
+            self?.updateNowPlaying()
+        }
     }
 
     func playbackStatus() -> String {
@@ -249,14 +269,37 @@ final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
             self?.pause()
             return .success
         }
+        center.changePlaybackPositionCommand.isEnabled = true
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard
+                let self,
+                self.player.currentItem != nil,
+                let event = event as? MPChangePlaybackPositionCommandEvent
+            else {
+                return .commandFailed
+            }
+            self.seekTo(positionMs: Int64((event.positionTime * 1000).rounded()))
+            return .success
+        }
     }
 
-    private func updateNowPlaying(payload: PlaybackPayload) {
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-            MPMediaItemPropertyTitle: payload.title,
-            MPMediaItemPropertyArtist: payload.artists,
-            MPMediaItemPropertyAlbumTitle: payload.album,
+    private func updateNowPlaying(payload: PlaybackPayload? = nil, playbackRate: Float? = nil) {
+        guard let activePayload = payload ?? currentPayload else { return }
+        var nowPlayingInfo: [String: Any] = [
+            MPMediaItemPropertyTitle: activePayload.title,
+            MPMediaItemPropertyArtist: activePayload.artists,
+            MPMediaItemPropertyAlbumTitle: activePayload.album,
         ]
+        let duration = durationMs()
+        if duration > 0 {
+            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = Double(duration) / 1000
+        }
+        let elapsed = max(0, CMTimeGetSeconds(player.currentTime()))
+        if elapsed.isFinite {
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
+        }
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?? (didReachEnd ? 0 : player.rate)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
 }
 

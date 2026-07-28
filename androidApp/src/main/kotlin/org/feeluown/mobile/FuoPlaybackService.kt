@@ -111,6 +111,14 @@ class FuoPlaybackService : MediaSessionService() {
                         publishPlaybackState()
                     }
 
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int,
+                    ) {
+                        publishPlaybackState()
+                    }
+
                     override fun onPlayerError(error: PlaybackException) {
                         val item = player.currentMediaItem
                         Log.e(
@@ -129,14 +137,15 @@ class FuoPlaybackService : MediaSessionService() {
                 })
             }
         player = exoPlayer
-        mediaSession = MediaSession.Builder(this, QueueCommandPlayer(exoPlayer))
+        val sessionPlayer = QueueCommandPlayer(exoPlayer)
+        mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setCallback(object : MediaSession.Callback {
                 override fun onConnect(
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                 ): MediaSession.ConnectionResult {
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                        .setAvailablePlayerCommands(queuePlayerCommands(exoPlayer.getAvailableCommands()))
+                        .setAvailablePlayerCommands(sessionPlayer.getAvailableCommands())
                         .build()
                 }
 
@@ -629,7 +638,7 @@ class FuoPlaybackService : MediaSessionService() {
         }
 
         override fun isCommandAvailable(command: Int): Boolean {
-            return command in queueNavigationCommands || super.isCommandAvailable(command)
+            return command in forcedPlayerCommands || super.isCommandAvailable(command)
         }
 
         @Suppress("DEPRECATION")
@@ -669,6 +678,12 @@ class FuoPlaybackService : MediaSessionService() {
             Player.COMMAND_SEEK_TO_NEXT,
             Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
         )
+        private val seekCommands = setOf(
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_BACK,
+            Player.COMMAND_SEEK_FORWARD,
+        )
+        private val forcedPlayerCommands = queueNavigationCommands + seekCommands
 
         @Volatile
         var transportControls: TransportControls? = null
@@ -727,7 +742,7 @@ class FuoPlaybackService : MediaSessionService() {
         private fun queuePlayerCommands(commands: Player.Commands): Player.Commands {
             return Player.Commands.Builder()
                 .addAll(commands)
-                .addAll(*queueNavigationCommands.toIntArray())
+                .addAll(*forcedPlayerCommands.toIntArray())
                 .build()
         }
 

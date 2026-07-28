@@ -2766,7 +2766,10 @@ class FuoPlayerController(
     }
 
     fun seekTo(positionMs: Long) {
-        playbackEngine.seekTo(positionMs)
+        val normalizedPosition = positionMs.coerceAtLeast(0).let { position ->
+            playbackState.durationMs.takeIf { it > 0 }?.let(position::coerceAtMost) ?: position
+        }
+        playbackEngine.seekTo(normalizedPosition)
     }
 
     fun openFullPlayer() {

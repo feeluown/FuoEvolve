@@ -1132,14 +1132,20 @@ fun PlayPauseButton(
 @Composable
 fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
     val duration = state.durationMs.takeIf { it > 0 } ?: 1L
+    val canSeek = state.currentTrack != null &&
+        state.durationMs > 0 &&
+        state.status != PlayerStatus.Idle &&
+        state.status != PlayerStatus.Loading &&
+        state.status != PlayerStatus.Error
     var isSeeking by remember(state.currentTrack?.id) { mutableStateOf(false) }
     var seekPosition by remember(state.currentTrack?.id) {
         mutableStateOf(state.positionMs.coerceIn(0, duration).toFloat())
     }
 
-    LaunchedEffect(state.positionMs, duration, isSeeking) {
-        if (!isSeeking) {
+    LaunchedEffect(state.positionMs, duration, isSeeking, canSeek) {
+        if (!isSeeking || !canSeek) {
             seekPosition = state.positionMs.coerceIn(0, duration).toFloat()
+            if (!canSeek) isSeeking = false
         }
     }
 
@@ -1150,18 +1156,22 @@ fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
             seekPosition = it
         },
         onValueChangeFinished = {
-            if (isSeeking) {
-                onSeek(seekPosition.toLong())
+            if (isSeeking && canSeek) {
+                onSeek(seekPosition.toLong().coerceIn(0, duration))
                 isSeeking = false
             }
         },
+        enabled = canSeek,
         valueRange = 0f..duration.toFloat(),
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(formatMs(state.positionMs), style = MaterialTheme.typography.labelMedium)
+        Text(
+            formatMs(if (isSeeking) seekPosition.toLong() else state.positionMs),
+            style = MaterialTheme.typography.labelMedium,
+        )
         Text(formatMs(state.durationMs), style = MaterialTheme.typography.labelMedium)
     }
 }

@@ -127,8 +127,12 @@ class AndroidNativeAudioEngine(
     }
 
     override fun seekTo(positionMs: Long) {
-        mediaController?.seekTo(positionMs)
-        mutableState.value = mutableState.value.copy(positionMs = positionMs)
+        val duration = mutableState.value.durationMs
+        val normalizedPosition = positionMs.coerceAtLeast(0).let { position ->
+            duration.takeIf { it > 0 }?.let(position::coerceAtMost) ?: position
+        }
+        mediaController?.seekTo(normalizedPosition)
+        mutableState.value = mutableState.value.copy(positionMs = normalizedPosition)
     }
 
     private fun connectController() {

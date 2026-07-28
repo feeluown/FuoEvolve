@@ -248,6 +248,39 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun seekToClampsToCurrentTrackDuration() = runTest {
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            val track = providerTrack("provider:seek", "Seek").copy(durationMs = 100_000)
+            engine.emitState(
+                PlaybackState(
+                    status = PlayerStatus.Paused,
+                    currentTrack = track,
+                    durationMs = 100_000,
+                ),
+            )
+            advanceUntilIdle()
+
+            controller.seekTo(-1_000)
+            controller.seekTo(120_000)
+
+            assertEquals(listOf(0L, 100_000L), engine.seekPositions)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun downloadImmediatelyPublishesQueueFeedback() = runTest {
         val track = providerTrack("netease:1", "Queue Song")
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -4254,6 +4287,7 @@ class FuoPlayerControllerTest {
         var lastTrack: MusicTrack? = null
         var lastPayload: PlaybackPayload? = null
         var resumeCount = 0
+        val seekPositions = mutableListOf<Long>()
 
         override fun prepareLoading(track: MusicTrack) {
             mutableState.value = PlaybackState(
@@ -4291,6 +4325,10 @@ class FuoPlayerControllerTest {
             )
         }
 
+        fun emitState(state: PlaybackState) {
+            mutableState.value = state
+        }
+
         override fun pause() {
             mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
         }
@@ -4305,6 +4343,7 @@ class FuoPlayerControllerTest {
         }
 
         override fun seekTo(positionMs: Long) {
+            seekPositions += positionMs
             mutableState.value = mutableState.value.copy(positionMs = positionMs)
         }
     }
