@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,11 +9,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Mic
@@ -26,12 +30,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -41,11 +44,16 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 
 @Composable
 fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
@@ -206,6 +214,17 @@ fun HomeSectionPager(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
     ) {
+        HomeSectionTabs(
+            modifier = Modifier.padding(horizontal = contentHorizontalPadding),
+            sections = sections,
+            selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
+            indicatorOffsetFraction = pagerState.currentPageOffsetFraction,
+            onClick = { index, section ->
+                if (section != controller.homeSection || index != pagerState.currentPage) {
+                    scope.launch { pagerState.animateScrollToPage(index) }
+                }
+            },
+        )
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
@@ -233,26 +252,6 @@ fun HomeSectionPager(
                 )
             }
         }
-        NavigationBar(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(FuoBottomNavigationBarHeight),
-            windowInsets = WindowInsets(0, 0, 0, 0),
-        ) {
-            sections.forEachIndexed { index, (section, label) ->
-                NavigationBarItem(
-                    selected = index == pagerState.currentPage,
-                    onClick = {
-                        if (section != controller.homeSection || index != pagerState.currentPage) {
-                            scope.launch { pagerState.animateScrollToPage(index) }
-                        }
-                    },
-                    icon = { Icon(homeSectionIcon(section), contentDescription = label) },
-                    label = { Text(label) },
-                    alwaysShowLabel = true,
-                )
-            }
-        }
     }
 }
 
@@ -265,29 +264,127 @@ fun HomeSectionRail(
     onRecognition: () -> Unit,
     onClick: (Int, HomeSection) -> Unit,
 ) {
-    NavigationRail(
-        modifier = Modifier.fillMaxHeight(),
-        header = {
+    Surface(
+        modifier = Modifier
+            .width(64.dp)
+            .fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             IconButton(onClick = onSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = "设置")
             }
+            Spacer(Modifier.weight(1f))
+            sections.forEachIndexed { index, (section, label) ->
+                val selected = index == selectedIndex
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fuoInteractive()
+                        .clickable(role = Role.Tab) { onClick(index, section) }
+                        .padding(vertical = 4.dp),
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    },
+                    contentColor = if (selected) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(homeSectionIcon(section), contentDescription = label)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onRecognition) {
+                Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
+            }
+            IconButton(onClick = onSearch) {
+                Icon(Icons.Filled.Search, contentDescription = "搜索")
+            }
+        }
+    }
+}
+
+@Composable
+@Suppress("DEPRECATION")
+fun HomeSectionTabs(
+    sections: List<Pair<HomeSection, String>>,
+    selectedIndex: Int,
+    indicatorOffsetFraction: Float,
+    onClick: (Int, HomeSection) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TabRow(
+        selectedTabIndex = selectedIndex,
+        modifier = modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.primary,
+        indicator = { tabPositions ->
+            val current = tabPositions.getOrNull(selectedIndex) ?: return@TabRow
+            val targetIndex = when {
+                indicatorOffsetFraction > 0f -> (selectedIndex + 1).coerceAtMost(tabPositions.lastIndex)
+                indicatorOffsetFraction < 0f -> (selectedIndex - 1).coerceAtLeast(0)
+                else -> selectedIndex
+            }
+            val target = tabPositions[targetIndex]
+            val progress = indicatorOffsetFraction.absoluteValue.coerceIn(0f, 1f)
+            val indicatorLeft = lerp(current.left, target.left, progress)
+            val indicatorWidth = lerp(current.width, target.width, progress)
+            TabRowDefaults.SecondaryIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentSize(Alignment.BottomStart)
+                    .offset { IntOffset(indicatorLeft.roundToPx(), 0) }
+                    .width(indicatorWidth),
+            )
         },
     ) {
         sections.forEachIndexed { index, (section, label) ->
-            NavigationRailItem(
+            Tab(
                 selected = index == selectedIndex,
                 onClick = { onClick(index, section) },
-                icon = { Icon(homeSectionIcon(section), contentDescription = label) },
-                label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                alwaysShowLabel = true,
+                text = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = homeSectionIcon(section),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
             )
-        }
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = onRecognition) {
-            Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
-        }
-        IconButton(onClick = onSearch) {
-            Icon(Icons.Filled.Search, contentDescription = "搜索")
         }
     }
 }
