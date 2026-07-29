@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -96,7 +96,8 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
             ) {
                 Column(
                     modifier = Modifier
-                        .width(280.dp)
+                        .weight(0.36f)
+                        .widthIn(min = 240.dp, max = 360.dp)
                         .fillMaxHeight()
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -488,7 +489,7 @@ fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) 
             modifier = if (isFullscreen) {
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black)
+                    .background(FuoMediaOverlay.background)
             } else {
                 Modifier
                     .fillMaxSize()
@@ -516,7 +517,7 @@ fun ProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) 
                         .align(Alignment.TopEnd)
                         .padding(8.dp),
                     shape = CircleShape,
-                    color = Color.Black.copy(alpha = 0.6f),
+                    color = FuoMediaOverlay.scrim,
                 ) {
                     IconButton(onClick = controller::toggleVideoFullscreen) {
                         Icon(
@@ -608,7 +609,8 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
             ) {
                 Column(
                     modifier = Modifier
-                        .width(300.dp)
+                        .weight(0.36f)
+                        .widthIn(min = 240.dp, max = 360.dp)
                         .fillMaxHeight()
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -833,7 +835,8 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
             ) {
                 Column(
                     modifier = Modifier
-                        .width(300.dp)
+                        .weight(0.36f)
+                        .widthIn(min = 240.dp, max = 360.dp)
                         .fillMaxHeight()
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),

@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.PlayArrow
@@ -33,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -206,7 +206,8 @@ fun ProviderVideoList(videos: List<ProviderVideo>, onClick: (ProviderVideo) -> U
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onClick(video) }
+                    .fuoInteractive()
+                    .clickable(role = Role.Button) { onClick(video) }
                     .padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -329,7 +330,8 @@ fun ProviderFeatureCoverCard(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
-            .clickable(onClick = onClick)
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
@@ -404,7 +406,8 @@ fun PrivateFmButton(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     RecommendationButton(
         modifier = modifier
-            .clickable(enabled = enabled, onClick = onClick)
+            .fuoInteractive()
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
         title = "私人 FM",
         providerName = section.feature.providerName,
@@ -427,7 +430,8 @@ fun DailyRecommendationButton(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     RecommendationButton(
         modifier = modifier
-            .clickable(enabled = enabled, onClick = onClick)
+            .fuoInteractive()
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
         title = feature.title.ifBlank { "每日推荐" },
         providerName = feature.providerName,
@@ -450,7 +454,8 @@ fun RecommendationEntryButton(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     RecommendationButton(
         modifier = modifier
-            .clickable(enabled = enabled, onClick = onClick)
+            .fuoInteractive()
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
         title = feature.title.ifBlank { "推荐视频" },
         providerName = feature.providerName,
@@ -478,7 +483,7 @@ fun RecommendationButton(
                 .aspectRatio(1f),
             color = MaterialTheme.colorScheme.secondaryContainer,
             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            shape = RoundedCornerShape(8.dp),
+            shape = MaterialTheme.shapes.medium,
         ) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -545,7 +550,8 @@ fun ProviderPlaylistCard(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
-            .clickable(onClick = onClick)
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
@@ -623,7 +629,8 @@ fun ProviderMediaItemCard(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
-            .clickable(onClick = onClick)
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
@@ -858,13 +865,8 @@ fun ProviderLockedSummary(providers: List<ProviderFeature>, onClick: (ProviderFe
 
 @Composable
 fun ProviderContentMessage(message: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
-    ) {
+    FuoSectionCard(modifier = Modifier.fillMaxWidth()) {
         Text(
-            modifier = Modifier.padding(16.dp),
             text = message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

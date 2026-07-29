@@ -36,7 +36,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Delete
@@ -52,12 +51,17 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -75,6 +79,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -91,9 +96,10 @@ fun MiniPlayer(controller: FuoPlayerController) {
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(220))
-            .clickable(onClick = controller::openFullPlayer),
-        shape = RoundedCornerShape(if (isWideLayout) 12.dp else 18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = controller::openFullPlayer),
+        shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 3.dp,
     ) {
         Column {
@@ -622,20 +628,7 @@ fun formatAudioBitrate(value: Long?): String? {
 
 @Composable
 fun InfoTag(text: String, onClick: (() -> Unit)? = null) {
-    Surface(
-        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(50),
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    FuoMetadataChip(label = text, onClick = onClick)
 }
 
 @Composable
@@ -681,9 +674,21 @@ fun ReplacementInfoLine(label: String, value: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueBottomSheet(controller: FuoPlayerController) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    if (!isWideLayout) {
+        if (controller.isQueueOpen) {
+            ModalBottomSheet(
+                onDismissRequest = controller::toggleQueue,
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            ) {
+                QueueBottomSheetContent(controller, sidePanel = false, embedded = true)
+            }
+        }
+        return
+    }
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter,
@@ -698,30 +703,34 @@ fun QueueBottomSheet(controller: FuoPlayerController) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                    .clickable(onClick = controller::toggleQueue),
+                    .clickable(role = Role.Button, onClick = controller::toggleQueue),
             )
         }
         AnimatedVisibility(
             visible = controller.isQueueOpen,
             modifier = Modifier.align(if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter),
             enter = if (isWideLayout) {
-                slideInHorizontally(animationSpec = tween(220)) { it } + fadeIn(tween(160))
+                slideInHorizontally(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it } + fadeIn(tween(FuoMotion.overlayFadeMillis))
             } else {
-                slideInVertically(animationSpec = tween(220)) { it } + fadeIn(tween(160))
+                slideInVertically(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it } + fadeIn(tween(FuoMotion.overlayFadeMillis))
             },
             exit = if (isWideLayout) {
-                slideOutHorizontally(animationSpec = tween(180)) { it } + fadeOut(tween(140))
+                slideOutHorizontally(animationSpec = tween(FuoMotion.overlayExitMillis)) { it } + fadeOut(tween(FuoMotion.overlayFadeMillis))
             } else {
-                slideOutVertically(animationSpec = tween(180)) { it } + fadeOut(tween(140))
+                slideOutVertically(animationSpec = tween(FuoMotion.overlayExitMillis)) { it } + fadeOut(tween(FuoMotion.overlayFadeMillis))
             },
         ) {
-            QueueBottomSheetContent(controller, sidePanel = isWideLayout)
+            QueueBottomSheetContent(controller, sidePanel = true)
         }
     }
 }
 
 @Composable
-fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean = false) {
+fun QueueBottomSheetContent(
+    controller: FuoPlayerController,
+    sidePanel: Boolean = false,
+    embedded: Boolean = false,
+) {
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     val queueSize = controller.playbackState.queue.size
 
@@ -737,15 +746,14 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = 460.dp)
-                .navigationBarsPadding()
-                .clickable { }
+                .then(if (embedded) Modifier else Modifier.navigationBarsPadding())
         },
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 8.dp,
         shape = if (sidePanel) {
-            RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)
+            MaterialTheme.shapes.large
         } else {
-            RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+            MaterialTheme.shapes.large
         },
     ) {
         Column(
@@ -858,7 +866,7 @@ fun FmModeBadge() {
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
         tonalElevation = 1.dp,
-        shape = RoundedCornerShape(50),
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Text(
             text = "FM",
@@ -879,38 +887,18 @@ fun RepeatModeTextButton(
         RepeatMode.QUEUE -> Icons.Filled.Repeat
         RepeatMode.SINGLE -> Icons.Filled.RepeatOne
     }
-    Surface(
-        modifier = Modifier.clickable(onClick = onRepeat),
-        color = if (repeatMode == RepeatMode.OFF) {
-            MaterialTheme.colorScheme.surfaceVariant
-        } else {
-            MaterialTheme.colorScheme.primary
-        },
-        contentColor = if (repeatMode == RepeatMode.OFF) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.onPrimary
-        },
-        tonalElevation = 1.dp,
-        shape = RoundedCornerShape(50),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    FilterChip(
+        selected = repeatMode != RepeatMode.OFF,
+        onClick = onRepeat,
+        label = { Text(repeatMode.label, maxLines = 1) },
+        leadingIcon = {
             Icon(
                 imageVector = repeatIcon,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
             )
-            Text(
-                text = repeatMode.label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
-    }
+        },
+    )
 }
 
 fun emptyDisplayTrack() = MusicTrack(
@@ -947,7 +935,7 @@ fun PlayerControls(
                 imageVector = Icons.Filled.Shuffle,
                 contentDescription = if (shuffleAvailable) "随机播放" else "私人 FM 使用顺序播放",
                 onClick = onShuffle,
-                size = 44.dp,
+                size = 48.dp,
                 iconSize = 24.dp,
                 selected = shuffleEnabled,
                 enabled = shuffleAvailable,
@@ -957,7 +945,7 @@ fun PlayerControls(
             imageVector = Icons.Filled.SkipPrevious,
             contentDescription = "上一首",
             onClick = onPrevious,
-            size = if (compact) 44.dp else 48.dp,
+            size = 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
         PlayPauseButton(
@@ -972,7 +960,7 @@ fun PlayerControls(
             imageVector = Icons.Filled.SkipNext,
             contentDescription = "下一首",
             onClick = onNext,
-            size = if (compact) 44.dp else 48.dp,
+            size = 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
         when {
@@ -996,23 +984,26 @@ fun RoundControlButton(
     selected: Boolean = false,
     enabled: Boolean = true,
 ) {
-    Surface(
-        modifier = Modifier
-            .size(size)
-            .clickable(enabled = enabled, onClick = onClick),
-        color = when {
-            prominent || selected -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.surfaceVariant
-        },
-        contentColor = when {
-            prominent || selected -> MaterialTheme.colorScheme.onPrimary
-            enabled -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-        },
-        tonalElevation = if (prominent) 3.dp else 1.dp,
-        shape = RoundedCornerShape(50),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
+    val buttonSize = if (size < 48.dp) 48.dp else size
+    val buttonModifier = Modifier.size(buttonSize)
+    if (prominent || selected) {
+        FilledIconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = buttonModifier,
+        ) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    } else {
+        FilledTonalIconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = buttonModifier,
+        ) {
             Icon(
                 imageVector = imageVector,
                 contentDescription = contentDescription,
@@ -1033,11 +1024,11 @@ fun PlayPauseButton(
 ) {
     if (isLoading) {
         Surface(
-            modifier = Modifier.size(size),
-            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.size(if (size < 48.dp) 48.dp else size),
+            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
             contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
             tonalElevation = if (prominent) 3.dp else 1.dp,
-            shape = RoundedCornerShape(50),
+            shape = MaterialTheme.shapes.extraLarge,
         ) {
             Box(contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
@@ -1142,12 +1133,12 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
 
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
         ) {
             val displayLines = lines.takeIf { it.isNotEmpty() } ?: listOf(LyricLine(0, "暂无歌词"))
             itemsIndexed(displayLines) { index, line ->
@@ -1211,12 +1202,16 @@ fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = !isUnavailable) { controller.playQueueIndex(index) }
+                    .fuoInteractive()
+                    .clickable(
+                        enabled = !isUnavailable,
+                        role = Role.Button,
+                    ) { controller.playQueueIndex(index) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverBox(track, modifier = Modifier.size(44.dp))
+                CoverBox(track, modifier = Modifier.size(48.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "${index + 1}. ${track.title.ifBlank { "未知歌曲" }}",
@@ -1281,7 +1276,8 @@ fun PlaybackPartList(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPartClick(index) },
+                    .fuoInteractive()
+                    .clickable(role = Role.Button) { onPartClick(index) },
                 color = if (selected) {
                     MaterialTheme.colorScheme.primaryContainer
                 } else {
@@ -1292,7 +1288,7 @@ fun PlaybackPartList(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                shape = RoundedCornerShape(6.dp),
+                shape = MaterialTheme.shapes.small,
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),

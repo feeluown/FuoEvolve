@@ -49,7 +49,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -125,11 +124,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -151,8 +152,21 @@ data class AppLayoutInfo(
     val gridColumns: Int = 3,
 )
 
-private const val PAGE_TRANSITION_DURATION_MILLIS = 320
-private const val PAGE_FADE_DURATION_MILLIS = 180
+internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
+    val isLandscape = maxWidth > maxHeight
+    return AppLayoutInfo(
+        isLandscape = isLandscape,
+        useWideLayout = isLandscape && maxWidth >= 640.dp,
+        gridColumns = when {
+            maxWidth >= 980.dp -> 6
+            maxWidth >= 760.dp -> 5
+            maxWidth >= 640.dp -> 4
+            else -> 3
+        },
+    )
+}
+
+private const val PAGE_TRANSITION_DURATION_MILLIS = FuoMotion.pageTransitionMillis
 
 private fun pageTransition(
     initialOffsetX: (Int) -> Int,
@@ -161,12 +175,12 @@ private fun pageTransition(
     slideInHorizontally(
         initialOffsetX = initialOffsetX,
         animationSpec = tween(PAGE_TRANSITION_DURATION_MILLIS),
-    ) + fadeIn(animationSpec = tween(PAGE_FADE_DURATION_MILLIS))
+    ) + fadeIn(animationSpec = tween(FuoMotion.pageFadeMillis))
     ) togetherWith (
     slideOutHorizontally(
         targetOffsetX = targetOffsetX,
         animationSpec = tween(PAGE_TRANSITION_DURATION_MILLIS),
-    ) + fadeOut(animationSpec = tween(PAGE_FADE_DURATION_MILLIS))
+    ) + fadeOut(animationSpec = tween(FuoMotion.pageFadeMillis))
     )
 
 private fun forwardPageTransition(): ContentTransform =
@@ -202,13 +216,13 @@ fun AppRoot(
 ) {
     val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
     val controller = appViewModel.controller
-    FuoEvolveTheme(
+    FuoTheme(
         themeMode = appUiState.settings.settings.themeMode,
         themeColorScheme = appUiState.settings.settings.themeColorScheme,
     ) {
         if (!controller.isSettingsLoaded) {
             AppInitializationLoadingScreen()
-            return@FuoEvolveTheme
+            return@FuoTheme
         }
         if (!controller.onboardingCompleted) {
             OnboardingScreen(
@@ -217,7 +231,7 @@ fun AppRoot(
                 onLogoutProvider = onLogoutProvider,
                 onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
             )
-            return@FuoEvolveTheme
+            return@FuoTheme
         }
         val snackbarHostState = remember { SnackbarHostState() }
         val playlistOperationFeedback = controller.playlistOperationFeedback
@@ -234,17 +248,7 @@ fun AppRoot(
         }
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val layoutInfo = remember(maxWidth, maxHeight) {
-                val isLandscape = maxWidth > maxHeight
-                AppLayoutInfo(
-                    isLandscape = isLandscape,
-                    useWideLayout = isLandscape && maxWidth >= 640.dp,
-                    gridColumns = when {
-                        maxWidth >= 980.dp -> 6
-                        maxWidth >= 760.dp -> 5
-                        maxWidth >= 640.dp -> 4
-                        else -> 3
-                    },
-                )
+                appLayoutInfoFor(maxWidth, maxHeight)
             }
 
             val currentFeature = controller.selectedFeature
@@ -344,8 +348,10 @@ fun AppRoot(
                             AnimatedVisibility(
                                 visible = controller.isFullPlayerOpen,
                                 modifier = Modifier.fillMaxSize(),
-                                enter = slideInVertically(animationSpec = tween(260)) { it / 2 } + fadeIn(tween(180)),
-                                exit = slideOutVertically(animationSpec = tween(220)) { it / 2 } + fadeOut(tween(160)),
+                                enter = slideInVertically(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it / 2 } +
+                                    fadeIn(tween(FuoMotion.overlayFadeMillis)),
+                                exit = slideOutVertically(animationSpec = tween(FuoMotion.overlayExitMillis)) { it / 2 } +
+                                    fadeOut(tween(FuoMotion.overlayFadeMillis)),
                             ) {
                                 FullPlayer(controller)
                             }
@@ -394,8 +400,9 @@ fun TrackArtistTargetDialog(controller: FuoPlayerController, track: MusicTrack) 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { controller.openArtistTarget(target) }
+                            .clip(MaterialTheme.shapes.medium)
+                            .fuoInteractive()
+                            .clickable(role = Role.Button) { controller.openArtistTarget(target) }
                             .padding(horizontal = 8.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -459,15 +466,16 @@ fun ProviderPlaylistTargetDialog(controller: FuoPlayerController, track: MusicTr
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { controller.addTrackToProviderPlaylist(playlist) }
+                            .clip(MaterialTheme.shapes.medium)
+                            .fuoInteractive()
+                            .clickable(role = Role.Button) { controller.addTrackToProviderPlaylist(playlist) }
                             .padding(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         CoverBox(
                             track = playlist.toDisplayTrack(),
-                            modifier = Modifier.size(40.dp),
+                            modifier = Modifier.size(48.dp),
                             placeholder = CoverPlaceholder.Playlist,
                         )
                         Column(modifier = Modifier.weight(1f)) {

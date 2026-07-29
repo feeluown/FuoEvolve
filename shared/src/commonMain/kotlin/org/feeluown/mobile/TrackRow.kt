@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -60,7 +61,8 @@ fun TrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -149,7 +151,7 @@ fun TrackAction(
                 imageVector = Icons.Filled.MoreVert,
                 contentDescription = "更多操作",
                 onClick = { expanded = true },
-                size = 44.dp,
+                size = 48.dp,
                 iconSize = 24.dp,
             )
         } else {

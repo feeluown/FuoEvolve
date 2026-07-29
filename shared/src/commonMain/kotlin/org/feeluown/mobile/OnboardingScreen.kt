@@ -17,7 +17,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -45,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -58,7 +58,7 @@ fun AppInitializationLoadingScreen() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
         ) {
             CircularProgressIndicator()
             Text(
@@ -247,12 +247,12 @@ private fun ProviderSelectionPage(
         if (providers.isEmpty()) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = MaterialTheme.shapes.medium,
             ) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(FuoSpacing.lg),
+                    horizontalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
@@ -265,20 +265,21 @@ private fun ProviderSelectionPage(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(enabled = enabled) {
+                        .clip(MaterialTheme.shapes.medium)
+                        .fuoInteractive()
+                        .clickable(enabled = enabled, role = Role.Checkbox) {
                             onProviderSelected(provider.providerId, !selected)
                         },
                     color = if (selected) {
                         MaterialTheme.colorScheme.primaryContainer
                     } else {
-                        MaterialTheme.colorScheme.surfaceVariant
+                        MaterialTheme.colorScheme.surfaceContainer
                     },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.medium,
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(horizontal = FuoSpacing.lg, vertical = FuoSpacing.md),
+                        horizontalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(
@@ -313,15 +314,16 @@ private fun ProviderSelectionPage(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.secondaryContainer,
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.medium,
             ) {
                 Row(
                     modifier = Modifier
-                        .clickable(enabled = enabled) {
+                        .fuoInteractive()
+                        .clickable(enabled = enabled, role = Role.Checkbox) {
                             onBilibiliReplacementOnlyChange(!bilibiliReplacementOnly)
                         }
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        .padding(FuoSpacing.lg),
+                    horizontalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Checkbox(

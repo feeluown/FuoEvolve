@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,19 +12,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -36,11 +31,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -54,37 +47,39 @@ fun SearchScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    .padding(horizontal = FuoSpacing.xl, vertical = FuoSpacing.md),
+                horizontalArrangement = Arrangement.spacedBy(FuoSpacing.xl),
             ) {
                 Box(
                     modifier = Modifier
-                        .width(320.dp)
+                        .weight(0.34f)
+                        .widthIn(min = 280.dp, max = 360.dp)
                         .fillMaxHeight(),
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 48.dp)
+                            .padding(bottom = FuoSpacing.xxl)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
                     ) {
-                        TextField(
+                        FuoSearchField(
                             modifier = Modifier.fillMaxWidth(),
-                            value = controller.query,
-                            onValueChange = controller::onQueryChange,
-                            singleLine = true,
-                            placeholder = { Text("歌曲、歌手或专辑") },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { controller.search() }),
-                        )
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
+                            query = controller.query,
+                            onQueryChange = controller::onQueryChange,
+                            onSearch = controller::search,
                             enabled = !controller.isLoading,
-                            onClick = controller::search,
-                        ) {
-                            Icon(Icons.Filled.Search, contentDescription = "搜索")
-                        }
+                            placeholder = "歌曲、歌手或专辑",
+                            trailingContent = {
+                                FuoIconButton(
+                                    contentDescription = "搜索",
+                                    enabled = !controller.isLoading,
+                                    onClick = controller::search,
+                                ) {
+                                    Icon(Icons.Filled.Search, contentDescription = null)
+                                }
+                            },
+                        )
                         OutlinedButton(
                             modifier = Modifier.fillMaxWidth(),
                             onClick = onOpenRecognition,
@@ -117,7 +112,7 @@ fun SearchScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                 ) {
                     LoadingIndicator(controller.isLoading)
                     ProviderSearchTabs(controller)
@@ -154,24 +149,31 @@ fun SearchScreen(
                         IconButton(onClick = controller::closeSearch) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                         }
-                        TextField(
+                        FuoSearchField(
                             modifier = Modifier.weight(1f),
-                            value = controller.query,
-                            onValueChange = controller::onQueryChange,
-                            singleLine = true,
-                            placeholder = { Text("歌曲、歌手或专辑") },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { controller.search() }),
-                        )
-                        IconButton(onClick = onOpenRecognition) {
-                            Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
-                        }
-                        IconButton(
+                            query = controller.query,
+                            onQueryChange = controller::onQueryChange,
+                            onSearch = controller::search,
                             enabled = !controller.isLoading,
-                            onClick = controller::search,
-                        ) {
-                            Icon(Icons.Filled.Search, contentDescription = "搜索")
-                        }
+                            placeholder = "歌曲、歌手或专辑",
+                            trailingContent = {
+                                Row {
+                                    FuoIconButton(
+                                        contentDescription = "听歌识曲",
+                                        onClick = onOpenRecognition,
+                                    ) {
+                                        Icon(Icons.Filled.Mic, contentDescription = null)
+                                    }
+                                    FuoIconButton(
+                                        contentDescription = "搜索",
+                                        enabled = !controller.isLoading,
+                                        onClick = controller::search,
+                                    ) {
+                                        Icon(Icons.Filled.Search, contentDescription = null)
+                                    }
+                                }
+                            },
+                        )
                     }
                     Row(
                         modifier = Modifier
@@ -193,8 +195,8 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = FuoSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
         ) {
             LoadingIndicator(controller.isLoading)
             ProviderSearchTabs(controller)
@@ -346,41 +348,38 @@ private fun ProviderSearchRow(
     placeholder: CoverPlaceholder = CoverPlaceholder.Song,
     onClick: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CoverBox(
-            track = MusicTrack(
-                id = title,
-                title = title,
-                artists = "",
-                album = "",
-                source = "",
-                sourceType = TrackSourceType.Provider,
-                coverUrl = coverUrl,
-            ),
-            modifier = Modifier.size(48.dp),
-            placeholder = placeholder,
-        )
-        Column(modifier = Modifier.weight(1f)) {
+    FuoListItem(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        leadingContent = {
+            CoverBox(
+                track = MusicTrack(
+                    id = title,
+                    title = title,
+                    artists = "",
+                    album = "",
+                    source = "",
+                    sourceType = TrackSourceType.Provider,
+                    coverUrl = coverUrl,
+                ),
+                modifier = Modifier.size(48.dp),
+                placeholder = placeholder,
+            )
+        },
+        headlineContent = {
             Text(
                 text = title.ifBlank { "未命名" },
-                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
             )
+        },
+        supportingContent = {
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
-        }
-    }
+        },
+    )
 }
 
 private fun ProviderSearchTab.label(controller: FuoPlayerController): String = when (this) {
@@ -393,20 +392,12 @@ private fun ProviderSearchTab.label(controller: FuoPlayerController): String = w
 
 @Composable
 fun EmptySearchHint(query: String, compactTop: Boolean = false) {
-    Surface(
+    FuoEmptyState(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = if (compactTop) 0.dp else 24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Text(
-            modifier = Modifier.padding(16.dp),
-            text = if (query.isBlank()) "输入关键词查找音乐" else "没有结果",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+        title = if (query.isBlank()) "输入关键词查找音乐" else "没有结果",
+    )
 }
 
 @Composable
