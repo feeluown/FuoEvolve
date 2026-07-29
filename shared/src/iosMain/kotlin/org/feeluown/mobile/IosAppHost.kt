@@ -19,6 +19,7 @@ fun MainViewController(
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
     shareOutput: IosShareOutput,
+    localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     audioRecognitionOutput: IosAudioRecognitionOutput,
 ): UIViewController = ComposeUIViewController {
@@ -30,6 +31,7 @@ fun MainViewController(
         downloadOutput,
         webLoginOutput,
         shareOutput,
+        localPlaylistFileOutput,
         networkStatusOutput,
         audioRecognitionOutput,
     )
@@ -44,6 +46,7 @@ private fun IosApp(
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
     shareOutput: IosShareOutput,
+    localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     audioRecognitionOutput: IosAudioRecognitionOutput,
 ) {
@@ -67,6 +70,17 @@ private fun IosApp(
         onRequestMicrophonePermission = container::requestMicrophonePermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
         onLogoutProvider = container::logoutProvider,
+        onImportLocalPlaylistFile = {
+            localPlaylistFileOutput.importFile { fileName, content ->
+                if (!fileName.isNullOrBlank() && !content.isNullOrBlank()) {
+                    container.controller.prepareLocalPlaylistImport(fileName, content)
+                } else {
+                    container.controller.showMessage("无法读取本地歌单文件")
+                }
+            }
+        },
+        onExportLocalPlaylistFile = localPlaylistFileOutput::exportFile,
+        onShareLocalPlaylistFile = localPlaylistFileOutput::shareFile,
         onShareText = shareOutput::share,
     )
 }
@@ -83,6 +97,7 @@ private class IosAppContainer(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val providerRepository = IosFuoCoreBridge(pythonRuntime, networkStatusOutput)
     private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
+    private val localPlaylistRepository = IosLocalPlaylistRepository()
     private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
     private val playbackEngine = IosNativeAudioEngine(scope, audioOutput)
     private val settingsRepository = createIosAppSettingsRepository(scope)
@@ -97,6 +112,7 @@ private class IosAppContainer(
     val controller = FuoPlayerController(
         providerRepository = providerRepository,
         localRepository = localRepository,
+        localPlaylistRepository = localPlaylistRepository,
         downloadRepository = downloadRepository,
         playbackEngine = playbackEngine,
         settingsRepository = settingsRepository,

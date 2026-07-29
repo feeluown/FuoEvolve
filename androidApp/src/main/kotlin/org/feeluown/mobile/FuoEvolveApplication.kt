@@ -18,6 +18,10 @@ class FuoEvolveApplication : PyApplication() {
         AndroidLocalMusicRepository(applicationContext)
     }
 
+    private val localPlaylistRepository: AndroidLocalPlaylistRepository by lazy {
+        AndroidLocalPlaylistRepository(applicationContext)
+    }
+
     private val downloadRepository: AndroidDownloadRepository by lazy {
         AndroidDownloadRepository(applicationContext, providerRepository) { tasks ->
             FuoDownloadService.update(applicationContext, tasks)
@@ -58,6 +62,7 @@ class FuoEvolveApplication : PyApplication() {
         FuoPlayerController(
             providerRepository = providerRepository,
             localRepository = localRepository,
+            localPlaylistRepository = localPlaylistRepository,
             downloadRepository = downloadRepository,
             playbackEngine = playbackEngine,
             settingsRepository = settingsRepository,

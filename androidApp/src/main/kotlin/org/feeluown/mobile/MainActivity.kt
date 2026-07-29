@@ -7,6 +7,8 @@ import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,6 +25,12 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.io.File
+
+private data class PendingLocalPlaylistExport(
+    val fileName: String,
+    val content: String,
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +91,44 @@ class MainActivity : ComponentActivity() {
                     controller.loginYtmusicWithHeaderFile(headerFileJson)
                 }
             }
+            var pendingLocalPlaylistExport by remember {
+                mutableStateOf<PendingLocalPlaylistExport?>(null)
+            }
+            val localPlaylistFileLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) {
+                    val content = runCatching {
+                        contentResolver.openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                            .orEmpty()
+                    }.getOrDefault("")
+                    if (content.isBlank()) {
+                        controller.showMessage("无法读取本地歌单文件")
+                    } else {
+                        controller.prepareLocalPlaylistImport(
+                            fileName = displayNameFor(uri),
+                            content = content,
+                        )
+                    }
+                }
+            }
+            val localPlaylistExportLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("text/plain"),
+            ) { uri ->
+                val pending = pendingLocalPlaylistExport
+                if (uri != null && pending != null) {
+                    runCatching {
+                        contentResolver.openOutputStream(uri)?.use { output ->
+                            output.write(pending.content.toByteArray(Charsets.UTF_8))
+                        } ?: error("无法打开导出目标")
+                    }.onFailure {
+                        controller.showMessage(it.message ?: "导出本地歌单失败")
+                    }
+                }
+                pendingLocalPlaylistExport = null
+            }
 
             BackHandler(
                 enabled = controller.isFullPlayerOpen ||
@@ -120,6 +166,16 @@ class MainActivity : ComponentActivity() {
                 onImportYtmusicHeaderFile = {
                     ytmusicHeaderFileLauncher.launch(arrayOf("application/json"))
                 },
+                onImportLocalPlaylistFile = {
+                    localPlaylistFileLauncher.launch(
+                        arrayOf("text/plain", "application/octet-stream", "application/x-fuo", "*/*"),
+                    )
+                },
+                onExportLocalPlaylistFile = { fileName, content ->
+                    pendingLocalPlaylistExport = PendingLocalPlaylistExport(fileName, content)
+                    localPlaylistExportLauncher.launch(fileName)
+                },
+                onShareLocalPlaylistFile = ::shareLocalPlaylistFile,
                 onShareText = ::shareText,
             )
         }
@@ -165,6 +221,40 @@ class MainActivity : ComponentActivity() {
             .setType("text/plain")
             .putExtra(Intent.EXTRA_TEXT, text)
         startActivity(Intent.createChooser(sendIntent, "分享"))
+    }
+
+    private fun shareLocalPlaylistFile(fileName: String, content: String) {
+        val shareDirectory = File(cacheDir, "local-playlists")
+        if (!shareDirectory.exists()) shareDirectory.mkdirs()
+        val safeName = File(fileName).name.ifBlank { "playlist.fuo" }
+        val file = File(shareDirectory, safeName)
+        runCatching {
+            file.writeText(content, Charsets.UTF_8)
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            val sendIntent = Intent(Intent.ACTION_SEND)
+                .setType("application/octet-stream")
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(sendIntent, "分享本地歌单文件"))
+        }.onFailure {
+            (application as FuoEvolveApplication).controller.showMessage(it.message ?: "分享本地歌单失败")
+        }
+    }
+
+    private fun displayNameFor(uri: android.net.Uri): String {
+        val queried = runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+                    } else {
+                        null
+                    }
+                }
+        }.getOrNull()
+        return queried?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ?: "playlist.fuo"
     }
 
     private fun configureSystemBars(darkTheme: Boolean) {

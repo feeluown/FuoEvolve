@@ -50,6 +50,7 @@ fun TrackRow(
     onOpenAlbum: () -> Unit,
     onOpenDetail: (() -> Unit)? = null,
     onEditLocalMetadata: (() -> Unit)? = null,
+    onAddToLocalPlaylist: (() -> Unit)? = null,
     onAddToProviderPlaylist: (() -> Unit)? = null,
     onRemoveFromProviderPlaylist: (() -> Unit)? = null,
     onSetDisliked: (() -> Unit)? = null,
@@ -98,6 +99,7 @@ fun TrackRow(
             onOpenAlbum = onOpenAlbum,
             onOpenDetail = onOpenDetail,
             onEditLocalMetadata = onEditLocalMetadata,
+            onAddToLocalPlaylist = onAddToLocalPlaylist,
             onAddToProviderPlaylist = onAddToProviderPlaylist,
             onRemoveFromProviderPlaylist = onRemoveFromProviderPlaylist,
             onSetDisliked = onSetDisliked,
@@ -135,6 +137,7 @@ fun TrackAction(
     onOpenAlbum: () -> Unit,
     onOpenDetail: (() -> Unit)? = null,
     onEditLocalMetadata: (() -> Unit)?,
+    onAddToLocalPlaylist: (() -> Unit)?,
     onAddToProviderPlaylist: (() -> Unit)?,
     onRemoveFromProviderPlaylist: (() -> Unit)?,
     onSetDisliked: (() -> Unit)?,
@@ -240,6 +243,16 @@ fun TrackAction(
                     },
                 )
             }
+            if (onAddToLocalPlaylist != null) {
+                DropdownMenuItem(
+                    text = { Text("添加到本地歌单") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onAddToLocalPlaylist()
+                    },
+                )
+            }
             if (onRemoveFromProviderPlaylist != null) {
                 DropdownMenuItem(
                     text = { Text("从当前歌单移除") },
@@ -300,9 +313,25 @@ fun addToProviderPlaylistAction(controller: FuoPlayerController, track: MusicTra
     }
 }
 
+fun addToLocalPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
+    return if (controller.canAddTrackToLocalPlaylist(track)) {
+        { controller.openLocalPlaylistTargetPicker(track) }
+    } else {
+        null
+    }
+}
+
 fun removeFromSelectedPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
     return if (controller.canRemoveTrackFromSelectedPlaylist(track)) {
         { controller.removeTrackFromSelectedPlaylist(track) }
+    } else {
+        null
+    }
+}
+
+fun removeFromSelectedLocalPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
+    return if (controller.canRemoveTrackFromSelectedLocalPlaylist(track)) {
+        { controller.removeTrackFromSelectedLocalPlaylist(track) }
     } else {
         null
     }

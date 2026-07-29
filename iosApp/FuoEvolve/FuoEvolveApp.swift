@@ -37,6 +37,7 @@ private struct SharedComposeRoot: UIViewControllerRepresentable {
             downloadOutput: IOSDownloadOutput.shared,
             webLoginOutput: IOSWebLoginOutput.shared,
             shareOutput: IOSShareOutput.shared,
+            localPlaylistFileOutput: IOSShareOutput.shared,
             networkStatusOutput: IOSNetworkStatusOutput.shared,
             audioRecognitionOutput: IOSAudioRecognitionOutput.shared
         )

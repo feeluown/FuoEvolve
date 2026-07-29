@@ -197,6 +197,9 @@ fun AppRoot(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
+    onImportLocalPlaylistFile: (() -> Unit)? = null,
+    onExportLocalPlaylistFile: ((String, String) -> Unit)? = null,
+    onShareLocalPlaylistFile: ((String, String) -> Unit)? = null,
     onShareText: (String) -> Unit = {},
     appVersionInfo: String? = null,
 ) {
@@ -251,11 +254,13 @@ fun AppRoot(
             val currentTrack = controller.selectedTrack
             val currentVideo = controller.selectedVideo
             val currentPlaylist = controller.selectedPlaylist
+            val currentLocalPlaylist = controller.selectedLocalPlaylist
             val currentMediaItem = controller.selectedMediaItem
             var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
             var lastTrack by remember { mutableStateOf<MusicTrack?>(null) }
             var lastVideo by remember { mutableStateOf<ProviderVideo?>(null) }
             var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
+            var lastLocalPlaylist by remember { mutableStateOf<LocalPlaylist?>(null) }
             var lastMediaItem by remember { mutableStateOf<ProviderMediaItem?>(null) }
 
             LaunchedEffect(currentFeature) {
@@ -278,6 +283,11 @@ fun AppRoot(
                     lastPlaylist = currentPlaylist
                 }
             }
+            LaunchedEffect(currentLocalPlaylist) {
+                if (currentLocalPlaylist != null) {
+                    lastLocalPlaylist = currentLocalPlaylist
+                }
+            }
             LaunchedEffect(currentMediaItem) {
                 if (currentMediaItem != null) {
                     lastMediaItem = currentMediaItem
@@ -286,6 +296,11 @@ fun AppRoot(
 
             CompositionLocalProvider(
                 LocalShareHandler provides { onShareText(it.text) },
+                LocalLocalPlaylistFileActions provides LocalPlaylistFileActions(
+                    importFile = onImportLocalPlaylistFile,
+                    exportFile = onExportLocalPlaylistFile,
+                    shareFile = onShareLocalPlaylistFile,
+                ),
                 LocalAppLayoutInfo provides layoutInfo,
             ) {
                 SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
@@ -336,6 +351,10 @@ fun AppRoot(
                                             AppRoute.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
                                             AppRoute.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
                                             AppRoute.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
+                                            AppRoute.LocalPlaylist -> LocalPlaylistScreen(
+                                                controller,
+                                                currentLocalPlaylist ?: lastLocalPlaylist,
+                                            )
                                             AppRoute.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                                         }
                                     }
@@ -354,6 +373,9 @@ fun AppRoot(
                             }
                             controller.playlistTargetTrack?.let { track ->
                                 ProviderPlaylistTargetDialog(controller = controller, track = track)
+                            }
+                            controller.localPlaylistTargetTrack?.let { track ->
+                                LocalPlaylistTargetDialog(controller = controller, track = track)
                             }
                             controller.artistTargetTrack?.let { track ->
                                 TrackArtistTargetDialog(controller = controller, track = track)

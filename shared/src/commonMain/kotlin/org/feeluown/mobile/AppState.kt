@@ -35,6 +35,9 @@ sealed interface AppRoute : NavKey {
     data object Playlist : AppRoute
 
     @Serializable
+    data object LocalPlaylist : AppRoute
+
+    @Serializable
     data object MediaItem : AppRoute
 
     @Serializable

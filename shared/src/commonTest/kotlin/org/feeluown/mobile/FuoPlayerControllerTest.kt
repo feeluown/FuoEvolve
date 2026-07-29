@@ -3830,6 +3830,90 @@ class FuoPlayerControllerTest {
         }
     }
 
+    @Test
+    fun localPlaylistDeduplicatesTracksRemovesTracksAndPlaysCompleteList() = runTest {
+        val first = providerTrack("netease:1", "第一首")
+        val second = providerTrack("netease:2", "第二首")
+        val provider = FakeProviderRepository(listOf(first, second))
+        val engine = FakePlaybackEngine()
+        val localPlaylists = InMemoryLocalPlaylistRepository()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                localPlaylistRepository = localPlaylists,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+
+            controller.createLocalPlaylist("收藏")
+            advanceUntilIdle()
+            val created = controller.localPlaylists.single()
+            controller.openLocalPlaylistTargetPicker(first)
+            controller.addTrackToLocalPlaylist(created)
+            advanceUntilIdle()
+            controller.openLocalPlaylistTargetPicker(first)
+            controller.addTrackToLocalPlaylist(created)
+            controller.openLocalPlaylistTargetPicker(second)
+            controller.addTrackToLocalPlaylist(created)
+            advanceUntilIdle()
+
+            val updated = controller.localPlaylists.single()
+            assertEquals(listOf("fuo://netease/songs/1", "fuo://netease/songs/2"), updated.tracks.map { it.uri })
+            controller.openLocalPlaylist(updated)
+            assertEquals(listOf("netease:1", "netease:2"), controller.selectedLocalPlaylistTracks.map { it.id })
+            controller.playAllFromSelectedLocalPlaylist()
+            advanceUntilIdle()
+            assertEquals("netease:1", engine.lastTrack?.id)
+
+            controller.removeTrackFromSelectedLocalPlaylist(controller.selectedLocalPlaylistTracks[0])
+            advanceUntilIdle()
+            assertEquals(listOf("fuo://netease/songs/2"), controller.selectedLocalPlaylist?.tracks?.map { it.uri })
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun localPlaylistImportKeepsUnknownProviderAndCreatesUniqueSameNameFile() = runTest {
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(listOf(providerTrack("netease:1", "已知"))),
+                localRepository = FakeLocalMusicRepository(),
+                localPlaylistRepository = InMemoryLocalPlaylistRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+            controller.createLocalPlaylist("导入歌单")
+            advanceUntilIdle()
+
+            val raw = """
+                +++
+                title = "导入歌单"
+                +++
+            """.trimIndent() + "\nfuo://missing/songs/unknown\t# 未知歌曲 - 歌手 - 专辑 - 01:00"
+            controller.prepareLocalPlaylistImport("import.fuo", raw)
+            controller.importLocalPlaylist(LocalPlaylistImportMode.CreateNew)
+            advanceUntilIdle()
+
+            assertEquals(2, controller.localPlaylists.size)
+            assertEquals(listOf("导入歌单", "导入歌单"), controller.localPlaylists.map { it.title })
+            assertEquals(2, controller.localPlaylists.map { it.fileName }.toSet().size)
+            val imported = controller.localPlaylists.first { it.fileName != "导入歌单.fuo" }
+            controller.openLocalPlaylist(imported)
+            assertTrue(controller.selectedLocalPlaylistTracks.single().isUnavailable)
+            assertEquals("missing", controller.selectedLocalPlaylistTracks.single().source)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
     private fun providerTrack(id: String, title: String): MusicTrack = MusicTrack(
         id = id,
         title = title,

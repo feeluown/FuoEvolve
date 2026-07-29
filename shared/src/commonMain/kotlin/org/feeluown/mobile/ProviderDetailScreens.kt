@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
@@ -338,6 +339,13 @@ fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
                                 Text("播放 MV")
                             }
                         }
+                        addToLocalPlaylistAction(controller, displayTrack)?.let { action ->
+                            TextButton(onClick = action) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null)
+                                Spacer(Modifier.size(4.dp))
+                                Text("添加到本地歌单")
+                            }
+                        }
                         ShareTextButton(sharePayload)
                     }
                     if (controller.selectedTrackError != null) {
@@ -388,6 +396,13 @@ fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
                                 Text("播放 MV")
                             }
                         }
+                        addToLocalPlaylistAction(controller, displayTrack)?.let { action ->
+                            TextButton(onClick = action) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null)
+                                Spacer(Modifier.size(4.dp))
+                                Text("添加到本地歌单")
+                            }
+                        }
                         ShareTextButton(sharePayload)
                     }
                 },
@@ -422,6 +437,7 @@ private fun TrackRelatedContent(controller: FuoPlayerController) {
                 onOpenArtist = { controller.openTrackArtist(track) },
                 onOpenAlbum = { controller.openTrackAlbum(track) },
                 onOpenDetail = trackDetailAction(controller, track),
+                onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
                 onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
             )
             HorizontalDivider()
@@ -744,6 +760,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
                             onOpenDetail = trackDetailAction(controller, track),
+                            onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
                             onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                             onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                         )
@@ -1020,6 +1037,7 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                                 onOpenArtist = { controller.openTrackArtist(track) },
                                 onOpenAlbum = { controller.openTrackAlbum(track) },
                                 onOpenDetail = trackDetailAction(controller, track),
+                                onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
                                 onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                             )
                             HorizontalDivider()
@@ -1106,6 +1124,7 @@ fun TrackCollectionList(
                         onOpenArtist = { controller.openTrackArtist(track) },
                         onOpenAlbum = { controller.openTrackAlbum(track) },
                         onOpenDetail = trackDetailAction(controller, track),
+                        onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
                         onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                         onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                     )
@@ -1136,6 +1155,7 @@ fun TrackCollectionList(
                     onOpenArtist = { controller.openTrackArtist(track) },
                     onOpenAlbum = { controller.openTrackAlbum(track) },
                     onOpenDetail = trackDetailAction(controller, track),
+                    onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
                     onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                     onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                 )

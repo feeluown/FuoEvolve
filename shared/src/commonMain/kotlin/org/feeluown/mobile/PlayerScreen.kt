@@ -418,6 +418,7 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
         } else {
             null
         },
+        onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
         onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
         onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
         onSetDisliked = controller.canSetSongDisliked(track, true).takeIf { it }?.let {

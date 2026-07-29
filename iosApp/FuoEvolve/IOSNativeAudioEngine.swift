@@ -6,6 +6,8 @@ import MediaToolbox
 import MediaPlayer
 import Network
 import Shared
+import UIKit
+import UniformTypeIdentifiers
 import WebKit
 
 final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
@@ -745,8 +747,34 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
     }
 }
 
-final class IOSShareOutput: NSObject, IosShareOutput {
+private final class IOSLocalPlaylistDocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
+    private let completion: (String?, String?) -> Void
+
+    init(completion: @escaping (String?, String?) -> Void) {
+        self.completion = completion
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let url = urls.first else {
+            completion(nil, nil)
+            return
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+        }
+        let content = try? String(contentsOf: url, encoding: .utf8)
+        completion(url.lastPathComponent, content)
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        completion(nil, nil)
+    }
+}
+
+final class IOSShareOutput: NSObject, IosShareOutput, IosLocalPlaylistFileOutput {
     static let shared = IOSShareOutput()
+    private var localPlaylistPickerDelegate: IOSLocalPlaylistDocumentPickerDelegate?
 
     func share(text: String) {
         guard let presenter = IOSWebLoginOutput.topViewController() else { return }
@@ -759,6 +787,58 @@ final class IOSShareOutput: NSObject, IosShareOutput {
             height: 1
         )
         presenter.present(activity, animated: true)
+    }
+
+    func importFile(completion: @escaping (String?, String?) -> Void) {
+        guard let presenter = IOSWebLoginOutput.topViewController() else {
+            completion(nil, nil)
+            return
+        }
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.plainText, .data],
+            asCopy: true
+        )
+        let delegate = IOSLocalPlaylistDocumentPickerDelegate(completion: { [weak self] fileName, content in
+            self?.localPlaylistPickerDelegate = nil
+            completion(fileName, content)
+        })
+        localPlaylistPickerDelegate = delegate
+        picker.delegate = delegate
+        presenter.present(picker, animated: true)
+    }
+
+    func exportFile(fileName: String, content: String) {
+        guard let presenter = IOSWebLoginOutput.topViewController(),
+              let file = temporaryLocalPlaylistFile(fileName: fileName, content: content) else { return }
+        let picker = UIDocumentPickerViewController(forExporting: [file])
+        presenter.present(picker, animated: true)
+    }
+
+    func shareFile(fileName: String, content: String) {
+        guard let presenter = IOSWebLoginOutput.topViewController(),
+              let file = temporaryLocalPlaylistFile(fileName: fileName, content: content) else { return }
+        let activity = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = presenter.view
+        activity.popoverPresentationController?.sourceRect = CGRect(
+            x: presenter.view.bounds.midX,
+            y: presenter.view.bounds.midY,
+            width: 1,
+            height: 1
+        )
+        presenter.present(activity, animated: true)
+    }
+
+    private func temporaryLocalPlaylistFile(fileName: String, content: String) -> URL? {
+        let safeName = URL(fileURLWithPath: fileName).lastPathComponent
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(safeName.isEmpty ? "playlist.fuo" : safeName)
+        do {
+            try? FileManager.default.removeItem(at: target)
+            try content.write(to: target, atomically: true, encoding: .utf8)
+            return target
+        } catch {
+            return nil
+        }
     }
 }
 

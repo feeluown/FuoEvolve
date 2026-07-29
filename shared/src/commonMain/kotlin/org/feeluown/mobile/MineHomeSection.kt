@@ -42,7 +42,10 @@ fun MineHomeSection(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     val refreshMineContent = {
         when (controller.mineSection) {
-            MineSection.Playlists -> controller.refreshMinePlaylistContent()
+            MineSection.Playlists -> {
+                controller.refreshLocalPlaylists()
+                controller.refreshMinePlaylistContent()
+            }
             MineSection.Songs,
             MineSection.Artists,
             MineSection.Albums -> controller.refreshMineContent()
@@ -179,6 +182,7 @@ fun MineSongSections(controller: FuoPlayerController, modifier: Modifier) {
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
                             onOpenDetail = trackDetailAction(controller, track),
+                            onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
                             onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
                             onSetDisliked = when (section.feature.id) {
                                 "qqmusic_disliked_songs" -> { { controller.setSongDisliked(track, false) } }
@@ -227,13 +231,18 @@ fun MinePlaylistsSection(
     var showCreateDialog by remember { mutableStateOf(false) }
     var playlistName by remember { mutableStateOf("") }
     var selectedCreateProviderId by remember { mutableStateOf<String?>(null) }
+    var showCreateLocalDialog by remember { mutableStateOf(false) }
+    val fileActions = LocalLocalPlaylistFileActions.current
     val userSections = controller.minePlaylistSections
     val favoriteSections = controller.mineFavoritePlaylistSections
     val sections = when (controller.playlistFilter) {
         PlaylistFilter.All -> userSections + favoriteSections
         PlaylistFilter.UserPlaylists -> userSections
         PlaylistFilter.FavoritePlaylists -> favoriteSections
+        PlaylistFilter.Local -> emptyList()
     }
+    val showLocalPlaylists = controller.playlistFilter == PlaylistFilter.All ||
+        controller.playlistFilter == PlaylistFilter.Local
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
     val lockedProviders = remember(sections) {
         sections.filter { it.isLoginRequired }
@@ -253,11 +262,19 @@ fun MinePlaylistsSection(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (sections.isEmpty()) {
+            if (sections.isEmpty() && !showLocalPlaylists) {
                 item {
                     EmptyProviderContentHint(controller.playlistFilter.emptyTitle())
                 }
             } else {
+                if (showLocalPlaylists) {
+                    localPlaylistSectionItems(
+                        controller = controller,
+                        playlists = controller.localPlaylists,
+                        onCreatePlaylist = { showCreateLocalDialog = true },
+                        onImportPlaylist = fileActions.importFile,
+                    )
+                }
                 visibleSections.forEach { contentSection ->
                     playlistSectionItems(
                         controller = controller,
@@ -312,6 +329,36 @@ fun MinePlaylistsSection(
             dismissButton = { TextButton(onClick = { showCreateDialog = false }) { Text("取消") } },
         )
     }
+    if (showCreateLocalDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateLocalDialog = false },
+            title = { Text("新建本地歌单") },
+            text = {
+                OutlinedTextField(
+                    value = playlistName,
+                    onValueChange = { playlistName = it },
+                    label = { Text("歌单名称") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = playlistName.isNotBlank(),
+                    onClick = {
+                        controller.createLocalPlaylist(playlistName)
+                        playlistName = ""
+                        showCreateLocalDialog = false
+                    },
+                ) { Text("创建") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateLocalDialog = false }) { Text("取消") }
+            },
+        )
+    }
+    controller.localPlaylistImportPreview?.let { preview ->
+        LocalPlaylistImportDialog(controller, preview)
+    }
 }
 
 @Composable
@@ -332,6 +379,11 @@ fun PlaylistFilterChips(controller: FuoPlayerController) {
             onClick = { controller.onPlaylistFilterChange(PlaylistFilter.FavoritePlaylists) },
             label = "收藏",
         )
+        CompactFilterChip(
+            selected = controller.playlistFilter == PlaylistFilter.Local,
+            onClick = { controller.onPlaylistFilterChange(PlaylistFilter.Local) },
+            label = "本地",
+        )
     }
 }
 
@@ -340,7 +392,112 @@ fun PlaylistFilter.emptyTitle(): String {
         PlaylistFilter.All -> "歌单"
         PlaylistFilter.UserPlaylists -> "用户歌单"
         PlaylistFilter.FavoritePlaylists -> "收藏歌单"
+        PlaylistFilter.Local -> "本地歌单"
     }
+}
+
+fun androidx.compose.foundation.lazy.LazyListScope.localPlaylistSectionItems(
+    controller: FuoPlayerController,
+    playlists: List<LocalPlaylist>,
+    onCreatePlaylist: () -> Unit,
+    onImportPlaylist: (() -> Unit)?,
+) {
+    item(key = "header:local-playlists") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "本地歌单",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row {
+                TextButton(onClick = onCreatePlaylist) { Text("新建") }
+                TextButton(
+                    onClick = { onImportPlaylist?.invoke() },
+                    enabled = onImportPlaylist != null,
+                ) { Text("导入") }
+            }
+        }
+    }
+    if (playlists.isEmpty()) {
+        item(key = "empty:local-playlists") {
+            ProviderContentMessage("暂无本地歌单，可新建或导入 .fuo 文件")
+        }
+    } else {
+        item(key = "playlists:local") {
+            ProviderPlaylistGrid(
+                playlists = playlists.map { localPlaylist ->
+                    ProviderPlaylist(
+                        id = localPlaylist.id,
+                        title = localPlaylist.title,
+                        providerId = "local",
+                        providerName = "本地 · ${localPlaylist.tracks.size} 首",
+                        description = localPlaylist.description,
+                        trackCount = localPlaylist.tracks.size,
+                    )
+                },
+                onClick = { card ->
+                    playlists.firstOrNull { it.id == card.id }?.let(controller::openLocalPlaylist)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+fun LocalPlaylistImportDialog(
+    controller: FuoPlayerController,
+    preview: LocalPlaylistImportPreview,
+) {
+    val existing = controller.existingLocalPlaylistForImport(preview)
+    AlertDialog(
+        onDismissRequest = controller::cancelLocalPlaylistImport,
+        title = { Text("导入本地歌单") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("《${preview.title}》 · ${preview.tracks.size} 首")
+                if (preview.description.isNotBlank()) {
+                    Text(
+                        text = preview.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (preview.skippedLineCount > 0) {
+                    Text(
+                        text = "将跳过 ${preview.skippedLineCount} 行不支持内容",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (existing != null) {
+                    Text("已存在同名歌单，请选择覆盖或新建。")
+                }
+            }
+        },
+        confirmButton = {
+            if (existing != null) {
+                TextButton(onClick = {
+                    controller.importLocalPlaylist(LocalPlaylistImportMode.Replace, existing.id)
+                }) { Text("覆盖") }
+            } else {
+                TextButton(onClick = {
+                    controller.importLocalPlaylist(LocalPlaylistImportMode.CreateNew)
+                }) { Text("导入") }
+            }
+        },
+        dismissButton = {
+            Row {
+                if (existing != null) {
+                    TextButton(onClick = {
+                        controller.importLocalPlaylist(LocalPlaylistImportMode.CreateNew)
+                    }) { Text("新建") }
+                }
+                TextButton(onClick = controller::cancelLocalPlaylistImport) { Text("取消") }
+            }
+        },
+    )
 }
 
 fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
