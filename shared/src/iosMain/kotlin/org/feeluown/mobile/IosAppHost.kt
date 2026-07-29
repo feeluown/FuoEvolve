@@ -11,6 +11,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import platform.UIKit.UIViewController
 
+internal fun handleIosLocalPlaylistImportResult(
+    fileName: String?,
+    content: String?,
+    onImport: (String, String) -> Unit,
+    onReadFailure: () -> Unit,
+) {
+    if (fileName == null && content == null) return
+    val validFileName = fileName?.takeIf { it.isNotBlank() }
+    val validContent = content?.takeIf { it.isNotBlank() }
+    if (validFileName != null && validContent != null) {
+        onImport(validFileName, validContent)
+    } else {
+        onReadFailure()
+    }
+}
+
 fun MainViewController(
     pythonRuntime: IosPythonRuntime,
     audioOutput: IosAudioOutput,
@@ -72,11 +88,12 @@ private fun IosApp(
         onLogoutProvider = container::logoutProvider,
         onImportLocalPlaylistFile = {
             localPlaylistFileOutput.importFile { fileName, content ->
-                if (!fileName.isNullOrBlank() && !content.isNullOrBlank()) {
-                    container.controller.prepareLocalPlaylistImport(fileName, content)
-                } else {
-                    container.controller.showMessage("无法读取本地歌单文件")
-                }
+                handleIosLocalPlaylistImportResult(
+                    fileName = fileName,
+                    content = content,
+                    onImport = container.controller::prepareLocalPlaylistImport,
+                    onReadFailure = { container.controller.showMessage("无法读取本地歌单文件") },
+                )
             }
         },
         onExportLocalPlaylistFile = localPlaylistFileOutput::exportFile,

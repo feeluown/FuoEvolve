@@ -12,6 +12,38 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class IosPlatformRepositoriesTest {
     @Test
+    fun localPlaylistImportCancellationDoesNotReportReadFailure() {
+        var importCount = 0
+        var readFailureCount = 0
+
+        handleIosLocalPlaylistImportResult(
+            fileName = null,
+            content = null,
+            onImport = { _, _ -> importCount += 1 },
+            onReadFailure = { readFailureCount += 1 },
+        )
+
+        assertEquals(0, importCount)
+        assertEquals(0, readFailureCount)
+    }
+
+    @Test
+    fun localPlaylistImportReadFailureStillReportsFailure() {
+        var importCount = 0
+        var readFailureCount = 0
+
+        handleIosLocalPlaylistImportResult(
+            fileName = "playlist.fuo",
+            content = null,
+            onImport = { _, _ -> importCount += 1 },
+            onReadFailure = { readFailureCount += 1 },
+        )
+
+        assertEquals(0, importCount)
+        assertEquals(1, readFailureCount)
+    }
+
+    @Test
     fun resolveUsesAudioQualityForCurrentNetwork() = runTest {
         val runtime = RecordingPythonRuntime()
         val networkStatus = FakeNetworkStatusOutput(isCellular = true)

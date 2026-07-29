@@ -265,6 +265,7 @@ object LocalPlaylistFileCodec {
         if (normalized.isEmpty()) return "\"\""
         return if (
             normalized.contains(" - ") ||
+                normalized.contains('"') ||
                 normalized.startsWith('#') ||
                 normalized.startsWith('"') ||
                 normalized.endsWith('"')

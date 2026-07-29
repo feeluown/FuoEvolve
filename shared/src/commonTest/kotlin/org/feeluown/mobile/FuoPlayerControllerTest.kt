@@ -3849,6 +3849,16 @@ class FuoPlayerControllerTest {
             )
             advanceUntilIdle()
 
+            val downloadedProviderTrack = first.copy(
+                id = "netease:3",
+                providerId = "netease:3",
+                title = "已下载歌曲",
+                sourceType = TrackSourceType.Downloaded,
+                localUri = "content://downloads/netease-3",
+            )
+            assertTrue(controller.canAddTrackToLocalPlaylist(downloadedProviderTrack))
+            assertFalse(controller.canAddTrackToLocalPlaylist(localTrack("local:1", "本地歌曲")))
+
             controller.createLocalPlaylist("收藏")
             advanceUntilIdle()
             val created = controller.localPlaylists.single()
@@ -3859,19 +3869,34 @@ class FuoPlayerControllerTest {
             controller.addTrackToLocalPlaylist(created)
             controller.openLocalPlaylistTargetPicker(second)
             controller.addTrackToLocalPlaylist(created)
+            controller.openLocalPlaylistTargetPicker(downloadedProviderTrack)
+            controller.addTrackToLocalPlaylist(created)
             advanceUntilIdle()
 
             val updated = controller.localPlaylists.single()
-            assertEquals(listOf("fuo://netease/songs/1", "fuo://netease/songs/2"), updated.tracks.map { it.uri })
+            assertEquals(
+                listOf(
+                    "fuo://netease/songs/1",
+                    "fuo://netease/songs/2",
+                    "fuo://netease/songs/3",
+                ),
+                updated.tracks.map { it.uri },
+            )
             controller.openLocalPlaylist(updated)
-            assertEquals(listOf("netease:1", "netease:2"), controller.selectedLocalPlaylistTracks.map { it.id })
+            assertEquals(
+                listOf("netease:1", "netease:2", "netease:3"),
+                controller.selectedLocalPlaylistTracks.map { it.id },
+            )
             controller.playAllFromSelectedLocalPlaylist()
             advanceUntilIdle()
             assertEquals("netease:1", engine.lastTrack?.id)
 
             controller.removeTrackFromSelectedLocalPlaylist(controller.selectedLocalPlaylistTracks[0])
             advanceUntilIdle()
-            assertEquals(listOf("fuo://netease/songs/2"), controller.selectedLocalPlaylist?.tracks?.map { it.uri })
+            assertEquals(
+                listOf("fuo://netease/songs/2", "fuo://netease/songs/3"),
+                controller.selectedLocalPlaylist?.tracks?.map { it.uri },
+            )
         } finally {
             controllerScope.cancel()
         }

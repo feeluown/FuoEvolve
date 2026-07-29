@@ -92,4 +92,33 @@ class LocalPlaylistFileCodecTest {
         assertEquals(playlist.tracks[0].durationMs, roundTrip.tracks[0].durationMs)
         assertEquals(playlist.tracks[1].durationMs, roundTrip.tracks[1].durationMs)
     }
+
+    @Test
+    fun quotesInteriorDoubleQuotesInSongMetadataForRoundTrip() {
+        val playlist = LocalPlaylist(
+            id = "quoted.fuo",
+            fileName = "quoted.fuo",
+            title = "带引号",
+            tracks = listOf(
+                LocalPlaylistTrack(
+                    uri = "not-used",
+                    providerId = "netease",
+                    identifier = "1",
+                    title = "12\" Remix",
+                    artists = "Artist \"A",
+                    album = "Album \"B",
+                    durationMs = 60_000,
+                ),
+            ),
+        )
+
+        val roundTrip = LocalPlaylistFileCodec.decode(
+            playlist.fileName,
+            LocalPlaylistFileCodec.encode(playlist),
+        )
+
+        assertEquals(playlist.tracks.single().title, roundTrip.tracks.single().title)
+        assertEquals(playlist.tracks.single().artists, roundTrip.tracks.single().artists)
+        assertEquals(playlist.tracks.single().album, roundTrip.tracks.single().album)
+    }
 }

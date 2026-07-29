@@ -2052,7 +2052,7 @@ class FuoPlayerController(
     }
 
     fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean {
-        return track.sourceType == TrackSourceType.Provider && track.toLocalPlaylistTrack() != null
+        return track.isProviderBacked() && track.toLocalPlaylistTrack() != null
     }
 
     fun openLocalPlaylistTargetPicker(track: MusicTrack) {
@@ -3420,7 +3420,7 @@ class FuoPlayerController(
     }
 
     private fun MusicTrack.toLocalPlaylistTrack(): LocalPlaylistTrack? {
-        if (sourceType != TrackSourceType.Provider) return null
+        if (!isProviderBacked()) return null
         val providerId = trackProviderId(this) ?: return null
         val rawId = this.providerId?.takeIf { it.isNotBlank() } ?: id
         val identifier = rawId.removePrefix("$providerId:").trim()
@@ -3439,6 +3439,10 @@ class FuoPlayerController(
             album = album,
             durationMs = durationMs,
         )
+    }
+
+    private fun MusicTrack.isProviderBacked(): Boolean {
+        return sourceType == TrackSourceType.Provider || sourceType == TrackSourceType.Downloaded
     }
 
     private fun LocalPlaylist.toMusicTracks(): List<MusicTrack> {
