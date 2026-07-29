@@ -45,6 +45,8 @@ internal object FuoSpacing {
     val xxl = 32.dp
 }
 
+internal val FuoBottomNavigationBarHeight = 64.dp
+
 internal object FuoMotion {
     const val pageTransitionMillis = 300
     const val pageFadeMillis = 180

@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -40,14 +42,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 @Composable
-fun LoadingIndicator(visible: Boolean) {
+fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
     AnimatedVisibility(visible = visible) {
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        LinearProgressIndicator(modifier = modifier.fillMaxWidth())
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,17 +95,20 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
+                .padding(paddingValues),
             verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) 6.dp else 12.dp),
         ) {
-            LoadingIndicator(controller.isLoading)
+            LoadingIndicator(
+                visible = controller.isLoading,
+                modifier = Modifier.padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
+            )
             HomeSectionPager(
                 controller = controller,
                 hasAudioPermission = hasAudioPermission,
                 onRequestAudioPermission = onRequestAudioPermission,
                 onOpenRecognition = onOpenRecognition,
                 modifier = Modifier.weight(1f),
+                contentHorizontalPadding = if (layoutInfo.useWideLayout) 8.dp else 16.dp,
             )
         }
     }
@@ -115,6 +121,7 @@ fun HomeSectionPager(
     onRequestAudioPermission: () -> Unit,
     onOpenRecognition: () -> Unit,
     modifier: Modifier,
+    contentHorizontalPadding: Dp,
 ) {
     val sections = listOf(
         HomeSection.Recommend to "推荐",
@@ -148,7 +155,9 @@ fun HomeSectionPager(
 
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Row(
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = contentHorizontalPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             HomeSectionRail(
@@ -201,7 +210,8 @@ fun HomeSectionPager(
             state = pagerState,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .padding(horizontal = contentHorizontalPadding),
             pageSpacing = 16.dp,
         ) { page ->
             when (sections[page].first) {
@@ -224,7 +234,10 @@ fun HomeSectionPager(
             }
         }
         NavigationBar(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(FuoBottomNavigationBarHeight),
+            windowInsets = WindowInsets(0, 0, 0, 0),
         ) {
             sections.forEachIndexed { index, (section, label) ->
                 NavigationBarItem(
