@@ -72,6 +72,11 @@ enum class LocalMusicViewMode {
     Album,
 }
 
+data class LocalMusicCollectionSelection(
+    val mode: LocalMusicViewMode,
+    val key: String,
+)
+
 data class TrackArtistTarget(
     val name: String,
     val mediaItem: ProviderMediaItem? = null,
@@ -253,6 +258,8 @@ class FuoPlayerController(
         private set
     var selectedLocalMusicDirectoryId by mutableStateOf<String?>(null)
         private set
+    var selectedLocalMusicCollection by mutableStateOf<LocalMusicCollectionSelection?>(null)
+        private set
     var excludedLocalMusicDirectoryIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var localMusicMinDurationSeconds by mutableStateOf(DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS)
@@ -345,6 +352,7 @@ class FuoPlayerController(
         get() = upNextQueue.size
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
+            selectedLocalMusicCollection != null ||
             selectedLocalMusicDirectoryId != null ||
             navigator.backStack.value.size > 1
 
@@ -610,7 +618,7 @@ class FuoPlayerController(
                         if (selectedLocalMusicDirectoryId != null &&
                             directories.none { it.id == selectedLocalMusicDirectoryId }
                         ) {
-                            selectedLocalMusicDirectoryId = null
+                            closeLocalMusicCollection()
                         }
                         if (showLoading) {
                             message = if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首"
@@ -645,7 +653,7 @@ class FuoPlayerController(
                         if (selectedLocalMusicDirectoryId != null &&
                             directories.none { it.id == selectedLocalMusicDirectoryId }
                         ) {
-                            selectedLocalMusicDirectoryId = null
+                            closeLocalMusicCollection()
                         }
                         message = if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首"
                     }
@@ -850,8 +858,9 @@ class FuoPlayerController(
                 toggleVideoFullscreen()
                 true
             }
-            selectedLocalMusicDirectoryId != null && navigator.currentRoute == AppRoute.Home -> {
-                closeLocalMusicDirectory()
+            (selectedLocalMusicCollection != null || selectedLocalMusicDirectoryId != null) &&
+                navigator.currentRoute == AppRoute.Home -> {
+                closeLocalMusicCollection()
                 true
             }
             else -> when (navigator.currentRoute) {
@@ -1470,28 +1479,48 @@ class FuoPlayerController(
 
     fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
         localMusicViewMode = value
-        closeLocalMusicDirectory()
+        closeLocalMusicCollection()
         persistSettings()
     }
 
     fun openLocalMusicDirectory(directoryId: String) {
-        if (directoryId in excludedLocalMusicDirectoryIds) return
+        if (isLocalMusicDirectoryExcluded(directoryId, excludedLocalMusicDirectoryIds)) return
         if (localMusicDirectories.none { it.id == directoryId }) return
+        selectedLocalMusicCollection = LocalMusicCollectionSelection(LocalMusicViewMode.All, directoryId)
         selectedLocalMusicDirectoryId = directoryId
     }
 
-    fun closeLocalMusicDirectory() {
+    fun openLocalMusicCollection(mode: LocalMusicViewMode, key: String) {
+        if (key.isBlank()) return
+        if (mode == LocalMusicViewMode.All) {
+            openLocalMusicDirectory(key)
+            return
+        }
         selectedLocalMusicDirectoryId = null
+        selectedLocalMusicCollection = LocalMusicCollectionSelection(mode, key)
+    }
+
+    fun closeLocalMusicCollection() {
+        selectedLocalMusicDirectoryId = null
+        selectedLocalMusicCollection = null
+    }
+
+    fun closeLocalMusicDirectory() {
+        closeLocalMusicCollection()
     }
 
     fun onLocalMusicDirectoryEnabledChange(directoryId: String, enabled: Boolean) {
+        val canonicalDirectoryId = canonicalLocalMusicDirectoryId(directoryId) ?: directoryId
+        val normalizedExcludedIds = excludedLocalMusicDirectoryIds.mapNotNull {
+            canonicalLocalMusicDirectoryId(it)
+        }.toSet()
         excludedLocalMusicDirectoryIds = if (enabled) {
-            excludedLocalMusicDirectoryIds - directoryId
+            normalizedExcludedIds - canonicalDirectoryId
         } else {
-            excludedLocalMusicDirectoryIds + directoryId
+            normalizedExcludedIds + canonicalDirectoryId
         }
         if (!enabled && selectedLocalMusicDirectoryId == directoryId) {
-            closeLocalMusicDirectory()
+            closeLocalMusicCollection()
         }
         persistSettings()
         reloadLocalMusic()
@@ -4196,6 +4225,8 @@ class FuoPlayerController(
         playlistFilter = settings.playlistFilter
         localMusicViewMode = settings.localMusicViewMode
         excludedLocalMusicDirectoryIds = settings.excludedLocalMusicDirectoryIds
+            .mapNotNull(::canonicalLocalMusicDirectoryId)
+            .toSet()
         localMusicMinDurationSeconds = settings.localMusicMinDurationSeconds
         searchScope = settings.searchScope
         selectedSearchProviderId = settings.selectedSearchProviderId
@@ -4234,7 +4265,9 @@ class FuoPlayerController(
             mineSection = mineSection,
             playlistFilter = playlistFilter,
             localMusicViewMode = localMusicViewMode,
-            excludedLocalMusicDirectoryIds = excludedLocalMusicDirectoryIds,
+            excludedLocalMusicDirectoryIds = excludedLocalMusicDirectoryIds
+                .mapNotNull(::canonicalLocalMusicDirectoryId)
+                .toSet(),
             localMusicMinDurationSeconds = localMusicMinDurationSeconds,
             searchScope = searchScope,
             selectedSearchProviderId = selectedSearchProviderId,
@@ -4325,7 +4358,7 @@ class FuoPlayerController(
                 if (selectedLocalMusicDirectoryId != null &&
                     it.none { directory -> directory.id == selectedLocalMusicDirectoryId }
                 ) {
-                    selectedLocalMusicDirectoryId = null
+                    closeLocalMusicCollection()
                 }
             }.onFailure {
                 setError(it)

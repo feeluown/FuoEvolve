@@ -768,10 +768,7 @@ private fun File.runCatchingReadText(): String? {
 }
 
 private fun Set<String>.normalizedDirectoryIds(): Set<String> {
-    return flatMap { id ->
-        val trimmed = id.trim('/')
-        if (trimmed.isBlank()) listOf(id) else listOf(id, trimmed)
-    }.toSet()
+    return flatMap(::localMusicDirectoryIdAliases).toSet()
 }
 
 private fun sanitizeFileName(value: String): String {

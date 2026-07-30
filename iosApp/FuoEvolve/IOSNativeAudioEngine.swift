@@ -413,7 +413,13 @@ final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
         let directory = cacheDirectory.appendingPathComponent("local-music-artwork", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let target = directory.appendingPathComponent("\(item.persistentID).jpg")
-        if !FileManager.default.fileExists(atPath: target.path) {
+        let shouldWrite: Bool
+        if let cachedData = try? Data(contentsOf: target) {
+            shouldWrite = cachedData != data
+        } else {
+            shouldWrite = true
+        }
+        if shouldWrite {
             try? data.write(to: target, options: .atomic)
         }
         return FileManager.default.fileExists(atPath: target.path) ? target : nil

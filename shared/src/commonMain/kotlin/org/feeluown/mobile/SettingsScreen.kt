@@ -1108,14 +1108,20 @@ fun LocalMusicScanSettingsPanel(controller: FuoPlayerController) {
                             .clickable(role = Role.Button) {
                                 controller.onLocalMusicDirectoryEnabledChange(
                                     directory.id,
-                                    directory.id in controller.excludedLocalMusicDirectoryIds,
+                                    isLocalMusicDirectoryExcluded(
+                                        directory.id,
+                                        controller.excludedLocalMusicDirectoryIds,
+                                    ),
                                 )
                             },
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(
-                            checked = directory.id !in controller.excludedLocalMusicDirectoryIds,
+                            checked = !isLocalMusicDirectoryExcluded(
+                                directory.id,
+                                controller.excludedLocalMusicDirectoryIds,
+                            ),
                             onCheckedChange = {
                                 controller.onLocalMusicDirectoryEnabledChange(directory.id, it)
                             },

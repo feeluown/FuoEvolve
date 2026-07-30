@@ -1,15 +1,16 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,7 +21,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,10 +41,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+internal data class LocalMusicCollection(
+    val key: String,
+    val title: String,
+    val coverUrl: String?,
+    val tracks: List<MusicTrack>,
+) {
+    val trackCount: Int get() = tracks.size
+}
 
 @Composable
 fun LocalMusicSection(
@@ -56,11 +64,11 @@ fun LocalMusicSection(
     showModeFilter: Boolean,
     modifier: Modifier,
 ) {
-    var previousImagePermission by remember { mutableStateOf(hasImagePermission) }
+    var previousImagePermission by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(hasAudioPermission, hasImagePermission) {
         controller.onLocalMusicPermissionChange(hasAudioPermission)
         if (hasAudioPermission) {
-            if (!hasImagePermission || !previousImagePermission && hasImagePermission) {
+            if (previousImagePermission == false && hasImagePermission) {
                 controller.refreshLocalMusic()
             } else {
                 controller.ensureLocalMusic()
@@ -68,33 +76,31 @@ fun LocalMusicSection(
         }
         previousImagePermission = hasImagePermission
     }
-    val selectedDirectory = controller.localMusicDirectories.firstOrNull {
-        it.id == controller.selectedLocalMusicDirectoryId
-    }
-    val displayTracks = remember(
+    val viewMode = controller.localMusicViewMode
+    val collections = remember(
         controller.localTracks,
-        controller.localMusicViewMode,
-        controller.selectedLocalMusicDirectoryId,
+        controller.localMusicDirectories,
+        controller.excludedLocalMusicDirectoryIds,
+        viewMode,
     ) {
-        val tracksInDirectory = controller.selectedLocalMusicDirectoryId?.let { directoryId ->
-            controller.localTracks.filter { it.localDirectoryId == directoryId }
-        } ?: controller.localTracks
-        when (controller.localMusicViewMode) {
-            LocalMusicViewMode.All -> tracksInDirectory.sortedWith(
-                compareBy<MusicTrack> { localTitleSectionOrder(localTitleSection(it.title)) }
-                    .thenBy { it.title.lowercase() }
-                    .thenBy { it.artists.lowercase() },
+        buildLocalMusicCollections(
+            mode = viewMode,
+            tracks = controller.localTracks,
+            directories = controller.localMusicDirectories,
+            excludedDirectoryIds = controller.excludedLocalMusicDirectoryIds,
+        )
+    }
+    val selection = controller.selectedLocalMusicCollection
+    val selectedCollection = selection
+        ?.takeIf { it.mode == viewMode }
+        ?.let { current -> collections.firstOrNull { it.key == current.key } }
+    LaunchedEffect(selection, viewMode, collections, controller.isLoading) {
+        if (selection != null && (
+                selection.mode != viewMode ||
+                    !controller.isLoading && collections.none { it.key == selection.key }
             )
-            LocalMusicViewMode.Artist -> tracksInDirectory.sortedWith(
-                compareBy<MusicTrack> { normalizedGroupName(it.artists, "未知歌手").lowercase() }
-                    .thenBy { it.album.lowercase() }
-                    .thenBy { it.title.lowercase() },
-            )
-            LocalMusicViewMode.Album -> tracksInDirectory.sortedWith(
-                compareBy<MusicTrack> { normalizedGroupName(it.album, "未知专辑").lowercase() }
-                    .thenBy { it.artists.lowercase() }
-                    .thenBy { it.title.lowercase() },
-            )
+        ) {
+            controller.closeLocalMusicCollection()
         }
     }
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
@@ -114,16 +120,16 @@ fun LocalMusicSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (selectedDirectory != null) {
+            if (selectedCollection != null) {
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = controller::closeLocalMusicDirectory) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回文件夹")
+                    IconButton(onClick = controller::closeLocalMusicCollection) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                     Text(
-                        text = selectedDirectory.name,
+                        text = selectedCollection.title,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -137,130 +143,82 @@ fun LocalMusicSection(
             } else {
                 Spacer(Modifier)
             }
-            if (selectedDirectory != null && displayTracks.isNotEmpty()) {
-                PlayAllButton(onClick = { controller.playAllLocalTracks(displayTracks) })
-            }
         }
-        val isDirectoryOverview = controller.localMusicViewMode == LocalMusicViewMode.All &&
-            selectedDirectory == null
-        if (isDirectoryOverview) {
-            val directories = controller.localMusicDirectories.filter {
-                it.id !in controller.excludedLocalMusicDirectoryIds
-            }
-            if (isWideLayout) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    if (directories.isEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            EmptyLocalMusicHint()
-                        }
-                    } else {
-                        items(directories, key = { it.id }) { directory ->
-                            LocalMusicDirectoryCard(
-                                directory = directory,
-                                onClick = { controller.openLocalMusicDirectory(directory.id) },
-                            )
-                        }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (directories.isEmpty()) {
-                        item { EmptyLocalMusicHint() }
-                    } else {
-                        itemsIndexed(directories, key = { _, item -> item.id }) { _, directory ->
-                            LocalMusicDirectoryCard(
-                                directory = directory,
-                                onClick = { controller.openLocalMusicDirectory(directory.id) },
-                            )
-                        }
-                    }
-                }
-            }
-            return@Column
-        }
-        val groups = remember(displayTracks, controller.localMusicViewMode) {
-            when (controller.localMusicViewMode) {
-                LocalMusicViewMode.All -> displayTracks.groupBy { localTitleSection(it.title) }
-                LocalMusicViewMode.Artist -> displayTracks.groupBy { normalizedGroupName(it.artists, "未知歌手") }
-                LocalMusicViewMode.Album -> displayTracks.groupBy { normalizedGroupName(it.album, "未知专辑") }
-            }
-        }
-        if (isWideLayout) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+        if (selectedCollection == null) {
+            LocalMusicCollectionOverview(
+                mode = viewMode,
+                collections = collections,
+                onClick = { controller.openLocalMusicCollection(viewMode, it.key) },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (displayTracks.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        EmptyLocalMusicHint()
-                    }
-                } else {
-                    groups.forEach { (section, tracks) ->
-                        item(key = "section:$section", span = { GridItemSpan(maxLineSpan) }) {
-                            LocalMusicSectionHeader(title = section, count = tracks.size)
-                        }
-                        items(tracks, key = { it.id }) { track ->
-                            TrackRow(
-                                track = track,
-                                downloadState = controller.downloadStates[track.id],
-                                onClick = { controller.playLocalTrack(track, displayTracks) },
-                                onAddToUpNext = { controller.addToUpNext(track) },
-                                onDownload = { controller.download(track) },
-                                onDeleteDownload = { controller.deleteDownload(track) },
-                                onOpenArtist = { controller.openTrackArtist(track) },
-                                onOpenAlbum = { controller.openTrackAlbum(track) },
-                                onEditLocalMetadata = { controller.openLocalMetadataEditor(track) },
-                            )
-                        }
-                    }
-                }
-            }
+            )
             return@Column
         }
-        LazyColumn(
+        LocalMusicCollectionDetail(
+            controller = controller,
+            collection = selectedCollection,
+            mode = viewMode,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-        ) {
-            if (displayTracks.isEmpty()) {
-                item {
-                    EmptyLocalMusicHint()
-                }
-            } else {
-                groups.forEach { (section, tracks) ->
-                    item(key = "section:$section") {
-                        LocalMusicSectionHeader(title = section, count = tracks.size)
-                    }
-                    itemsIndexed(tracks, key = { _, item -> item.id }) { _, track ->
-                        TrackRow(
-                            track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playLocalTrack(track, displayTracks) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                            onEditLocalMetadata = { controller.openLocalMetadataEditor(track) },
-                        )
-                        HorizontalDivider()
-                    }
+            isWideLayout = isWideLayout,
+        )
+    }
+}
+
+@Composable
+private fun LocalMusicCollectionOverview(
+    mode: LocalMusicViewMode,
+    collections: List<LocalMusicCollection>,
+    onClick: (LocalMusicCollection) -> Unit,
+    modifier: Modifier,
+) {
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(if (LocalAppLayoutInfo.current.useWideLayout) 8.dp else 12.dp),
+    ) {
+        if (collections.isEmpty()) {
+            item { EmptyLocalMusicHint() }
+        } else {
+            item(key = "local-music-collections") {
+                when (mode) {
+                    LocalMusicViewMode.All -> ProviderPlaylistGrid(
+                        playlists = collections.map { collection ->
+                            ProviderPlaylist(
+                                id = collection.key,
+                                title = collection.title,
+                                providerId = "local",
+                                providerName = "本地 · ${collection.trackCount} 首",
+                                coverUrl = collection.coverUrl,
+                                trackCount = collection.trackCount,
+                            )
+                        },
+                        onClick = { playlist ->
+                            collections.firstOrNull { it.key == playlist.id }?.let(onClick)
+                        },
+                    )
+                    LocalMusicViewMode.Artist,
+                    LocalMusicViewMode.Album -> ProviderMediaItemGrid(
+                        items = collections.map { collection ->
+                            ProviderMediaItem(
+                                id = collection.key,
+                                title = collection.title,
+                                providerId = "local",
+                                providerName = "本地",
+                                type = if (mode == LocalMusicViewMode.Artist) {
+                                    ProviderMediaItemType.Artist
+                                } else {
+                                    ProviderMediaItemType.Album
+                                },
+                                coverUrl = collection.coverUrl,
+                                trackCount = collection.trackCount,
+                            )
+                        },
+                        onClick = { item ->
+                            collections.firstOrNull { it.key == item.id }?.let(onClick)
+                        },
+                    )
                 }
             }
         }
@@ -268,42 +226,230 @@ fun LocalMusicSection(
 }
 
 @Composable
-private fun LocalMusicDirectoryCard(
-    directory: LocalMusicDirectory,
-    onClick: () -> Unit,
+private fun LocalMusicCollectionDetail(
+    controller: FuoPlayerController,
+    collection: LocalMusicCollection,
+    mode: LocalMusicViewMode,
+    modifier: Modifier,
+    isWideLayout: Boolean,
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    val displayTrack = collection.toDisplayTrack(mode)
+    val placeholder = mode.localMusicCollectionPlaceholder()
+    val subtitle = mode.localMusicCollectionSubtitle(collection.trackCount)
+    if (isWideLayout) {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            PlatformCoverArt(
-                title = directory.name,
-                imageUrl = directory.coverUrl,
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .size(132.dp),
-                placeholder = CoverPlaceholder.Album,
-            )
-            Text(
-                text = directory.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "${directory.trackCount} 首",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    .weight(0.36f)
+                    .widthIn(min = 240.dp, max = 360.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CoverBox(
+                    track = displayTrack,
+                    modifier = Modifier.size(168.dp),
+                    placeholder = placeholder,
+                )
+                Text(
+                    text = collection.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (collection.tracks.isNotEmpty()) {
+                    PlayAllButton(onClick = { controller.playAllLocalTracks(collection.tracks) })
+                }
+            }
+            LocalMusicTrackList(
+                controller = controller,
+                tracks = collection.tracks,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                isWideLayout = true,
             )
         }
+    } else {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ProviderDetailHeader(
+                track = displayTrack,
+                title = collection.title,
+                subtitle = subtitle,
+                description = "",
+                placeholder = placeholder,
+                action = {
+                    PlayAllButton(
+                        onClick = { controller.playAllLocalTracks(collection.tracks) },
+                        enabled = collection.tracks.isNotEmpty(),
+                    )
+                },
+            )
+            LocalMusicTrackList(
+                controller = controller,
+                tracks = collection.tracks,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                isWideLayout = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicTrackList(
+    controller: FuoPlayerController,
+    tracks: List<MusicTrack>,
+    modifier: Modifier,
+    isWideLayout: Boolean,
+) {
+    if (isWideLayout) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (tracks.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    ProviderContentMessage("暂无歌曲")
+                }
+            } else {
+                items(tracks, key = { it.id }) { track ->
+                    LocalMusicTrackRow(controller, track, tracks)
+                }
+            }
+        }
+    } else {
+        LazyColumn(modifier = modifier) {
+            if (tracks.isEmpty()) {
+                item { ProviderContentMessage("暂无歌曲") }
+            } else {
+                itemsIndexed(tracks, key = { _, item -> item.id }) { _, track ->
+                    LocalMusicTrackRow(controller, track, tracks)
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicTrackRow(
+    controller: FuoPlayerController,
+    track: MusicTrack,
+    queue: List<MusicTrack>,
+) {
+    TrackRow(
+        track = track,
+        downloadState = controller.downloadStates[track.id],
+        onClick = { controller.playLocalTrack(track, queue) },
+        onAddToUpNext = { controller.addToUpNext(track) },
+        onDownload = { controller.download(track) },
+        onDeleteDownload = { controller.deleteDownload(track) },
+        onOpenArtist = { controller.openTrackArtist(track) },
+        onOpenAlbum = { controller.openTrackAlbum(track) },
+        onEditLocalMetadata = { controller.openLocalMetadataEditor(track) },
+    )
+}
+
+internal fun buildLocalMusicCollections(
+    mode: LocalMusicViewMode,
+    tracks: List<MusicTrack>,
+    directories: List<LocalMusicDirectory>,
+    excludedDirectoryIds: Set<String>,
+): List<LocalMusicCollection> {
+    val sortedTracks = when (mode) {
+        LocalMusicViewMode.All -> tracks.sortedWith(
+            compareBy<MusicTrack> { localTitleSectionOrder(localTitleSection(it.title)) }
+                .thenBy { it.title.lowercase() }
+                .thenBy { it.artists.lowercase() },
+        )
+        LocalMusicViewMode.Artist -> tracks.sortedWith(
+            compareBy<MusicTrack> { normalizedGroupName(it.artists, "未知歌手").lowercase() }
+                .thenBy { it.album.lowercase() }
+                .thenBy { it.title.lowercase() },
+        )
+        LocalMusicViewMode.Album -> tracks.sortedWith(
+            compareBy<MusicTrack> { normalizedGroupName(it.album, "未知专辑").lowercase() }
+                .thenBy { it.artists.lowercase() }
+                .thenBy { it.title.lowercase() },
+        )
+    }
+    return when (mode) {
+        LocalMusicViewMode.All -> directories
+            .filter { directory -> !isLocalMusicDirectoryExcluded(directory.id, excludedDirectoryIds) }
+            .map { directory ->
+                LocalMusicCollection(
+                    key = directory.id,
+                    title = directory.name,
+                    coverUrl = directory.coverUrl,
+                    tracks = sortedTracks.filter { it.localDirectoryId == directory.id },
+                )
+            }
+        LocalMusicViewMode.Artist -> sortedTracks
+            .groupBy { normalizedGroupName(it.artists, "未知歌手") }
+            .entries
+            .map { (name, group) ->
+                LocalMusicCollection(
+                    key = name,
+                    title = name,
+                    coverUrl = group.firstNotNullOfOrNull { it.coverUrl },
+                    tracks = group,
+                )
+            }
+        LocalMusicViewMode.Album -> sortedTracks
+            .groupBy { normalizedGroupName(it.album, "未知专辑") }
+            .entries
+            .map { (name, group) ->
+                LocalMusicCollection(
+                    key = name,
+                    title = name,
+                    coverUrl = group.firstNotNullOfOrNull { it.coverUrl },
+                    tracks = group,
+                )
+            }
+    }
+}
+
+private fun LocalMusicCollection.toDisplayTrack(mode: LocalMusicViewMode): MusicTrack {
+    return MusicTrack(
+        id = "local-collection:${mode.name}:$key",
+        title = title,
+        artists = if (mode == LocalMusicViewMode.Artist) title else "本地",
+        album = if (mode == LocalMusicViewMode.Album) title else "",
+        source = "local",
+        sourceType = TrackSourceType.LocalMediaStore,
+        coverUrl = coverUrl,
+    )
+}
+
+private fun LocalMusicViewMode.localMusicCollectionPlaceholder(): CoverPlaceholder {
+    return when (this) {
+        LocalMusicViewMode.All -> CoverPlaceholder.Playlist
+        LocalMusicViewMode.Artist -> CoverPlaceholder.Artist
+        LocalMusicViewMode.Album -> CoverPlaceholder.Album
+    }
+}
+
+private fun LocalMusicViewMode.localMusicCollectionSubtitle(trackCount: Int): String {
+    return when (this) {
+        LocalMusicViewMode.All -> "本地文件夹 · $trackCount 首"
+        LocalMusicViewMode.Artist -> "本地 · 歌手 · $trackCount 首"
+        LocalMusicViewMode.Album -> "本地 · 专辑 · $trackCount 首"
     }
 }
 
@@ -321,7 +467,7 @@ private fun LocalMusicImagePermissionPanel(onRequestImagePermission: () -> Unit)
         ) {
             Text(
                 modifier = Modifier.weight(1f),
-                text = "允许读取图片以显示文件夹封面",
+                text = "允许读取图片以显示封面",
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = onRequestImagePermission) {
@@ -512,31 +658,6 @@ fun LocalMusicViewModeTabs(controller: FuoPlayerController) {
                 label = label,
             )
         }
-    }
-}
-
-@Composable
-fun LocalMusicSectionHeader(title: String, count: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 10.dp, bottom = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "$count 首",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

@@ -2402,7 +2402,7 @@ class FuoPlayerControllerTest {
                 mineSection = MineSection.LocalMusic,
                 playlistFilter = PlaylistFilter.FavoritePlaylists,
                 localMusicViewMode = LocalMusicViewMode.Album,
-                excludedLocalMusicDirectoryIds = setOf("Podcasts/"),
+                excludedLocalMusicDirectoryIds = setOf("Podcasts"),
                 localMusicMinDurationSeconds = 30,
                 providerLoginMode = ProviderLoginMode.Cookie,
                 providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"saved"}"""),
@@ -2660,6 +2660,14 @@ class FuoPlayerControllerTest {
             controller.openLocalMusicDirectory(directoryA.id)
             controller.onLocalMusicViewModeChange(LocalMusicViewMode.Artist)
             assertNull(controller.selectedLocalMusicDirectoryId)
+
+            controller.openLocalMusicCollection(LocalMusicViewMode.Artist, "歌手 A")
+            assertEquals(
+                LocalMusicCollectionSelection(LocalMusicViewMode.Artist, "歌手 A"),
+                controller.selectedLocalMusicCollection,
+            )
+            assertTrue(controller.navigateBack())
+            assertNull(controller.selectedLocalMusicCollection)
         } finally {
             controllerScope.cancel()
         }

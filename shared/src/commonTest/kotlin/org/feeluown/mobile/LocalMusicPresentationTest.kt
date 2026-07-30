@@ -3,8 +3,54 @@ package org.feeluown.mobile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LocalMusicPresentationTest {
+    @Test
+    fun directoryExclusionsAcceptLegacyAndCanonicalIds() {
+        assertEquals("Music/Foo/", canonicalLocalMusicDirectoryId("Music/Foo"))
+        assertTrue(isLocalMusicDirectoryExcluded("Music/Foo/", setOf("Music/Foo")))
+        assertTrue(isLocalMusicDirectoryExcluded("Music/Foo", setOf("Music/Foo/")))
+    }
+
+    @Test
+    fun artistAndAlbumModesCreateSecondLevelCollections() {
+        val tracks = listOf(
+            localTrack(TrackSourceType.LocalMediaStore).copy(
+                id = "local:two",
+                title = "第二首",
+                artists = "歌手 B",
+                album = "专辑 2",
+                coverUrl = "cover-2",
+            ),
+            localTrack(TrackSourceType.LocalMediaStore).copy(
+                id = "local:one",
+                title = "第一首",
+                artists = "歌手 A",
+                album = "专辑 1",
+                coverUrl = "cover-1",
+            ),
+        )
+
+        val artists = buildLocalMusicCollections(
+            mode = LocalMusicViewMode.Artist,
+            tracks = tracks,
+            directories = emptyList(),
+            excludedDirectoryIds = emptySet(),
+        )
+        val albums = buildLocalMusicCollections(
+            mode = LocalMusicViewMode.Album,
+            tracks = tracks,
+            directories = emptyList(),
+            excludedDirectoryIds = emptySet(),
+        )
+
+        assertEquals(listOf("歌手 A", "歌手 B"), artists.map { it.title })
+        assertEquals(listOf("专辑 1", "专辑 2"), albums.map { it.title })
+        assertEquals(listOf("第一首"), artists.first().tracks.map { it.title })
+        assertEquals("cover-1", albums.first().coverUrl)
+    }
+
     @Test
     fun localSourcesUseLocalLabel() {
         assertEquals("本地", sourceLabel(localTrack(TrackSourceType.LocalMediaStore), null))

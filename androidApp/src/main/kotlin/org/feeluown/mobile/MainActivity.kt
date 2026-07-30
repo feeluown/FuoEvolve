@@ -149,6 +149,7 @@ class MainActivity : ComponentActivity() {
                 enabled = controller.isFullPlayerOpen ||
                     controller.isVideoFullscreen ||
                     controller.settingsLoginProviderId != null ||
+                    controller.selectedLocalMusicCollection != null ||
                     controller.selectedLocalMusicDirectoryId != null,
             ) {
                 controller.navigateBack()

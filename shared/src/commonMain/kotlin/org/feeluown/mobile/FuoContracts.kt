@@ -145,6 +145,21 @@ data class LocalMusicDirectory(
     val coverUrl: String? = null,
 )
 
+fun canonicalLocalMusicDirectoryId(id: String): String? {
+    return id.trim('/').takeIf { it.isNotBlank() }?.let { "$it/" }
+}
+
+fun localMusicDirectoryIdAliases(id: String): Set<String> {
+    val canonical = canonicalLocalMusicDirectoryId(id) ?: return setOf(id)
+    return setOf(id, canonical, canonical.removeSuffix("/"))
+}
+
+fun isLocalMusicDirectoryExcluded(directoryId: String, excludedDirectoryIds: Set<String>): Boolean {
+    return excludedDirectoryIds.any { excludedId ->
+        directoryId in localMusicDirectoryIdAliases(excludedId)
+    }
+}
+
 data class LocalTrackMetadata(
     val title: String,
     val artists: String,
