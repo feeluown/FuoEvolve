@@ -31,4 +31,15 @@ class AppNavigatorTest {
 
         assertEquals(listOf(AppRoute.Home), navigator.backStack.value)
     }
+
+    @Test
+    fun localMusicCollectionUsesAnIndependentRoute() {
+        val navigator = AppNavigator()
+
+        navigator.navigate(AppRoute.LocalMusicCollection)
+
+        assertEquals(listOf(AppRoute.Home, AppRoute.LocalMusicCollection), navigator.backStack.value)
+        assertTrue(navigator.pop(AppRoute.LocalMusicCollection))
+        assertEquals(listOf(AppRoute.Home), navigator.backStack.value)
+    }
 }

@@ -900,6 +900,10 @@ class FuoPlayerController(
                     closeLocalPlaylist()
                     true
                 }
+                AppRoute.LocalMusicCollection -> {
+                    closeLocalMusicCollection()
+                    true
+                }
                 AppRoute.Feature -> {
                     closeFeature()
                     true
@@ -1486,6 +1490,7 @@ class FuoPlayerController(
     fun openLocalMusicDirectory(directoryId: String) {
         if (isLocalMusicDirectoryExcluded(directoryId, excludedLocalMusicDirectoryIds)) return
         if (localMusicDirectories.none { it.id == directoryId }) return
+        navigator.navigate(AppRoute.LocalMusicCollection)
         selectedLocalMusicCollection = LocalMusicCollectionSelection(LocalMusicViewMode.All, directoryId)
         selectedLocalMusicDirectoryId = directoryId
     }
@@ -1496,11 +1501,13 @@ class FuoPlayerController(
             openLocalMusicDirectory(key)
             return
         }
+        navigator.navigate(AppRoute.LocalMusicCollection)
         selectedLocalMusicDirectoryId = null
         selectedLocalMusicCollection = LocalMusicCollectionSelection(mode, key)
     }
 
     fun closeLocalMusicCollection() {
+        navigator.pop(AppRoute.LocalMusicCollection)
         selectedLocalMusicDirectoryId = null
         selectedLocalMusicCollection = null
     }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,12 +24,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -90,19 +93,6 @@ fun LocalMusicSection(
             excludedDirectoryIds = controller.excludedLocalMusicDirectoryIds,
         )
     }
-    val selection = controller.selectedLocalMusicCollection
-    val selectedCollection = selection
-        ?.takeIf { it.mode == viewMode }
-        ?.let { current -> collections.firstOrNull { it.key == current.key } }
-    LaunchedEffect(selection, viewMode, collections, controller.isLoading) {
-        if (selection != null && (
-                selection.mode != viewMode ||
-                    !controller.isLoading && collections.none { it.key == selection.key }
-            )
-        ) {
-            controller.closeLocalMusicCollection()
-        }
-    }
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier,
@@ -120,50 +110,88 @@ fun LocalMusicSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (selectedCollection != null) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = controller::closeLocalMusicCollection) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                    Text(
-                        text = selectedCollection.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (showModeFilter) {
-                    LocalMusicViewModeTabs(controller)
-                }
-            } else if (showModeFilter) {
+            if (showModeFilter) {
                 LocalMusicViewModeTabs(controller)
             } else {
                 Spacer(Modifier)
             }
         }
-        if (selectedCollection == null) {
-            LocalMusicCollectionOverview(
-                mode = viewMode,
-                collections = collections,
-                onClick = { controller.openLocalMusicCollection(viewMode, it.key) },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            )
-            return@Column
-        }
-        LocalMusicCollectionDetail(
-            controller = controller,
-            collection = selectedCollection,
+        LocalMusicCollectionOverview(
             mode = viewMode,
+            collections = collections,
+            onClick = { controller.openLocalMusicCollection(viewMode, it.key) },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            isWideLayout = isWideLayout,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LocalMusicCollectionScreen(controller: FuoPlayerController) {
+    val selection = controller.selectedLocalMusicCollection ?: return
+    val collections = remember(
+        controller.localTracks,
+        controller.localMusicDirectories,
+        controller.excludedLocalMusicDirectoryIds,
+        selection.mode,
+    ) {
+        buildLocalMusicCollections(
+            mode = selection.mode,
+            tracks = controller.localTracks,
+            directories = controller.localMusicDirectories,
+            excludedDirectoryIds = controller.excludedLocalMusicDirectoryIds,
+        )
+    }
+    val selectedCollection = collections.firstOrNull { it.key == selection.key }
+    LaunchedEffect(selection, selectedCollection, controller.isLoading) {
+        if (!controller.isLoading && selectedCollection == null) {
+            controller.closeLocalMusicCollection()
+        }
+    }
+    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = selectedCollection?.title ?: selection.key,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = controller::closeLocalMusicCollection) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                        )
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            if (controller.playbackState.currentTrack != null) {
+                MiniPlayer(controller)
+            }
+        },
+    ) { paddingValues ->
+        selectedCollection?.let { collection ->
+            LocalMusicCollectionDetail(
+                controller = controller,
+                collection = collection,
+                mode = selection.mode,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(
+                        horizontal = if (isWideLayout) 20.dp else 16.dp,
+                        vertical = if (isWideLayout) 12.dp else 0.dp,
+                    ),
+                isWideLayout = isWideLayout,
+            )
+        }
     }
 }
 

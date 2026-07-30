@@ -363,6 +363,7 @@ fun AppRoot(
                                                 controller,
                                                 currentLocalPlaylist ?: lastLocalPlaylist,
                                             )
+                                            AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen(controller)
                                             AppRoute.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                                         }
                                     }
