@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -154,7 +153,7 @@ fun LocalPlaylistScreen(
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
                             onOpenDetail = trackDetailAction(controller, track),
-                            onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
+                            onAddToPlaylist = addToPlaylistAction(controller, track),
                             onRemoveFromProviderPlaylist = removeFromSelectedLocalPlaylistAction(controller, track),
                         )
                         HorizontalDivider()
@@ -182,64 +181,4 @@ fun LocalPlaylistScreen(
             },
         )
     }
-}
-
-@Composable
-fun LocalPlaylistTargetDialog(
-    controller: FuoPlayerController,
-    track: MusicTrack,
-) {
-    AlertDialog(
-        onDismissRequest = controller::closeLocalPlaylistTargetPicker,
-        title = { Text("添加到本地歌单") },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = track.title.ifBlank { "未知歌曲" },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                controller.localPlaylistOperationError?.let { ProviderContentMessage(it) }
-                if (controller.localPlaylists.isEmpty()) {
-                    ProviderContentMessage("请先在“我的 → 歌单 → 本地”中新建歌单")
-                } else {
-                    controller.localPlaylists.forEach { playlist ->
-                        androidx.compose.foundation.layout.Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { controller.addTrackToLocalPlaylist(playlist) }
-                                .padding(8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                        ) {
-                            CoverBox(
-                                track = playlist.toDisplayTrack(),
-                                modifier = Modifier.size(40.dp),
-                                placeholder = CoverPlaceholder.Playlist,
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = playlist.title.ifBlank { "未命名歌单" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                )
-                                Text(
-                                    text = "${playlist.tracks.size} 首",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        HorizontalDivider()
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = controller::closeLocalPlaylistTargetPicker) { Text("取消") }
-        },
-    )
 }

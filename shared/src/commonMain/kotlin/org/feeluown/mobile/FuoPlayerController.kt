@@ -77,6 +77,11 @@ data class TrackArtistTarget(
     val mediaItem: ProviderMediaItem? = null,
 )
 
+enum class PlaylistTargetType {
+    Provider,
+    Local,
+}
+
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
 private const val PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS = 3_000L
@@ -198,13 +203,15 @@ class FuoPlayerController(
         private set
     var playlistTargetTrack by mutableStateOf<MusicTrack?>(null)
         private set
+    var playlistTargetType by mutableStateOf(PlaylistTargetType.Provider)
+        private set
+    var playlistTargetPickerShowSwitcher by mutableStateOf(true)
+        private set
     var playlistOperationTargets by mutableStateOf<List<ProviderPlaylist>>(emptyList())
         private set
     var playlistOperationError by mutableStateOf<String?>(null)
         private set
     var playlistOperationFeedback by mutableStateOf<String?>(null)
-        private set
-    var localPlaylistTargetTrack by mutableStateOf<MusicTrack?>(null)
         private set
     var localPlaylistOperationError by mutableStateOf<String?>(null)
         private set
@@ -2048,15 +2055,41 @@ class FuoPlayerController(
         return track.isProviderBacked() && track.toLocalPlaylistTrack() != null
     }
 
+    fun canAddTrackToPlaylist(track: MusicTrack): Boolean {
+        return canAddTrackToProviderPlaylist(track) || canAddTrackToLocalPlaylist(track)
+    }
+
+    fun playlistProviderName(track: MusicTrack): String {
+        val providerId = trackProviderId(track)
+        return playlistOperationTargets.firstOrNull()?.providerName
+            ?.takeIf { it.isNotBlank() }
+            ?: providerId?.let(::providerName)?.takeIf { it.isNotBlank() && it != providerId }
+            ?: track.providerName?.takeIf { it.isNotBlank() }
+            ?: providerId.orEmpty().ifBlank { "Provider" }
+    }
+
+    fun selectPlaylistTargetType(type: PlaylistTargetType) {
+        val track = playlistTargetTrack ?: return
+        if (type == PlaylistTargetType.Provider && !canAddTrackToProviderPlaylist(track)) return
+        if (type == PlaylistTargetType.Local && !canAddTrackToLocalPlaylist(track)) return
+        playlistTargetType = type
+        if (type == PlaylistTargetType.Local) {
+            localPlaylistOperationError = if (localPlaylists.isEmpty()) "请先新建本地歌单" else null
+        }
+    }
+
     fun openLocalPlaylistTargetPicker(track: MusicTrack) {
         if (!canAddTrackToLocalPlaylist(track)) return
-        localPlaylistTargetTrack = track
+        playlistTargetTrack = track
+        playlistTargetType = PlaylistTargetType.Local
+        playlistTargetPickerShowSwitcher = false
+        playlistOperationTargets = emptyList()
+        playlistOperationError = null
         localPlaylistOperationError = if (localPlaylists.isEmpty()) "请先新建本地歌单" else null
     }
 
     fun closeLocalPlaylistTargetPicker() {
-        localPlaylistTargetTrack = null
-        localPlaylistOperationError = null
+        closePlaylistTargetPicker()
     }
 
     fun createLocalPlaylist(title: String) {
@@ -2069,6 +2102,7 @@ class FuoPlayerController(
                 .onSuccess { result ->
                     if (result.success) {
                         result.playlist?.let { localPlaylists = localPlaylists + it }
+                        localPlaylistOperationError = null
                         message = result.message
                     } else {
                         message = result.message.ifBlank { "新建本地歌单失败" }
@@ -2080,7 +2114,7 @@ class FuoPlayerController(
     }
 
     fun addTrackToLocalPlaylist(playlist: LocalPlaylist) {
-        val track = localPlaylistTargetTrack ?: return
+        val track = playlistTargetTrack ?: return
         val localTrack = track.toLocalPlaylistTrack() ?: return
         scope.launch {
             isLoading = true
@@ -2288,10 +2322,18 @@ class FuoPlayerController(
     }
 
     fun openPlaylistTargetPicker(track: MusicTrack) {
-        if (!canAddTrackToProviderPlaylist(track)) return
+        if (!canAddTrackToPlaylist(track)) return
         playlistTargetTrack = track
+        playlistTargetType = if (canAddTrackToProviderPlaylist(track)) {
+            PlaylistTargetType.Provider
+        } else {
+            PlaylistTargetType.Local
+        }
+        playlistTargetPickerShowSwitcher = true
         playlistOperationTargets = emptyList()
         playlistOperationError = null
+        localPlaylistOperationError = if (localPlaylists.isEmpty()) "请先新建本地歌单" else null
+        if (!canAddTrackToProviderPlaylist(track)) return
         scope.launch {
             isLoading = true
             message = "正在加载可添加歌单"
@@ -2311,8 +2353,11 @@ class FuoPlayerController(
 
     fun closePlaylistTargetPicker() {
         playlistTargetTrack = null
+        playlistTargetType = PlaylistTargetType.Provider
+        playlistTargetPickerShowSwitcher = true
         playlistOperationTargets = emptyList()
         playlistOperationError = null
+        localPlaylistOperationError = null
     }
 
     fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) {

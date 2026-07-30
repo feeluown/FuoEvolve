@@ -1428,6 +1428,61 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun unifiedPlaylistTargetPickerSwitchesBetweenProviderAndLocalPlaylists() = runTest {
+        val track = providerTrack("netease:1", "First")
+        val target = ProviderPlaylist(
+            id = "playlist:netease:mine",
+            title = "我的歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(track),
+            playlistTargets = listOf(target),
+            capabilities = listOf(
+                ProviderCapabilities(
+                    providerId = "netease",
+                    providerName = "网易云音乐",
+                    canAddSongToPlaylist = true,
+                ),
+            ),
+        )
+        val localPlaylists = InMemoryLocalPlaylistRepository()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                localPlaylistRepository = localPlaylists,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.createLocalPlaylist("本地收藏")
+            advanceUntilIdle()
+            controller.openPlaylistTargetPicker(track)
+            advanceUntilIdle()
+
+            assertEquals(PlaylistTargetType.Provider, controller.playlistTargetType)
+            assertTrue(controller.playlistTargetPickerShowSwitcher)
+            assertEquals("网易云音乐", controller.playlistProviderName(track))
+            assertEquals(listOf(target), controller.playlistOperationTargets)
+
+            controller.selectPlaylistTargetType(PlaylistTargetType.Local)
+            assertEquals(PlaylistTargetType.Local, controller.playlistTargetType)
+            controller.addTrackToLocalPlaylist(controller.localPlaylists.single())
+            advanceUntilIdle()
+
+            assertNull(controller.playlistTargetTrack)
+            assertEquals("First", controller.localPlaylists.single().tracks.single().title)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun removeTrackFromSelectedPlaylistUpdatesVisibleTracks() = runTest {
         val tracks = listOf(
             providerTrack("netease:1", "First"),

@@ -182,8 +182,7 @@ fun MineSongSections(controller: FuoPlayerController, modifier: Modifier) {
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
                             onOpenDetail = trackDetailAction(controller, track),
-                            onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                            onAddToPlaylist = addToPlaylistAction(controller, track),
                             onSetDisliked = when (section.feature.id) {
                                 "qqmusic_disliked_songs" -> { { controller.setSongDisliked(track, false) } }
                                 else -> controller.canSetSongDisliked(track, true).takeIf { it }?.let {

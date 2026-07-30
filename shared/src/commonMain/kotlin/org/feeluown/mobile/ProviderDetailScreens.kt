@@ -438,8 +438,7 @@ private fun TrackRelatedContent(controller: FuoPlayerController) {
                 onOpenArtist = { controller.openTrackArtist(track) },
                 onOpenAlbum = { controller.openTrackAlbum(track) },
                 onOpenDetail = trackDetailAction(controller, track),
-                onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                onAddToPlaylist = addToPlaylistAction(controller, track),
             )
             HorizontalDivider()
         }
@@ -762,8 +761,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
                             onOpenArtist = { controller.openTrackArtist(track) },
                             onOpenAlbum = { controller.openTrackAlbum(track) },
                             onOpenDetail = trackDetailAction(controller, track),
-                            onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                            onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                            onAddToPlaylist = addToPlaylistAction(controller, track),
                             onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                         )
                         HorizontalDivider()
@@ -1040,8 +1038,7 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
                                 onOpenArtist = { controller.openTrackArtist(track) },
                                 onOpenAlbum = { controller.openTrackAlbum(track) },
                                 onOpenDetail = trackDetailAction(controller, track),
-                                onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                                onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                                onAddToPlaylist = addToPlaylistAction(controller, track),
                             )
                             HorizontalDivider()
                         }
@@ -1127,8 +1124,7 @@ fun TrackCollectionList(
                         onOpenArtist = { controller.openTrackArtist(track) },
                         onOpenAlbum = { controller.openTrackAlbum(track) },
                         onOpenDetail = trackDetailAction(controller, track),
-                        onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                        onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                        onAddToPlaylist = addToPlaylistAction(controller, track),
                         onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                     )
                 }
@@ -1158,8 +1154,7 @@ fun TrackCollectionList(
                     onOpenArtist = { controller.openTrackArtist(track) },
                     onOpenAlbum = { controller.openTrackAlbum(track) },
                     onOpenDetail = trackDetailAction(controller, track),
-                    onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                    onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                    onAddToPlaylist = addToPlaylistAction(controller, track),
                     onRemoveFromProviderPlaylist = removeFromSelectedPlaylistAction(controller, track),
                 )
                 HorizontalDivider()

@@ -378,10 +378,7 @@ fun AppRoot(
                                 LocalMetadataDialog(controller = controller, track = track)
                             }
                             controller.playlistTargetTrack?.let { track ->
-                                ProviderPlaylistTargetDialog(controller = controller, track = track)
-                            }
-                            controller.localPlaylistTargetTrack?.let { track ->
-                                LocalPlaylistTargetDialog(controller = controller, track = track)
+                                PlaylistTargetDialog(controller = controller, track = track)
                             }
                             controller.artistTargetTrack?.let { track ->
                                 TrackArtistTargetDialog(controller = controller, track = track)
@@ -450,7 +447,9 @@ fun TrackArtistTargetDialog(controller: FuoPlayerController, track: MusicTrack) 
 }
 
 @Composable
-fun ProviderPlaylistTargetDialog(controller: FuoPlayerController, track: MusicTrack) {
+fun PlaylistTargetDialog(controller: FuoPlayerController, track: MusicTrack) {
+    val canAddProvider = controller.canAddTrackToProviderPlaylist(track)
+    val canAddLocal = controller.canAddTrackToLocalPlaylist(track)
     AlertDialog(
         onDismissRequest = controller::closePlaylistTargetPicker,
         title = {
@@ -474,49 +473,118 @@ fun ProviderPlaylistTargetDialog(controller: FuoPlayerController, track: MusicTr
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (controller.isLoading && controller.playlistOperationTargets.isEmpty()) {
-                    Text(
-                        text = controller.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (controller.playlistTargetPickerShowSwitcher && canAddProvider && canAddLocal) {
+                    val targetTypes = listOf(
+                        PlaylistTargetType.Provider to controller.playlistProviderName(track),
+                        PlaylistTargetType.Local to "本地歌单",
                     )
-                }
-                controller.playlistOperationError?.let {
-                    ProviderContentMessage(it)
-                }
-                controller.playlistOperationTargets.forEach { playlist ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(MaterialTheme.shapes.medium)
-                            .fuoInteractive()
-                            .clickable(role = Role.Button) { controller.addTrackToProviderPlaylist(playlist) }
-                            .padding(8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CoverBox(
-                            track = playlist.toDisplayTrack(),
-                            modifier = Modifier.size(48.dp),
-                            placeholder = CoverPlaceholder.Playlist,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = playlist.title.ifBlank { "未命名歌单" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = playlist.providerName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        targetTypes.forEachIndexed { index, (type, label) ->
+                            SegmentedButton(
+                                selected = controller.playlistTargetType == type,
+                                onClick = { controller.selectPlaylistTargetType(type) },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = targetTypes.size,
+                                ),
+                            ) {
+                                Text(
+                                    text = label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
-                    HorizontalDivider()
+                }
+                when (controller.playlistTargetType) {
+                    PlaylistTargetType.Provider -> {
+                        if (controller.isLoading && controller.playlistOperationTargets.isEmpty()) {
+                            Text(
+                                text = controller.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        controller.playlistOperationError?.let { ProviderContentMessage(it) }
+                        controller.playlistOperationTargets.forEach { playlist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .fuoInteractive()
+                                    .clickable(role = Role.Button) {
+                                        controller.addTrackToProviderPlaylist(playlist)
+                                    }
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CoverBox(
+                                    track = playlist.toDisplayTrack(),
+                                    modifier = Modifier.size(48.dp),
+                                    placeholder = CoverPlaceholder.Playlist,
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = playlist.title.ifBlank { "未命名歌单" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = playlist.providerName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                    PlaylistTargetType.Local -> {
+                        if (controller.localPlaylists.isEmpty()) {
+                            ProviderContentMessage("请先在“我的 → 歌单 → 本地”中新建歌单")
+                        } else {
+                            controller.localPlaylistOperationError?.let { ProviderContentMessage(it) }
+                            controller.localPlaylists.forEach { playlist ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(MaterialTheme.shapes.medium)
+                                        .fuoInteractive()
+                                        .clickable(role = Role.Button) {
+                                            controller.addTrackToLocalPlaylist(playlist)
+                                        }
+                                        .padding(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CoverBox(
+                                        track = playlist.toDisplayTrack(),
+                                        modifier = Modifier.size(48.dp),
+                                        placeholder = CoverPlaceholder.Playlist,
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = playlist.title.ifBlank { "未命名歌单" },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = "${playlist.tracks.size} 首",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                    }
                 }
             }
         },

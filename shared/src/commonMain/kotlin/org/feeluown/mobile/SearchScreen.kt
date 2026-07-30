@@ -264,8 +264,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
                         onOpenArtist = { controller.openTrackArtist(track) },
                         onOpenAlbum = { controller.openTrackAlbum(track) },
                         onOpenDetail = trackDetailAction(controller, track),
-                        onAddToLocalPlaylist = addToLocalPlaylistAction(controller, track),
-                        onAddToProviderPlaylist = addToProviderPlaylistAction(controller, track),
+                        onAddToPlaylist = addToPlaylistAction(controller, track),
                     )
                     HorizontalDivider()
                 }
