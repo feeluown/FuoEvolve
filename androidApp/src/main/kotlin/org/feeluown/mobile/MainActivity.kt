@@ -5,6 +5,7 @@ import android.app.Activity.RESULT_OK
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -33,11 +34,21 @@ private data class PendingLocalPlaylistExport(
     val content: String,
 )
 
+private data class PendingLocalPlaylistImport(
+    val fileName: String,
+    val content: String,
+)
+
+private const val LOCAL_PLAYLIST_MIME_TYPE = "application/x-fuo"
+private const val CONTENT_URI_SCHEME = "content"
+private const val FILE_URI_SCHEME = "file"
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val fuoApplication = application as FuoEvolveApplication
+        val launchLocalPlaylistImport = localPlaylistImportFromIntent(intent)
         val launchSharedText = sharedTextFromIntent(intent)
 
         setContent {
@@ -117,7 +128,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val localPlaylistExportLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.CreateDocument("text/plain"),
+                ActivityResultContracts.CreateDocument(LOCAL_PLAYLIST_MIME_TYPE),
             ) { uri ->
                 val pending = pendingLocalPlaylistExport
                 if (uri != null && pending != null) {
@@ -141,6 +152,7 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
+                launchLocalPlaylistImport?.let(::handleLocalPlaylistImport)
                 launchSharedText?.let(controller::openSharedResource)
             }
 
@@ -192,6 +204,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val localPlaylistImport = localPlaylistImportFromIntent(intent)
+        if (localPlaylistImport != null) {
+            handleLocalPlaylistImport(localPlaylistImport)
+            return
+        }
         sharedTextFromIntent(intent)?.let {
             (application as FuoEvolveApplication).controller.openSharedResource(it)
         }
@@ -234,7 +251,7 @@ class MainActivity : ComponentActivity() {
             file.writeText(content, Charsets.UTF_8)
             val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
             val sendIntent = Intent(Intent.ACTION_SEND)
-                .setType("application/octet-stream")
+                .setType(LOCAL_PLAYLIST_MIME_TYPE)
                 .putExtra(Intent.EXTRA_STREAM, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(Intent.createChooser(sendIntent, "分享本地歌单文件"))
@@ -243,7 +260,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun displayNameFor(uri: android.net.Uri): String {
+    private fun displayNameFor(uri: Uri): String {
         val queried = runCatching {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { cursor ->
@@ -257,6 +274,36 @@ class MainActivity : ComponentActivity() {
         return queried?.takeIf { it.isNotBlank() }
             ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
             ?: "playlist.fuo"
+    }
+
+    private fun localPlaylistImportFromIntent(intent: Intent?): PendingLocalPlaylistImport? {
+        if (intent?.action != Intent.ACTION_VIEW) return null
+        val uri = intent.data ?: return null
+        if (uri.scheme != CONTENT_URI_SCHEME && uri.scheme != FILE_URI_SCHEME) return null
+        val fileName = displayNameFor(uri)
+        val mimeType = runCatching { contentResolver.getType(uri) }.getOrNull()
+        val supportedMimeType = mimeType == LOCAL_PLAYLIST_MIME_TYPE ||
+            mimeType == "application/octet-stream" ||
+            mimeType == "text/plain"
+        if (!fileName.endsWith(".fuo", ignoreCase = true) && !supportedMimeType) {
+            return null
+        }
+        val content = runCatching {
+            contentResolver.openInputStream(uri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+        }.getOrDefault("")
+        return PendingLocalPlaylistImport(fileName, content)
+    }
+
+    private fun handleLocalPlaylistImport(pending: PendingLocalPlaylistImport) {
+        val controller = (application as FuoEvolveApplication).controller
+        if (pending.content.isBlank()) {
+            controller.showMessage("无法读取本地歌单文件")
+        } else {
+            controller.prepareLocalPlaylistImport(pending.fileName, pending.content)
+        }
     }
 
     private fun configureSystemBars(darkTheme: Boolean) {
@@ -276,7 +323,9 @@ class MainActivity : ComponentActivity() {
 
     private fun sharedTextFromIntent(intent: Intent?): String? {
         return when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.dataString
+            Intent.ACTION_VIEW -> intent.data
+                ?.takeUnless { it.scheme == CONTENT_URI_SCHEME || it.scheme == FILE_URI_SCHEME }
+                ?.toString()
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             else -> null
         }?.takeIf { it.isNotBlank() }

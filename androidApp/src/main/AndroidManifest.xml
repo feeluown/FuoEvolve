@@ -37,6 +37,15 @@
 
                 <data android:scheme="fuo" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="application/x-fuo" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
 
