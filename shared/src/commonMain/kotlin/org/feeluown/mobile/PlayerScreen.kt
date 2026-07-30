@@ -1338,7 +1338,7 @@ fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): String {
         when (track.sourceType) {
             TrackSourceType.Provider -> track.providerName ?: track.source.ifBlank { "音源" }
             TrackSourceType.LocalMediaStore -> "本地"
-            TrackSourceType.Downloaded -> track.providerName ?: "FeelUOwn"
+            TrackSourceType.Downloaded -> "本地"
         },
         "智能替换".takeIf { track.isSmartReplacement },
         "不可用".takeIf { track.isUnavailable },

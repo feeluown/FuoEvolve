@@ -36,7 +36,14 @@ class IosLocalMusicRepository(
 
     override suspend fun directories(): List<LocalMusicDirectory> {
         if (cachedTracks.isEmpty()) return emptyList()
-        return listOf(LocalMusicDirectory(LIBRARY_DIRECTORY_ID, "媒体资料库", cachedTracks.size))
+        return listOf(
+            LocalMusicDirectory(
+                id = LIBRARY_DIRECTORY_ID,
+                name = "歌曲",
+                trackCount = cachedTracks.size,
+                coverUrl = cachedTracks.firstNotNullOfOrNull { it.coverUrl },
+            ),
+        )
     }
 
     override suspend fun tracks(): List<MusicTrack> = if (libraryTracks.isEmpty()) refreshDatabase() else cachedTracks
@@ -54,8 +61,10 @@ class IosLocalMusicRepository(
                 album = item["album"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 source = "本地音乐",
                 sourceType = TrackSourceType.LocalMediaStore,
+                coverUrl = item["artwork_url"]?.jsonPrimitive?.contentOrNull,
                 durationMs = item["duration_ms"]?.jsonPrimitive?.longOrNull,
                 localUri = item["local_uri"]?.jsonPrimitive?.contentOrNull,
+                localDirectoryId = LIBRARY_DIRECTORY_ID,
             ))
         }
         cachedTracks = filterTracks(libraryTracks)

@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
@@ -65,7 +66,8 @@ class AndroidLocalMusicRepository(
 
     override suspend fun isDatabaseStale(): Boolean = withContext(Dispatchers.IO) {
         val stored = database.readableDatabase.getMeta(KEY_MEDIA_FINGERPRINT)
-        stored == null || stored != queryMediaFingerprint()
+        val layout = database.readableDatabase.getMeta(KEY_SCAN_LAYOUT_VERSION)
+        stored == null || layout != SCAN_LAYOUT_VERSION || stored != queryMediaFingerprint()
     }
 
     override suspend fun directories(): List<LocalMusicDirectory> = withContext(Dispatchers.IO) {
@@ -73,9 +75,9 @@ class AndroidLocalMusicRepository(
         val result = mutableListOf<LocalMusicDirectory>()
         db.rawQuery(
             """
-            SELECT directory_id, directory_name, COUNT(*)
+            SELECT directory_id, directory_name, directory_cover_url, COUNT(*)
             FROM tracks
-            GROUP BY directory_id, directory_name
+            GROUP BY directory_id, directory_name, directory_cover_url
             ORDER BY directory_name
             """.trimIndent(),
             null,
@@ -84,7 +86,8 @@ class AndroidLocalMusicRepository(
                 result += LocalMusicDirectory(
                     id = cursor.getString(0).orEmpty(),
                     name = cursor.getString(1).orEmpty(),
-                    trackCount = cursor.getInt(2),
+                    trackCount = cursor.getInt(3),
+                    coverUrl = cursor.getString(2)?.takeIf { it.isNotBlank() },
                 )
             }
         }
@@ -97,12 +100,26 @@ class AndroidLocalMusicRepository(
 
     override suspend fun refreshDatabase(): List<MusicTrack> = withContext(Dispatchers.IO) {
         val rows = queryAudioRows()
+        val imageCovers = queryImageCovers()
+        val fallbackCovers = rows
+            .groupBy { it.directory.id }
+            .mapValues { (_, directoryRows) ->
+                directoryRows
+                    .sortedWith(
+                        compareBy<AudioRow> { it.displayName.lowercase(Locale.ROOT) }
+                            .thenBy { it.mediaId },
+                    )
+                    .firstOrNull()
+                    ?.let { localCoverUri(it.uri, it.albumId) }
+            }
         val metadataOverrides = metadataOverrides()
         val folderLyrics = queryLyrics()
         val appLyrics = queryAppLyrics()
         val records = rows.map { row ->
-            val directory = directoryInfo(row.relativePath)
-            val sourceType = if (row.relativePath.contains(FEELUOWN_FOLDER)) {
+            val directory = row.directory.copy(
+                coverUrl = imageCovers[row.directory.id] ?: fallbackCovers[row.directory.id],
+            )
+            val sourceType = if (row.directory.id == FEELUOWN_DIRECTORY_ID) {
                 TrackSourceType.Downloaded
             } else {
                 TrackSourceType.LocalMediaStore
@@ -123,6 +140,7 @@ class AndroidLocalMusicRepository(
                     coverUrl = localCoverUri(row.uri, row.albumId),
                     durationMs = row.durationMs.takeIf { it > 0 },
                     localUri = row.uri.toString(),
+                    localDirectoryId = directory.id,
                     lyrics = row.lyrics(folderLyrics, appLyrics),
                 ),
                 directory = directory,
@@ -224,6 +242,17 @@ class AndroidLocalMusicRepository(
             }
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
+                val relativePath = if (relativePathColumn >= 0) {
+                    cursor.getString(relativePathColumn).orEmpty()
+                } else {
+                    ""
+                }
+                val filePath = if (dataColumn >= 0) {
+                    cursor.getString(dataColumn).orEmpty()
+                } else {
+                    ""
+                }
+                val directory = directoryInfo(relativePath, filePath) ?: continue
                 rows += AudioRow(
                     uri = ContentUris.withAppendedId(collection, id),
                     title = cursor.getString(titleColumn).orEmpty(),
@@ -232,16 +261,9 @@ class AndroidLocalMusicRepository(
                     albumId = cursor.getLong(albumIdColumn),
                     durationMs = cursor.getLong(durationColumn),
                     displayName = cursor.getString(displayNameColumn).orEmpty(),
-                    relativePath = if (relativePathColumn >= 0) {
-                        cursor.getString(relativePathColumn).orEmpty()
-                    } else {
-                        ""
-                    },
-                    filePath = if (dataColumn >= 0) {
-                        cursor.getString(dataColumn).orEmpty()
-                    } else {
-                        ""
-                    },
+                    relativePath = relativePath,
+                    filePath = filePath,
+                    directory = directory,
                     mediaId = id,
                     dateAdded = cursor.getLong(dateAddedColumn),
                     dateModified = cursor.getLong(dateModifiedColumn),
@@ -252,6 +274,68 @@ class AndroidLocalMusicRepository(
     }
 
     private fun queryMediaFingerprint(): String = mediaFingerprint(queryAudioRows())
+
+    private fun queryImageCovers(): Map<String, String> {
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = mutableListOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DISPLAY_NAME,
+        ).apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(MediaStore.Images.Media.RELATIVE_PATH)
+            } else {
+                @Suppress("DEPRECATION")
+                add(MediaStore.Images.Media.DATA)
+            }
+        }.toTypedArray()
+        val rows = mutableListOf<ImageRow>()
+        try {
+            appContext.contentResolver.query(collection, projection, null, null, null)
+        } catch (_: SecurityException) {
+            null
+        }?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+            val relativePathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH)
+            } else {
+                -1
+            }
+            val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                @Suppress("DEPRECATION")
+                cursor.getColumnIndex(MediaStore.Images.Media.DATA)
+            } else {
+                -1
+            }
+            while (cursor.moveToNext()) {
+                val relativePath = if (relativePathColumn >= 0) {
+                    cursor.getString(relativePathColumn).orEmpty()
+                } else {
+                    ""
+                }
+                val filePath = if (dataColumn >= 0) {
+                    cursor.getString(dataColumn).orEmpty()
+                } else {
+                    ""
+                }
+                val directory = directoryInfo(relativePath, filePath) ?: continue
+                val id = cursor.getLong(idColumn)
+                rows += ImageRow(
+                    directoryId = directory.id,
+                    displayName = cursor.getString(displayNameColumn).orEmpty(),
+                    uri = ContentUris.withAppendedId(collection, id),
+                )
+            }
+        }
+        return rows
+            .sortedWith(
+                compareBy<ImageRow> { it.directoryId }
+                    .thenBy { it.displayName.lowercase(Locale.ROOT) }
+                    .thenBy { it.displayName },
+            )
+            .distinctBy { it.directoryId }
+            .associate { it.directoryId to it.uri.toString() }
+    }
 
     private fun queryLyrics(): Map<String, String> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyMap()
@@ -386,23 +470,12 @@ class AndroidLocalMusicRepository(
         return track.title
     }
 
-    private fun directoryInfo(relativePath: String): LocalMusicDirectory {
-        val normalized = relativePath.trim('/').ifBlank { OTHER_DIRECTORY_ID }
-        val name = if (normalized == OTHER_DIRECTORY_ID) "其他媒体库" else normalized
-        return LocalMusicDirectory(
-            id = normalized,
-            name = name,
-            trackCount = 0,
-        )
-    }
-
     private companion object {
-        private const val FEELUOWN_FOLDER = "FeelUOwn"
         private const val LYRICS_FOLDER = "lyrics"
         private const val METADATA_OVERRIDE_FILE = "local_music_metadata.json"
-        private const val OTHER_DIRECTORY_ID = "__other__"
         private const val KEY_INITIALIZED = "initialized"
         private const val KEY_MEDIA_FINGERPRINT = "media_fingerprint"
+        private const val KEY_SCAN_LAYOUT_VERSION = "scan_layout_version"
         private const val KEY_LAST_REFRESH_AT = "last_refresh_at"
     }
 }
@@ -424,6 +497,7 @@ private class LocalMusicDatabase(context: Context) : SQLiteOpenHelper(context, D
                 lyrics TEXT,
                 directory_id TEXT NOT NULL,
                 directory_name TEXT NOT NULL,
+                directory_cover_url TEXT,
                 display_name TEXT NOT NULL,
                 media_id INTEGER NOT NULL,
                 date_added INTEGER NOT NULL,
@@ -444,7 +518,7 @@ private class LocalMusicDatabase(context: Context) : SQLiteOpenHelper(context, D
 
     private companion object {
         private const val DATABASE_NAME = "local_music.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
     }
 }
 
@@ -467,9 +541,16 @@ private data class AudioRow(
     val displayName: String,
     val relativePath: String,
     val filePath: String,
+    val directory: LocalMusicDirectory,
     val mediaId: Long,
     val dateAdded: Long,
     val dateModified: Long,
+)
+
+private data class ImageRow(
+    val directoryId: String,
+    val displayName: String,
+    val uri: Uri,
 )
 
 private fun SQLiteDatabase.replaceTracks(records: List<LocalTrackRecord>, fingerprint: String) {
@@ -481,6 +562,7 @@ private fun SQLiteDatabase.replaceTracks(records: List<LocalTrackRecord>, finger
         }
         putMeta("initialized", "1")
         putMeta("media_fingerprint", fingerprint)
+        putMeta("scan_layout_version", SCAN_LAYOUT_VERSION)
         putMeta("last_refresh_at", System.currentTimeMillis().toString())
         setTransactionSuccessful()
     } finally {
@@ -519,6 +601,7 @@ private fun SQLiteDatabase.readTracks(settings: LocalMusicScanSettings): List<Mu
                 coverUrl = cursor.getString(6)?.takeIf { it.isNotBlank() },
                 durationMs = durationMs,
                 localUri = cursor.getString(8).orEmpty(),
+                localDirectoryId = directoryId,
                 lyrics = cursor.getString(9)?.takeIf { it.isNotBlank() },
             )
         }
@@ -579,10 +662,63 @@ private fun LocalTrackRecord.toContentValues(): ContentValues {
         put("lyrics", track.lyrics)
         put("directory_id", directory.id)
         put("directory_name", directory.name)
+        put("directory_cover_url", directory.coverUrl)
         put("display_name", displayName)
         put("media_id", mediaId)
         put("date_added", dateAdded)
         put("date_modified", dateModified)
+    }
+}
+
+private const val MUSIC_DIRECTORY_NAME = "Music"
+private const val MUSIC_ROOT_DIRECTORY_ID = "Music/"
+private const val FEELUOWN_DIRECTORY_ID = "Music/FeelUOwn/"
+private const val SCAN_LAYOUT_VERSION = "music-first-level-v1"
+
+private fun directoryInfo(relativePath: String, filePath: String): LocalMusicDirectory? {
+    val firstLevelName = if (relativePath.isNotBlank()) {
+        val segments = relativePath
+            .replace('\\', '/')
+            .split('/')
+            .filter { it.isNotBlank() }
+        if (segments.firstOrNull()?.equals(MUSIC_DIRECTORY_NAME, ignoreCase = true) != true) {
+            return null
+        }
+        segments.getOrNull(1)
+    } else {
+        val musicRoot = Environment
+            .getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            .path
+            .replace('\\', '/')
+            .trimEnd('/')
+        val normalizedFilePath = filePath.replace('\\', '/').trimEnd('/')
+        val normalizedDirectoryPath = normalizedFilePath.substringBeforeLast('/', "")
+        if (normalizedDirectoryPath != musicRoot &&
+            !normalizedDirectoryPath.startsWith("$musicRoot/")
+        ) {
+            return null
+        }
+        if (normalizedDirectoryPath == musicRoot) {
+            null
+        } else {
+            normalizedDirectoryPath
+                .removePrefix("$musicRoot/")
+                .substringBefore('/')
+                .takeIf { it.isNotBlank() }
+        }
+    }
+    return if (firstLevelName.isNullOrBlank()) {
+        LocalMusicDirectory(
+            id = MUSIC_ROOT_DIRECTORY_ID,
+            name = "歌曲",
+            trackCount = 0,
+        )
+    } else {
+        LocalMusicDirectory(
+            id = "$MUSIC_DIRECTORY_NAME/$firstLevelName/",
+            name = firstLevelName,
+            trackCount = 0,
+        )
     }
 }
 

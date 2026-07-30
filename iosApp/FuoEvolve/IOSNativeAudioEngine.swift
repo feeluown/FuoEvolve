@@ -379,7 +379,7 @@ final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
     func tracksJson() -> String {
         let tracks: [[String: Any]] = (MPMediaQuery.songs().items ?? []).compactMap { item in
             guard let assetURL = item.assetURL else { return nil }
-            return [
+            var track: [String: Any] = [
                 "id": String(item.persistentID),
                 "title": item.title ?? "",
                 "artists": item.artist ?? "",
@@ -387,6 +387,10 @@ final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
                 "duration_ms": Int64(item.playbackDuration * 1000),
                 "local_uri": assetURL.absoluteString,
             ]
+            if let artworkURL = cachedArtworkURL(for: item) {
+                track["artwork_url"] = artworkURL.absoluteString
+            }
+            return track
         }
         guard
             let data = try? JSONSerialization.data(withJSONObject: ["tracks": tracks]),
@@ -395,6 +399,24 @@ final class IOSMediaLibraryOutput: NSObject, IosMediaLibraryOutput {
             return #"{"tracks":[]}"#
         }
         return json
+    }
+
+    private func cachedArtworkURL(for item: MPMediaItem) -> URL? {
+        guard
+            let artwork = item.artwork,
+            let image = artwork.image(at: CGSize(width: 512, height: 512)),
+            let data = image.jpegData(compressionQuality: 0.9),
+            let cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        else {
+            return nil
+        }
+        let directory = cacheDirectory.appendingPathComponent("local-music-artwork", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let target = directory.appendingPathComponent("\(item.persistentID).jpg")
+        if !FileManager.default.fileExists(atPath: target.path) {
+            try? data.write(to: target, options: .atomic)
+        }
+        return FileManager.default.fileExists(atPath: target.path) ? target : nil
     }
 }
 

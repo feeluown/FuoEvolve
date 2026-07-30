@@ -67,6 +67,8 @@ fun HomeScreen(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    hasImagePermission: Boolean,
+    onRequestImagePermission: () -> Unit,
     onOpenRecognition: () -> Unit,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
@@ -114,6 +116,8 @@ fun HomeScreen(
                 controller = controller,
                 hasAudioPermission = hasAudioPermission,
                 onRequestAudioPermission = onRequestAudioPermission,
+                hasImagePermission = hasImagePermission,
+                onRequestImagePermission = onRequestImagePermission,
                 onOpenRecognition = onOpenRecognition,
                 modifier = Modifier.weight(1f),
                 contentHorizontalPadding = if (layoutInfo.useWideLayout) 8.dp else 16.dp,
@@ -127,6 +131,8 @@ fun HomeSectionPager(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    hasImagePermission: Boolean,
+    onRequestImagePermission: () -> Unit,
     onOpenRecognition: () -> Unit,
     modifier: Modifier,
     contentHorizontalPadding: Dp,
@@ -202,6 +208,8 @@ fun HomeSectionPager(
                         controller = controller,
                         hasAudioPermission = hasAudioPermission,
                         onRequestAudioPermission = onRequestAudioPermission,
+                        hasImagePermission = hasImagePermission,
+                        onRequestImagePermission = onRequestImagePermission,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -248,6 +256,8 @@ fun HomeSectionPager(
                     controller = controller,
                     hasAudioPermission = hasAudioPermission,
                     onRequestAudioPermission = onRequestAudioPermission,
+                    hasImagePermission = hasImagePermission,
+                    onRequestImagePermission = onRequestImagePermission,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

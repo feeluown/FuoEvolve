@@ -142,6 +142,7 @@ data class LocalMusicDirectory(
     val id: String,
     val name: String,
     val trackCount: Int,
+    val coverUrl: String? = null,
 )
 
 data class LocalTrackMetadata(
@@ -160,6 +161,7 @@ data class MusicTrack(
     val coverUrl: String? = null,
     val durationMs: Long? = null,
     val localUri: String? = null,
+    val localDirectoryId: String? = null,
     val lyrics: String? = null,
     val providerId: String? = null,
     val providerName: String? = null,
@@ -403,6 +405,7 @@ object PlaybackQueueCodec {
         track.replacementCoverUrl.orEmpty(),
         track.replacementStrategy.orEmpty(),
         track.replacementScore?.toString().orEmpty(),
+        track.localDirectoryId.orEmpty(),
     ).map(::escape)
 
     private fun decodeTrack(fields: List<String>): MusicTrack? {
@@ -432,6 +435,7 @@ object PlaybackQueueCodec {
                 replacementCoverUrl = fields.unescapedOrNull(23),
                 replacementStrategy = fields.unescapedOrNull(24),
                 replacementScore = fields.unescapedOrNull(25)?.toDoubleOrNull(),
+                localDirectoryId = fields.unescapedOrNull(26),
                 isUnavailable = unescape(fields[15]).toBooleanStrictOrNull() ?: false,
                 artistItemId = unescape(fields[16]).ifBlank { null },
                 albumItemId = unescape(fields[17]).ifBlank { null },

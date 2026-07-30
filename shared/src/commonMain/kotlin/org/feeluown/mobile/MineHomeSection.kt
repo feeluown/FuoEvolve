@@ -37,6 +37,8 @@ fun MineHomeSection(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    hasImagePermission: Boolean,
+    onRequestImagePermission: () -> Unit,
     modifier: Modifier,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
@@ -93,6 +95,8 @@ fun MineHomeSection(
                     controller = controller,
                     hasAudioPermission = hasAudioPermission,
                     onRequestAudioPermission = onRequestAudioPermission,
+                    hasImagePermission = hasImagePermission,
+                    onRequestImagePermission = onRequestImagePermission,
                     showModeFilter = !isWideLayout,
                     modifier = Modifier.fillMaxSize(),
                 )

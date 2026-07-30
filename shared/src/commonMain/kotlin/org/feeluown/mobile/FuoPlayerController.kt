@@ -251,6 +251,8 @@ class FuoPlayerController(
         private set
     var localMusicDirectories by mutableStateOf<List<LocalMusicDirectory>>(emptyList())
         private set
+    var selectedLocalMusicDirectoryId by mutableStateOf<String?>(null)
+        private set
     var excludedLocalMusicDirectoryIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var localMusicMinDurationSeconds by mutableStateOf(DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS)
@@ -342,7 +344,9 @@ class FuoPlayerController(
     val displayUpNextCount: Int
         get() = upNextQueue.size
     val canNavigateBack: Boolean
-        get() = isFullPlayerOpen || navigator.backStack.value.size > 1
+        get() = isFullPlayerOpen ||
+            selectedLocalMusicDirectoryId != null ||
+            navigator.backStack.value.size > 1
 
     private var mainQueue: List<MusicTrack> = emptyList()
     private var originalMainQueue: List<MusicTrack> = emptyList()
@@ -596,15 +600,20 @@ class FuoPlayerController(
                 } else {
                     localRepository.tracks()
                 }
-                localMusicDirectories = localRepository.directories()
-                tracks
+                tracks to localRepository.directories()
             }
             if (refreshSerial == localMusicRefreshSerial) {
                 result
-                    .onSuccess {
-                        localTracks = it
+                    .onSuccess { (tracks, directories) ->
+                        localTracks = tracks
+                        localMusicDirectories = directories
+                        if (selectedLocalMusicDirectoryId != null &&
+                            directories.none { it.id == selectedLocalMusicDirectoryId }
+                        ) {
+                            selectedLocalMusicDirectoryId = null
+                        }
                         if (showLoading) {
-                            message = if (it.isEmpty()) "未发现本地音乐" else "本地音乐 ${it.size} 首"
+                            message = if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首"
                         }
                     }
                     .onFailure {
@@ -626,14 +635,19 @@ class FuoPlayerController(
             val result = runCatching {
                 updateLocalMusicScanSettings()
                 val tracks = localRepository.tracks()
-                localMusicDirectories = localRepository.directories()
-                tracks
+                tracks to localRepository.directories()
             }
             if (refreshSerial == localMusicRefreshSerial) {
                 result
-                    .onSuccess {
-                        localTracks = it
-                        message = if (it.isEmpty()) "未发现本地音乐" else "本地音乐 ${it.size} 首"
+                    .onSuccess { (tracks, directories) ->
+                        localTracks = tracks
+                        localMusicDirectories = directories
+                        if (selectedLocalMusicDirectoryId != null &&
+                            directories.none { it.id == selectedLocalMusicDirectoryId }
+                        ) {
+                            selectedLocalMusicDirectoryId = null
+                        }
+                        message = if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首"
                     }
                     .onFailure { setError(it) }
             }
@@ -834,6 +848,10 @@ class FuoPlayerController(
             }
             isVideoFullscreen -> {
                 toggleVideoFullscreen()
+                true
+            }
+            selectedLocalMusicDirectoryId != null && navigator.currentRoute == AppRoute.Home -> {
+                closeLocalMusicDirectory()
                 true
             }
             else -> when (navigator.currentRoute) {
@@ -1389,6 +1407,7 @@ class FuoPlayerController(
 
     fun onHomeSectionChange(value: HomeSection) {
         homeSection = value
+        if (value != HomeSection.Mine) closeLocalMusicDirectory()
         persistSettings()
         if (value == HomeSection.Mine) {
             refreshActiveMineSectionIfNeeded()
@@ -1399,6 +1418,7 @@ class FuoPlayerController(
 
     fun onMineSectionChange(value: MineSection) {
         mineSection = value
+        if (value != MineSection.LocalMusic) closeLocalMusicDirectory()
         persistSettings()
         when (value) {
             MineSection.Playlists -> {
@@ -1450,7 +1470,18 @@ class FuoPlayerController(
 
     fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
         localMusicViewMode = value
+        closeLocalMusicDirectory()
         persistSettings()
+    }
+
+    fun openLocalMusicDirectory(directoryId: String) {
+        if (directoryId in excludedLocalMusicDirectoryIds) return
+        if (localMusicDirectories.none { it.id == directoryId }) return
+        selectedLocalMusicDirectoryId = directoryId
+    }
+
+    fun closeLocalMusicDirectory() {
+        selectedLocalMusicDirectoryId = null
     }
 
     fun onLocalMusicDirectoryEnabledChange(directoryId: String, enabled: Boolean) {
@@ -1458,6 +1489,9 @@ class FuoPlayerController(
             excludedLocalMusicDirectoryIds - directoryId
         } else {
             excludedLocalMusicDirectoryIds + directoryId
+        }
+        if (!enabled && selectedLocalMusicDirectoryId == directoryId) {
+            closeLocalMusicDirectory()
         }
         persistSettings()
         reloadLocalMusic()
@@ -4288,6 +4322,11 @@ class FuoPlayerController(
                 localRepository.directories()
             }.onSuccess {
                 localMusicDirectories = it
+                if (selectedLocalMusicDirectoryId != null &&
+                    it.none { directory -> directory.id == selectedLocalMusicDirectoryId }
+                ) {
+                    selectedLocalMusicDirectoryId = null
+                }
             }.onFailure {
                 setError(it)
             }

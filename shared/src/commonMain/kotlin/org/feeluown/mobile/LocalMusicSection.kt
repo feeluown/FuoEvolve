@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -25,6 +27,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,28 +51,46 @@ fun LocalMusicSection(
     controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
+    hasImagePermission: Boolean,
+    onRequestImagePermission: () -> Unit,
     showModeFilter: Boolean,
     modifier: Modifier,
 ) {
-    LaunchedEffect(hasAudioPermission) {
+    var previousImagePermission by remember { mutableStateOf(hasImagePermission) }
+    LaunchedEffect(hasAudioPermission, hasImagePermission) {
         controller.onLocalMusicPermissionChange(hasAudioPermission)
         if (hasAudioPermission) {
-            controller.ensureLocalMusic()
+            if (!hasImagePermission || !previousImagePermission && hasImagePermission) {
+                controller.refreshLocalMusic()
+            } else {
+                controller.ensureLocalMusic()
+            }
         }
+        previousImagePermission = hasImagePermission
     }
-    val displayTracks = remember(controller.localTracks, controller.localMusicViewMode) {
+    val selectedDirectory = controller.localMusicDirectories.firstOrNull {
+        it.id == controller.selectedLocalMusicDirectoryId
+    }
+    val displayTracks = remember(
+        controller.localTracks,
+        controller.localMusicViewMode,
+        controller.selectedLocalMusicDirectoryId,
+    ) {
+        val tracksInDirectory = controller.selectedLocalMusicDirectoryId?.let { directoryId ->
+            controller.localTracks.filter { it.localDirectoryId == directoryId }
+        } ?: controller.localTracks
         when (controller.localMusicViewMode) {
-            LocalMusicViewMode.All -> controller.localTracks.sortedWith(
+            LocalMusicViewMode.All -> tracksInDirectory.sortedWith(
                 compareBy<MusicTrack> { localTitleSectionOrder(localTitleSection(it.title)) }
                     .thenBy { it.title.lowercase() }
                     .thenBy { it.artists.lowercase() },
             )
-            LocalMusicViewMode.Artist -> controller.localTracks.sortedWith(
+            LocalMusicViewMode.Artist -> tracksInDirectory.sortedWith(
                 compareBy<MusicTrack> { normalizedGroupName(it.artists, "未知歌手").lowercase() }
                     .thenBy { it.album.lowercase() }
                     .thenBy { it.title.lowercase() },
             )
-            LocalMusicViewMode.Album -> controller.localTracks.sortedWith(
+            LocalMusicViewMode.Album -> tracksInDirectory.sortedWith(
                 compareBy<MusicTrack> { normalizedGroupName(it.album, "未知专辑").lowercase() }
                     .thenBy { it.artists.lowercase() }
                     .thenBy { it.title.lowercase() },
@@ -84,19 +106,89 @@ fun LocalMusicSection(
             PermissionPanel(onRequestAudioPermission)
             return@Column
         }
+        if (!hasImagePermission) {
+            LocalMusicImagePermissionPanel(onRequestImagePermission)
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (showModeFilter) {
+            if (selectedDirectory != null) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = controller::closeLocalMusicDirectory) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回文件夹")
+                    }
+                    Text(
+                        text = selectedDirectory.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (showModeFilter) {
+                    LocalMusicViewModeTabs(controller)
+                }
+            } else if (showModeFilter) {
                 LocalMusicViewModeTabs(controller)
             } else {
                 Spacer(Modifier)
             }
-            if (displayTracks.isNotEmpty()) {
+            if (selectedDirectory != null && displayTracks.isNotEmpty()) {
                 PlayAllButton(onClick = { controller.playAllLocalTracks(displayTracks) })
             }
+        }
+        val isDirectoryOverview = controller.localMusicViewMode == LocalMusicViewMode.All &&
+            selectedDirectory == null
+        if (isDirectoryOverview) {
+            val directories = controller.localMusicDirectories.filter {
+                it.id !in controller.excludedLocalMusicDirectoryIds
+            }
+            if (isWideLayout) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (directories.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            EmptyLocalMusicHint()
+                        }
+                    } else {
+                        items(directories, key = { it.id }) { directory ->
+                            LocalMusicDirectoryCard(
+                                directory = directory,
+                                onClick = { controller.openLocalMusicDirectory(directory.id) },
+                            )
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (directories.isEmpty()) {
+                        item { EmptyLocalMusicHint() }
+                    } else {
+                        itemsIndexed(directories, key = { _, item -> item.id }) { _, directory ->
+                            LocalMusicDirectoryCard(
+                                directory = directory,
+                                onClick = { controller.openLocalMusicDirectory(directory.id) },
+                            )
+                        }
+                    }
+                }
+            }
+            return@Column
         }
         val groups = remember(displayTracks, controller.localMusicViewMode) {
             when (controller.localMusicViewMode) {
@@ -170,6 +262,70 @@ fun LocalMusicSection(
                         HorizontalDivider()
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicDirectoryCard(
+    directory: LocalMusicDirectory,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PlatformCoverArt(
+                title = directory.name,
+                imageUrl = directory.coverUrl,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .size(132.dp),
+                placeholder = CoverPlaceholder.Album,
+            )
+            Text(
+                text = directory.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${directory.trackCount} 首",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicImagePermissionPanel(onRequestImagePermission: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
+                text = "允许读取图片以显示文件夹封面",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = onRequestImagePermission) {
+                Text("授权图片")
             }
         }
     }

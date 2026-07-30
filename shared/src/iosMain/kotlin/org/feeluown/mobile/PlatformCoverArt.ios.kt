@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Image
 import platform.Foundation.NSData
+import platform.Foundation.NSFileManager
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLSession
 import platform.Foundation.dataTaskWithURL
@@ -85,7 +86,11 @@ private suspend fun loadImage(imageUrl: String): ImageBitmap? = withContext(Disp
         else -> imageUrl
     } ?: return@withContext null
     val url = NSURL.URLWithString(resolvedUrl) ?: return@withContext null
-    val data = fetchData(url) ?: return@withContext null
+    val data = if (url.scheme == "file") {
+        url.path?.let { NSFileManager.defaultManager.contentsAtPath(it) }
+    } else {
+        fetchData(url)
+    } ?: return@withContext null
     val bytes = data.bytes?.reinterpret<ByteVar>()?.readBytes(data.length.toInt()) ?: return@withContext null
     runCatching { Image.makeFromEncoded(bytes).toComposeImageBitmap() }.getOrNull()
 }

@@ -2621,6 +2621,51 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun localMusicDirectorySelectionUsesDirectoryTracksAndSystemBack() = runTest {
+        val directoryA = LocalMusicDirectory("Music/A/", "A", 2)
+        val directoryB = LocalMusicDirectory("Music/B/", "B", 1)
+        val local = FakeLocalMusicRepository(
+            directories = listOf(directoryA, directoryB),
+            tracks = listOf(
+                localTrack("local:1", "A song").copy(localDirectoryId = directoryA.id),
+                localTrack("local:2", "B song").copy(localDirectoryId = directoryB.id),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = local,
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onLocalMusicPermissionChange(true)
+            controller.onMineSectionChange(MineSection.LocalMusic)
+            advanceUntilIdle()
+
+            controller.openLocalMusicDirectory(directoryA.id)
+
+            assertEquals(directoryA.id, controller.selectedLocalMusicDirectoryId)
+            assertEquals(
+                listOf("A song"),
+                controller.localTracks.filter { it.localDirectoryId == controller.selectedLocalMusicDirectoryId }
+                    .map { it.title },
+            )
+            assertTrue(controller.navigateBack())
+            assertNull(controller.selectedLocalMusicDirectoryId)
+
+            controller.openLocalMusicDirectory(directoryA.id)
+            controller.onLocalMusicViewModeChange(LocalMusicViewMode.Artist)
+            assertNull(controller.selectedLocalMusicDirectoryId)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun readyLocalMusicDatabaseReadsTracksWithoutRefresh() = runTest {
         val local = FakeLocalMusicRepository(
             tracks = listOf(localTrack("local:content://music/1", "Cached")),

@@ -216,6 +216,8 @@ fun AppRoot(
     onShareLocalPlaylistFile: ((String, String) -> Unit)? = null,
     onShareText: (String) -> Unit = {},
     appVersionInfo: String? = null,
+    hasImagePermission: Boolean = true,
+    onRequestImagePermission: () -> Unit = {},
 ) {
     val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
     val controller = appViewModel.controller
@@ -331,6 +333,8 @@ fun AppRoot(
                                                 controller = controller,
                                                 hasAudioPermission = hasAudioPermission,
                                                 onRequestAudioPermission = onRequestAudioPermission,
+                                                hasImagePermission = hasImagePermission,
+                                                onRequestImagePermission = onRequestImagePermission,
                                                 onOpenRecognition = controller::openRecognition,
                                             )
                                             AppRoute.DebugLogs -> DebugLogScreen(controller)

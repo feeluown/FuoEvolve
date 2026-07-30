@@ -74,6 +74,11 @@ class IosPlatformRepositoriesTest {
 
         repository.updateScanSettings(LocalMusicScanSettings())
         assertEquals(listOf("Short track", "Long track"), repository.tracks().map { it.title })
+        val directory = repository.directories().single()
+        assertEquals("歌曲", directory.name)
+        assertEquals(2, directory.trackCount)
+        assertEquals("file:///tmp/short.jpg", directory.coverUrl)
+        assertEquals("ios-media-library", repository.tracks().first().localDirectoryId)
         assertEquals(1, mediaLibrary.trackRequests)
     }
 
@@ -166,7 +171,8 @@ class IosPlatformRepositoriesTest {
                       "artists": "Artist",
                       "album": "Album",
                       "duration_ms": 30000,
-                      "local_uri": "ipod-library://short"
+                      "local_uri": "ipod-library://short",
+                      "artwork_url": "file:///tmp/short.jpg"
                     },
                     {
                       "id": "long",
@@ -174,7 +180,8 @@ class IosPlatformRepositoriesTest {
                       "artists": "Artist",
                       "album": "Album",
                       "duration_ms": 120000,
-                      "local_uri": "ipod-library://long"
+                      "local_uri": "ipod-library://long",
+                      "artwork_url": "file:///tmp/long.jpg"
                     }
                   ]
                 }

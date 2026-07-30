@@ -53,11 +53,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var hasAudioPermission by remember { mutableStateOf(hasAudioPermission()) }
+            var hasImagePermission by remember { mutableStateOf(hasImagePermission()) }
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
             ) {
                 hasAudioPermission = hasAudioPermission()
+                hasImagePermission = hasImagePermission()
             }
             val microphonePermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
@@ -146,7 +148,8 @@ class MainActivity : ComponentActivity() {
             BackHandler(
                 enabled = controller.isFullPlayerOpen ||
                     controller.isVideoFullscreen ||
-                    controller.settingsLoginProviderId != null,
+                    controller.settingsLoginProviderId != null ||
+                    controller.selectedLocalMusicDirectoryId != null,
             ) {
                 controller.navigateBack()
             }
@@ -159,9 +162,13 @@ class MainActivity : ComponentActivity() {
             AppRoot(
                 appViewModel = appViewModel,
                 hasAudioPermission = hasAudioPermission,
+                hasImagePermission = hasImagePermission,
                 appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                 onRequestAudioPermission = {
-                    permissionLauncher.launch(audioPermissions())
+                    permissionLauncher.launch(mediaPermissions())
+                },
+                onRequestImagePermission = {
+                    permissionLauncher.launch(imagePermissions())
                 },
                 hasMicrophonePermission = hasMicrophonePermission,
                 onRequestMicrophonePermission = {
@@ -217,6 +224,22 @@ class MainActivity : ComponentActivity() {
     private fun hasAudioPermission(): Boolean {
         return audioPermissions().all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun hasImagePermission(): Boolean {
+        return imagePermissions().all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun mediaPermissions(): Array<String> = (audioPermissions().toList() + imagePermissions()).distinct().toTypedArray()
+
+    private fun imagePermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
 
