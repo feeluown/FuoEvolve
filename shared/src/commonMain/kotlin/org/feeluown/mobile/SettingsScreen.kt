@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +27,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
@@ -52,6 +52,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -59,23 +61,32 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -106,6 +117,7 @@ fun SettingsScreen(
         }
     }
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(loginProvider?.providerName ?: "设置") },
@@ -120,8 +132,11 @@ fun SettingsScreen(
                         },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                        }
+                    }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
         },
     ) { paddingValues ->
@@ -131,8 +146,8 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(FuoSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
             ) {
                 ProviderLoginPanel(
                     controller = controller,
@@ -143,19 +158,19 @@ fun SettingsScreen(
                 )
             }
         } else if (layoutInfo.useWideLayout) {
+            val wideScrollState = rememberScrollState()
             Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(FuoSpacing.lg)
+                    .verticalScroll(wideScrollState),
+                horizontalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
             ) {
                 Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
                 ) {
                     ProviderSwitchPanel(
                         controller = controller,
@@ -166,10 +181,8 @@ fun SettingsScreen(
                 }
                 Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
                 ) {
                     PlayerDisplaySettingsPanel(controller)
                     LocalMusicScanSettingsPanel(controller)
@@ -187,8 +200,8 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(FuoSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
             ) {
                 ProviderSwitchPanel(
                     controller = controller,
@@ -214,11 +227,11 @@ fun AppInfoPanel(appVersionInfo: String?) {
     Surface(
         modifier = Modifier
             .fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -293,118 +306,212 @@ fun ProviderSwitchPanel(
     var configuringProvider by remember { mutableStateOf<ProviderInfo?>(null) }
     var draggingProviderId by remember { mutableStateOf<String?>(null) }
     var dragDistance by remember { mutableStateOf(0f) }
+    var dragStartCenter by remember { mutableStateOf(0f) }
+    val providerItemBounds = remember { mutableStateMapOf<String, Rect>() }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(vertical = FuoSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
         ) {
             Text(
+                modifier = Modifier.padding(horizontal = FuoSpacing.lg),
                 text = "音源",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             if (controller.availableProviders.isEmpty()) {
-                ProviderContentMessage("音源正在初始化")
+                Box(modifier = Modifier.padding(horizontal = FuoSpacing.lg)) {
+                    ProviderContentMessage("音源正在初始化")
+                }
             } else {
                 LookaheadScope {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        controller.orderedAvailableProviders().forEach { provider ->
-                            val isEnabled = controller.isProviderEnabled(provider.providerId)
-                            val authState = controller.authStateFor(provider)
-                            val isDragging = draggingProviderId == provider.providerId
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .animateBounds(this@LookaheadScope, boundsTransform = { _, _ -> tween(180) })
-                                    .graphicsLayer {
-                                        translationY = if (isDragging) dragDistance else 0f
-                                        scaleX = if (isDragging) 1.02f else 1f
-                                        scaleY = if (isDragging) 1.02f else 1f
-                                    }
-                                    .zIndex(if (isDragging) 1f else 0f),
-                                color = if (isDragging) {
-                                    MaterialTheme.colorScheme.secondaryContainer
+                    val providers = controller.orderedAvailableProviders()
+                    Column {
+                        providers.forEachIndexed { index, provider ->
+                            key(provider.providerId) {
+                                val isEnabled = controller.isProviderEnabled(provider.providerId)
+                                val authState = controller.authStateFor(provider)
+                                val isDragging = draggingProviderId == provider.providerId
+                                val itemBounds = providerItemBounds[provider.providerId]
+                                val dragTranslationY = if (isDragging) {
+                                    itemBounds?.let { dragStartCenter + dragDistance - it.center.y } ?: dragDistance
                                 } else {
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                shadowElevation = if (isDragging) 8.dp else 0.dp,
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
+                                    0f
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onGloballyPositioned { coordinates ->
+                                            val bounds = coordinates.boundsInParent()
+                                            if (providerItemBounds[provider.providerId] != bounds) {
+                                                providerItemBounds[provider.providerId] = bounds
+                                            }
+                                        }
+                                        .animateBounds(
+                                            this@LookaheadScope,
+                                            boundsTransform = { _, _ -> tween(180) },
+                                        )
+                                        .zIndex(if (isDragging) 1f else 0f),
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = provider.providerName,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.Medium,
-                                        )
-                                        Text(
-                                            text = providerStatusText(isEnabled, authState) + " · " + providerDisplaySummary(controller, provider.providerId),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(
-                                            enabled = !controller.isLoading,
-                                            onClick = { configuringProvider = provider },
-                                        ) {
-                                            Icon(Icons.Filled.Settings, contentDescription = "配置${provider.providerName}")
-                                        }
-                                        IconButton(
-                                            enabled = !controller.isLoading && isEnabled,
-                                            onClick = { onOpenProviderLogin(provider) },
-                                        ) {
-                                            Icon(
-                                                if (authState.isLoggedIn) Icons.Filled.ManageAccounts else Icons.AutoMirrored.Filled.Login,
-                                                contentDescription = if (authState.isLoggedIn) "管理${provider.providerName}" else "登录${provider.providerName}",
-                                            )
-                                        }
-                                        Icon(
-                                            modifier = Modifier.pointerInput(provider.providerId, controller.isLoading) {
-                                                detectDragGesturesAfterLongPress(
-                                                    onDragStart = {
-                                                        draggingProviderId = provider.providerId
-                                                        dragDistance = 0f
-                                                    },
-                                                    onDragEnd = {
-                                                        draggingProviderId = null
-                                                        dragDistance = 0f
-                                                    },
-                                                    onDragCancel = {
-                                                        draggingProviderId = null
-                                                        dragDistance = 0f
-                                                    },
-                                                    onDrag = { change, amount ->
-                                                        change.consume()
-                                                        if (controller.isLoading) return@detectDragGesturesAfterLongPress
-                                                        dragDistance += amount.y
-                                                        if (dragDistance >= 48f) {
-                                                            controller.moveProvider(provider.providerId, 1)
-                                                            dragDistance -= 48f
-                                                        } else if (dragDistance <= -48f) {
-                                                            controller.moveProvider(provider.providerId, -1)
-                                                            dragDistance += 48f
-                                                        }
-                                                    },
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .graphicsLayer {
+                                                translationY = dragTranslationY
+                                                scaleX = if (isDragging) 1.02f else 1f
+                                                scaleY = if (isDragging) 1.02f else 1f
+                                            },
+                                        color = Color.Transparent,
+                                        contentColor = if (isDragging) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                        shape = MaterialTheme.shapes.medium,
+                                        tonalElevation = if (isDragging) 3.dp else 0.dp,
+                                        shadowElevation = if (isDragging) 4.dp else 0.dp,
+                                    ) {
+                                        ListItem(
+                                            colors = ListItemDefaults.colors(
+                                                containerColor = if (isDragging) {
+                                                    MaterialTheme.colorScheme.secondaryContainer
+                                                } else {
+                                                    Color.Transparent
+                                                },
+                                                headlineColor = if (isDragging) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurface
+                                                },
+                                                supportingColor = if (isDragging) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                trailingIconColor = if (isDragging) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            ),
+                                            headlineContent = {
+                                                Text(
+                                                    text = provider.providerName,
+                                                    fontWeight = FontWeight.Medium,
                                                 )
                                             },
-                                            imageVector = Icons.Filled.DragHandle,
-                                            contentDescription = "长按拖动排序${provider.providerName}",
+                                            supportingContent = {
+                                                Text(
+                                                    text = providerStatusText(isEnabled, authState) +
+                                                        " · " + providerDisplaySummary(controller, provider.providerId),
+                                                )
+                                            },
+                                            trailingContent = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    FuoIconButton(
+                                                        contentDescription = "配置${provider.providerName}",
+                                                        enabled = !controller.isLoading,
+                                                        onClick = { configuringProvider = provider },
+                                                    ) {
+                                                        Icon(Icons.Filled.Settings, contentDescription = null)
+                                                    }
+                                                    FuoIconButton(
+                                                        contentDescription = if (authState.isLoggedIn) {
+                                                            "管理${provider.providerName}"
+                                                        } else {
+                                                            "登录${provider.providerName}"
+                                                        },
+                                                        enabled = !controller.isLoading && isEnabled,
+                                                        onClick = { onOpenProviderLogin(provider) },
+                                                    ) {
+                                                        Icon(
+                                                            if (authState.isLoggedIn) {
+                                                                Icons.Filled.ManageAccounts
+                                                            } else {
+                                                                Icons.AutoMirrored.Filled.Login
+                                                            },
+                                                            contentDescription = null,
+                                                        )
+                                                    }
+                                                    Icon(
+                                                        modifier = Modifier
+                                                            .fuoInteractive()
+                                                            .pointerInput(provider.providerId, controller.isLoading) {
+                                                                detectDragGesturesAfterLongPress(
+                                                                    onDragStart = {
+                                                                        providerItemBounds[provider.providerId]?.let { bounds ->
+                                                                            draggingProviderId = provider.providerId
+                                                                            dragStartCenter = bounds.center.y
+                                                                            dragDistance = 0f
+                                                                        }
+                                                                    },
+                                                                    onDragEnd = {
+                                                                        draggingProviderId = null
+                                                                        dragStartCenter = 0f
+                                                                        dragDistance = 0f
+                                                                    },
+                                                                    onDragCancel = {
+                                                                        draggingProviderId = null
+                                                                        dragStartCenter = 0f
+                                                                        dragDistance = 0f
+                                                                    },
+                                                                    onDrag = { change, amount ->
+                                                                        change.consume()
+                                                                        if (controller.isLoading || draggingProviderId != provider.providerId) {
+                                                                            return@detectDragGesturesAfterLongPress
+                                                                        }
+                                                                        dragDistance += amount.y
+                                                                        val orderedProviders = controller.orderedAvailableProviders()
+                                                                        val currentIndex = orderedProviders.indexOfFirst {
+                                                                            it.providerId == provider.providerId
+                                                                        }
+                                                                        if (currentIndex < 0 || orderedProviders.size < 2) {
+                                                                            return@detectDragGesturesAfterLongPress
+                                                                        }
+                                                                        val dragCenter = dragStartCenter + dragDistance
+                                                                        val targetIndex = orderedProviders
+                                                                            .withIndex()
+                                                                            .firstOrNull { (_, candidate) ->
+                                                                                candidate.providerId != provider.providerId &&
+                                                                                    providerItemBounds[candidate.providerId]
+                                                                                        ?.let { dragCenter < it.center.y } == true
+                                                                            }
+                                                                            ?.let { candidate ->
+                                                                                candidate.index -
+                                                                                    if (candidate.index > currentIndex) 1 else 0
+                                                                            }
+                                                                            ?: orderedProviders.lastIndex
+                                                                        val offset = targetIndex - currentIndex
+                                                                        if (offset != 0) {
+                                                                            controller.moveProvider(provider.providerId, offset)
+                                                                        }
+                                                                    },
+                                                                )
+                                                            },
+                                                        imageVector = Icons.Filled.DragHandle,
+                                                        contentDescription = "长按拖动排序${provider.providerName}",
+                                                    )
+                                                    Switch(
+                                                        checked = isEnabled,
+                                                        enabled = !controller.isLoading &&
+                                                            (isEnabled && controller.enabledProviderIds.size > 1 || !isEnabled),
+                                                        onCheckedChange = {
+                                                            controller.onProviderEnabledChange(provider.providerId, it)
+                                                        },
+                                                    )
+                                                }
+                                            },
                                         )
                                     }
-                                    Checkbox(
-                                        checked = isEnabled,
-                                        enabled = !controller.isLoading &&
-                                            (isEnabled && controller.enabledProviderIds.size > 1 || !isEnabled),
-                                        onCheckedChange = { controller.onProviderEnabledChange(provider.providerId, it) },
+                                }
+                                if (index < providers.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = FuoSpacing.lg),
+                                        color = MaterialTheme.colorScheme.outlineVariant,
                                     )
                                 }
                             }
@@ -498,11 +605,11 @@ fun ProviderLoginPanel(
         ?: ProviderLoginMode.Cookie
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -669,11 +776,11 @@ fun settingsFilterChipColors() = FilterChipDefaults.filterChipColors(
 fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -743,7 +850,7 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                         text = "使用替换信息",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Checkbox(
+                    Switch(
                         checked = controller.smartReplacementUseReplacementMetadata,
                         enabled = !controller.isLoading,
                         onCheckedChange = controller::onSmartReplacementUseReplacementMetadataChange,
@@ -759,7 +866,7 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                         text = "使用替换歌词",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Checkbox(
+                    Switch(
                         checked = controller.smartReplacementUseReplacementLyrics,
                         enabled = !controller.isLoading,
                         onCheckedChange = controller::onSmartReplacementUseReplacementLyricsChange,
@@ -775,11 +882,11 @@ fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
     val darkTheme = resolvedDarkTheme(controller.themeMode, isSystemInDarkTheme())
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -804,26 +911,6 @@ fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                         colors = settingsSegmentedButtonColors(),
                     ) {
                         Text(size.label)
-                    }
-                }
-            }
-            Text(
-                text = "频谱样式",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                PlaybackSpectrumStyle.entries.forEachIndexed { index, style ->
-                    SegmentedButton(
-                        selected = controller.playbackSpectrumStyle == style,
-                        onClick = { controller.onPlaybackSpectrumStyleChange(style) },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = PlaybackSpectrumStyle.entries.size,
-                        ),
-                        colors = settingsSegmentedButtonColors(),
-                    ) {
-                        Text(style.label)
                     }
                 }
             }
@@ -896,8 +983,13 @@ fun ThemeColorSchemeOption(
                     MaterialTheme.colorScheme.surface
                 },
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .fuoInteractive()
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
+            .padding(horizontal = FuoSpacing.md, vertical = FuoSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -926,11 +1018,11 @@ fun ThemeColorSchemeOption(
 fun AudioQualitySettingsPanel(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -984,11 +1076,11 @@ fun AudioQualityRow(
 fun LocalMusicScanSettingsPanel(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -1012,7 +1104,8 @@ fun LocalMusicScanSettingsPanel(controller: FuoPlayerController) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
+                            .fuoInteractive()
+                            .clickable(role = Role.Button) {
                                 controller.onLocalMusicDirectoryEnabledChange(
                                     directory.id,
                                     directory.id in controller.excludedLocalMusicDirectoryIds,
@@ -1082,28 +1175,20 @@ fun LocalMusicDurationFilterRow(
 fun DownloadSettingsPanel(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = controller::openDownloadManager),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Download, contentDescription = null)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("下载管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "${controller.downloadTasks.count { it.status == DownloadTaskStatus.Downloading }} 个下载中",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            FuoSettingRow(
+                modifier = Modifier.fillMaxWidth(),
+                title = "下载管理",
+                supportingText = "${controller.downloadTasks.count { it.status == DownloadTaskStatus.Downloading }} 个下载中",
+                onClick = controller::openDownloadManager,
+                leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
+            )
             Text("并行下载数量", style = MaterialTheme.typography.bodyMedium)
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 (1..5).forEach { value ->
@@ -1123,11 +1208,11 @@ fun DownloadSettingsPanel(controller: FuoPlayerController) {
 fun CacheSettingsPanel(controller: FuoPlayerController) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -1174,26 +1259,15 @@ fun CacheSettingsPanel(controller: FuoPlayerController) {
 @Composable
 fun DebugSettingsPanel(controller: FuoPlayerController) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = controller::openDebugLogs),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.BugReport, contentDescription = null)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "应用日志",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
+        FuoSettingRow(
+            title = "应用日志",
+            onClick = controller::openDebugLogs,
+            leadingContent = { Icon(Icons.Filled.BugReport, contentDescription = null) },
+        )
     }
 }
 
@@ -1351,7 +1425,7 @@ fun DebugLogScreen(controller: FuoPlayerController) {
                                     },
                                 ),
                             color = debugLogLevelContainerColor(level),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = MaterialTheme.shapes.medium,
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1379,7 +1453,7 @@ fun DebugLogScreen(controller: FuoPlayerController) {
                                     color = debugLogLevelContentColor(level),
                                 )
                                 IconButton(
-                                    modifier = Modifier.size(40.dp),
+                                    modifier = Modifier.fuoInteractive().size(48.dp),
                                     onClick = { clipboardManager.setText(AnnotatedString(line)) },
                                 ) {
                                     Icon(Icons.Filled.ContentCopy, contentDescription = "复制")
@@ -1416,7 +1490,7 @@ private fun debugLogLevelLabel(level: DebugLogLevel): String = when (level) {
 
 @Composable
 private fun debugLogLevelContainerColor(level: DebugLogLevel?) = when (level) {
-    DebugLogLevel.Debug -> MaterialTheme.colorScheme.surfaceVariant
+    DebugLogLevel.Debug -> MaterialTheme.colorScheme.surfaceContainerHigh
     DebugLogLevel.Info -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.20f)
     DebugLogLevel.Warning -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
     DebugLogLevel.Error -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
@@ -1462,7 +1536,7 @@ fun PermissionPanel(onRequestAudioPermission: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = RoundedCornerShape(8.dp),
+        shape = MaterialTheme.shapes.medium,
     ) {
         Row(
             modifier = Modifier.padding(12.dp),

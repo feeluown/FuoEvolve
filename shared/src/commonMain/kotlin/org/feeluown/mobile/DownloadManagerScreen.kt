@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -80,7 +79,12 @@ fun DownloadManagerScreen(controller: FuoPlayerController) {
             }
             item { DownloadSectionTitle("已完成") }
             if (completed.isEmpty()) {
-                item { Text("暂无已完成下载", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                item {
+                    FuoEmptyState(
+                        modifier = Modifier.fillMaxWidth(),
+                        title = "暂无已完成下载",
+                    )
+                }
             } else {
                 items(completed.take(completedLimit), key = { it.id }) { task ->
                     DownloadTaskCard(
@@ -140,9 +144,12 @@ private fun DownloadTaskCard(
     onRetry: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp)) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

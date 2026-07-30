@@ -33,8 +33,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -44,8 +44,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
@@ -54,9 +56,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
 @Composable
-fun LoadingIndicator(visible: Boolean) {
+fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
     AnimatedVisibility(visible = visible) {
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        LinearProgressIndicator(modifier = modifier.fillMaxWidth())
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,17 +103,20 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
+                .padding(paddingValues),
             verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) 6.dp else 12.dp),
         ) {
-            LoadingIndicator(controller.isLoading)
+            LoadingIndicator(
+                visible = controller.isLoading,
+                modifier = Modifier.padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
+            )
             HomeSectionPager(
                 controller = controller,
                 hasAudioPermission = hasAudioPermission,
                 onRequestAudioPermission = onRequestAudioPermission,
                 onOpenRecognition = onOpenRecognition,
                 modifier = Modifier.weight(1f),
+                contentHorizontalPadding = if (layoutInfo.useWideLayout) 8.dp else 16.dp,
             )
         }
     }
@@ -124,6 +129,7 @@ fun HomeSectionPager(
     onRequestAudioPermission: () -> Unit,
     onOpenRecognition: () -> Unit,
     modifier: Modifier,
+    contentHorizontalPadding: Dp,
 ) {
     val sections = listOf(
         HomeSection.Recommend to "推荐",
@@ -157,7 +163,9 @@ fun HomeSectionPager(
 
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Row(
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = contentHorizontalPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             HomeSectionRail(
@@ -204,9 +212,10 @@ fun HomeSectionPager(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
     ) {
         HomeSectionTabs(
+            modifier = Modifier.padding(horizontal = contentHorizontalPadding),
             sections = sections,
             selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
             indicatorOffsetFraction = pagerState.currentPageOffsetFraction,
@@ -220,7 +229,8 @@ fun HomeSectionPager(
             state = pagerState,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .padding(horizontal = contentHorizontalPadding),
             pageSpacing = 16.dp,
         ) { page ->
             when (sections[page].first) {
@@ -275,9 +285,14 @@ fun HomeSectionRail(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onClick(index, section) }
+                        .fuoInteractive()
+                        .clickable(role = Role.Tab) { onClick(index, section) }
                         .padding(vertical = 4.dp),
-                    color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    },
                     contentColor = if (selected) {
                         MaterialTheme.colorScheme.onSecondaryContainer
                     } else {
@@ -312,14 +327,6 @@ fun HomeSectionRail(
     }
 }
 
-fun homeSectionIcon(section: HomeSection): ImageVector {
-    return when (section) {
-        HomeSection.Recommend -> Icons.Filled.PlayArrow
-        HomeSection.Music -> Icons.Filled.Album
-        HomeSection.Mine -> Icons.Filled.Person
-    }
-}
-
 @Composable
 @Suppress("DEPRECATION")
 fun HomeSectionTabs(
@@ -327,10 +334,11 @@ fun HomeSectionTabs(
     selectedIndex: Int,
     indicatorOffsetFraction: Float,
     onClick: (Int, HomeSection) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     TabRow(
         selectedTabIndex = selectedIndex,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.primary,
         indicator = { tabPositions ->
@@ -378,6 +386,14 @@ fun HomeSectionTabs(
                 },
             )
         }
+    }
+}
+
+fun homeSectionIcon(section: HomeSection): ImageVector {
+    return when (section) {
+        HomeSection.Recommend -> Icons.Filled.PlayArrow
+        HomeSection.Music -> Icons.Filled.Album
+        HomeSection.Mine -> Icons.Filled.Person
     }
 }
 

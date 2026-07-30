@@ -80,16 +80,6 @@ enum class ThemeColorScheme(
 }
 
 @Serializable
-enum class PlaybackSpectrumStyle(
-    val label: String,
-) {
-    None("无频谱"),
-    Bars("柱状"),
-    MirrorBars("镜像"),
-    Wave("波形"),
-}
-
-@Serializable
 data class AppSettings(
     val onboardingCompleted: Boolean = false,
     val homeSection: HomeSection = HomeSection.Recommend,
@@ -121,7 +111,6 @@ data class AppSettings(
     val smartReplacementUseReplacementMetadata: Boolean = false,
     val smartReplacementUseReplacementLyrics: Boolean = false,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
-    val playbackSpectrumStyle: PlaybackSpectrumStyle = PlaybackSpectrumStyle.None,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
 )
@@ -293,7 +282,6 @@ data class PlaybackState(
     val audioQuality: String? = null,
     val audioFormatInfo: AudioFormatInfo? = null,
     val audioDecoderInfo: AudioDecoderInfo? = null,
-    val spectrumLevels: List<Float> = emptyList(),
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val playbackGeneration: Long = 0,

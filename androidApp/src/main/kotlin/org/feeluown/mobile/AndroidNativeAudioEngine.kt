@@ -39,16 +39,10 @@ class AndroidNativeAudioEngine(
             }
         }
         scope.launch {
-            FuoPlaybackService.spectrumLevels.collect { spectrumLevels ->
-                mutableState.value = mutableState.value.copy(spectrumLevels = spectrumLevels)
-            }
-        }
-        scope.launch {
             FuoPlaybackService.playbackState.collect { serviceState ->
                 mutableState.value = serviceState.copy(
                     audioDecoderInfo = mutableState.value.audioDecoderInfo,
                     audioFormatInfo = mutableState.value.audioFormatInfo,
-                    spectrumLevels = mutableState.value.spectrumLevels,
                 )
             }
         }
@@ -70,7 +64,6 @@ class AndroidNativeAudioEngine(
             lyrics = track.lyrics,
             audioQuality = null,
             audioFormatInfo = null,
-            spectrumLevels = emptyList(),
             playbackParts = emptyList(),
             currentPartIndex = -1,
             errorMessage = null,
@@ -90,7 +83,6 @@ class AndroidNativeAudioEngine(
             lyrics = first.track.lyrics,
             audioQuality = null,
             audioFormatInfo = null,
-            spectrumLevels = emptyList(),
             playbackParts = emptyList(),
             currentPartIndex = -1,
             playbackGeneration = plan.generation,
@@ -123,7 +115,7 @@ class AndroidNativeAudioEngine(
     override fun stop() {
         mediaController?.stop()
         FuoPlaybackService.stop(context)
-        mutableState.value = mutableState.value.copy(status = PlayerStatus.Idle, positionMs = 0, spectrumLevels = emptyList())
+        mutableState.value = mutableState.value.copy(status = PlayerStatus.Idle, positionMs = 0)
     }
 
     override fun seekTo(positionMs: Long) {

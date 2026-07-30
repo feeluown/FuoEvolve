@@ -60,11 +60,6 @@ internal class AndroidLegacySettingsLoader(context: Context) {
                 false,
             ),
             lyricFontSize = enumValue(KEY_LYRIC_FONT_SIZE, LyricFontSize.Small),
-            playbackSpectrumStyle = if (preferences.getBoolean(KEY_SHOW_PLAYBACK_SPECTRUM, true)) {
-                enumValue(KEY_PLAYBACK_SPECTRUM_STYLE, PlaybackSpectrumStyle.None)
-            } else {
-                PlaybackSpectrumStyle.None
-            },
             themeMode = enumValue(KEY_THEME_MODE, ThemeMode.System),
             themeColorScheme = enumValue(KEY_THEME_COLOR_SCHEME, ThemeColorScheme.Dynamic),
         )
@@ -173,8 +168,6 @@ internal class AndroidLegacySettingsLoader(context: Context) {
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_METADATA = "smart_replacement_use_replacement_metadata"
         private const val KEY_SMART_REPLACEMENT_USE_REPLACEMENT_LYRICS = "smart_replacement_use_replacement_lyrics"
         private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
-        private const val KEY_SHOW_PLAYBACK_SPECTRUM = "show_playback_spectrum"
-        private const val KEY_PLAYBACK_SPECTRUM_STYLE = "playback_spectrum_style"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_COLOR_SCHEME = "theme_color_scheme"
     }

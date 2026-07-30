@@ -12,5 +12,4 @@ interface IosAudioOutput {
     fun bufferedMs(): Long
     fun errorMessage(): String?
     fun audioFormatInfo(): AudioFormatInfo?
-    fun spectrumLevels(): List<Float>
 }

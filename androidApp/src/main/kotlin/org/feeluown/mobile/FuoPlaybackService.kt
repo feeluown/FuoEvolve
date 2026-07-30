@@ -23,9 +23,6 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
-import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
@@ -61,14 +58,13 @@ class FuoPlaybackService : MediaSessionService() {
     @Volatile
     private var activeGeneration: Long = 0L
     private var itemSerial: Long = 0L
-    private val spectrumAnalyzer = AudioSpectrumAnalyzer { levels ->
-        mutableSpectrumLevels.value = levels
-    }
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val renderersFactory = spectrumRenderersFactory()
+        val renderersFactory = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
         val exoPlayer = ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
             .build()
@@ -185,7 +181,6 @@ class FuoPlaybackService : MediaSessionService() {
                 player?.stop()
                 mutableAudioDecoderInfo.value = null
                 mutableAudioFormatInfo.value = null
-                spectrumAnalyzer.clear()
                 stopSelf()
             }
         }
@@ -209,7 +204,6 @@ class FuoPlaybackService : MediaSessionService() {
         mutableAudioDecoderInfo.value = null
         mutableAudioFormatInfo.value = null
         mutablePlaybackState.value = PlaybackState()
-        spectrumAnalyzer.clear()
         super.onDestroy()
     }
 
@@ -694,9 +688,6 @@ class FuoPlaybackService : MediaSessionService() {
         private val mutableAudioFormatInfo = MutableStateFlow<AudioFormatInfo?>(null)
         val audioFormatInfo: StateFlow<AudioFormatInfo?> = mutableAudioFormatInfo.asStateFlow()
 
-        private val mutableSpectrumLevels = MutableStateFlow<List<Float>>(emptyList())
-        val spectrumLevels: StateFlow<List<Float>> = mutableSpectrumLevels.asStateFlow()
-
         private val mutablePlaybackState = MutableStateFlow(PlaybackState())
         val playbackState: StateFlow<PlaybackState> = mutablePlaybackState.asStateFlow()
 
@@ -776,20 +767,4 @@ class FuoPlaybackService : MediaSessionService() {
         fun next()
     }
 
-    private fun spectrumRenderersFactory(): DefaultRenderersFactory {
-        return object : DefaultRenderersFactory(this@FuoPlaybackService) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink {
-                return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(enableFloatOutput)
-                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .setAudioProcessors(arrayOf(TeeAudioProcessor(spectrumAnalyzer)))
-                    .build()
-            }
-        }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-            .setEnableDecoderFallback(true)
-    }
 }

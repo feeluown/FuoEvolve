@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Search
@@ -313,7 +312,7 @@ fun LocalMetadataSearchResultRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CoverBox(track, modifier = Modifier.size(40.dp))
+            CoverBox(track, modifier = Modifier.size(48.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = track.title.ifBlank { "未知歌曲" },
@@ -387,18 +386,10 @@ fun LocalMusicSectionHeader(title: String, count: Int) {
 
 @Composable
 fun EmptyLocalMusicHint() {
-    Surface(
+    FuoEmptyState(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Text(
-            modifier = Modifier.padding(16.dp),
-            text = "未发现本地音乐",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+        title = "未发现本地音乐",
+    )
 }

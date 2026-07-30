@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +36,7 @@ private data class PendingLocalPlaylistExport(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val fuoApplication = application as FuoEvolveApplication
         val launchSharedText = sharedTextFromIntent(intent)
 

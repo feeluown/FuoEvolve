@@ -12,7 +12,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +36,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Delete
@@ -52,17 +50,25 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -72,10 +78,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -92,9 +96,10 @@ fun MiniPlayer(controller: FuoPlayerController) {
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(220))
-            .clickable(onClick = controller::openFullPlayer),
-        shape = RoundedCornerShape(if (isWideLayout) 12.dp else 18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+            .fuoInteractive()
+            .clickable(role = Role.Button, onClick = controller::openFullPlayer),
+        shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 3.dp,
     ) {
         Column {
@@ -158,12 +163,34 @@ fun MiniPlayer(controller: FuoPlayerController) {
 @Composable
 private fun MiniPlayerProgress(state: PlaybackState, isLoadingAudio: Boolean) {
     val duration = state.durationMs.takeIf { it > 0 }
-    if (isLoadingAudio || duration != null) {
-        LinearProgressIndicator(
-            progress = { duration?.let { state.positionMs.coerceIn(0, it).toFloat() / it } ?: 0f },
+    when {
+        isLoadingAudio -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        duration != null -> PlayingProgressIndicator(
+            progress = { state.positionMs.coerceIn(0, duration).toFloat() / duration },
+            isPlaying = state.status == PlayerStatus.Playing,
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+private fun PlayingProgressIndicator(
+    progress: () -> Float,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    LinearWavyProgressIndicator(
+        progress = progress,
+        modifier = modifier,
+        amplitude = { value ->
+            if (isPlaying) {
+                WavyProgressIndicatorDefaults.indicatorAmplitude(value)
+            } else {
+                0f
+            }
+        },
+    )
 }
 
 @Composable
@@ -283,14 +310,6 @@ fun FullPlayer(controller: FuoPlayerController) {
                         }
                     }
                 }
-                FullPlayerSpectrum(
-                    controller = controller,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 8.dp),
-                )
                 QueueBottomSheet(controller)
             }
         }
@@ -380,14 +399,6 @@ fun FullPlayer(controller: FuoPlayerController) {
                     },
                 )
             }
-            FullPlayerSpectrum(
-                controller = controller,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 8.dp),
-            )
             QueueBottomSheet(controller)
         }
     }
@@ -474,81 +485,6 @@ fun PlayerSharedCover(
         }
     }
     CoverBox(track = track, cornerRadius = cornerRadius, modifier = sharedModifier)
-}
-
-@Composable
-fun FullPlayerSpectrum(controller: FuoPlayerController, modifier: Modifier = Modifier) {
-    if (controller.playbackSpectrumStyle == PlaybackSpectrumStyle.None) return
-    AudioSpectrumLines(
-        levels = controller.playbackState.spectrumLevels,
-        isPlaying = controller.playbackState.status == PlayerStatus.Playing,
-        style = controller.playbackSpectrumStyle,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(64.dp),
-    )
-}
-
-@Composable
-fun AudioSpectrumLines(
-    levels: List<Float>,
-    isPlaying: Boolean,
-    style: PlaybackSpectrumStyle,
-    modifier: Modifier = Modifier,
-) {
-    if (!isPlaying || levels.isEmpty()) return
-    val color = MaterialTheme.colorScheme.primary
-    Canvas(modifier = modifier) {
-        val count = levels.size
-        val spacing = size.width / (count * 2f)
-        val strokeWidth = (spacing * 0.48f).coerceAtLeast(1f)
-        when (style) {
-            PlaybackSpectrumStyle.None -> Unit
-            PlaybackSpectrumStyle.Bars,
-            PlaybackSpectrumStyle.MirrorBars -> levels.forEachIndexed { index, level ->
-                val normalized = 0.12f + level.coerceIn(0f, 1f) * 0.88f
-                val height = size.height * if (style == PlaybackSpectrumStyle.Bars) normalized else normalized / 2f
-                val x = spacing * (index * 2 + 1)
-                drawLine(
-                    color = color,
-                    start = androidx.compose.ui.geometry.Offset(
-                        x,
-                        if (style == PlaybackSpectrumStyle.Bars) size.height else size.height / 2f - height,
-                    ),
-                    end = androidx.compose.ui.geometry.Offset(
-                        x,
-                        if (style == PlaybackSpectrumStyle.Bars) size.height - height else size.height / 2f + height,
-                    ),
-                    strokeWidth = strokeWidth,
-                    cap = StrokeCap.Round,
-                )
-            }
-            PlaybackSpectrumStyle.Wave -> {
-                val path = Path()
-                val points = levels.mapIndexed { index, level ->
-                    androidx.compose.ui.geometry.Offset(
-                        x = if (count == 1) size.width / 2f else size.width * index / (count - 1f),
-                        y = size.height * (1f - (0.04f + level.coerceIn(0f, 1f) * 0.92f)),
-                    )
-                }
-                path.moveTo(points.first().x, points.first().y)
-                points.zipWithNext().forEach { (previous, current) ->
-                    path.quadraticTo(
-                        x1 = previous.x,
-                        y1 = previous.y,
-                        x2 = (previous.x + current.x) / 2f,
-                        y2 = (previous.y + current.y) / 2f,
-                    )
-                }
-                points.last().let { point -> path.lineTo(point.x, point.y) }
-                drawPath(
-                    path = path,
-                    color = color,
-                    style = Stroke(width = (strokeWidth * 0.75f).coerceAtLeast(1f), cap = StrokeCap.Round),
-                )
-            }
-        }
-    }
 }
 
 enum class PlayerVisualTab(val title: String) {
@@ -693,20 +629,7 @@ fun formatAudioBitrate(value: Long?): String? {
 
 @Composable
 fun InfoTag(text: String, onClick: (() -> Unit)? = null) {
-    Surface(
-        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(50),
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    FuoMetadataChip(label = text, onClick = onClick)
 }
 
 @Composable
@@ -752,9 +675,21 @@ fun ReplacementInfoLine(label: String, value: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueBottomSheet(controller: FuoPlayerController) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    if (!isWideLayout) {
+        if (controller.isQueueOpen) {
+            ModalBottomSheet(
+                onDismissRequest = controller::toggleQueue,
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            ) {
+                QueueBottomSheetContent(controller, sidePanel = false, embedded = true)
+            }
+        }
+        return
+    }
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter,
@@ -769,30 +704,34 @@ fun QueueBottomSheet(controller: FuoPlayerController) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                    .clickable(onClick = controller::toggleQueue),
+                    .clickable(role = Role.Button, onClick = controller::toggleQueue),
             )
         }
         AnimatedVisibility(
             visible = controller.isQueueOpen,
             modifier = Modifier.align(if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter),
             enter = if (isWideLayout) {
-                slideInHorizontally(animationSpec = tween(220)) { it } + fadeIn(tween(160))
+                slideInHorizontally(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it } + fadeIn(tween(FuoMotion.overlayFadeMillis))
             } else {
-                slideInVertically(animationSpec = tween(220)) { it } + fadeIn(tween(160))
+                slideInVertically(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it } + fadeIn(tween(FuoMotion.overlayFadeMillis))
             },
             exit = if (isWideLayout) {
-                slideOutHorizontally(animationSpec = tween(180)) { it } + fadeOut(tween(140))
+                slideOutHorizontally(animationSpec = tween(FuoMotion.overlayExitMillis)) { it } + fadeOut(tween(FuoMotion.overlayFadeMillis))
             } else {
-                slideOutVertically(animationSpec = tween(180)) { it } + fadeOut(tween(140))
+                slideOutVertically(animationSpec = tween(FuoMotion.overlayExitMillis)) { it } + fadeOut(tween(FuoMotion.overlayFadeMillis))
             },
         ) {
-            QueueBottomSheetContent(controller, sidePanel = isWideLayout)
+            QueueBottomSheetContent(controller, sidePanel = true)
         }
     }
 }
 
 @Composable
-fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean = false) {
+fun QueueBottomSheetContent(
+    controller: FuoPlayerController,
+    sidePanel: Boolean = false,
+    embedded: Boolean = false,
+) {
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     val queueSize = controller.playbackState.queue.size
 
@@ -808,15 +747,14 @@ fun QueueBottomSheetContent(controller: FuoPlayerController, sidePanel: Boolean 
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = 460.dp)
-                .navigationBarsPadding()
-                .clickable { }
+                .then(if (embedded) Modifier else Modifier.navigationBarsPadding())
         },
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 8.dp,
         shape = if (sidePanel) {
-            RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)
+            MaterialTheme.shapes.large
         } else {
-            RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+            MaterialTheme.shapes.large
         },
     ) {
         Column(
@@ -929,7 +867,7 @@ fun FmModeBadge() {
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
         tonalElevation = 1.dp,
-        shape = RoundedCornerShape(50),
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Text(
             text = "FM",
@@ -950,38 +888,18 @@ fun RepeatModeTextButton(
         RepeatMode.QUEUE -> Icons.Filled.Repeat
         RepeatMode.SINGLE -> Icons.Filled.RepeatOne
     }
-    Surface(
-        modifier = Modifier.clickable(onClick = onRepeat),
-        color = if (repeatMode == RepeatMode.OFF) {
-            MaterialTheme.colorScheme.surfaceVariant
-        } else {
-            MaterialTheme.colorScheme.primary
-        },
-        contentColor = if (repeatMode == RepeatMode.OFF) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.onPrimary
-        },
-        tonalElevation = 1.dp,
-        shape = RoundedCornerShape(50),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    FilterChip(
+        selected = repeatMode != RepeatMode.OFF,
+        onClick = onRepeat,
+        label = { Text(repeatMode.label, maxLines = 1) },
+        leadingIcon = {
             Icon(
                 imageVector = repeatIcon,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
             )
-            Text(
-                text = repeatMode.label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
-    }
+        },
+    )
 }
 
 fun emptyDisplayTrack() = MusicTrack(
@@ -1018,7 +936,7 @@ fun PlayerControls(
                 imageVector = Icons.Filled.Shuffle,
                 contentDescription = if (shuffleAvailable) "随机播放" else "私人 FM 使用顺序播放",
                 onClick = onShuffle,
-                size = 44.dp,
+                size = 48.dp,
                 iconSize = 24.dp,
                 selected = shuffleEnabled,
                 enabled = shuffleAvailable,
@@ -1028,7 +946,7 @@ fun PlayerControls(
             imageVector = Icons.Filled.SkipPrevious,
             contentDescription = "上一首",
             onClick = onPrevious,
-            size = if (compact) 44.dp else 48.dp,
+            size = 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
         PlayPauseButton(
@@ -1043,7 +961,7 @@ fun PlayerControls(
             imageVector = Icons.Filled.SkipNext,
             contentDescription = "下一首",
             onClick = onNext,
-            size = if (compact) 44.dp else 48.dp,
+            size = 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
         when {
@@ -1067,23 +985,26 @@ fun RoundControlButton(
     selected: Boolean = false,
     enabled: Boolean = true,
 ) {
-    Surface(
-        modifier = Modifier
-            .size(size)
-            .clickable(enabled = enabled, onClick = onClick),
-        color = when {
-            prominent || selected -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.surfaceVariant
-        },
-        contentColor = when {
-            prominent || selected -> MaterialTheme.colorScheme.onPrimary
-            enabled -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-        },
-        tonalElevation = if (prominent) 3.dp else 1.dp,
-        shape = RoundedCornerShape(50),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
+    val buttonSize = if (size < 48.dp) 48.dp else size
+    val buttonModifier = Modifier.size(buttonSize)
+    if (prominent || selected) {
+        FilledIconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = buttonModifier,
+        ) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    } else {
+        FilledTonalIconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = buttonModifier,
+        ) {
             Icon(
                 imageVector = imageVector,
                 contentDescription = contentDescription,
@@ -1104,11 +1025,11 @@ fun PlayPauseButton(
 ) {
     if (isLoading) {
         Surface(
-            modifier = Modifier.size(size),
-            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.size(if (size < 48.dp) 48.dp else size),
+            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
             contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
             tonalElevation = if (prominent) 3.dp else 1.dp,
-            shape = RoundedCornerShape(50),
+            shape = MaterialTheme.shapes.extraLarge,
         ) {
             Box(contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
@@ -1164,6 +1085,13 @@ fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
         },
         enabled = canSeek,
         valueRange = 0f..duration.toFloat(),
+        track = { sliderState ->
+            PlayingProgressIndicator(
+                progress = { sliderState.value / duration.toFloat() },
+                isPlaying = canSeek && state.status == PlayerStatus.Playing,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1206,12 +1134,12 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
 
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
     ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(FuoSpacing.lg),
         ) {
             val displayLines = lines.takeIf { it.isNotEmpty() } ?: listOf(LyricLine(0, "暂无歌词"))
             itemsIndexed(displayLines) { index, line ->
@@ -1275,12 +1203,16 @@ fun QueueList(controller: FuoPlayerController, modifier: Modifier) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = !isUnavailable) { controller.playQueueIndex(index) }
+                    .fuoInteractive()
+                    .clickable(
+                        enabled = !isUnavailable,
+                        role = Role.Button,
+                    ) { controller.playQueueIndex(index) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverBox(track, modifier = Modifier.size(44.dp))
+                CoverBox(track, modifier = Modifier.size(48.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "${index + 1}. ${track.title.ifBlank { "未知歌曲" }}",
@@ -1345,7 +1277,8 @@ fun PlaybackPartList(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPartClick(index) },
+                    .fuoInteractive()
+                    .clickable(role = Role.Button) { onPartClick(index) },
                 color = if (selected) {
                     MaterialTheme.colorScheme.primaryContainer
                 } else {
@@ -1356,7 +1289,7 @@ fun PlaybackPartList(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                shape = RoundedCornerShape(6.dp),
+                shape = MaterialTheme.shapes.small,
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -1415,8 +1348,11 @@ fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): String {
 }
 
 fun replacementSourceLabel(track: MusicTrack): String {
-    val source = replacementProviderLabel(track).ifBlank { "音源" }
-    return "替换来源：$source"
+    val source = track.replacementProviderName?.takeIf { it.isNotBlank() }
+        ?: track.providerName?.takeIf { it.isNotBlank() }
+        ?: track.replacementSource?.takeIf { it.isNotBlank() }
+        ?: "音源"
+    return "换源 • $source"
 }
 
 fun replacementProviderLabel(track: MusicTrack): String {
