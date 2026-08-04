@@ -110,13 +110,26 @@ class QQMusicProvider(
         val (_, identifier) = splitResourceId(playlist.id, "playlist")
         val root = http.getText(
             ID,
-            queryUrl("$SEARCH_BASE/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg", mapOf("format" to "json", "disstid" to identifier, "type" to "1", "json" to "1", "utf8" to "1", "onlysong" to "0")),
+            queryUrl(
+                "$SEARCH_BASE/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg",
+                mapOf(
+                    "format" to "json",
+                    "disstid" to identifier,
+                    "type" to "1",
+                    "json" to "1",
+                    "utf8" to "1",
+                    "onlysong" to "0",
+                    "new_format" to "1",
+                    "song_begin" to offset.toString(),
+                    "song_num" to limit.toString(),
+                ),
+            ),
             authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:playlist:$identifier",
             cachePolicy = ProviderCachePolicies.detail,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
         val detail = root.array("cdlist").firstOrNull()?.asObject() ?: return ProviderPlaylistDetail(playlist)
-        val tracks = detail.array("songlist").drop(offset).take(limit).map(::song)
+        val tracks = detail.array("songlist").map(::song)
         val actual = playlist(
             identifier = detail.string("disstid").ifBlank { identifier },
             title = detail.string("dissname").ifBlank { playlist.title },
@@ -205,18 +218,22 @@ class QQMusicProvider(
     }
 
     override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): org.feeluown.mobile.ProviderContentSection {
-        if (feature.id != "qqmusic_user_playlists") {
+        if (feature.id !in setOf("qqmusic_daily_playlists", "qqmusic_user_playlists")) {
             return super.loadFeature(feature, offset, limit)
         }
         if (!authState().isLoggedIn) {
             return org.feeluown.mobile.ProviderContentSection(feature, isLoginRequired = true)
         }
-        val playlists = userPlaylists()
+        val playlists = when (feature.id) {
+            "qqmusic_daily_playlists" -> recommendedPlaylists()
+            else -> userPlaylists()
+        }
+        val page = playlists.drop(offset).take(limit)
         return org.feeluown.mobile.ProviderContentSection(
             feature = feature,
-            playlists = playlists.drop(offset).take(limit),
-            nextOffset = offset + limit,
-            hasMore = playlists.size > offset + limit,
+            playlists = page,
+            nextOffset = offset + page.size,
+            hasMore = playlists.size > offset + page.size,
         )
     }
 
@@ -239,28 +256,68 @@ class QQMusicProvider(
         val root = http.getText(
             providerId = ID,
             url = queryUrl(
-                "$SEARCH_BASE/qzone/fcg-bin/fcg_ucc_getcd_by_user",
+                "$SEARCH_BASE/rsc/fcgi-bin/fcg_get_profile_homepage.fcg",
                 mapOf(
-                    "format" to "json",
-                    "uin" to uin,
-                    "hostuin" to uin,
-                    "neednewcode" to "0",
-                    "platform" to "yqq",
+                    "cid" to "205360838",
+                    "reqfrom" to "1",
+                    "userid" to uin,
                 ),
             ),
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = null,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        return root.obj("data")?.array("disslist").orEmpty().map { item ->
+        val data = root.obj("data") ?: return emptyList()
+        val creator = data.obj("creator")
+        val userPlaylists = data.obj("mydiss")?.array("list")
+            ?: data.obj("mymusic")?.array("list")
+            ?: data.array("disslist")
+        return buildList {
+            creator?.stringOrNull("fav_pid")?.let { favoriteId ->
+                add(
+                    playlist(
+                        identifier = favoriteId,
+                        title = "我喜欢",
+                        providerUrl = "https://y.qq.com/n/ryqq/playlist/$favoriteId",
+                    ),
+                )
+            }
+            addAll(userPlaylists.mapNotNull { item ->
+                val value = item.asObject()
+                val identifier = value.string("dissid").ifBlank { value.string("tid") }
+                if (identifier.isBlank()) return@mapNotNull null
+                playlist(
+                    identifier = identifier,
+                    title = value.string("title").ifBlank { value.string("dissname") },
+                    coverUrl = value.stringOrNull("logo")
+                        ?: value.stringOrNull("picurl")
+                        ?: value.stringOrNull("cover")
+                        ?: value.stringOrNull("imgurl"),
+                    description = value.string("desc"),
+                    playCount = value.long("visitnum"),
+                    trackCount = value.int("songnum"),
+                    providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
+                )
+            })
+        }
+    }
+
+    private suspend fun recommendedPlaylists(): List<ProviderPlaylist> {
+        val root = rpc(
+            """
+            {"recomPlaylist":{"module":"playlist.HotRecommendServer","method":"get_hot_recommend","param":{"cmd":2,"async":1}}}
+            """.trimIndent(),
+        )
+        return root.obj("recomPlaylist")?.obj("data")?.array("v_hot").orEmpty().mapNotNull { item ->
             val value = item.asObject()
+            val identifier = value.string("content_id").ifBlank { value.string("id") }
+            if (identifier.isBlank()) return@mapNotNull null
             playlist(
-                identifier = value.string("tid").ifBlank { value.string("dissid") },
-                title = value.string("dissname"),
-                coverUrl = value.stringOrNull("logo"),
-                description = value.string("desc"),
-                playCount = value.long("visitnum"),
-                trackCount = value.int("songnum"),
-                providerUrl = "https://y.qq.com/n/ryqq/playlist/${value.string("tid").ifBlank { value.string("dissid") }}",
+                identifier = identifier,
+                title = value.string("title"),
+                coverUrl = value.stringOrNull("cover"),
+                description = value.string("rcmdtemplate"),
+                playCount = value.long("listen_num"),
+                providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
             )
         }
     }
@@ -374,7 +431,7 @@ class QQMusicProvider(
             canRemoveSongFromPlaylist = true,
         )
         val FEATURES = listOf(
-            ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, false),
+            ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
             ProviderFeature("qqmusic_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
         )
     }

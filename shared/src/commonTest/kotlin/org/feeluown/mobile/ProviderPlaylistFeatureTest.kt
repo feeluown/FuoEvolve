@@ -12,6 +12,7 @@ import org.feeluown.mobile.provider.bilibili.BilibiliProvider
 import org.feeluown.mobile.provider.core.InMemoryProviderCredentialStore
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.netease.NeteaseProvider
+import org.feeluown.mobile.provider.qqmusic.QQMusicProvider
 
 class ProviderPlaylistFeatureTest {
     @Test
@@ -131,6 +132,71 @@ class ProviderPlaylistFeatureTest {
         assertFalse(section.isLoginRequired)
         assertEquals("推荐歌单", section.playlists.single().title)
         assertEquals(2, section.playlists.single().trackCount)
+
+        client.close()
+    }
+
+    @Test
+    fun qqmusicLoadsRecommendedPlaylistsFromRpc() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/cgi-bin/musicu.fcg", request.url.encodedPath)
+                        assertEquals("POST", request.method.value)
+                        respond(
+                            """{"code":0,"recomPlaylist":{"code":0,"data":{"v_hot":[{"content_id":987,"title":"QQ 推荐歌单","cover":"https://example.test/cover.jpg","listen_num":1234,"rcmdtemplate":"编辑推荐"}]}}}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"qqmusic_key":"key","wxuin":"o12345","qm_keyst":"keyst"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "qqmusic_daily_playlists" },
+            0,
+            50,
+        )
+
+        assertFalse(section.isLoginRequired)
+        assertEquals("QQ 推荐歌单", section.playlists.single().title)
+        assertEquals(987L, section.playlists.single().id.substringAfterLast(':').toLong())
+        assertEquals(1234L, section.playlists.single().playCount)
+
+        client.close()
+    }
+
+    @Test
+    fun qqmusicLoadsUserPlaylistsFromProfileEndpoint() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/rsc/fcgi-bin/fcg_get_profile_homepage.fcg", request.url.encodedPath)
+                        assertEquals("12345", request.url.parameters["userid"])
+                        assertEquals("205360838", request.url.parameters["cid"])
+                        respond(
+                            """{"code":0,"data":{"creator":{"fav_pid":99},"mydiss":{"list":[{"dissid":123,"title":"我的歌单","logo":"https://example.test/playlist.jpg","songnum":2}]}}}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"qqmusic_key":"key","wxuin":"o12345","qm_keyst":"keyst"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "qqmusic_user_playlists" },
+            0,
+            50,
+        )
+
+        assertFalse(section.isLoginRequired)
+        assertEquals(listOf("我喜欢", "我的歌单"), section.playlists.map { it.title })
+        assertEquals(2, section.playlists[1].trackCount)
+        assertEquals("https://example.test/playlist.jpg", section.playlists[1].coverUrl)
 
         client.close()
     }

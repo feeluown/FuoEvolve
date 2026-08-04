@@ -530,7 +530,7 @@ class FuoPlayerController(
     }
 
     fun authStateFor(provider: ProviderInfo): ProviderAuthState {
-        return providerSessionRepository.state.value.authStates[provider.providerId] ?: ProviderAuthState(
+        return providerAuthStates[provider.providerId] ?: ProviderAuthState(
             providerId = provider.providerId,
             providerName = provider.providerName,
             isLoggedIn = false,
