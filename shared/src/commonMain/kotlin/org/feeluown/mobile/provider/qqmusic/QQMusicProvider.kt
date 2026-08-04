@@ -38,6 +38,7 @@ import org.feeluown.mobile.provider.core.stringOrNull
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderRequestKind
+import kotlin.random.Random
 
 class QQMusicProvider(
     http: ProviderHttpClient,
@@ -61,43 +62,68 @@ class QQMusicProvider(
     override suspend fun resolve(track: org.feeluown.mobile.MusicTrack, qualityPolicy: String): PlaybackPayload? {
         val (_, identifier) = splitResourceId(track.providerId ?: track.id)
         val songMid = identifier.ifBlank { track.id.substringAfterLast(':') }
-        val detail = songDetailObject(songMid)
-        val mediaId = detail?.obj("file")?.stringOrNull("media_mid").orEmpty().ifBlank { songMid }
+        val detail = songDetailObject(songMid) ?: return null
+        val file = detail.obj("file")
+        val mediaId = file?.stringOrNull("media_mid").orEmpty().ifBlank { songMid }
         val credentials = currentCredentials()
-        val guid = credentials?.cookies?.get("guid") ?: "10000"
+        val guid = credentials?.cookies?.get("guid")?.takeIf { it.isNotBlank() } ?: defaultGuid
         val uin = credentials?.cookies?.get("wxuin")?.removePrefix("o")
             ?: credentials?.cookies?.get("uin")
             ?: "0"
-        val filename = qualityPolicy.toQqFilename(mediaId)
+        qqQualityCandidates(qualityPolicy, file).forEach { quality ->
+            val url = qqMediaUrl(songMid, mediaId, quality, guid, uin) ?: return@forEach
+            return PlaybackPayload(
+                url = url,
+                title = track.title,
+                artists = track.artists,
+                album = track.album,
+                source = ID,
+                headers = mapOf("Referer" to "https://y.qq.com/"),
+                coverUrl = track.coverUrl,
+                durationMs = track.durationMs,
+                lyrics = lyric(songMid),
+                audioQuality = quality.label,
+                providerName = NAME,
+            )
+        }
+        return null
+    }
+
+    private suspend fun qqMediaUrl(
+        songMid: String,
+        mediaId: String,
+        quality: QqAudioQuality,
+        guid: String,
+        uin: String,
+    ): String? {
         val request = """
-            {"req_0":{"module":"vkey.GetVkeyServer","method":"CgiGetVkey","param":{"filename":["$filename"],"guid":"$guid","songmid":["$songMid"],"songtype":[0],"uin":"$uin","loginflag":1,"platform":"20"}},"comm":{"format":"json","ct":24,"cv":0}}
+            {"req_0":{"module":"vkey.GetVkeyServer","method":"CgiGetVkey","param":{"filename":[${jsonString(quality.filename(mediaId))}],"guid":${jsonString(guid)},"songmid":[${jsonString(songMid)}],"songtype":[0],"uin":${jsonString(uin)},"loginflag":1,"platform":"20"}},"comm":{"uin":${jsonString(uin)},"format":"json","ct":19,"cv":0}}
         """.trimIndent()
-        val sign = "zza0000000000${md5Hex("CJBPACrRuNy7$request")}"
-        val root = http.postJson(
+        val sign = qqSign(request)
+        val root = http.getText(
             providerId = ID,
-            url = queryUrl("$VKEY_BASE/cgi-bin/musicu.fcg", mapOf("sign" to sign)),
-            json = request,
-            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            url = queryUrl(
+                "$VKEY_BASE/cgi-bin/musicu.fcg",
+                mapOf(
+                    "sign" to sign,
+                    "g_tk" to "5381",
+                    "loginUin" to "",
+                    "hostUin" to "0",
+                    "format" to "json",
+                    "inCharset" to "utf8",
+                    "outCharset" to "utf-8",
+                    "platform" to "yqq.json",
+                    "needNewCode" to "0",
+                    "data" to request,
+                ),
+            ),
+            headers = authenticatedHeaders(mapOf("Referer" to "http://y.qq.com/")),
             cacheKey = null,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        val data = root.obj("req_0")?.obj("data")
-        val item = data?.array("midurlinfo")?.firstOrNull()?.asObject() ?: return null
-        val purl = item.stringOrNull("purl") ?: return null
-        val sip = data.array("sip").firstOrNull()?.asString().orEmpty()
-        val url = if (purl.startsWith("http")) purl else sip + purl
-        return PlaybackPayload(
-            url = url,
-            title = track.title,
-            artists = track.artists,
-            album = track.album,
-            source = ID,
-            headers = mapOf("Referer" to "https://y.qq.com/"),
-            coverUrl = track.coverUrl,
-            durationMs = track.durationMs,
-            lyrics = lyric(songMid),
-            audioQuality = qualityPolicy,
-            providerName = NAME,
-        )
+        val data = root.obj("req_0")?.obj("data") ?: return null
+        val purl = data.array("midurlinfo").firstOrNull()?.asObject()?.stringOrNull("purl") ?: return null
+        if (purl.startsWith("http")) return purl
+        return "$QQ_AUDIO_BASE/${purl.trimStart('/')}"
     }
 
     override suspend fun playlistTracks(playlist: ProviderPlaylist): List<org.feeluown.mobile.MusicTrack> =
@@ -599,7 +625,7 @@ class QQMusicProvider(
         payload: String,
         kind: ProviderRequestKind = ProviderRequestKind.SafeRead,
     ): kotlinx.serialization.json.JsonObject {
-        val sign = "zza0000000000${md5Hex("CJBPACrRuNy7$payload")}"
+        val sign = qqSign(payload)
         return http.postJson(
             providerId = ID,
             url = queryUrl("$VKEY_BASE/cgi-bin/musicu.fcg", mapOf("sign" to sign)),
@@ -710,11 +736,38 @@ class QQMusicProvider(
 
     private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
 
+    private fun qqQualityCandidates(policy: String, file: JsonObject?): List<QqAudioQuality> {
+        val flac = QqAudioQuality("shq", "F000", "flac", "SHQ")
+        val ape = QqAudioQuality("shq", "A000", "ape", "SHQ")
+        val high = QqAudioQuality("hq", "M800", "mp3", "HQ")
+        val standard = QqAudioQuality("sq", "C600", "m4a", "SQ")
+        val low = QqAudioQuality("lq", "M500", "mp3", "LQ")
+        val all = listOf(flac, ape, high, standard, low)
+        val ordered = when (policy) {
+            AudioQualityPolicy.Highest.policy -> listOf(flac, ape, high, standard, low)
+            AudioQualityPolicy.High.policy -> listOf(high, flac, ape, standard, low)
+            AudioQualityPolicy.Standard.policy -> listOf(standard, high, flac, ape, low)
+            AudioQualityPolicy.Low.policy -> listOf(low, standard, high, flac, ape)
+            else -> listOf(high, flac, ape, standard, low)
+        }
+        val available = all.filter { quality ->
+            when (quality.code) {
+                "shq" -> if (quality.prefix == "F000") file?.hasPositive("size_flac") == true else file?.hasPositive("size_ape") == true
+                "hq" -> file?.hasPositive("size_320") == true || file?.hasPositive("size_320mp3") == true
+                "sq" -> file?.hasPositive("size_aac") == true || file?.hasPositive("size_192aac") == true
+                else -> file?.hasPositive("size_128") == true || file?.hasPositive("size_128mp3") == true
+            }
+        }
+        return if (available.isEmpty()) ordered else ordered.filter { it in available }
+    }
+
     private companion object {
         const val ID = "qqmusic"
         const val NAME = "QQ 音乐"
         const val SEARCH_BASE = "https://c.y.qq.com"
         const val VKEY_BASE = "https://u.y.qq.com"
+        const val QQ_AUDIO_BASE = "http://isure.stream.qqmusic.qq.com"
+        val defaultGuid = Random.nextLong(100_000_000, 1_000_000_000).toString()
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,
@@ -739,10 +792,24 @@ class QQMusicProvider(
     }
 }
 
-private fun String.toQqFilename(mediaId: String): String = when (this) {
-    AudioQualityPolicy.Low.policy -> "M500$mediaId.mp3"
-    AudioQualityPolicy.Standard.policy -> "C600$mediaId.m4a"
-    AudioQualityPolicy.High.policy -> "M800$mediaId.mp3"
-    AudioQualityPolicy.Highest.policy -> "F000$mediaId.flac"
-    else -> "M500$mediaId.mp3"
+private data class QqAudioQuality(
+    val code: String,
+    val prefix: String,
+    val extension: String,
+    val label: String,
+) {
+    fun filename(mediaId: String): String = "$prefix$mediaId.$extension"
 }
+
+private fun JsonObject.hasPositive(key: String): Boolean = string(key).toLongOrNull()?.let { it > 0 } == true
+
+private fun qqSign(data: String): String {
+    val randomPart = buildString {
+        repeat(Random.nextInt(10, 17)) {
+            append(QQ_SIGN_ALPHABET[Random.nextInt(QQ_SIGN_ALPHABET.length)])
+        }
+    }
+    return "zza$randomPart${md5Hex("CJBPACrRuNy7$data")}"
+}
+
+private const val QQ_SIGN_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"

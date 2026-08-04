@@ -100,7 +100,7 @@ class BilibiliProvider(
         val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
         val info = videoInfo(bvid).obj("data") ?: return null
         val pages = info.array("pages")
-        val pageNumber = page ?: 1
+        val pageNumber = page?.takeIf { it in 1..pages.size } ?: 1
         val pageInfo = pages.getOrNull(pageNumber - 1)?.asObject()
         val cid = pageInfo?.long("cid") ?: info.long("cid") ?: return null
         val response = http.getText(
@@ -110,9 +110,7 @@ class BilibiliProvider(
                 mapOf(
                     "bvid" to bvid,
                     "cid" to cid.toString(),
-                    "fnval" to "4048",
-                    "fourk" to "1",
-                    "qn" to qualityPolicy.toBilibiliQn(),
+                    "fnval" to "16",
                 ),
             ),
             headers(),
@@ -120,21 +118,28 @@ class BilibiliProvider(
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
         val data = response.obj("data") ?: return null
         val dash = data.obj("dash")
-        val audio = dash?.array("audio")?.sortedByDescending { it.asObject().long("bandwidth") ?: 0 }?.firstOrNull()?.asObject()
+        val audio = selectAudio(
+            qualityPolicy = qualityPolicy,
+            audio = dash?.array("audio").orEmpty().mapNotNull { it.asObject().toAudioStream() },
+            flac = dash?.obj("flac")?.obj("audio")?.toAudioStream(isFlac = true),
+        )
         val durl = data.array("durl").firstOrNull()?.asObject()
-        val url = audio?.stringOrNull("baseUrl")
-            ?: audio?.stringOrNull("base_url")
+        val url = audio?.stream?.url
             ?: durl?.stringOrNull("url")
             ?: return null
-        val parts = pages.mapNotNull { element ->
-            val item = element.asObject()
-            item.stringOrNull("cid")?.let { cidValue ->
-                PlaybackPart(
-                    id = "bilibili:${item.long("cid") ?: cidValue}",
-                    title = item.string("part"),
-                    durationMs = item.long("duration")?.times(1_000),
-                )
+        val parts = if (pages.size > 1) {
+            pages.mapIndexedNotNull { index, element ->
+                val item = element.asObject()
+                item.long("cid")?.let {
+                    PlaybackPart(
+                        id = "bilibili:paged_${bvid}__${index + 1}",
+                        title = item.string("part"),
+                        durationMs = item.long("duration")?.times(1_000),
+                    )
+                }
             }
+        } else {
+            emptyList()
         }
         return PlaybackPayload(
             url = url,
@@ -142,13 +147,13 @@ class BilibiliProvider(
             artists = track.artists,
             album = track.album,
             source = ID,
-            headers = headers(mapOf("Referer" to "https://www.bilibili.com/video/$bvid")),
+            headers = mediaHeaders(),
             coverUrl = track.coverUrl,
-            durationMs = (audio?.long("length") ?: durl?.long("length")) ?: track.durationMs,
-            audioQuality = audio?.long("bandwidth")?.toString() ?: qualityPolicy,
+            durationMs = (audio?.stream?.durationMs ?: durl?.long("length")) ?: track.durationMs,
+            audioQuality = audio?.quality,
             providerName = NAME,
             parts = parts,
-            currentPartIndex = (page ?: 1) - 1,
+            currentPartIndex = if (parts.isEmpty()) -1 else pageNumber - 1,
         )
     }
 
@@ -383,6 +388,13 @@ class BilibiliProvider(
         putAll(extra)
     }
 
+    private suspend fun mediaHeaders(): Map<String, String> = authenticatedHeaders(
+        mapOf(
+            "Referer" to "https://www.bilibili.com/",
+            "User-Agent" to BILIBILI_MEDIA_USER_AGENT,
+        ),
+    )
+
     private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
 
     private fun parsePaged(value: String): Pair<String, Int?> {
@@ -391,11 +403,40 @@ class BilibiliProvider(
         return parts.first() to parts.getOrNull(1)?.toIntOrNull()
     }
 
-    private fun String.toBilibiliQn(): String = when (this) {
-        AudioQualityPolicy.Low.policy -> "32"
-        AudioQualityPolicy.Standard.policy -> "64"
-        AudioQualityPolicy.High.policy, AudioQualityPolicy.Highest.policy -> "80"
-        else -> "80"
+    private fun selectAudio(
+        qualityPolicy: String,
+        audio: List<AudioStream>,
+        flac: AudioStream?,
+    ): SelectedAudio? {
+        if (qualityPolicy == AudioQualityPolicy.Highest.policy && flac != null) {
+            return SelectedAudio(flac, "SHQ")
+        }
+        val sorted = audio.sortedByDescending { it.bandwidth }
+        val preferred = when (qualityPolicy) {
+            AudioQualityPolicy.Low.policy -> sorted.filter { it.bandwidth <= AUDIO_LOW_MAX_BANDWIDTH }
+            AudioQualityPolicy.Standard.policy -> sorted.filter { it.bandwidth <= AUDIO_STANDARD_MAX_BANDWIDTH }
+            else -> sorted
+        }
+        val fallback = if (qualityPolicy == AudioQualityPolicy.Low.policy) sorted.lastOrNull() else sorted.firstOrNull()
+        val selected = preferred.firstOrNull() ?: fallback ?: flac ?: return null
+        return SelectedAudio(selected, selected.qualityLabel())
+    }
+
+    private fun kotlinx.serialization.json.JsonObject.toAudioStream(isFlac: Boolean = false): AudioStream? {
+        val url = stringOrNull("baseUrl") ?: stringOrNull("base_url") ?: return null
+        return AudioStream(
+            url = url,
+            bandwidth = long("bandwidth") ?: 0L,
+            durationMs = long("length"),
+            isFlac = isFlac,
+        )
+    }
+
+    private fun AudioStream.qualityLabel(): String = when {
+        isFlac -> "SHQ"
+        bandwidth <= AUDIO_LOW_MAX_BANDWIDTH -> "LQ"
+        bandwidth <= AUDIO_STANDARD_MAX_BANDWIDTH -> "SQ"
+        else -> "HQ"
     }
 
     private fun stripHtml(value: String): String = value
@@ -436,11 +477,27 @@ class BilibiliProvider(
 
     private data class WbiKeys(val mixinKey: String)
 
+    private data class AudioStream(
+        val url: String,
+        val bandwidth: Long,
+        val durationMs: Long?,
+        val isFlac: Boolean = false,
+    )
+
+    private data class SelectedAudio(
+        val stream: AudioStream,
+        val quality: String,
+    )
+
     private companion object {
         const val ID = "bilibili"
         const val NAME = "哔哩哔哩"
         const val BASE = "https://api.bilibili.com"
         const val MAX_FAVORITE_PAGE_SIZE = 20
+        const val AUDIO_LOW_MAX_BANDWIDTH = 120_000L
+        const val AUDIO_STANDARD_MAX_BANDWIDTH = 256_000L
+        const val BILIBILI_MEDIA_USER_AGENT =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
         val MIXIN_KEY_TABLE = intArrayOf(
             46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
             27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,

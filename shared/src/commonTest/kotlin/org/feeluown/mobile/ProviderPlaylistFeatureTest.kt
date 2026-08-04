@@ -477,6 +477,7 @@ class ProviderPlaylistFeatureTest {
 
     @Test
     fun qqmusicDoesNotUseTestFileAsPlayableMedia() = runTest {
+        val requestedData = mutableListOf<String>()
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
                 engine {
@@ -485,9 +486,17 @@ class ProviderPlaylistFeatureTest {
                             "/v8/fcg-bin/fcg_play_single_song.fcg" -> respond(
                                 """{"code":0,"data":[{"songmid":"qq-mid","file":{"media_mid":"media-mid"}}]}""",
                             )
-                            "/cgi-bin/musicu.fcg" -> respond(
-                                """{"req_0":{"code":0,"data":{"midurlinfo":[{"purl":""}],"sip":["https://example.test/"] ,"testfilewifi":"preview.mp3"}}}""",
-                            )
+                            "/cgi-bin/musicu.fcg" -> {
+                                assertEquals("GET", request.method.value)
+                                val sign = request.url.parameters["sign"].orEmpty()
+                                assertTrue(sign.matches(Regex("zza[a-z0-9]{10,16}[0-9a-f]{32}")), sign)
+                                val data = request.url.parameters["data"].orEmpty()
+                                requestedData += data
+                                assertTrue(data.contains("\"ct\":19"), data)
+                                respond(
+                                    """{"req_0":{"code":0,"data":{"midurlinfo":[{"purl":""}],"sip":["https://example.test/"] ,"testfilewifi":"preview.mp3"}}}""",
+                                )
+                            }
                             else -> error("unexpected QQ Music request: ${request.url.encodedPath}")
                         }
                     }
@@ -508,6 +517,51 @@ class ProviderPlaylistFeatureTest {
         val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
 
         assertEquals(null, payload)
+        assertTrue(requestedData.any { it.contains("M800media-mid.mp3") })
+        client.close()
+    }
+
+    @Test
+    fun qqmusicUsesAvailableQualityAndBuildsPlayableUrlFromPurl() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/v8/fcg-bin/fcg_play_single_song.fcg" -> respond(
+                                """{"code":0,"data":[{"songmid":"qq-mid","file":{"media_mid":"media-mid","size_128mp3":123}}]}""",
+                            )
+                            "/cgi-bin/musicu.fcg" -> {
+                                assertEquals("GET", request.method.value)
+                                assertTrue(request.url.parameters["data"].orEmpty().contains("M500media-mid.mp3"))
+                                respond(
+                                    """{"req_0":{"code":0,"data":{"midurlinfo":[{"purl":"audio/path.mp3"}]}}}""",
+                                )
+                            }
+                            "/lyric/fcgi-bin/fcg_query_lyric_new.fcg" -> respond(
+                                """{"code":0,"lyric":""}""",
+                            )
+                            else -> error("unexpected QQ Music request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "qqmusic:qq-mid",
+            title = "普通歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "qqmusic",
+            sourceType = TrackSourceType.Provider,
+            providerId = "qqmusic:qq-mid",
+        )
+
+        val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
+
+        assertEquals("http://isure.stream.qqmusic.qq.com/audio/path.mp3", payload?.url)
+        assertEquals("LQ", payload?.audioQuality)
         client.close()
     }
 
