@@ -16,17 +16,16 @@
 FuoEvolve 是一个基于 [FeelUOwn](https://github.com/feeluown/FeelUOwn)
 生态构建的开源音乐播放器。当前 Android 端可用，已提供 iOS 实验性构建支持，但暂不发布 iOS 版本。
 
-项目使用 Kotlin Multiplatform 和 Compose Multiplatform 共享 UI、状态和播放器契约。
-Android 端通过 Chaquopy 打包 FeelUOwn Python Core 与音乐源插件，并使用 AndroidX Media3
-播放音频和视频。
+项目使用 Kotlin Multiplatform 和 Compose Multiplatform 共享 UI、状态、播放器契约和音乐源实现。
+音乐源层使用 Kotlin 与 Ktor 实现，Android 端使用 AndroidX Media3 播放音频和视频。
 
 ## 下载
 
 | 渠道 | 地址 | 安装包 |
 | --- | --- | --- |
-| 正式版 | [GitHub 最新 Release](https://github.com/feeluown/FuoEvolve/releases/latest) | 签名 release APK，提供 `arm64-v8a`、`x86_64`、universal 三个包。 |
-| F-Droid | [官方自托管仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | 自动收录最近 5 个稳定版 `arm64-v8a` 安装包，每次 GitHub Release 后自动更新。 |
-| Canary | [master 分支最新 Android APK workflow](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster) | 在最新成功 workflow 的 Artifacts 中下载：用于开发者调试的签名 debug APK，以及 `arm64-v8a`、`x86_64`、universal 三个签名 release APK。 |
+| 正式版 | [GitHub 最新 Release](https://github.com/feeluown/FuoEvolve/releases/latest) | 一个包含 `arm64-v8a` 和 `x86_64` 的签名 multi-ABI release APK。 |
+| F-Droid | [官方自托管仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | 自动收录最近 5 个稳定版 multi-ABI 安装包，每次 GitHub Release 后自动更新。 |
+| Canary | [master 分支最新 Android APK workflow](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster) | 在最新成功 workflow 的 Artifacts 中下载签名 debug APK 和签名 multi-ABI release APK。 |
 
 iOS 仅提供实验性的 Debug 构建产物，不会作为 GitHub Release 发布，也不面向终端用户安装提供支持。
 
@@ -54,16 +53,24 @@ iOS 仅提供实验性的 Debug 构建产物，不会作为 GitHub Release 发�
 
 ## 音乐源支持
 
-Android App 当前已打包的音乐源插件：
+当前共享 Kotlin 模块内置的音乐源实现：
 
-| 音乐源 | 插件包 | 默认状态 | 登录方式 |
+| 音乐源 | Kotlin 实现 | 默认状态 | 登录方式 |
 | --- | --- | --- | --- |
-| 网易云音乐 | `fuo_netease==1.0.8` | 默认启用 | WebView、Cookie |
-| QQ 音乐 | `fuo-qqmusic==1.0.16` | 设置中可启用 | WebView、Cookie |
-| 哔哩哔哩 | `feeluown-bilibili==0.5.5` | 设置中可启用 | WebView、Cookie |
-| YouTube Music | `fuo-ytmusic==0.4.18` | 设置中可启用 | WebView、Headers |
+| 网易云音乐 | `NeteaseProvider` | 默认启用 | Cookie |
+| QQ 音乐 | `QQMusicProvider` | 设置中可启用 | Cookie |
+| 哔哩哔哩 | `BilibiliProvider` | 设置中可启用 | Cookie |
+| YouTube Music | `YtMusicProvider` | 设置中可启用 | Google OAuth |
 
 应用默认只加载网易云音乐。QQ 音乐、哔哩哔哩、YouTube Music 已随 Android 包打包，可在设置中启用、禁用和排序。
+
+YouTube Music 使用 Google OAuth 授权，不使用应用内 WebView。Android 需要设备可用 Google Play services；iOS 需要在 Xcode 配置 Google OAuth iOS Client ID 和反向 URL Scheme。
+
+Google OAuth 配置：
+
+- 在 Google Cloud 项目中启用 YouTube Data API，并配置 OAuth consent screen。`youtube` scope 属于敏感权限，面向公开用户发布时还需要按 Google 要求完成验证。
+- Android OAuth 客户端需要匹配应用包名 `org.feeluown.mobile` 和实际签名证书 SHA-1；登录按钮依赖 Google Play services 提供授权结果。
+- iOS Xcode Build Settings 需要设置 `GOOGLE_IOS_CLIENT_ID` 和 `GOOGLE_IOS_REVERSED_CLIENT_ID`；后者就是 Google OAuth iOS 客户端 ID 的反向 URL Scheme。iOS 工程会通过 Swift Package Manager 引入 `GoogleSignIn`。
 
 图例：✅ 支持，包括需要登录后使用的能力；🧩 依赖上游音乐源暴露对应方法或返回对应结果类型；➖ 当前应用没有入口或未开放。
 
@@ -106,9 +113,9 @@ Android App 当前已打包的音乐源插件：
 
 ## 项目结构
 
-- `shared`：共享 Compose UI、领域契约、播放器状态、通用测试和公共 Python bridge。
-- `androidApp`：Android 应用、Chaquopy 打包、Media3 播放、资源和音乐源桥接。
-- `shared/src/commonMain/python/fuo_mobile`：围绕 FeelUOwn Core 与音乐源插件的 Python 适配层。
+- `shared`：共享 Compose UI、领域契约、播放器状态、通用测试和 Kotlin 音乐源/网络层。
+- `androidApp`：Android 应用、Media3 播放、资源以及 Android 凭据/缓存存储。
+- `shared/src/commonMain/kotlin/org/feeluown/mobile/provider`：Kotlin 音乐源实现、请求策略、缓存、重试和领域映射。
 - `shared/src/commonMain/resources/audio_recognition`：移动端听歌识曲使用的音频指纹运行时资源。
 - `iosApp/FuoEvolve`：用于 iOS 实验性构建的 Swift 应用外壳。
 - `.github/workflows`：Android APK 和 release 工作流，以及实验性的 iOS Debug 工作流。
@@ -117,7 +124,6 @@ Android App 当前已打包的音乐源插件：
 
 - JDK 17 或更新版本。
 - Android Studio 或 Android 命令行工具链，用于 Android 构建。
-- 本地 Chaquopy 构建需要 Python 时使用 Python 3.12。
 - macOS + Xcode，用于 iOS 实验性构建。
 
 ## Android 构建
@@ -134,21 +140,14 @@ Android App 当前已打包的音乐源插件：
 ./gradlew :androidApp:installDebug
 ```
 
-Android 构建会通过 Chaquopy 打包 FeelUOwn 和音乐源插件。默认 FeelUOwn 来源为
-PyPI `5.1.2` sdist，音乐源依赖声明在 `androidApp/build.gradle.kts`。
+Android 构建会直接包含 Kotlin 音乐源实现和 Ktor 网络层，不下载或打包脚本运行时。
 
 ## iOS 状态
 
-`iosApp/FuoEvolve.xcodeproj` 已提供实验性 Debug 构建支持，包括共享 UI 集成、Python
-运行时准备和听歌识曲集成。每次提交到 `master` 都会由 GitHub Actions 构建模拟器 Debug
+`iosApp/FuoEvolve.xcodeproj` 已提供实验性 Debug 构建支持，包括共享 UI 集成和听歌识曲集成。
+每次提交到 `master` 都会由 GitHub Actions 构建模拟器 Debug
 产物。iOS 暂不发布，不应将其视为生产可用版本；不会提供 GitHub Release、App Store 分发
 或面向终端用户的安装支持。
-
-在 Xcode 本地构建前，先准备 Python 运行时：
-
-```bash
-bash scripts/prepare-ios-python.sh
-```
 
 音乐源和播放集成仍处于实验阶段。
 
@@ -168,8 +167,9 @@ bash scripts/prepare-ios-python.sh
 
 ## 音乐源扩展
 
-添加音乐源时，需要在 `androidApp/build.gradle.kts` 中声明 Python 依赖，加入 Android
-音乐源注册表，从设置页开放配置，并在 bridge 中补齐该音乐源的登录或功能定义。默认启用的音乐源是网易云音乐：
+添加音乐源时，在 `shared/src/commonMain/kotlin/org/feeluown/mobile/provider` 下实现
+`KotlinMusicProvider` 契约，在 `KotlinProviderRepository` 注册，并补充契约测试和设置页入口。
+默认启用的音乐源是网易云音乐：
 
 ```json
 {

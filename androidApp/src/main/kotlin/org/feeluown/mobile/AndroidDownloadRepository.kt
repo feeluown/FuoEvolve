@@ -8,8 +8,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
-import android.util.Base64
-import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +27,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.RandomAccessFile
 import java.net.URL
 import java.net.HttpURLConnection
 import kotlin.coroutines.coroutineContext
@@ -588,18 +587,195 @@ class AndroidDownloadRepository(
         if (title.isBlank() && artists.isBlank() && album.isBlank() && coverImage == null) return
 
         runCatching {
-            Python.getInstance().getModule("fuo_mobile.bridge").callAttr(
-                "write_m4a_tags",
-                file.absolutePath,
-                title,
-                artists,
-                album,
-                coverImage?.mimeType.orEmpty(),
-                coverImage?.bytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }.orEmpty(),
-            )
+            insertM4aMetadata(file, title, artists, album, coverImage)
         }.onFailure { throwable ->
             Log.w(TAG, "failed to write m4a metadata file=${file.name}", throwable)
         }
+    }
+
+    private fun insertM4aMetadata(
+        file: File,
+        title: String,
+        artists: String,
+        album: String,
+        coverImage: CoverImage?,
+    ) {
+        val atoms = locateM4aAtoms(file)
+        val moov = atoms.firstOrNull { it.type == "moov" } ?: return
+        val original = ByteArray(moov.size.toInt())
+        RandomAccessFile(file, "r").use { input ->
+            input.seek(moov.offset)
+            input.readFully(original)
+        }
+        val metadata = buildM4aMetadata(title, artists, album, coverImage)
+        val updated = original.copyOf()
+        if (atoms.any { it.type == "mdat" && it.offset > moov.offset }) {
+            adjustM4aChunkOffsets(updated, metadata.size.toLong())
+        }
+        val updatedMoov = ByteArrayOutputStream().apply {
+            writeInt32(updated.size + metadata.size)
+            write(updated, 4, updated.size - 4)
+            write(metadata)
+        }.toByteArray()
+        val temporary = File(file.parentFile, "${file.name}.tags.tmp")
+        RandomAccessFile(file, "r").use { input ->
+            FileOutputStream(temporary, false).use { output ->
+                copyRange(input, output, 0, moov.offset)
+                output.write(updatedMoov)
+                copyRange(
+                    input,
+                    output,
+                    moov.offset + moov.size,
+                    file.length() - moov.offset - moov.size,
+                )
+            }
+        }
+        check(temporary.renameTo(file) || run {
+            file.delete()
+            temporary.renameTo(file)
+        }) { "无法替换带标签的 m4a 文件" }
+    }
+
+    private fun locateM4aAtoms(file: File): List<M4aAtom> {
+        val atoms = mutableListOf<M4aAtom>()
+        RandomAccessFile(file, "r").use { input ->
+            var offset = 0L
+            while (offset + 8 <= input.length()) {
+                input.seek(offset)
+                val size32 = Integer.toUnsignedLong(input.readInt())
+                val typeBytes = ByteArray(4)
+                input.readFully(typeBytes)
+                val type = typeBytes.decodeToString()
+                val headerSize = if (size32 == 1L) 16L else 8L
+                val size = when (size32) {
+                    0L -> input.length() - offset
+                    1L -> input.readLong()
+                    else -> size32
+                }
+                if (size < headerSize || offset + size > input.length()) break
+                atoms += M4aAtom(offset, size, type)
+                offset += size
+            }
+        }
+        return atoms
+    }
+
+    private fun copyRange(input: RandomAccessFile, output: FileOutputStream, offset: Long, length: Long) {
+        input.seek(offset)
+        var remaining = length
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (remaining > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            if (read < 0) error("读取 m4a 文件失败")
+            output.write(buffer, 0, read)
+            remaining -= read
+        }
+    }
+
+    private fun buildM4aMetadata(
+        title: String,
+        artists: String,
+        album: String,
+        coverImage: CoverImage?,
+    ): ByteArray {
+        val ilst = ByteArrayOutputStream()
+        ilst.writeM4aTextItem(byteArrayOf(0xA9.toByte(), 'n'.code.toByte(), 'a'.code.toByte(), 'm'.code.toByte()), title)
+        ilst.writeM4aTextItem(byteArrayOf(0xA9.toByte(), 'A'.code.toByte(), 'R'.code.toByte(), 'T'.code.toByte()), artists)
+        ilst.writeM4aTextItem(byteArrayOf(0xA9.toByte(), 'a'.code.toByte(), 'l'.code.toByte(), 'b'.code.toByte()), album)
+        coverImage?.let { ilst.writeM4aCoverItem(it) }
+        val handler = ByteArrayOutputStream().apply {
+            write(byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0))
+            write("mdir".encodeToByteArray())
+            write(ByteArray(12))
+            write(0)
+        }
+        val meta = atom(
+            "meta".encodeToByteArray(),
+            byteArrayOf(0, 0, 0, 0) + atom("hdlr".encodeToByteArray(), handler.toByteArray()) +
+                atom("ilst".encodeToByteArray(), ilst.toByteArray()),
+        )
+        return atom("udta".encodeToByteArray(), meta)
+    }
+
+    private fun ByteArrayOutputStream.writeM4aTextItem(type: ByteArray, value: String) {
+        if (value.isBlank()) return
+        write(atom(type, atom("data".encodeToByteArray(), byteArrayOf(0, 0, 0, 1, 0, 0, 0, 0) + value.encodeToByteArray())))
+    }
+
+    private fun ByteArrayOutputStream.writeM4aCoverItem(coverImage: CoverImage) {
+        if (coverImage.bytes.isEmpty()) return
+        val imageType = if (coverImage.mimeType.equals("image/png", ignoreCase = true)) 14 else 13
+        write(atom("covr".encodeToByteArray(), atom("data".encodeToByteArray(), byteArrayOf(0, 0, 0, imageType.toByte(), 0, 0, 0, 0) + coverImage.bytes)))
+    }
+
+    private fun atom(type: ByteArray, payload: ByteArray): ByteArray = ByteArrayOutputStream().apply {
+        writeInt32(payload.size + 8)
+        write(type)
+        write(payload)
+    }.toByteArray()
+
+    private fun adjustM4aChunkOffsets(bytes: ByteArray, delta: Long) {
+        visitM4aAtoms(bytes, 8, bytes.size) { type, payloadStart, payloadEnd ->
+            when (type) {
+                "stco" -> {
+                    if (payloadStart + 8 > payloadEnd) return@visitM4aAtoms
+                    val count = bytes.readInt32(payloadStart + 4)
+                    repeat(count.coerceAtMost((payloadEnd - payloadStart - 8) / 4)) { index ->
+                        val offset = payloadStart + 8 + index * 4
+                        bytes.writeInt32(offset, (bytes.readInt32(offset).toLong() + delta).toInt())
+                    }
+                }
+                "co64" -> {
+                    if (payloadStart + 8 > payloadEnd) return@visitM4aAtoms
+                    val count = bytes.readInt32(payloadStart + 4)
+                    repeat(count.coerceAtMost((payloadEnd - payloadStart - 8) / 8)) { index ->
+                        val offset = payloadStart + 8 + index * 8
+                        bytes.writeInt64(offset, bytes.readInt64(offset) + delta)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun visitM4aAtoms(bytes: ByteArray, start: Int, end: Int, visitor: (String, Int, Int) -> Unit) {
+        var offset = start
+        while (offset + 8 <= end) {
+            val size32 = bytes.readInt32(offset).toLong() and 0xFFFF_FFFFL
+            val type = bytes.copyOfRange(offset + 4, offset + 8).decodeToString()
+            val headerSize = if (size32 == 1L) 16 else 8
+            val size = if (size32 == 0L) end - offset else if (size32 == 1L) bytes.readInt64(offset + 8).toInt() else size32.toInt()
+            if (size < headerSize || offset + size > end) return
+            val payloadStart = offset + headerSize + if (type == "meta") 4 else 0
+            val payloadEnd = offset + size
+            visitor(type, offset + headerSize, payloadEnd)
+            if (type in M4A_CONTAINER_ATOMS && payloadStart < payloadEnd) {
+                visitM4aAtoms(bytes, payloadStart, payloadEnd, visitor)
+            }
+            offset += size
+        }
+    }
+
+    private fun ByteArray.readInt32(offset: Int): Int =
+        ((this[offset].toInt() and 0xFF) shl 24) or
+            ((this[offset + 1].toInt() and 0xFF) shl 16) or
+            ((this[offset + 2].toInt() and 0xFF) shl 8) or
+            (this[offset + 3].toInt() and 0xFF)
+
+    private fun ByteArray.readInt64(offset: Int): Long {
+        var value = 0L
+        repeat(8) { index -> value = (value shl 8) or (this[offset + index].toLong() and 0xFF) }
+        return value
+    }
+
+    private fun ByteArray.writeInt32(offset: Int, value: Int) {
+        this[offset] = (value ushr 24).toByte()
+        this[offset + 1] = (value ushr 16).toByte()
+        this[offset + 2] = (value ushr 8).toByte()
+        this[offset + 3] = value.toByte()
+    }
+
+    private fun ByteArray.writeInt64(offset: Int, value: Long) {
+        repeat(8) { index -> this[offset + index] = (value ushr (56 - index * 8)).toByte() }
     }
 
     private fun ByteArray.stripId3v2Tag(): ByteArray {
@@ -771,8 +947,18 @@ class AndroidDownloadRepository(
         val bytes: ByteArray,
     )
 
+    private data class M4aAtom(
+        val offset: Long,
+        val size: Long,
+        val type: String,
+    )
+
     private companion object {
         val M4S_EXTENSION_PATTERN = Regex("\\.m4s(?:[./?#]|$)", RegexOption.IGNORE_CASE)
+        val M4A_CONTAINER_ATOMS = setOf(
+            "moov", "trak", "mdia", "minf", "stbl", "edts", "dinf", "udta", "meta", "ilst",
+            "moof", "traf", "mvex",
+        )
         private const val ID3_HEADER_SIZE = 10
         private const val MAX_COVER_BYTES = 5 * 1024 * 1024
         private const val COVER_CONNECT_TIMEOUT_MS = 10_000

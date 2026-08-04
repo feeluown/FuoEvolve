@@ -1289,6 +1289,42 @@ class FuoPlayerController(
         }
     }
 
+    fun loginYtmusicWithOAuth(
+        accessToken: String,
+        expiresAtMillis: Long? = null,
+        grantedScopes: Set<String> = emptySet(),
+    ) {
+        if (accessToken.isBlank()) {
+            message = "Google OAuth 未返回访问令牌"
+            return
+        }
+        val providerName = providerName("ytmusic")
+        scope.launch {
+            message = "正在登录 $providerName"
+            runCatching {
+                providerSessionRepository.loginWithOAuth(
+                    providerId = "ytmusic",
+                    accessToken = accessToken,
+                    expiresAtMillis = expiresAtMillis,
+                    grantedScopes = grantedScopes,
+                )
+            }
+                .onSuccess {
+                    message = if (it.isLoggedIn) {
+                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
+                    } else {
+                        "${it.providerName} 未登录"
+                    }
+                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                        refreshActiveMineProviderContent()
+                    } else {
+                        refreshHomeContent(homeSection)
+                    }
+                }
+                .onFailure { setError(it) }
+        }
+    }
+
     fun loginYtmusicWithHeaderFile(headerFileJson: String) {
         if (headerFileJson.isBlank()) {
             message = "无法读取 ytmusic_header.json"

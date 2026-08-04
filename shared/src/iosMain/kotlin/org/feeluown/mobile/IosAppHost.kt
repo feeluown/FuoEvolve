@@ -28,24 +28,24 @@ internal fun handleIosLocalPlaylistImportResult(
 }
 
 fun MainViewController(
-    pythonRuntime: IosPythonRuntime,
     audioOutput: IosAudioOutput,
     videoOutput: IosVideoOutput,
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
+    oauthOutput: IosOAuthOutput,
     shareOutput: IosShareOutput,
     localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     audioRecognitionOutput: IosAudioRecognitionOutput,
 ): UIViewController = ComposeUIViewController {
     IosApp(
-        pythonRuntime,
         audioOutput,
         videoOutput,
         mediaLibraryOutput,
         downloadOutput,
         webLoginOutput,
+        oauthOutput,
         shareOutput,
         localPlaylistFileOutput,
         networkStatusOutput,
@@ -55,12 +55,12 @@ fun MainViewController(
 
 @Composable
 private fun IosApp(
-    pythonRuntime: IosPythonRuntime,
     audioOutput: IosAudioOutput,
     videoOutput: IosVideoOutput,
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
+    oauthOutput: IosOAuthOutput,
     shareOutput: IosShareOutput,
     localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
@@ -69,11 +69,11 @@ private fun IosApp(
     IosVideoOutputHolder.output = videoOutput
     val container = remember {
         IosAppContainer(
-            pythonRuntime,
             audioOutput,
             mediaLibraryOutput,
             downloadOutput,
             webLoginOutput,
+            oauthOutput,
             networkStatusOutput,
             audioRecognitionOutput,
         )
@@ -86,6 +86,7 @@ private fun IosApp(
         onRequestMicrophonePermission = container::requestMicrophonePermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
         onLogoutProvider = container::logoutProvider,
+        onStartProviderOAuthLogin = container::startProviderOAuthLogin,
         onImportLocalPlaylistFile = {
             localPlaylistFileOutput.importFile { fileName, content ->
                 handleIosLocalPlaylistImportResult(
@@ -103,16 +104,20 @@ private fun IosApp(
 }
 
 private class IosAppContainer(
-    pythonRuntime: IosPythonRuntime,
     audioOutput: IosAudioOutput,
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     private val webLoginOutput: IosWebLoginOutput,
+    private val oauthOutput: IosOAuthOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     private val audioRecognitionOutput: IosAudioRecognitionOutput,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val providerRepository = IosFuoCoreBridge(pythonRuntime, networkStatusOutput)
+    private val providerRepository = createKotlinProviderRepository(
+        credentials = IosProviderCredentialStore(),
+        persistentCache = IosProviderCacheStore(),
+        isCellularConnection = networkStatusOutput::isCellularConnection,
+    )
     private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
     private val localPlaylistRepository = IosLocalPlaylistRepository()
     private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
@@ -181,8 +186,30 @@ private class IosAppContainer(
         }
     }
 
+    fun startProviderOAuthLogin(provider: ProviderInfo) {
+        val scopes = provider.oauthConfig?.scopes.orEmpty()
+        if (scopes.isEmpty()) {
+            controller.showMessage("未配置 Google OAuth scope")
+            return
+        }
+        val scopesJson = scopes.joinToString(prefix = "[", postfix = "]") { scope ->
+            "\"${scope.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        }
+        oauthOutput.authorize(scopesJson) { accessToken ->
+            if (accessToken.isNullOrBlank()) {
+                controller.showMessage("Google OAuth 授权失败或已取消")
+            } else {
+                controller.loginYtmusicWithOAuth(
+                    accessToken = accessToken,
+                    grantedScopes = scopes.toSet(),
+                )
+            }
+        }
+    }
+
     fun logoutProvider(provider: ProviderInfo) {
         webLoginOutput.clear()
+        oauthOutput.clear()
         controller.logoutProvider(provider.providerId)
     }
 }

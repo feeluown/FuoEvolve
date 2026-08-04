@@ -33,7 +33,7 @@ the pushed tag ref.
 
 ## Publication behavior
 
-Each release downloads up to five recent stable `arm64-v8a` APKs from GitHub
+Each release downloads up to five recent stable multi-ABI APKs from GitHub
 Releases, verifies their package name and signing certificate, runs
 `fdroid update`, combines the generated repository with `docs/`, and deploys the
 complete site to GitHub Pages.
@@ -43,6 +43,5 @@ To refresh the repository without publishing a new Android release, open
 and GitHub Release job, then rebuilds the index from the existing stable
 Releases and redeploys Pages.
 
-Only the `arm64-v8a` APK is published to avoid exposing multiple APKs with the
-same `versionCode` in the repository. GitHub Releases continue to provide the
-`x86_64` and universal APKs.
+Only the multi-ABI APK is published so each release contributes one artifact per
+`versionCode`; it contains the `arm64-v8a` and `x86_64` native ABIs.

@@ -1,17 +1,30 @@
 package org.feeluown.mobile
 
+import android.app.Application
 import android.content.pm.ApplicationInfo
-import com.chaquo.python.android.PyApplication
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 
-class FuoEvolveApplication : PyApplication() {
+class FuoEvolveApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    internal val providerRepository: AndroidFuoCoreBridge by lazy {
-        AndroidFuoCoreBridge(applicationContext)
+    internal val providerRepository: ProviderMusicRepository by lazy {
+        createKotlinProviderRepository(
+            credentials = AndroidProviderCredentialStore(applicationContext),
+            persistentCache = AndroidProviderCacheStore(applicationContext),
+            isCellularConnection = ::isCellularConnection,
+        )
+    }
+
+    private fun isCellularConnection(): Boolean {
+        val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     }
 
     private val localRepository: AndroidLocalMusicRepository by lazy {

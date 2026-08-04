@@ -11,8 +11,8 @@
         A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* ContentView.swift */; };
         A10000000000000000000003 /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* PlayerViewModel.swift */; };
         A10000000000000000000004 /* IOSNativeAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* IOSNativeAudioEngine.swift */; };
-        A10000000000000000000005 /* PythonCoreBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* PythonCoreBridge.swift */; };
         A10000000000000000000006 /* IOSAudioRecognitionOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */; };
+        A10000000000000000000007 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,7 +21,6 @@
         A10000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
         A10000000000000000000013 /* PlayerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViewModel.swift; sourceTree = "<group>"; };
         A10000000000000000000014 /* IOSNativeAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeAudioEngine.swift; sourceTree = "<group>"; };
-        A10000000000000000000015 /* PythonCoreBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonCoreBridge.swift; sourceTree = "<group>"; };
         A10000000000000000000016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
         A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAudioRecognitionOutput.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -31,6 +30,7 @@
             isa = PBXFrameworksBuildPhase;
             buildActionMask = 2147483647;
             files = (
+                A10000000000000000000007 /* GoogleSignIn in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -52,7 +52,6 @@
                 A10000000000000000000012 /* ContentView.swift */,
                 A10000000000000000000013 /* PlayerViewModel.swift */,
                 A10000000000000000000014 /* IOSNativeAudioEngine.swift */,
-                A10000000000000000000015 /* PythonCoreBridge.swift */,
                 A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */,
                 A10000000000000000000016 /* Info.plist */,
             );
@@ -75,7 +74,6 @@
             buildConfigurationList = A10000000000000000000090 /* Build configuration list for PBXNativeTarget "FuoEvolve" */;
             buildPhases = (
                 A10000000000000000000060 /* Embed Shared Framework */,
-                A10000000000000000000061 /* Embed Python Runtime */,
                 A10000000000000000000062 /* Embed Audio Recognition Assets */,
                 A10000000000000000000050 /* Sources */,
                 A10000000000000000000020 /* Frameworks */,
@@ -83,6 +81,9 @@
             buildRules = (
             );
             dependencies = (
+            );
+            packageProductDependencies = (
+                A10000000000000000000022 /* GoogleSignIn */,
             );
             name = FuoEvolve;
             productName = FuoEvolve;
@@ -114,6 +115,9 @@
             );
             mainGroup = A10000000000000000000030;
             productRefGroup = A10000000000000000000032 /* Products */;
+            packageReferences = (
+                A10000000000000000000021 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+            );
             projectDirPath = "";
             projectRoot = "";
             targets = (
@@ -141,25 +145,6 @@
             runOnlyForDeploymentPostprocessing = 0;
             shellPath = /bin/sh;
             shellScript = "cd \"$SRCROOT/..\"\n./gradlew :shared:embedAndSignAppleFrameworkForXcode\n";
-        };
-        A10000000000000000000061 /* Embed Python Runtime */ = {
-            isa = PBXShellScriptBuildPhase;
-            alwaysOutOfDate = 1;
-            buildActionMask = 2147483647;
-            files = (
-            );
-            inputFileListPaths = (
-            );
-            inputPaths = (
-            );
-            name = "Embed Python Runtime";
-            outputFileListPaths = (
-            );
-            outputPaths = (
-            );
-            runOnlyForDeploymentPostprocessing = 0;
-            shellPath = /bin/sh;
-            shellScript = "set -eu\nRUNTIME_ROOT=\"$SRCROOT/FuoEvolve/PythonResources\"\nif [ ! -d \"$RUNTIME_ROOT/python/Python.xcframework\" ]; then\n  echo \"error: iOS Python runtime is missing; run scripts/prepare-ios-python.sh\"\n  exit 1\nfi\nif [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n  PYTHON_SLICE=ios-arm64_x86_64-simulator\nelse\n  PYTHON_SLICE=ios-arm64\nfi\nif [ \"$CURRENT_ARCH\" = \"x86_64\" ]; then\n  PYTHON_ARCH=lib-x86_64\nelse\n  PYTHON_ARCH=lib-arm64\nfi\nAPP_ROOT=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nmkdir -p \"$APP_ROOT/Frameworks\" \"$APP_ROOT/python/lib/python3.12/lib-dynload\" \"$APP_ROOT/python-app\"\nrsync -a --delete \"$RUNTIME_ROOT/python/Python.xcframework/$PYTHON_SLICE/Python.framework\" \"$APP_ROOT/Frameworks/\"\nrsync -a --delete \"$RUNTIME_ROOT/python/Python.xcframework/lib/\" \"$APP_ROOT/python/lib/\"\nrsync -a --delete \"$RUNTIME_ROOT/python/Python.xcframework/$PYTHON_SLICE/$PYTHON_ARCH/python3.12/lib-dynload/\" \"$APP_ROOT/python/lib/python3.12/lib-dynload/\"\nrsync -a --delete \"$RUNTIME_ROOT/app/\" \"$APP_ROOT/python-app/\"\nif [ \"$CODE_SIGNING_ALLOWED\" = \"YES\" ]; then\n  find \"$APP_ROOT/python/lib/python3.12/lib-dynload\" -type f -name '*.so' -print0 | while IFS= read -r -d '' extension; do\n    codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --timestamp=none \"$extension\"\n  done\n  codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --timestamp=none \"$APP_ROOT/Frameworks/Python.framework\"\nfi\n";
         };
         A10000000000000000000062 /* Embed Audio Recognition Assets */ = {
             isa = PBXShellScriptBuildPhase;
@@ -191,7 +176,6 @@
                 A10000000000000000000002 /* ContentView.swift in Sources */,
                 A10000000000000000000003 /* PlayerViewModel.swift in Sources */,
                 A10000000000000000000004 /* IOSNativeAudioEngine.swift in Sources */,
-                A10000000000000000000005 /* PythonCoreBridge.swift in Sources */,
                 A10000000000000000000006 /* IOSAudioRecognitionOutput.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
@@ -325,8 +309,6 @@
                     "$(inherited)",
                     "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
                 );
-                "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64";
-                "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64_x86_64-simulator";
                 INFOPLIST_FILE = FuoEvolve/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
                     "$(inherited)",
@@ -336,8 +318,6 @@
                     "$(inherited)",
                     "-framework",
                     Shared,
-                    "-framework",
-                    Python,
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = org.feeluown.mobile;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -358,8 +338,6 @@
                     "$(inherited)",
                     "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
                 );
-                "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64";
-                "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/FuoEvolve/PythonResources/python/Python.xcframework/ios-arm64_x86_64-simulator";
                 INFOPLIST_FILE = FuoEvolve/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
                     "$(inherited)",
@@ -369,8 +347,6 @@
                     "$(inherited)",
                     "-framework",
                     Shared,
-                    "-framework",
-                    Python,
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = org.feeluown.mobile;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -380,6 +356,25 @@
             name = Release;
         };
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+        A10000000000000000000021 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+            isa = XCRemoteSwiftPackageReference;
+            repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+            requirement = {
+                kind = upToNextMajorVersion;
+                majorVersion = 9;
+            };
+        };
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+        A10000000000000000000022 /* GoogleSignIn */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = A10000000000000000000021 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+            productName = GoogleSignIn;
+        };
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
         A10000000000000000000080 /* Build configuration list for PBXProject "FuoEvolve" */ = {

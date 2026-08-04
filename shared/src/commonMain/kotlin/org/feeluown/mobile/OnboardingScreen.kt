@@ -75,7 +75,7 @@ fun OnboardingScreen(
     controller: FuoPlayerController,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onImportYtmusicHeaderFile: (() -> Unit)? = null,
+    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val availableProviders = controller.orderedAvailableProviders()
@@ -203,7 +203,7 @@ fun OnboardingScreen(
                         provider = selectedProviders[page - 1],
                         onOpenProviderWebLogin = onOpenProviderWebLogin,
                         onLogoutProvider = onLogoutProvider,
-                        onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
+                        onStartProviderOAuthLogin = onStartProviderOAuthLogin,
                     )
                 }
             }
@@ -358,7 +358,7 @@ private fun ProviderLoginOnboardingPage(
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onImportYtmusicHeaderFile: (() -> Unit)?,
+    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)?,
 ) {
     Column(
         modifier = Modifier
@@ -382,7 +382,7 @@ private fun ProviderLoginOnboardingPage(
             provider = provider,
             onOpenProviderWebLogin = onOpenProviderWebLogin,
             onLogoutProvider = onLogoutProvider,
-            onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
+            onStartProviderOAuthLogin = onStartProviderOAuthLogin,
         )
     }
 }

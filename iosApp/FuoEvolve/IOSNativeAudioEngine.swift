@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import CoreMedia
+import GoogleSignIn
 import MediaPlayer
 import Network
 import Shared
@@ -653,6 +654,46 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
                 return controller
             }
         }
+    }
+}
+
+final class IOSGoogleOAuthOutput: NSObject, IosOAuthOutput {
+    static let shared = IOSGoogleOAuthOutput()
+
+    func authorize(
+        scopesJson: String,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        DispatchQueue.main.async {
+            guard
+                let presenter = IOSWebLoginOutput.topViewController(),
+                let scopes = (try? JSONSerialization.jsonObject(with: Data(scopesJson.utf8))) as? [String]
+            else {
+                completionHandler(nil)
+                return
+            }
+            GIDSignIn.sharedInstance.signIn(
+                withPresenting: presenter,
+                hint: nil,
+                additionalScopes: scopes
+            ) { result, error in
+                guard let result, error == nil else {
+                    completionHandler(nil)
+                    return
+                }
+                result.user.refreshTokensIfNeeded { user, error in
+                    guard let user, error == nil else {
+                        completionHandler(nil)
+                        return
+                    }
+                    completionHandler(user.accessToken.tokenString)
+                }
+            }
+        }
+    }
+
+    func clear() {
+        GIDSignIn.sharedInstance.signOut()
     }
 }
 

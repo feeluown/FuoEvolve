@@ -8,34 +8,13 @@ name: Android Release
 
 jobs:
   build-release-apks:
-    name: Build signed release APK (${{ matrix.label }})
+    name: Build signed multi-ABI release APK
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - id: arm64
-            label: arm64-v8a
-            gradle_task: assembleArm64Release
-            apk_glob: androidApp/build/outputs/apk/arm64/release/*-arm64-release.apk
-            asset_suffix: arm64-v8a
-          - id: x86_64
-            label: x86_64
-            gradle_task: assembleX86Release
-            apk_glob: androidApp/build/outputs/apk/x86/release/*-x86-release.apk
-            asset_suffix: x86_64
-          - id: universal
-            label: universal
-            gradle_task: assembleUniversalRelease
-            apk_glob: androidApp/build/outputs/apk/universal/release/*-universal-release.apk
-            asset_suffix: universal
     env:
-      FUO_BUILD_PYTHON: python
-      FUO_FEELUOWN_SOURCE: https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz
       FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
       FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
       FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
@@ -53,15 +32,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            androidApp/build.gradle.kts
-            gradle/libs.versions.toml
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -82,30 +52,29 @@ jobs:
           printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
       - name: Build signed release APK
-        run: ./gradlew :androidApp:${{ matrix.gradle_task }} -Pfuo.releasePerAbi=true
+        run: ./gradlew :androidApp:assembleRelease
 
       - name: Prepare release APK asset
         id: asset
         env:
-          RELEASE_APK_GLOB: ${{ matrix.apk_glob }}
-          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
         run: |
           mkdir -p build/artifacts
           tag="${GITHUB_REF_NAME//\//-}"
           mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
           if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one ${ASSET_SUFFIX} release APK, found ${#apks[@]}"
+            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
-          asset_path="build/artifacts/fuo-evolve-${tag}-${ASSET_SUFFIX}-signed.apk"
+          asset_path="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
           cp "${apks[0]}" "$asset_path"
           echo "path=$asset_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload release APK asset
         uses: actions/upload-artifact@v7
         with:
-          name: release-apk-${{ matrix.id }}
+          name: release-apk
           path: ${{ steps.asset.outputs.path }}
           archive: false
           if-no-files-found: error
@@ -123,27 +92,21 @@ jobs:
       - name: Download release APK assets
         uses: actions/download-artifact@v8
         with:
-          pattern: fuo-evolve-*-signed.apk
+          pattern: release-apk
           path: build/artifacts
           merge-multiple: true
 
       - name: Verify release APK assets
         run: |
           tag="${GITHUB_REF_NAME//\//-}"
-          expected=(
-            "build/artifacts/fuo-evolve-${tag}-arm64-v8a-signed.apk"
-            "build/artifacts/fuo-evolve-${tag}-x86_64-signed.apk"
-            "build/artifacts/fuo-evolve-${tag}-universal-signed.apk"
-          )
-          for asset in "${expected[@]}"; do
-            if [ ! -f "$asset" ]; then
-              echo "::error::Missing release APK asset: $asset"
-              exit 1
-            fi
-          done
+          asset="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
+          if [ ! -f "$asset" ]; then
+            echo "::error::Missing release APK asset: $asset"
+            exit 1
+          fi
           mapfile -t apks < <(find build/artifacts -maxdepth 1 -type f -name '*.apk' -print)
-          if [ "${#apks[@]}" -ne 3 ]; then
-            echo "::error::Expected exactly three release APK assets, found ${#apks[@]}"
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one release APK asset, found ${#apks[@]}"
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
@@ -177,6 +140,7 @@ jobs:
       FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
       FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
+      FDROID_DOCKER_IMAGE: registry.gitlab.com/fdroid/docker-executable-fdroidserver:master
 
     steps:
       - name: Checkout
@@ -188,18 +152,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install F-Droid server tools
-        run: >-
-          python -m pip install --disable-pip-version-check
-          fdroidserver==2.4.5
-
       - name: Build F-Droid repository and Pages site
-        run: bash scripts/build-fdroid-pages.sh
+        run: |
+          docker pull "$FDROID_DOCKER_IMAGE"
+          bash scripts/build-fdroid-pages.sh
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import GoogleSignIn
 import Shared
 
 @main
@@ -25,17 +26,25 @@ private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate {
             completionHandler: completionHandler
         )
     }
+
+    func application(
+        _ app: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+    ) -> Bool {
+        GIDSignIn.sharedInstance.handle(url)
+    }
 }
 
 private struct SharedComposeRoot: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
         let viewController = IosAppHostKt.MainViewController(
-            pythonRuntime: PythonCoreBridge.shared,
             audioOutput: IOSNativeAudioEngine.shared,
             videoOutput: IOSNativeVideoOutput.shared,
             mediaLibraryOutput: IOSMediaLibraryOutput.shared,
             downloadOutput: IOSDownloadOutput.shared,
             webLoginOutput: IOSWebLoginOutput.shared,
+            oauthOutput: IOSGoogleOAuthOutput.shared,
             shareOutput: IOSShareOutput.shared,
             localPlaylistFileOutput: IOSShareOutput.shared,
             networkStatusOutput: IOSNetworkStatusOutput.shared,

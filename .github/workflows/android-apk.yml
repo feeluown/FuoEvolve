@@ -11,31 +11,10 @@ permissions:
 
 jobs:
   build-release-apks:
-    name: Build signed release APK (${{ matrix.label }})
+    name: Build signed multi-ABI release APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - id: arm64
-            label: arm64-v8a
-            gradle_task: assembleArm64Release
-            apk_glob: androidApp/build/outputs/apk/arm64/release/*-arm64-release.apk
-            asset_suffix: arm64-v8a
-          - id: x86_64
-            label: x86_64
-            gradle_task: assembleX86Release
-            apk_glob: androidApp/build/outputs/apk/x86/release/*-x86-release.apk
-            asset_suffix: x86_64
-          - id: universal
-            label: universal
-            gradle_task: assembleUniversalRelease
-            apk_glob: androidApp/build/outputs/apk/universal/release/*-universal-release.apk
-            asset_suffix: universal
     env:
-      FUO_BUILD_PYTHON: python
-      FUO_FEELUOWN_SOURCE: https://files.pythonhosted.org/packages/b2/41/c0f205f279e7bc5e1441d65679f693133dcac976b59ff14f3a1adf9e168d/feeluown-5.1.2.tar.gz
       FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
       FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
       FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
@@ -53,15 +32,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            androidApp/build.gradle.kts
-            gradle/libs.versions.toml
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -82,29 +52,28 @@ jobs:
           printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
       - name: Build signed release APK
-        run: ./gradlew :androidApp:${{ matrix.gradle_task }} -Pfuo.releasePerAbi=true
+        run: ./gradlew :androidApp:assembleRelease
 
       - name: Prepare signed release APK artifact
         id: artifact
         env:
-          RELEASE_APK_GLOB: ${{ matrix.apk_glob }}
-          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
         run: |
           mkdir -p build/artifacts
           mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
           if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one ${ASSET_SUFFIX} release APK, found ${#apks[@]}"
+            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
-          artifact_path="build/artifacts/fuo-evolve-release-${ASSET_SUFFIX}-signed-${GITHUB_SHA}.apk"
+          artifact_path="build/artifacts/fuo-evolve-release-multi-abi-signed-${GITHUB_SHA}.apk"
           cp "${apks[0]}" "$artifact_path"
           echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed release APK
         uses: actions/upload-artifact@v7
         with:
-          name: fuo-evolve-release-${{ matrix.asset_suffix }}-signed-${{ github.sha }}
+          name: fuo-evolve-release-multi-abi-signed-${{ github.sha }}
           path: ${{ steps.artifact.outputs.path }}
           archive: false
           if-no-files-found: error

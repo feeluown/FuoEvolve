@@ -1,0 +1,389 @@
+package org.feeluown.mobile.provider.qqmusic
+
+import org.feeluown.mobile.AudioQualityPolicy
+import org.feeluown.mobile.PlaybackPayload
+import org.feeluown.mobile.ProviderCapabilities
+import org.feeluown.mobile.ProviderComment
+import org.feeluown.mobile.ProviderContentType
+import org.feeluown.mobile.ProviderFeature
+import org.feeluown.mobile.ProviderFeatureCategory
+import org.feeluown.mobile.ProviderInfo
+import org.feeluown.mobile.ProviderMediaItemType
+import org.feeluown.mobile.ProviderMutationResult
+import org.feeluown.mobile.ProviderPlaylist
+import org.feeluown.mobile.ProviderPlaylistDetail
+import org.feeluown.mobile.ProviderSearchResults
+import org.feeluown.mobile.ProviderVideo
+import org.feeluown.mobile.VideoPlaybackPayload
+import org.feeluown.mobile.provider.core.BaseKotlinProvider
+import org.feeluown.mobile.provider.core.KotlinMusicProvider
+import org.feeluown.mobile.provider.core.ProviderCredentialStore
+import org.feeluown.mobile.provider.core.array
+import org.feeluown.mobile.provider.core.asObject
+import org.feeluown.mobile.provider.core.asString
+import org.feeluown.mobile.provider.core.base64DecodeToString
+import org.feeluown.mobile.provider.core.int
+import org.feeluown.mobile.provider.core.long
+import org.feeluown.mobile.provider.core.md5Hex
+import org.feeluown.mobile.provider.core.obj
+import org.feeluown.mobile.provider.core.providerJson
+import org.feeluown.mobile.provider.core.splitResourceId
+import org.feeluown.mobile.provider.core.string
+import org.feeluown.mobile.provider.core.stringOrNull
+import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
+import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.core.network.ProviderRequestKind
+import io.ktor.http.Parameters
+
+class QQMusicProvider(
+    http: ProviderHttpClient,
+    credentials: ProviderCredentialStore,
+) : BaseKotlinProvider(
+    http = http,
+    credentials = credentials,
+    id = ID,
+    name = NAME,
+    info = INFO,
+    capabilities = CAPABILITIES,
+    features = FEATURES,
+), KotlinMusicProvider {
+    override suspend fun search(keyword: String): ProviderSearchResults {
+        val root = searchRoot(keyword)
+        return ProviderSearchResults(tracks = root.obj("data")?.obj("song")?.array("list").orEmpty().map(::song))
+    }
+
+    override suspend fun trackDetail(identifier: String) = songDetail(rawIdentifier(identifier))
+
+    override suspend fun resolve(track: org.feeluown.mobile.MusicTrack, qualityPolicy: String): PlaybackPayload? {
+        val (_, identifier) = splitResourceId(track.providerId ?: track.id)
+        val songMid = identifier.ifBlank { track.id.substringAfterLast(':') }
+        val detail = songDetailObject(songMid)
+        val mediaId = detail?.obj("file")?.stringOrNull("media_mid").orEmpty().ifBlank { songMid }
+        val credentials = currentCredentials()
+        val guid = credentials?.cookies?.get("guid") ?: "10000"
+        val uin = credentials?.cookies?.get("wxuin")?.removePrefix("o")
+            ?: credentials?.cookies?.get("uin")
+            ?: "0"
+        val filename = qualityPolicy.toQqFilename(mediaId)
+        val request = """
+            {"req_0":{"module":"vkey.GetVkeyServer","method":"CgiGetVkey","param":{"filename":["$filename"],"guid":"$guid","songmid":["$songMid"],"songtype":[0],"uin":"$uin","loginflag":1,"platform":"20"}},"comm":{"format":"json","ct":24,"cv":0}}
+        """.trimIndent()
+        val sign = "zza0000000000${md5Hex("CJBPACrRuNy7$request")}"
+        val root = http.postJson(
+            providerId = ID,
+            url = queryUrl("$VKEY_BASE/cgi-bin/musicu.fcg", mapOf("sign" to sign)),
+            json = request,
+            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val data = root.obj("req_0")?.obj("data")
+        val item = data?.array("midurlinfo")?.firstOrNull()?.asObject() ?: return null
+        val purl = item.stringOrNull("purl")
+        val sip = data.array("sip").firstOrNull()?.asString().orEmpty()
+        val testFile = data.stringOrNull("testfilewifi") ?: data.stringOrNull("testfile2g")
+        val url = when {
+            !purl.isNullOrBlank() && purl.startsWith("http") -> purl
+            !purl.isNullOrBlank() -> sip + purl
+            !testFile.isNullOrBlank() && testFile.startsWith("http") -> testFile
+            !testFile.isNullOrBlank() -> sip + testFile
+            else -> return null
+        }
+        return PlaybackPayload(
+            url = url,
+            title = track.title,
+            artists = track.artists,
+            album = track.album,
+            source = ID,
+            headers = mapOf("Referer" to "https://y.qq.com/"),
+            coverUrl = track.coverUrl,
+            durationMs = track.durationMs,
+            lyrics = lyric(songMid),
+            audioQuality = qualityPolicy,
+            providerName = NAME,
+        )
+    }
+
+    override suspend fun playlistTracks(playlist: ProviderPlaylist): List<org.feeluown.mobile.MusicTrack> =
+        playlistDetail(playlist, 0, 300).tracks
+
+    override suspend fun playlistDetail(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail {
+        val (_, identifier) = splitResourceId(playlist.id, "playlist")
+        val root = http.getText(
+            ID,
+            queryUrl("$SEARCH_BASE/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg", mapOf("format" to "json", "disstid" to identifier, "type" to "1", "json" to "1", "utf8" to "1", "onlysong" to "0")),
+            authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = "qqmusic:playlist:$identifier",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val detail = root.array("cdlist").firstOrNull()?.asObject() ?: return ProviderPlaylistDetail(playlist)
+        val tracks = detail.array("songlist").drop(offset).take(limit).map(::song)
+        val actual = playlist(
+            identifier = detail.string("disstid").ifBlank { identifier },
+            title = detail.string("dissname").ifBlank { playlist.title },
+            coverUrl = detail.stringOrNull("logo"),
+            description = detail.string("desc"),
+            playCount = detail.long("visitnum"),
+            trackCount = detail.int("songnum") ?: detail.array("songlist").size,
+            providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
+        )
+        val count = actual.trackCount ?: tracks.size
+        return ProviderPlaylistDetail(actual, tracks, offset + tracks.size, offset + tracks.size < count)
+    }
+
+    override suspend fun similarTracks(track: org.feeluown.mobile.MusicTrack): List<org.feeluown.mobile.MusicTrack> {
+        val identifier = rawIdentifier(track.providerId ?: track.id)
+        val root = rpc(
+            """
+            {"simsongs":{"module":"rcmusic.similarSongRadioServer","method":"get_simsongs","param":{"songid":"$identifier"}}}
+            """.trimIndent(),
+        )
+        return root.obj("simsongs")?.obj("data")?.array("songInfoList").orEmpty().map(::song)
+    }
+
+    override suspend fun hotComments(track: org.feeluown.mobile.MusicTrack): List<ProviderComment> {
+        val identifier = rawIdentifier(track.providerId ?: track.id)
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$SEARCH_BASE/base/fcgi-bin/fcg_global_comment_h5.fcg",
+                mapOf("biztype" to "1", "cmd" to "8", "topid" to identifier, "pagenum" to "0", "pagesize" to "25"),
+            ),
+            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = "qqmusic:comments:$identifier",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return root.obj("hot_comment")?.array("commentlist").orEmpty().map { value ->
+            val item = value.asObject()
+            ProviderComment(
+                id = item.string("commentid"),
+                userName = item.string("nick"),
+                content = item.string("rootcommentcontent"),
+                likedCount = item.long("praisenum") ?: 0,
+                timeSeconds = item.long("time") ?: 0,
+            )
+        }
+    }
+
+    override suspend fun trackVideo(track: org.feeluown.mobile.MusicTrack): ProviderVideo? {
+        val detail = songDetailObject(rawIdentifier(track.providerId ?: track.id)) ?: return null
+        val videoId = detail.obj("mv")?.stringOrNull("vid")?.takeIf { it.isNotBlank() } ?: return null
+        return video(
+            identifier = videoId,
+            title = track.title,
+            artists = track.artists,
+            coverUrl = track.coverUrl,
+            durationMs = track.durationMs,
+            providerUrl = "https://y.qq.com/n/ryqq/mvdetail/$videoId",
+        )
+    }
+
+    override suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload {
+        val identifier = splitResourceId(video.id, "video").second
+        val root = rpc(
+            """
+            {"getMvUrl":{"module":"gosrf.Stream.MvUrlProxy","method":"GetMvUrls","param":{"vids":["$identifier"],"request_typet":10001}}}
+            """.trimIndent(),
+        )
+        val data = root.obj("getMvUrl")?.obj("data")?.obj(identifier) ?: return VideoPlaybackPayload(video = video)
+        val url = data.array("mp4").asSequence()
+            .map { it.asObject() }
+            .flatMap { it.array("freeflow_url").asSequence().mapNotNull { value -> value.asString().takeIf(String::isNotBlank) } }
+            .firstOrNull()
+            ?: return VideoPlaybackPayload(video = video)
+        return VideoPlaybackPayload(
+            video = video,
+            url = url,
+            videoUrl = url,
+            headers = mapOf("Referer" to "https://y.qq.com/"),
+            quality = "video",
+        )
+    }
+
+    override suspend fun playlistOperationTargets(track: org.feeluown.mobile.MusicTrack): List<ProviderPlaylist> {
+        if (!authState().isLoggedIn) return emptyList()
+        return userPlaylists()
+    }
+
+    override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): org.feeluown.mobile.ProviderContentSection {
+        if (feature.id != "qqmusic_user_playlists") {
+            return super.loadFeature(feature, offset, limit)
+        }
+        if (!authState().isLoggedIn) {
+            return org.feeluown.mobile.ProviderContentSection(feature, isLoginRequired = true)
+        }
+        val playlists = userPlaylists()
+        return org.feeluown.mobile.ProviderContentSection(
+            feature = feature,
+            playlists = playlists.drop(offset).take(limit),
+            nextOffset = offset + limit,
+            hasMore = playlists.size > offset + limit,
+        )
+    }
+
+    override suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
+        mutatePlaylist("AddSonglist", playlist, track)
+
+    override suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
+        mutatePlaylist("DelSonglist", playlist, track)
+
+    private suspend fun searchRoot(keyword: String) = http.getText(
+        ID,
+        queryUrl("$SEARCH_BASE/soso/fcgi-bin/search_for_qq_cp", mapOf("format" to "json", "n" to "30", "p" to "1", "w" to keyword, "cr" to "1", "g_tk" to "5381", "t" to "0")),
+        authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+        cacheKey = "qqmusic:search:$keyword",
+        cachePolicy = ProviderCachePolicies.search,
+    ).value.let { providerJson.parseToJsonElement(it).asObject() }
+
+    private suspend fun userPlaylists(): List<ProviderPlaylist> {
+        val uin = currentUin() ?: return emptyList()
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$SEARCH_BASE/qzone/fcg-bin/fcg_ucc_getcd_by_user",
+                mapOf(
+                    "format" to "json",
+                    "uin" to uin,
+                    "hostuin" to uin,
+                    "neednewcode" to "0",
+                    "platform" to "yqq",
+                ),
+            ),
+            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return root.obj("data")?.array("disslist").orEmpty().map { item ->
+            val value = item.asObject()
+            playlist(
+                identifier = value.string("tid").ifBlank { value.string("dissid") },
+                title = value.string("dissname"),
+                coverUrl = value.stringOrNull("logo"),
+                description = value.string("desc"),
+                playCount = value.long("visitnum"),
+                trackCount = value.int("songnum"),
+                providerUrl = "https://y.qq.com/n/ryqq/playlist/${value.string("tid").ifBlank { value.string("dissid") }}",
+            )
+        }
+    }
+
+    private suspend fun currentUin(): String? {
+        val values = currentCredentials()?.cookies.orEmpty()
+        return values["wxuin"]?.removePrefix("o")?.takeIf { it.isNotBlank() }
+            ?: values["uin"]?.takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun rpc(
+        payload: String,
+        kind: ProviderRequestKind = ProviderRequestKind.SafeRead,
+    ): kotlinx.serialization.json.JsonObject {
+        val sign = "zza0000000000${md5Hex("CJBPACrRuNy7$payload")}"
+        return http.postJson(
+            providerId = ID,
+            url = queryUrl("$VKEY_BASE/cgi-bin/musicu.fcg", mapOf("sign" to sign)),
+            json = payload,
+            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            kind = kind,
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+    }
+
+    private suspend fun mutatePlaylist(
+        method: String,
+        playlist: ProviderPlaylist,
+        track: org.feeluown.mobile.MusicTrack,
+    ): ProviderMutationResult {
+        val (_, playlistId) = splitResourceId(playlist.id, "playlist")
+        val songId = songDetailObject(rawIdentifier(track.providerId ?: track.id))?.long("id")
+            ?: return ProviderMutationResult(false, "无法读取 QQ 音乐歌曲编号")
+        val root = rpc(
+            """
+            {"req_0":{"method":"$method","module":"music.musicasset.PlaylistDetailWrite","param":{"dirId":${playlistId.toLongOrNull() ?: 0},"v_songInfo":[{"songId":$songId,"songType":0}]}}}
+            """.trimIndent(),
+            kind = ProviderRequestKind.Mutation,
+        )
+        val success = root.obj("req_0")?.int("code") == 0
+        return ProviderMutationResult(success, if (success) "操作成功" else "QQ 音乐歌单操作失败")
+    }
+
+    private suspend fun songDetail(identifier: String): org.feeluown.mobile.MusicTrack? {
+        return songDetailObject(identifier)?.let(::song)
+    }
+
+    private suspend fun songDetailObject(identifier: String): kotlinx.serialization.json.JsonObject? {
+        val root = http.getText(
+            ID,
+            queryUrl("$SEARCH_BASE/v8/fcg-bin/fcg_play_single_song.fcg", mapOf("songmid" to identifier, "format" to "json")),
+            authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = "qqmusic:song:$identifier",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return root.array("data").firstOrNull()?.asObject()
+            ?: root.array("songlist").firstOrNull()?.asObject()
+    }
+
+    private suspend fun lyric(identifier: String): String? = runCatching {
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$SEARCH_BASE/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
+                mapOf("songmid" to identifier, "format" to "json"),
+            ),
+            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = "qqmusic:lyric:$identifier",
+            cachePolicy = ProviderCachePolicies.lyric,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        root.stringOrNull("lyric")?.let(::base64DecodeToString)
+    }.getOrNull()
+
+    private fun song(value: kotlinx.serialization.json.JsonElement): org.feeluown.mobile.MusicTrack {
+        val item = value.asObject()
+        val identifier = item.string("songmid").ifBlank { item.string("songid") }
+        val singers = item.array("singer").map { it.asObject().string("name") }.filter { it.isNotBlank() }.joinToString(" / ")
+        val albumMid = item.stringOrNull("albummid")
+        return track(
+            identifier = identifier,
+            title = item.string("songname").ifBlank { item.string("songorig") },
+            artists = singers,
+            album = item.string("albumname"),
+            coverUrl = albumMid?.let { "https://y.qq.com/music/photo_new/T002R300x300M000${it}.jpg" },
+            durationMs = item.long("interval")?.times(1_000),
+            artistItemId = item.array("singer").firstOrNull()?.asObject()?.stringOrNull("mid")?.let { "artist:$ID:$it" },
+            albumItemId = albumMid?.let { "album:$ID:$it" },
+            providerUrl = "https://y.qq.com/n/ryqq/songDetail/$identifier",
+        )
+    }
+
+    private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
+
+    private companion object {
+        const val ID = "qqmusic"
+        const val NAME = "QQ 音乐"
+        const val SEARCH_BASE = "https://c.y.qq.com"
+        const val VKEY_BASE = "https://u.y.qq.com"
+        val INFO = ProviderInfo(
+            providerId = ID,
+            providerName = NAME,
+            loginConfig = org.feeluown.mobile.ProviderLoginConfig(
+                "https://y.qq.com",
+                listOf(listOf("qqmusic_key", "wxuin", "qm_keyst"), listOf("qqmusic_key", "uin", "qm_keyst")),
+            ),
+        )
+        val CAPABILITIES = ProviderCapabilities(
+            providerId = ID,
+            providerName = NAME,
+            canAddSongToPlaylist = true,
+            canRemoveSongFromPlaylist = true,
+        )
+        val FEATURES = listOf(
+            ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, false),
+            ProviderFeature("qqmusic_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
+        )
+    }
+}
+
+private fun String.toQqFilename(mediaId: String): String = when (this) {
+    AudioQualityPolicy.Low.policy -> "M500$mediaId.mp3"
+    AudioQualityPolicy.Standard.policy -> "C600$mediaId.m4a"
+    AudioQualityPolicy.High.policy -> "M800$mediaId.mp3"
+    AudioQualityPolicy.Highest.policy -> "F000$mediaId.flac"
+    else -> "M500$mediaId.mp3"
+}

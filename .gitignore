@@ -9,10 +9,6 @@ local.properties
 DerivedData/
 iosApp/**/*.xcuserdata/
 iosApp/**/*.xcuserstate
-iosApp/FuoEvolve/PythonResources/
-shared/src/commonMain/python/.venv/
-shared/src/commonMain/python/__pycache__/
-shared/src/commonMain/python/**/__pycache__/
 signing/
 *.jks
 *.keystore

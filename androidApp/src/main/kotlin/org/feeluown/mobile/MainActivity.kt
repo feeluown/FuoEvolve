@@ -15,6 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -27,6 +28,10 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
 import java.io.File
 
 private data class PendingLocalPlaylistExport(
@@ -93,17 +98,30 @@ class MainActivity : ComponentActivity() {
                 }
                 pendingWebLoginProviderId = null
             }
-            val ytmusicHeaderFileLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument(),
-            ) { uri ->
-                if (uri != null) {
-                    val headerFileJson = runCatching {
-                        contentResolver.openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
-                            ?: ""
-                    }.getOrDefault("")
-                    controller.loginYtmusicWithHeaderFile(headerFileJson)
+            val googleAuthorizationClient = remember {
+                Identity.getAuthorizationClient(this@MainActivity)
+            }
+            fun applyGoogleAuthorization(result: AuthorizationResult) {
+                val accessToken = result.accessToken.orEmpty()
+                if (accessToken.isBlank()) {
+                    controller.showMessage("Google OAuth 未返回访问令牌")
+                } else {
+                    controller.loginYtmusicWithOAuth(
+                        accessToken = accessToken,
+                        grantedScopes = result.grantedScopes.toSet(),
+                    )
+                }
+            }
+            val googleAuthorizationResolutionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartIntentSenderForResult(),
+            ) { result ->
+                if (result.resultCode != RESULT_OK || result.data == null) {
+                    controller.showMessage("Google OAuth 授权已取消")
+                } else {
+                    runCatching {
+                        googleAuthorizationClient.getAuthorizationResultFromIntent(result.data)
+                    }.onSuccess(::applyGoogleAuthorization)
+                        .onFailure { controller.showMessage("Google OAuth 授权失败：${it.message.orEmpty()}") }
                 }
             }
             var pendingLocalPlaylistExport by remember {
@@ -185,8 +203,30 @@ class MainActivity : ComponentActivity() {
                     ProviderWebLoginActivity.clearWebLoginState()
                     controller.logoutProvider(provider.providerId)
                 },
-                onImportYtmusicHeaderFile = {
-                    ytmusicHeaderFileLauncher.launch(arrayOf("application/json"))
+                onStartProviderOAuthLogin = { provider ->
+                    val scopes = provider.oauthConfig?.scopes.orEmpty()
+                    if (scopes.isEmpty()) {
+                        controller.showMessage("未配置 Google OAuth scope")
+                    } else {
+                        val request = AuthorizationRequest.builder()
+                            .setRequestedScopes(scopes.map(::Scope))
+                            .build()
+                        googleAuthorizationClient.authorize(request)
+                            .addOnSuccessListener { result ->
+                                if (result.hasResolution()) {
+                                    result.pendingIntent?.let { pendingIntent ->
+                                        googleAuthorizationResolutionLauncher.launch(
+                                            IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                                        )
+                                    } ?: controller.showMessage("Google OAuth 无法启动授权页面")
+                                } else {
+                                    applyGoogleAuthorization(result)
+                                }
+                            }
+                            .addOnFailureListener {
+                                controller.showMessage("Google OAuth 授权失败：${it.message.orEmpty()}")
+                            }
+                    }
                 },
                 onImportLocalPlaylistFile = {
                     localPlaylistFileLauncher.launch(

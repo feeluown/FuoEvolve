@@ -25,6 +25,12 @@ interface ProviderSessionRepository {
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
+    suspend fun loginWithOAuth(
+        providerId: String,
+        accessToken: String,
+        expiresAtMillis: Long? = null,
+        grantedScopes: Set<String> = emptySet(),
+    ): ProviderAuthState
     suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState
     suspend fun logout(providerId: String): ProviderAuthState
 }
@@ -81,6 +87,15 @@ class DefaultProviderSessionRepository(
         cookie: String,
     ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
         providerRepository.loginWithHeaders(providerId, authorization, cookie)
+    }
+
+    override suspend fun loginWithOAuth(
+        providerId: String,
+        accessToken: String,
+        expiresAtMillis: Long?,
+        grantedScopes: Set<String>,
+    ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
+        providerRepository.loginWithOAuth(providerId, accessToken, expiresAtMillis, grantedScopes)
     }
 
     override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =

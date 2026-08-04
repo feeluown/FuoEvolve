@@ -44,21 +44,6 @@ class IosPlatformRepositoriesTest {
     }
 
     @Test
-    fun resolveUsesAudioQualityForCurrentNetwork() = runTest {
-        val runtime = RecordingPythonRuntime()
-        val networkStatus = FakeNetworkStatusOutput(isCellular = true)
-        val repository = IosFuoCoreBridge(runtime, networkStatus)
-        repository.updateAudioQualityPolicies(AudioQualityPolicy.Highest, AudioQualityPolicy.Low)
-
-        repository.resolve(providerTrack(), UnavailablePlaybackPolicy.Skip, emptySet(), 0.5, false, false)
-        assertEquals(AudioQualityPolicy.Low.policy, runtime.resolveArguments?.get(1))
-
-        networkStatus.isCellular = false
-        repository.resolve(providerTrack(), UnavailablePlaybackPolicy.Skip, emptySet(), 0.5, false, false)
-        assertEquals(AudioQualityPolicy.Highest.policy, runtime.resolveArguments?.get(1))
-    }
-
-    @Test
     fun relaxedScanSettingsRestoreTracksFromUnfilteredCache() = runTest {
         val mediaLibrary = FakeMediaLibraryOutput()
         val repository = IosLocalMusicRepository(mediaLibrary)
@@ -125,32 +110,6 @@ class IosPlatformRepositoriesTest {
         job.cancelAndJoin()
 
         assertTrue(waitingOutput.cancelled)
-    }
-
-    private fun providerTrack() = MusicTrack(
-        id = "netease:1",
-        title = "Track",
-        artists = "Artist",
-        album = "Album",
-        source = "netease",
-        sourceType = TrackSourceType.Provider,
-    )
-
-    private class FakeNetworkStatusOutput(
-        var isCellular: Boolean,
-    ) : IosNetworkStatusOutput {
-        override fun isCellularConnection(): Boolean = isCellular
-    }
-
-    private class RecordingPythonRuntime : IosPythonRuntime {
-        var resolveArguments: List<String>? = null
-
-        override fun createBridge(enabledProvidersJson: String): String = "{}"
-
-        override fun call(method: String, arguments: List<String>): String {
-            if (method == "resolve") resolveArguments = arguments
-            return "{\"url\":\"https://example.com/audio.mp3\"}"
-        }
     }
 
     private class FakeMediaLibraryOutput : IosMediaLibraryOutput {

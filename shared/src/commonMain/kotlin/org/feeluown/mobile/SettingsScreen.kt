@@ -105,8 +105,8 @@ fun SettingsScreen(
     controller: FuoPlayerController,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onImportYtmusicHeaderFile: (() -> Unit)? = null,
     appVersionInfo: String?,
+    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
 ) {
     val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
@@ -154,7 +154,7 @@ fun SettingsScreen(
                     provider = loginProvider,
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
                     onLogoutProvider = onLogoutProvider,
-                    onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
+                    onStartProviderOAuthLogin = onStartProviderOAuthLogin,
                 )
             }
         } else if (layoutInfo.useWideLayout) {
@@ -589,12 +589,13 @@ fun ProviderLoginPanel(
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onImportYtmusicHeaderFile: (() -> Unit)? = null,
+    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
 ) {
     val authState = controller.authStateFor(provider)
     val isAuthBusy = controller.isProviderAuthBusy(provider.providerId)
     val authError = controller.providerAuthError(provider.providerId)
     val supportedLoginModes = listOf(
+        ProviderLoginMode.OAuth,
         ProviderLoginMode.WebView,
         ProviderLoginMode.Cookie,
         ProviderLoginMode.Headers,
@@ -672,6 +673,21 @@ fun ProviderLoginPanel(
                 }
             }
             when (activeLoginMode) {
+                ProviderLoginMode.OAuth -> {
+                    Text(
+                        text = "使用 Google OAuth 授权 YouTube Music，不会在应用内嵌入 Google 登录页面。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(
+                        enabled = !isAuthBusy && provider.oauthConfig != null && onStartProviderOAuthLogin != null,
+                        onClick = { onStartProviderOAuthLogin?.invoke(provider) },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (isAuthBusy) "授权中" else "使用 Google 登录")
+                    }
+                }
                 ProviderLoginMode.WebView -> {
                     Button(
                         enabled = !isAuthBusy && provider.loginConfig != null,
@@ -709,14 +725,6 @@ fun ProviderLoginPanel(
                 }
                 ProviderLoginMode.Headers -> {
                     val headerInput = controller.providerHeaderInputFor(provider.providerId)
-                    if (provider.providerId == "ytmusic" && onImportYtmusicHeaderFile != null) {
-                        Button(
-                            enabled = !isAuthBusy,
-                            onClick = onImportYtmusicHeaderFile,
-                        ) {
-                            Text("导入 ytmusic_header.json")
-                        }
-                    }
                     TextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = headerInput.authorization,
@@ -749,6 +757,7 @@ fun ProviderLoginPanel(
 }
 
 fun ProviderLoginMode.label(): String = when (this) {
+    ProviderLoginMode.OAuth -> "Google OAuth"
     ProviderLoginMode.WebView -> "WebView"
     ProviderLoginMode.Cookie -> "复制 Cookie"
     ProviderLoginMode.Headers -> "Headers"

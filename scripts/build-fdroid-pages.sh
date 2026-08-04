@@ -64,6 +64,20 @@ AAPT="$(find_android_tool aapt)" || exit 1
 APKSIGNER="$(find_android_tool apksigner)" || exit 1
 readonly AAPT APKSIGNER
 
+run_fdroid() {
+    if [[ -n "${FDROID_DOCKER_IMAGE:-}" ]]; then
+        docker run --rm \
+            -v "$WORK_DIR:/repo" \
+            -v "$ANDROID_SDK_ROOT:/opt/android-sdk:ro" \
+            -w /repo \
+            -e ANDROID_HOME=/opt/android-sdk \
+            "$FDROID_DOCKER_IMAGE" \
+            "$@"
+    else
+        fdroid "$@"
+    fi
+}
+
 rm -rf "$WORK_DIR" "$PAGES_DIR"
 mkdir -p "$WORK_DIR/repo" "$WORK_DIR/metadata" "$PAGES_DIR"
 
@@ -90,10 +104,10 @@ for tag in "${release_tags[@]}"; do
         gh release view "$tag" \
             --repo "$REPOSITORY" \
             --json assets \
-            --jq '[.assets[].name | select(endswith("-arm64-v8a-signed.apk"))][0] // ""'
+            --jq '[.assets[].name | select(endswith("-android-signed.apk"))][0] // ""'
     )"
     if [[ -z "$asset_name" ]]; then
-        echo "Skipping $tag: no arm64-v8a signed APK"
+        echo "Skipping $tag: no multi-ABI signed APK"
         continue
     fi
 
@@ -108,7 +122,7 @@ for tag in "${release_tags[@]}"; do
 done
 
 if (( downloaded == 0 )); then
-    echo "No arm64-v8a release APKs were downloaded" >&2
+    echo "No multi-ABI release APKs were downloaded" >&2
     exit 1
 fi
 
@@ -136,8 +150,8 @@ done
 
 (
     cd "$WORK_DIR"
-    fdroid lint "$PACKAGE_NAME"
-    fdroid update --verbose
+    run_fdroid lint "$PACKAGE_NAME"
+    run_fdroid update --verbose
 )
 
 cp -a "$PROJECT_ROOT/docs/." "$PAGES_DIR/"
