@@ -677,7 +677,6 @@ fun ProviderLoginPanel(
             }
             when (activeLoginMode) {
                 ProviderLoginMode.OAuth -> {
-                    BrowserOAuthGuide()
                     Button(
                         enabled = !isAuthBusy && provider.oauthConfig != null && onStartProviderOAuthLogin != null,
                         onClick = { onStartProviderOAuthLogin?.invoke(provider) },
@@ -751,36 +750,6 @@ fun ProviderLoginPanel(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun BrowserOAuthGuide() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(
-            modifier = Modifier.padding(FuoSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "浏览器 OAuth 登录",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "登录会在 Chrome、Firefox 或系统 Custom Tab 中完成，应用不会嵌入 Google 登录页面。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            Text(
-                text = "流程：点击“打开浏览器授权” → 完成 Google 登录并同意授权 → 浏览器回调后自动返回应用。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
         }
     }
 }
