@@ -41,6 +41,16 @@ jobs:
           path: ~/.konan
           key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
 
+      - name: Resolve Swift package dependencies
+        run: |
+          defaults write com.apple.dt.Xcode IDEPackageSupportUseBuiltinSCM YES
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project iosApp/FuoEvolve.xcodeproj \
+            -scheme FuoEvolve \
+            -derivedDataPath build/ios-ci \
+            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages
+
       - name: Build debug simulator app
         run: |
           xcodebuild \
@@ -49,6 +59,7 @@ jobs:
             -configuration Debug \
             -sdk iphonesimulator \
             -derivedDataPath build/ios-ci \
+            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages \
             ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -63,6 +74,7 @@ jobs:
             -configuration Debug \
             -sdk iphoneos \
             -derivedDataPath build/ios-ci \
+            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages \
             ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
