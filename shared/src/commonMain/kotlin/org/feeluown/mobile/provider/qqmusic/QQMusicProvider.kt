@@ -82,16 +82,9 @@ class QQMusicProvider(
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
         val data = root.obj("req_0")?.obj("data")
         val item = data?.array("midurlinfo")?.firstOrNull()?.asObject() ?: return null
-        val purl = item.stringOrNull("purl")
+        val purl = item.stringOrNull("purl") ?: return null
         val sip = data.array("sip").firstOrNull()?.asString().orEmpty()
-        val testFile = data.stringOrNull("testfilewifi") ?: data.stringOrNull("testfile2g")
-        val url = when {
-            !purl.isNullOrBlank() && purl.startsWith("http") -> purl
-            !purl.isNullOrBlank() -> sip + purl
-            !testFile.isNullOrBlank() && testFile.startsWith("http") -> testFile
-            !testFile.isNullOrBlank() -> sip + testFile
-            else -> return null
-        }
+        val url = if (purl.startsWith("http")) purl else sip + purl
         return PlaybackPayload(
             url = url,
             title = track.title,

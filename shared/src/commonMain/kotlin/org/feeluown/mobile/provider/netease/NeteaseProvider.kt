@@ -2,6 +2,7 @@ package org.feeluown.mobile.provider.netease
 
 import io.ktor.http.Parameters
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.feeluown.mobile.AudioQualityPolicy
@@ -68,23 +69,13 @@ class NeteaseProvider(
         val (_, identifier) = splitResourceId(track.providerId ?: track.id)
         val id = identifier.ifBlank { track.id.substringAfterLast(':') }
         val credentials = currentCredentials()
-        val quality = qualityPolicy.toNeteaseLevel()
-        val response = http.postForm(
-            providerId = ID,
-            url = "$BASE/api/song/enhance/player/url/v1",
-            form = Parameters.build {
-                append("ids", "[$id]")
-                append("level", quality)
-                append("encodeType", "mp3")
-                append("csrf_token", credentials?.cookies?.get("__csrf").orEmpty())
-            },
-            headers = authenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
-            cacheKey = null,
+        val bitrate = qualityPolicy.toNeteaseBitrate()
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/song/enhance/player/url",
+            """{"ids":[$id],"br":$bitrate,"csrf_token":"${credentials?.cookies?.get("__csrf").orEmpty().jsonString()}"}""",
         )
-        val data = runCatching { providerJson.parseToJsonElement(response.value).asObject().array("data") }.getOrNull()
-            ?.firstOrNull()
-            ?.asObject()
-            ?: return null
+        val data = root.array("data").firstOrNull()?.asObject() ?: return null
+        if (data["freeTrialInfo"]?.let { it !is JsonNull } == true) return null
         val url = data.stringOrNull("url") ?: return null
         return PlaybackPayload(
             url = url,
@@ -96,7 +87,7 @@ class NeteaseProvider(
             coverUrl = track.coverUrl,
             durationMs = data.long("time") ?: track.durationMs,
             lyrics = lyric(id),
-            audioQuality = data.stringOrNull("type") ?: quality,
+            audioQuality = data.stringOrNull("type") ?: qualityPolicy,
             providerName = NAME,
         )
     }
@@ -121,25 +112,34 @@ class NeteaseProvider(
 
     override suspend fun playlistDetail(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail {
         val (_, identifier) = splitResourceId(playlist.id, "playlist")
-        val result = http.getText(
-            providerId = ID,
-            url = queryUrl("$BASE/api/playlist/detail", mapOf("id" to identifier, "limit" to limit.toString(), "offset" to offset.toString())),
-            headers = authenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
-            cacheKey = "netease:playlist:$identifier:$offset:$limit",
-            cachePolicy = ProviderCachePolicies.detail,
-        )
-        val root = providerJson.parseToJsonElement(result.value).asObject()
+        val root = runCatching {
+            neteaseWeApiPost(
+                "$BASE/weapi/v3/playlist/detail",
+                """{"id":${neteaseId(identifier)},"limit":$limit,"offset":$offset,"n":$limit}""",
+            )
+        }.getOrNull()?.takeIf { it.obj("playlist") != null || it.obj("result") != null }
+            ?: http.getText(
+                providerId = ID,
+                url = queryUrl("$BASE/api/playlist/detail", mapOf("id" to identifier, "limit" to limit.toString(), "offset" to offset.toString())),
+                headers = neteaseAuthenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
+                cacheKey = "netease:playlist:$identifier:$offset:$limit",
+                cachePolicy = ProviderCachePolicies.detail,
+            ).value.let { providerJson.parseToJsonElement(it).asObject() }
         val playlistObject = root.obj("playlist")
             ?: root.obj("result")?.obj("playlist")
             ?: root.obj("result")
             ?: return ProviderPlaylistDetail(playlist)
-        val trackValues = playlistObject.array("tracks").takeIf { it.isNotEmpty() }
-            ?: playlistObject.array("trackIds").drop(offset).take(limit).map { trackId ->
+        val trackIds = playlistObject.array("trackIds")
+        val trackValues = if (trackIds.isNotEmpty()) {
+            trackIds.drop(offset).take(limit).map { trackId ->
                 JsonObject(mapOf("id" to JsonPrimitive(trackId.asObject().string("id"))))
             }
+        } else {
+            playlistObject.array("tracks")
+        }
         val tracks = loadSongs(trackValues)
         val actualPlaylist = playlistObject.toPlaylist()
-        val count = actualPlaylist.trackCount ?: playlist.trackCount ?: tracks.size
+        val count = actualPlaylist.trackCount ?: playlist.trackCount ?: trackIds.size.coerceAtLeast(tracks.size)
         return ProviderPlaylistDetail(
             playlist = actualPlaylist,
             tracks = tracks,
@@ -517,11 +517,18 @@ class NeteaseProvider(
         val ids = identifiers.distinct().filter { it.toLongOrNull() != null }
         if (ids.isEmpty()) return emptyMap()
         return ids.chunked(200).flatMap { batch ->
-            val root = http.getText(
+            val idList = batch.joinToString(",")
+            val weApiRoot = runCatching {
+                neteaseWeApiPost(
+                    "$BASE/weapi/v3/song/detail",
+                    """{"c":[${batch.joinToString(",") { """{"id":$it}""" }}],"ids":[$idList]}""",
+                )
+            }.getOrNull()?.takeIf { it.array("songs").isNotEmpty() }
+            val root = weApiRoot ?: http.getText(
                 ID,
-                queryUrl("$BASE/api/song/detail", mapOf("ids" to "[${batch.joinToString(",")}]")),
-                authenticatedHeaders(),
-                cacheKey = "netease:songs:${batch.joinToString(",")}",
+                queryUrl("$BASE/api/song/detail", mapOf("ids" to "[$idList]")),
+                neteaseAuthenticatedHeaders(),
+                cacheKey = "netease:songs:$idList",
                 cachePolicy = ProviderCachePolicies.detail,
             ).value.let { providerJson.parseToJsonElement(it).asObject() }
             root.array("songs").mapNotNull { value ->
@@ -553,11 +560,16 @@ class NeteaseProvider(
         val hasMore: Boolean,
     )
 
-    private suspend fun lyric(identifier: String): String? {
-        val root = http.getText(ID, queryUrl("$BASE/api/song/lyric", mapOf("id" to identifier, "lv" to "1", "kv" to "1", "tv" to "-1")), authenticatedHeaders(), cacheKey = "netease:lyric:$identifier", cachePolicy = ProviderCachePolicies.lyric)
-            .value.let { providerJson.parseToJsonElement(it).asObject() }
-        return root.obj("lrc")?.stringOrNull("lyric")
-    }
+    private suspend fun lyric(identifier: String): String? = runCatching {
+        val root = http.getText(
+            ID,
+            queryUrl("$BASE/api/song/lyric", mapOf("id" to identifier, "lv" to "1", "kv" to "1", "tv" to "-1")),
+            neteaseAuthenticatedHeaders(),
+            cacheKey = "netease:lyric:$identifier",
+            cachePolicy = ProviderCachePolicies.lyric,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        root.obj("lrc")?.stringOrNull("lyric")
+    }.getOrNull()
 
     private suspend fun currentUserId(): String? = runCatching { requestCurrentUserId() }.getOrNull()
 
@@ -687,12 +699,15 @@ class NeteaseProvider(
     private fun mutation(root: kotlinx.serialization.json.JsonObject, successMessage: String): ProviderMutationResult =
         ProviderMutationResult(root.int("code") == 200 || root.boolean("success"), if (root.int("code") == 200) successMessage else root.string("message").ifBlank { "操作失败" })
 
-    private fun String.toNeteaseLevel(): String = when (this) {
-        AudioQualityPolicy.High.policy, AudioQualityPolicy.Highest.policy -> "exhigh"
-        AudioQualityPolicy.Standard.policy -> "standard"
-        AudioQualityPolicy.Low.policy -> "standard"
-        else -> "exhigh"
+    private fun String.toNeteaseBitrate(): Int = when (this) {
+        AudioQualityPolicy.Highest.policy -> 999_000
+        AudioQualityPolicy.High.policy -> 320_000
+        AudioQualityPolicy.Standard.policy -> 192_000
+        AudioQualityPolicy.Low.policy -> 128_000
+        else -> 320_000
     }
+
+    private fun String.jsonString(): String = replace("\\", "\\\\").replace("\"", "\\\"")
 
     private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
 

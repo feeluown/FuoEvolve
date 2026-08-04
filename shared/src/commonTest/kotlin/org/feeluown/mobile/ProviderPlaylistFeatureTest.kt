@@ -374,6 +374,144 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
+    fun neteasePlaylistPrefersWeApiTrackIdsAndBatchDetails() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/weapi/v3/playlist/detail" -> respond(
+                                """{"code":200,"playlist":{"id":123,"name":"用户歌单","trackCount":2,"trackIds":[{"id":456},{"id":789}],"tracks":[{"id":456,"name":"首屏歌曲"}]}}""",
+                            )
+                            "/weapi/v3/song/detail" -> respond(
+                                """{"code":200,"songs":[{"id":789,"name":"第二首歌曲","ar":[{"id":7,"name":"歌手"}],"al":{"id":8,"name":"专辑"}}]}""",
+                            )
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val playlist = ProviderPlaylist(
+            id = "playlist:netease:123",
+            title = "用户歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+
+        val detail = provider.playlistDetail(playlist, offset = 1, limit = 1)
+
+        assertEquals("netease:789", detail.tracks.single().id)
+        assertEquals("第二首歌曲", detail.tracks.single().title)
+        assertEquals(2, detail.tracksNextOffset)
+        assertFalse(detail.tracksHasMore)
+
+        client.close()
+    }
+
+    @Test
+    fun neteaseTreatsFreeTrialMediaAsUnavailableForSmartReplacement() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/weapi/song/enhance/player/url", request.url.encodedPath)
+                        respond(
+                            """{"code":200,"data":[{"id":456,"url":"https://example.test/preview.mp3","freeTrialInfo":{"start":0,"end":30},"time":180000}]}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "netease:456",
+            title = "VIP 歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            providerId = "netease:456",
+        )
+
+        val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
+
+        assertEquals(null, payload)
+        client.close()
+    }
+
+    @Test
+    fun neteaseLyricFailureDoesNotBlockPlayableMedia() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/weapi/song/enhance/player/url" -> respond(
+                                """{"code":200,"data":[{"id":456,"url":"https://example.test/song.mp3","freeTrialInfo":null,"time":180000,"type":"mp3"}]}""",
+                            )
+                            else -> error("lyric request should be best effort: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "netease:456",
+            title = "可播放歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            providerId = "netease:456",
+        )
+
+        val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
+
+        assertEquals("https://example.test/song.mp3", payload?.url)
+        assertEquals(null, payload?.lyrics)
+        client.close()
+    }
+
+    @Test
+    fun qqmusicDoesNotUseTestFileAsPlayableMedia() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/v8/fcg-bin/fcg_play_single_song.fcg" -> respond(
+                                """{"code":0,"data":[{"songmid":"qq-mid","file":{"media_mid":"media-mid"}}]}""",
+                            )
+                            "/cgi-bin/musicu.fcg" -> respond(
+                                """{"req_0":{"code":0,"data":{"midurlinfo":[{"purl":""}],"sip":["https://example.test/"] ,"testfilewifi":"preview.mp3"}}}""",
+                            )
+                            else -> error("unexpected QQ Music request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "qqmusic:qq-mid",
+            title = "试听歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "qqmusic",
+            sourceType = TrackSourceType.Provider,
+            providerId = "qqmusic:qq-mid",
+        )
+
+        val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
+
+        assertEquals(null, payload)
+        client.close()
+    }
+
+    @Test
     fun neteaseCloudSongsResolvesPrivateCloudEntries() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
