@@ -113,7 +113,7 @@ class NeteaseProvider(
         return ProviderAuthState(
             providerId = ID,
             providerName = NAME,
-            isLoggedIn = user?.int("code") == 200 || credentials.cookies.isNotEmpty(),
+            isLoggedIn = user?.let { it.int("code") == 200 } ?: credentialsArePresent(credentials),
             userName = user?.obj("profile")?.stringOrNull("nickname"),
         )
     }
@@ -378,8 +378,16 @@ class NeteaseProvider(
             headers = authenticatedHeaders(),
             cacheKey = null,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        root.obj("profile")?.stringOrNull("userId") ?: root.stringOrNull("id")
+        root.obj("profile")?.stringOrNull("userId")
+            ?: root.obj("account")?.stringOrNull("id")
+            ?: root.stringOrNull("userId")
+            ?: root.stringOrNull("id")
     }.getOrNull()
+
+    private fun credentialsArePresent(credentials: org.feeluown.mobile.provider.core.ProviderCredentials): Boolean =
+        credentials.cookies.isNotEmpty() ||
+            !credentials.cookieHeader.isNullOrBlank() ||
+            !credentials.authorization.isNullOrBlank()
 
     private fun song(value: kotlinx.serialization.json.JsonElement): org.feeluown.mobile.MusicTrack {
         val item = value.asObject()

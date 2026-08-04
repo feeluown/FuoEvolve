@@ -155,14 +155,12 @@ class BilibiliProvider(
     override suspend fun authState(): ProviderAuthState {
         val credentials = currentCredentials()
         if (credentials == null) return authState(null)
-        val root = runCatching {
-            http.getText(ID, "$BASE/x/web-interface/nav", headers(), cacheKey = null).value.let { providerJson.parseToJsonElement(it).asObject() }
-        }.getOrNull()
+        val root = nav()
         val data = root?.obj("data")
         return ProviderAuthState(
             providerId = ID,
             providerName = NAME,
-            isLoggedIn = data?.boolean("isLogin") == true || credentials.cookies.isNotEmpty(),
+            isLoggedIn = root?.let { data?.boolean("isLogin") == true } ?: credentialsArePresent(credentials),
             userName = data?.stringOrNull("uname"),
         )
     }
@@ -205,11 +203,52 @@ class BilibiliProvider(
     }
 
     override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
-        if (feature.id != "bilibili_popular_videos") return ProviderContentSection(feature, isLoginRequired = feature.requiresLogin && !authState().isLoggedIn)
+        if (feature.requiresLogin && !authState().isLoggedIn) {
+            return ProviderContentSection(feature, isLoginRequired = true)
+        }
+        if (feature.id == "bilibili_user_playlists" || feature.id == "bilibili_favorite_playlists") {
+            return loadFavoriteFolders(feature, offset, limit)
+        }
+        if (feature.id != "bilibili_popular_videos") return ProviderContentSection(feature)
         val root = http.getText(ID, queryUrl("$BASE/x/web-interface/popular", mapOf("ps" to limit.toString(), "pn" to (offset / limit + 1).toString())), headers(), cacheKey = "bilibili:popular:${offset / limit}:$limit", cachePolicy = ProviderCachePolicies.recommendation)
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         val tracks = root.obj("data")?.array("list").orEmpty().mapNotNull { searchItemToTrack(it.asObject()) }
         return ProviderContentSection(feature, tracks = tracks, nextOffset = offset + tracks.size, hasMore = tracks.size == limit)
+    }
+
+    override suspend fun playlistDetail(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail {
+        val (_, mediaId) = splitResourceId(playlist.id, "playlist")
+        val pageSize = limit.coerceIn(1, MAX_FAVORITE_PAGE_SIZE)
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$BASE/x/v3/fav/resource/list",
+                mapOf(
+                    "media_id" to mediaId,
+                    "pn" to (offset / pageSize + 1).toString(),
+                    "ps" to pageSize.toString(),
+                    "keyword" to "",
+                    "order" to "mtime",
+                    "type" to "0",
+                    "tid" to "0",
+                    "platform" to "web",
+                ),
+            ),
+            headers = headers(),
+            cacheKey = "bilibili:favorite:$mediaId:${offset / pageSize}:$pageSize",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val data = root.obj("data") ?: return ProviderPlaylistDetail(playlist)
+        val actualPlaylist = data.obj("info")?.toFavoritePlaylist() ?: playlist
+        val tracks = data.array("medias").mapNotNull { searchItemToTrack(it.asObject()) }
+        val total = actualPlaylist.trackCount ?: playlist.trackCount
+        val nextOffset = offset + tracks.size
+        return ProviderPlaylistDetail(
+            playlist = actualPlaylist,
+            tracks = tracks,
+            tracksNextOffset = nextOffset,
+            tracksHasMore = data.boolean("has_more") || (total != null && nextOffset < total),
+        )
     }
 
     private suspend fun videoInfo(bvid: String) = http.getText(
@@ -219,6 +258,62 @@ class BilibiliProvider(
         cacheKey = "bilibili:view:$bvid",
         cachePolicy = ProviderCachePolicies.detail,
     ).value.let { providerJson.parseToJsonElement(it).asObject() }
+
+    private suspend fun loadFavoriteFolders(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
+        val mid = currentUserMid()
+            ?: return ProviderContentSection(feature, errorMessage = "无法读取哔哩哔哩用户信息")
+        val collected = feature.id == "bilibili_favorite_playlists"
+        val pageSize = limit.coerceAtLeast(1)
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                if (collected) "$BASE/x/v3/fav/folder/collected/list" else "$BASE/x/v3/fav/folder/created/list-all",
+                buildMap {
+                    put("up_mid", mid)
+                    if (collected) {
+                        put("pn", (offset / pageSize + 1).toString())
+                        put("ps", pageSize.toString())
+                        put("platform", "web")
+                    } else {
+                        put("type", "2")
+                    }
+                },
+            ),
+            headers = headers(),
+            cacheKey = "bilibili:${if (collected) "collected" else "created"}:folders:$mid:${offset / pageSize}:$pageSize",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val code = root.int("code")
+        if (code != null && code != 0) {
+            return if (code == -101) {
+                ProviderContentSection(feature, isLoginRequired = true)
+            } else {
+                ProviderContentSection(feature, errorMessage = root.string("message").ifBlank { "无法读取哔哩哔哩收藏夹" })
+            }
+        }
+        val data = root.obj("data")
+        val folders = data?.array("list").orEmpty().mapNotNull { it.asObject().toFavoritePlaylist() }
+        val page = if (collected) folders else folders.drop(offset).take(pageSize)
+        val total = data?.int("count") ?: folders.size
+        val nextOffset = offset + page.size
+        return ProviderContentSection(
+            feature = feature,
+            playlists = page,
+            nextOffset = nextOffset,
+            hasMore = nextOffset < total,
+        )
+    }
+
+    private suspend fun currentUserMid(): String? = nav()?.obj("data")?.stringOrNull("mid")
+
+    private suspend fun nav(): kotlinx.serialization.json.JsonObject? = runCatching {
+        http.getText(
+            providerId = ID,
+            url = "$BASE/x/web-interface/nav",
+            headers = headers(),
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+    }.getOrNull()
 
     private suspend fun signedQueryUrl(base: String, params: Map<String, String>): String {
         val keys = wbiKeys()
@@ -251,17 +346,37 @@ class BilibiliProvider(
     }
 
     private fun searchItemToTrack(item: kotlinx.serialization.json.JsonObject): org.feeluown.mobile.MusicTrack? {
-        val bvid = item.stringOrNull("bvid") ?: return null
+        val bvid = item.stringOrNull("bvid") ?: item.stringOrNull("bv_id") ?: return null
         return track(
             identifier = bvid,
             title = stripHtml(item.string("title")),
-            artists = item.string("author").ifBlank { item.obj("owner")?.string("name").orEmpty() },
+            artists = item.string("author").ifBlank { item.obj("owner")?.string("name").orEmpty() }.ifBlank { item.obj("upper")?.string("name").orEmpty() },
             album = "",
-            coverUrl = normalizeCover(item.stringOrNull("pic")),
-            durationMs = parseDurationMs(item.string("duration")) ?: item.long("duration")?.times(1_000),
+            coverUrl = normalizeCover(item.stringOrNull("pic") ?: item.stringOrNull("cover")),
+            durationMs = item.long("duration")?.times(1_000) ?: parseDurationMs(item.string("duration")),
             providerUrl = "https://www.bilibili.com/video/$bvid",
         )
     }
+
+    private fun kotlinx.serialization.json.JsonObject.toFavoritePlaylist(): ProviderPlaylist? {
+        val identifier = stringOrNull("id") ?: stringOrNull("media_id") ?: return null
+        val title = stringOrNull("title") ?: return null
+        val ownerMid = stringOrNull("mid") ?: obj("upper")?.stringOrNull("mid")
+        return playlist(
+            identifier = identifier,
+            title = title,
+            coverUrl = normalizeCover(stringOrNull("cover")),
+            description = string("intro"),
+            playCount = obj("cnt_info")?.long("play"),
+            trackCount = int("media_count"),
+            providerUrl = ownerMid?.let { "https://space.bilibili.com/$it/favlist?fid=$identifier" },
+        )
+    }
+
+    private fun credentialsArePresent(credentials: org.feeluown.mobile.provider.core.ProviderCredentials): Boolean =
+        credentials.cookies.isNotEmpty() ||
+            !credentials.cookieHeader.isNullOrBlank() ||
+            !credentials.authorization.isNullOrBlank()
 
     private suspend fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
         putAll(authenticatedHeaders(mapOf("Referer" to "https://www.bilibili.com/", "Accept" to "application/json, text/plain, */*")))
@@ -325,6 +440,7 @@ class BilibiliProvider(
         const val ID = "bilibili"
         const val NAME = "哔哩哔哩"
         const val BASE = "https://api.bilibili.com"
+        const val MAX_FAVORITE_PAGE_SIZE = 20
         val MIXIN_KEY_TABLE = intArrayOf(
             46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
             27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
