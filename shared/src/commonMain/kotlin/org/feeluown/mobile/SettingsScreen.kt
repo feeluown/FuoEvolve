@@ -107,6 +107,7 @@ fun SettingsScreen(
     onLogoutProvider: (ProviderInfo) -> Unit,
     appVersionInfo: String?,
     onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
@@ -155,6 +156,7 @@ fun SettingsScreen(
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
                     onLogoutProvider = onLogoutProvider,
                     onStartProviderOAuthLogin = onStartProviderOAuthLogin,
+                    onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
                 )
             }
         } else if (layoutInfo.useWideLayout) {
@@ -590,6 +592,7 @@ fun ProviderLoginPanel(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val authState = controller.authStateFor(provider)
     val isAuthBusy = controller.isProviderAuthBusy(provider.providerId)
@@ -721,6 +724,14 @@ fun ProviderLoginPanel(
                 }
                 ProviderLoginMode.Headers -> {
                     val headerInput = controller.providerHeaderInputFor(provider.providerId)
+                    if (provider.providerId == "ytmusic" && onImportYtmusicHeaderFile != null) {
+                        Button(
+                            enabled = !isAuthBusy,
+                            onClick = onImportYtmusicHeaderFile,
+                        ) {
+                            Text("导入 ytmusic_header.json")
+                        }
+                    }
                     TextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = headerInput.authorization,

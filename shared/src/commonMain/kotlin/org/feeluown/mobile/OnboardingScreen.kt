@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +32,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +81,7 @@ fun OnboardingScreen(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
+    onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val availableProviders = controller.orderedAvailableProviders()
@@ -92,10 +98,11 @@ fun OnboardingScreen(
         )
     }
     val selectedProviders = availableProviders.filter { it.providerId in selectedProviderIds }
-    val pageCount = selectedProviders.size + 2
+    val pageCount = selectedProviders.size + 3
     val pagerState = rememberPagerState(pageCount = { pageCount })
     val isSourcePage = pagerState.currentPage == 0
     val isQualityPage = pagerState.currentPage == pageCount - 1
+    val isThemePage = pagerState.currentPage == pageCount - 2
 
     LaunchedEffect(availableProviders) {
         if (availableProviders.isEmpty()) return@LaunchedEffect
@@ -140,6 +147,7 @@ fun OnboardingScreen(
                 isLoading = controller.isLoading,
                 actionLabel = when {
                     isSourcePage -> "继续"
+                    isThemePage -> "继续"
                     isQualityPage -> "完成"
                     controller.authStateFor(selectedProviders[pagerState.currentPage - 1]).isLoggedIn -> "继续"
                     else -> "跳过"
@@ -154,6 +162,7 @@ fun OnboardingScreen(
                                 )
                                 if (applied) pagerState.animateScrollToPage(1)
                             }
+                            isThemePage -> pagerState.animateScrollToPage(pagerState.currentPage + 1)
                             isQualityPage -> controller.completeOnboarding()
                             else -> pagerState.animateScrollToPage(pagerState.currentPage + 1)
                         }
@@ -197,6 +206,7 @@ fun OnboardingScreen(
                         },
                         onBilibiliReplacementOnlyChange = { bilibiliReplacementOnly = it },
                     )
+                    page == pageCount - 2 -> ThemeOnboardingPage(controller)
                     page == pageCount - 1 -> AudioQualityOnboardingPage(controller)
                     else -> ProviderLoginOnboardingPage(
                         controller = controller,
@@ -204,8 +214,105 @@ fun OnboardingScreen(
                         onOpenProviderWebLogin = onOpenProviderWebLogin,
                         onLogoutProvider = onLogoutProvider,
                         onStartProviderOAuthLogin = onStartProviderOAuthLogin,
+                        onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeOnboardingPage(controller: FuoPlayerController) {
+    val darkTheme = resolvedDarkTheme(controller.themeMode, isSystemInDarkTheme())
+    Column(
+        modifier = Modifier
+            .widthIn(max = 720.dp)
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = "选择应用主题",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "快速选择外观模式和配色方案，之后也可以在设置中修改。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(
+                modifier = Modifier.padding(FuoSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "外观模式",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    ThemeMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = controller.themeMode == mode,
+                            onClick = { controller.onThemeModeChange(mode) },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = ThemeMode.entries.size,
+                            ),
+                            colors = settingsSegmentedButtonColors(),
+                        ) {
+                            Text(mode.label)
+                        }
+                    }
+                }
+                Text(
+                    text = "配色方案",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemeColorScheme.entries.chunked(2).forEach { rowSchemes ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            rowSchemes.forEach { scheme ->
+                                ThemeColorSchemeOption(
+                                    modifier = Modifier.weight(1f),
+                                    scheme = scheme,
+                                    selected = controller.themeColorScheme == scheme,
+                                    darkTheme = darkTheme,
+                                    onClick = { controller.onThemeColorSchemeChange(scheme) },
+                                )
+                            }
+                            if (rowSchemes.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+                FuoSettingRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "封面动态取色",
+                    supportingText = "根据当前播放封面生成主题色",
+                    enabled = !controller.isLoading,
+                    onClick = {
+                        controller.onDynamicCoverColorEnabledChange(!controller.dynamicCoverColorEnabled)
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = controller.dynamicCoverColorEnabled,
+                            enabled = !controller.isLoading,
+                            onCheckedChange = controller::onDynamicCoverColorEnabledChange,
+                        )
+                    },
+                )
             }
         }
     }
@@ -359,6 +466,7 @@ private fun ProviderLoginOnboardingPage(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)?,
+    onImportYtmusicHeaderFile: (() -> Unit)?,
 ) {
     Column(
         modifier = Modifier
@@ -387,6 +495,7 @@ private fun ProviderLoginOnboardingPage(
             onOpenProviderWebLogin = onOpenProviderWebLogin,
             onLogoutProvider = onLogoutProvider,
             onStartProviderOAuthLogin = onStartProviderOAuthLogin,
+            onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
         )
     }
 }

@@ -423,6 +423,7 @@ class QQMusicProvider(
                 "https://y.qq.com",
                 listOf(listOf("qqmusic_key", "wxuin", "qm_keyst"), listOf("qqmusic_key", "uin", "qm_keyst")),
             ),
+            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
         )
         val CAPABILITIES = ProviderCapabilities(
             providerId = ID,

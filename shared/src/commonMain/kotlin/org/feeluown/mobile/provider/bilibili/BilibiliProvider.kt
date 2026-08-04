@@ -454,6 +454,7 @@ class BilibiliProvider(
                 "https://passport.bilibili.com/h5-app/passport/login?gourl=https%3A%2F%2Fm.bilibili.com%2F",
                 listOf(listOf("SESSDATA", "bili_jct")),
             ),
+            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
         )
         val CAPABILITIES = ProviderCapabilities(providerId = ID, providerName = NAME, canAddSongToPlaylist = true, canRemoveSongFromPlaylist = true)
         val FEATURES = listOf(

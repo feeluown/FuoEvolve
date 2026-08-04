@@ -166,6 +166,7 @@ private class IosAppContainer(
     fun requestMicrophonePermission() {
         audioRecognitionOutput.requestPermission { granted ->
             hasMicrophonePermission = granted
+            controller.onMicrophonePermissionChange(granted)
         }
     }
 

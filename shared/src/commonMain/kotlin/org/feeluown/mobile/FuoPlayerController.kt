@@ -678,6 +678,12 @@ class FuoPlayerController(
         navigator.navigate(AppRoute.AudioRecognition)
     }
 
+    fun onMicrophonePermissionChange(hasPermission: Boolean) {
+        if (hasPermission && isRecognitionOpen && recognitionUiState == RecognitionUiState.Idle) {
+            startRecognition()
+        }
+    }
+
     fun startRecognition() {
         if (audioRecognitionJob?.isActive == true) return
         if (playbackState.status == PlayerStatus.Playing) {

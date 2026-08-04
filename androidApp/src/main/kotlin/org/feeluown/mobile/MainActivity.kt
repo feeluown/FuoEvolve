@@ -18,6 +18,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
@@ -62,25 +66,44 @@ class MainActivity : ComponentActivity() {
             var hasAudioPermission by remember { mutableStateOf(hasAudioPermission()) }
             var hasImagePermission by remember { mutableStateOf(hasImagePermission()) }
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
+            val appViewModel = fuoApplication.appViewModel
+            val controller = appViewModel.controller
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
-            ) {
-                hasAudioPermission = hasAudioPermission()
-                hasImagePermission = hasImagePermission()
+            ) { permissionResult ->
+                hasAudioPermission = hasPermissions(permissionResult, audioPermissions())
+                hasImagePermission = hasPermissions(permissionResult, imagePermissions())
+                controller.onLocalMusicPermissionChange(hasAudioPermission)
             }
             val microphonePermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
-            ) {
-                hasMicrophonePermission = hasMicrophonePermission()
+            ) { granted ->
+                hasMicrophonePermission = granted
+                controller.onMicrophonePermissionChange(granted)
             }
-            val appViewModel = fuoApplication.appViewModel
-            val controller = appViewModel.controller
+            val lifecycleOwner = LocalLifecycleOwner.current
             val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
             val systemDark = LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
                 Configuration.UI_MODE_NIGHT_YES
             val darkTheme = resolveDarkTheme(appUiState.settings.settings.themeMode, systemDark)
             SideEffect {
                 configureSystemBars(darkTheme)
+            }
+            DisposableEffect(lifecycleOwner) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        val audioPermission = hasAudioPermission()
+                        val imagePermission = hasImagePermission()
+                        val microphonePermission = hasMicrophonePermission()
+                        hasAudioPermission = audioPermission
+                        hasImagePermission = imagePermission
+                        hasMicrophonePermission = microphonePermission
+                        controller.onLocalMusicPermissionChange(audioPermission)
+                        controller.onMicrophonePermissionChange(microphonePermission)
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
             }
             var pendingWebLoginProviderId by rememberSaveable { mutableStateOf<String?>(null) }
             val webLoginLauncher = rememberLauncherForActivityResult(
@@ -99,6 +122,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 pendingWebLoginProviderId = null
+            }
+            val ytmusicHeaderFileLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) {
+                    val headerFileJson = runCatching {
+                        contentResolver.openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                            .orEmpty()
+                    }.getOrDefault("")
+                    controller.loginYtmusicWithHeaderFile(headerFileJson)
+                }
             }
             val googleAuthorizationClient = remember {
                 Identity.getAuthorizationClient(this@MainActivity)
@@ -229,8 +265,11 @@ class MainActivity : ComponentActivity() {
                             }
                             .addOnFailureListener { throwable ->
                                 controller.showMessage(googleAuthorizationErrorMessage(throwable))
-                            }
+                        }
                     }
+                },
+                onImportYtmusicHeaderFile = {
+                    ytmusicHeaderFileLauncher.launch(arrayOf("application/json"))
                 },
                 onImportLocalPlaylistFile = {
                     localPlaylistFileLauncher.launch(
@@ -313,6 +352,14 @@ class MainActivity : ComponentActivity() {
     private fun hasMicrophonePermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
+
+    private fun hasPermissions(
+        permissionResult: Map<String, Boolean>,
+        permissions: Array<String>,
+    ): Boolean = permissions.all { permission ->
+        permissionResult[permission] ?: ContextCompat.checkSelfPermission(this, permission) ==
+            PackageManager.PERMISSION_GRANTED
+    }
 
     private fun shareText(text: String) {
         val sendIntent = Intent(Intent.ACTION_SEND)

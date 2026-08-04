@@ -513,6 +513,7 @@ class NeteaseProvider(
             providerId = ID,
             providerName = NAME,
             loginConfig = org.feeluown.mobile.ProviderLoginConfig("https://music.163.com", listOf(listOf("MUSIC_U"))),
+            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
         )
         val CAPABILITIES = ProviderCapabilities(
             providerId = ID,

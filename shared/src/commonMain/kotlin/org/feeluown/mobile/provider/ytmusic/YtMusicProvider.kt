@@ -363,7 +363,10 @@ class YtMusicProvider(
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,
-            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.OAuth),
+            supportedLoginModes = setOf(
+                org.feeluown.mobile.ProviderLoginMode.OAuth,
+                org.feeluown.mobile.ProviderLoginMode.Headers,
+            ),
             oauthConfig = org.feeluown.mobile.ProviderOAuthConfig(
                 scopes = listOf("https://www.googleapis.com/auth/youtube"),
             ),
