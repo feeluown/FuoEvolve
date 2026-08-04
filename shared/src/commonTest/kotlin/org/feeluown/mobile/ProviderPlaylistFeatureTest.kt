@@ -79,7 +79,8 @@ class ProviderPlaylistFeatureTest {
             },
         )
         val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
-        val state = provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+        val state = provider.authState()
         val section = provider.loadFeature(provider.features.single { it.id == "netease_user_playlists" }, 0, 50)
 
         assertTrue(state.isLoggedIn)
