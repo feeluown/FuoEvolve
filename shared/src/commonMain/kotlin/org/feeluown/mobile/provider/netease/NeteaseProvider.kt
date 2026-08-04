@@ -459,7 +459,7 @@ class NeteaseProvider(
         identifier = string("id"),
         title = string("name"),
         coverUrl = stringOrNull("coverImgUrl") ?: stringOrNull("picUrl"),
-        description = string("description").ifBlank { string("creator").ifBlank { string("creatorName") } },
+        description = string("description").ifBlank { obj("creator")?.stringOrNull("nickname") ?: string("creatorName") },
         playCount = long("playCount"),
         trackCount = int("trackCount"),
         providerUrl = "https://music.163.com/#/playlist?id=${string("id")}",

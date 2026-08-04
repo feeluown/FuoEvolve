@@ -77,7 +77,7 @@ class ProviderPlaylistFeatureTest {
                             "/api/user/playlist/" -> {
                                 assertEquals("GET", request.method.value)
                                 assertEquals("12345", request.url.parameters["uid"])
-                                respond("""{"code":200,"playlist":[{"id":1,"name":"我的歌单","subscribed":false}]}""")
+                                respond("""{"code":200,"playlist":[{"id":1,"name":"我的歌单","creator":{"nickname":"歌单作者"},"subscribed":false}]}""")
                             }
                             else -> error("unexpected NetEase request: ${request.url.encodedPath}")
                         }
@@ -94,6 +94,7 @@ class ProviderPlaylistFeatureTest {
         assertEquals("tester", state.userName)
         assertFalse(section.isLoginRequired)
         assertEquals("我的歌单", section.playlists.single().title)
+        assertEquals("歌单作者", section.playlists.single().description)
         assertEquals(null, section.errorMessage)
 
         client.close()
