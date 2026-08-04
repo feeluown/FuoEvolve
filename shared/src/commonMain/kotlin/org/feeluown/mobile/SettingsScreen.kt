@@ -663,15 +663,20 @@ fun ProviderLoginPanel(
                 return@Column
             }
             if (supportedLoginModes.size > 1) {
-                SingleChoiceSegmentedButtonRow {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     supportedLoginModes.forEachIndexed { index, mode ->
                         SegmentedButton(
+                            modifier = Modifier.weight(1f),
                             selected = activeLoginMode == mode,
                             onClick = { controller.onProviderLoginModeChange(mode) },
                             shape = SegmentedButtonDefaults.itemShape(index = index, count = supportedLoginModes.size),
                             colors = settingsSegmentedButtonColors(),
                         ) {
-                            Text(mode.label())
+                            Text(
+                                text = mode.label(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
@@ -726,6 +731,7 @@ fun ProviderLoginPanel(
                     val headerInput = controller.providerHeaderInputFor(provider.providerId)
                     if (provider.providerId == "ytmusic" && onImportYtmusicHeaderFile != null) {
                         Button(
+                            modifier = Modifier.fillMaxWidth(),
                             enabled = !isAuthBusy,
                             onClick = onImportYtmusicHeaderFile,
                         ) {

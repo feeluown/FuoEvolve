@@ -125,22 +125,29 @@ class QQMusicProvider(
                 ),
             ),
             authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
-            cacheKey = "qqmusic:playlist:$identifier",
+            cacheKey = "qqmusic:playlist:$identifier:$offset:$limit",
             cachePolicy = ProviderCachePolicies.detail,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
         val detail = root.array("cdlist").firstOrNull()?.asObject() ?: return ProviderPlaylistDetail(playlist)
-        val tracks = detail.array("songlist").map(::song)
+        val songItems = detail.array("songlist")
+        val tracks = songs(songItems)
         val actual = playlist(
             identifier = detail.string("disstid").ifBlank { identifier },
             title = detail.string("dissname").ifBlank { playlist.title },
             coverUrl = detail.stringOrNull("logo"),
             description = detail.string("desc"),
             playCount = detail.long("visitnum"),
-            trackCount = detail.int("songnum") ?: detail.array("songlist").size,
+            trackCount = detail.int("songnum") ?: songItems.size,
             providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
         )
         val count = actual.trackCount ?: tracks.size
-        return ProviderPlaylistDetail(actual, tracks, offset + tracks.size, offset + tracks.size < count)
+        val nextOffset = offset + songItems.size
+        return ProviderPlaylistDetail(
+            playlist = actual,
+            tracks = tracks,
+            tracksNextOffset = nextOffset,
+            tracksHasMore = songItems.isNotEmpty() && nextOffset < count,
+        )
     }
 
     override suspend fun similarTracks(track: org.feeluown.mobile.MusicTrack): List<org.feeluown.mobile.MusicTrack> {
@@ -218,23 +225,42 @@ class QQMusicProvider(
     }
 
     override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): org.feeluown.mobile.ProviderContentSection {
-        if (feature.id !in setOf("qqmusic_daily_playlists", "qqmusic_user_playlists")) {
+        if (feature.id !in setOf(
+                "qqmusic_daily_songs",
+                "qqmusic_radio",
+                "qqmusic_daily_playlists",
+                "qqmusic_user_playlists",
+            )
+        ) {
             return super.loadFeature(feature, offset, limit)
         }
         if (!authState().isLoggedIn) {
             return org.feeluown.mobile.ProviderContentSection(feature, isLoginRequired = true)
         }
-        val playlists = when (feature.id) {
-            "qqmusic_daily_playlists" -> recommendedPlaylists()
-            else -> userPlaylists()
+        return when (feature.id) {
+            "qqmusic_daily_songs" -> recommendedDailySongs(feature, offset, limit)
+            "qqmusic_radio" -> privateFm(feature, offset, limit)
+            "qqmusic_daily_playlists" -> {
+                val playlists = recommendedPlaylists()
+                val page = playlists.drop(offset).take(limit)
+                org.feeluown.mobile.ProviderContentSection(
+                    feature = feature,
+                    playlists = page,
+                    nextOffset = offset + page.size,
+                    hasMore = playlists.size > offset + page.size,
+                )
+            }
+            else -> {
+                val playlists = userPlaylists()
+                val page = playlists.drop(offset).take(limit)
+                org.feeluown.mobile.ProviderContentSection(
+                    feature = feature,
+                    playlists = page,
+                    nextOffset = offset + page.size,
+                    hasMore = playlists.size > offset + page.size,
+                )
+            }
         }
-        val page = playlists.drop(offset).take(limit)
-        return org.feeluown.mobile.ProviderContentSection(
-            feature = feature,
-            playlists = page,
-            nextOffset = offset + page.size,
-            hasMore = playlists.size > offset + page.size,
-        )
     }
 
     override suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
@@ -322,6 +348,71 @@ class QQMusicProvider(
         }
     }
 
+    private suspend fun recommendedDailySongs(
+        feature: ProviderFeature,
+        offset: Int,
+        limit: Int,
+    ): org.feeluown.mobile.ProviderContentSection {
+        val dailyPlaylist = recommendedDailyPlaylist()
+            ?: return org.feeluown.mobile.ProviderContentSection(feature, nextOffset = offset)
+        val detail = playlistDetail(dailyPlaylist, offset, limit)
+        return org.feeluown.mobile.ProviderContentSection(
+            feature = feature,
+            tracks = detail.tracks,
+            nextOffset = detail.tracksNextOffset,
+            hasMore = detail.tracksHasMore,
+        )
+    }
+
+    private suspend fun recommendedDailyPlaylist(): ProviderPlaylist? {
+        val uin = currentUin().orEmpty()
+        val root = rpc(
+            """
+            {"req_0":{"module":"recommend.RecommendFeedServer","method":"get_recommend_feed","param":{"direction":0,"page":1,"v_cache":[],"v_uniq":[],"s_num":0}},"comm":{"ct":20,"cv":1770,"g_tk":5381,"uin":"$uin","format":"json","inCharset":"utf-8","outCharset":"utf-8","platform":"wk_v17","uid":"","guid":""}}
+            """.trimIndent(),
+        )
+        val cards = root.obj("req_0")?.obj("data")?.array("v_shelf").orEmpty()
+            .asSequence()
+            .flatMap { shelf -> shelf.asObject().array("v_niche").asSequence() }
+            .flatMap { batch -> batch.asObject().array("v_card").asSequence() }
+            .map { it.asObject() }
+            .filter { card ->
+                card.int("jumptype") == 10014 &&
+                    card.obj("extra_info")?.string("moduleID")?.startsWith("recforyou") == true
+            }
+            .toList()
+        val card = cards.firstOrNull { it.string("title").contains("每日") } ?: cards.firstOrNull()
+        val identifier = card?.string("id")?.takeIf { it.isNotBlank() } ?: return null
+        return playlist(
+            identifier = identifier,
+            title = card.string("title").ifBlank { "每日推荐歌曲" },
+            coverUrl = card.stringOrNull("cover"),
+            description = card.obj("miscellany")?.string("rcmdtemplate").orEmpty(),
+            providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
+        )
+    }
+
+    private suspend fun privateFm(
+        feature: ProviderFeature,
+        offset: Int,
+        limit: Int,
+    ): org.feeluown.mobile.ProviderContentSection {
+        val uin = currentUin().orEmpty()
+        val requestLimit = limit.coerceIn(1, 50)
+        val root = rpc(
+            """
+            {"songlist":{"module":"mb_track_radio_svr","method":"get_radio_track","param":{"id":99,"firstplay":0,"num":$requestLimit}},"comm":{"loginUin":"$uin","hostUin":0,"g_tk":5381,"inCharset":"utf8","outCharset":"utf-8","notice":0,"platform":"yqq","needNewCode":0}}
+            """.trimIndent(),
+        )
+        val songItems = root.obj("songlist")?.obj("data")?.array("tracks").orEmpty()
+        return org.feeluown.mobile.ProviderContentSection(
+            feature = feature,
+            tracks = songs(songItems),
+            nextOffset = offset + songItems.size,
+            hasMore = false,
+        )
+    }
+
     private suspend fun currentUin(): String? {
         val values = currentCredentials()?.cookies.orEmpty()
         return values["wxuin"]?.removePrefix("o")?.takeIf { it.isNotBlank() }
@@ -393,14 +484,17 @@ class QQMusicProvider(
 
     private fun song(value: kotlinx.serialization.json.JsonElement): org.feeluown.mobile.MusicTrack {
         val item = value.asObject()
-        val identifier = item.string("songmid").ifBlank { item.string("songid") }
+        val identifier = item.string("songmid")
+            .ifBlank { item.string("mid") }
+            .ifBlank { item.string("songid") }
         val singers = item.array("singer").map { it.asObject().string("name") }.filter { it.isNotBlank() }.joinToString(" / ")
-        val albumMid = item.stringOrNull("albummid")
+        val album = item.string("albumname").ifBlank { item.obj("album")?.string("name").orEmpty() }
+        val albumMid = item.stringOrNull("albummid") ?: item.obj("album")?.stringOrNull("mid")
         return track(
             identifier = identifier,
-            title = item.string("songname").ifBlank { item.string("songorig") },
+            title = item.string("songname").ifBlank { item.string("name") }.ifBlank { item.string("songorig") },
             artists = singers,
-            album = item.string("albumname"),
+            album = album,
             coverUrl = albumMid?.let { "https://y.qq.com/music/photo_new/T002R300x300M000${it}.jpg" },
             durationMs = item.long("interval")?.times(1_000),
             artistItemId = item.array("singer").firstOrNull()?.asObject()?.stringOrNull("mid")?.let { "artist:$ID:$it" },
@@ -408,6 +502,11 @@ class QQMusicProvider(
             providerUrl = "https://y.qq.com/n/ryqq/songDetail/$identifier",
         )
     }
+
+    private fun songs(values: Iterable<kotlinx.serialization.json.JsonElement>): List<org.feeluown.mobile.MusicTrack> =
+        values.mapNotNull { value ->
+            runCatching { song(value) }.getOrNull()?.takeIf { it.id.substringAfterLast(':').isNotBlank() }
+        }.distinctBy { it.id }
 
     private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
 
@@ -432,6 +531,8 @@ class QQMusicProvider(
             canRemoveSongFromPlaylist = true,
         )
         val FEATURES = listOf(
+            ProviderFeature("qqmusic_daily_songs", ID, NAME, "每日推荐歌曲", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
+            ProviderFeature("qqmusic_radio", ID, NAME, "私人 FM", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
             ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
             ProviderFeature("qqmusic_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
         )

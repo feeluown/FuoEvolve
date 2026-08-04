@@ -202,6 +202,108 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
+    fun qqmusicLoadsDailySongsFromRecommendFeed() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/cgi-bin/musicu.fcg" -> respond(
+                                """{"code":0,"req_0":{"code":0,"data":{"v_shelf":[{"extra_info":{},"v_niche":[{"v_card":[{"id":"7251579717","title":"每日30首","cover":"https://example.test/daily.jpg","jumptype":10014,"extra_info":{"moduleID":"recforyou@0@0"}}]}]}]}}}""",
+                            )
+                            "/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg" -> {
+                                assertEquals("7251579717", request.url.parameters["disstid"])
+                                respond(
+                                    """{"code":0,"cdlist":[{"disstid":"7251579717","dissname":"每日30首","songnum":1,"songlist":[{"songmid":"daily-mid","songname":"每日歌曲","singer":[{"mid":"artist-mid","name":"歌手"}],"albumname":"专辑","albummid":"album-mid","interval":180}]}]}""",
+                                )
+                            }
+                            else -> error("unexpected QQ Music request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"qqmusic_key":"key","wxuin":"o12345","qm_keyst":"keyst"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "qqmusic_daily_songs" },
+            0,
+            50,
+        )
+
+        assertFalse(section.isLoginRequired)
+        assertEquals("qqmusic:daily-mid", section.tracks.single().id)
+        assertEquals("每日歌曲", section.tracks.single().title)
+        assertFalse(section.hasMore)
+
+        client.close()
+    }
+
+    @Test
+    fun qqmusicLoadsPrivateFmTracksFromRpc() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/cgi-bin/musicu.fcg", request.url.encodedPath)
+                        assertEquals("POST", request.method.value)
+                        respond(
+                            """{"code":0,"songlist":{"code":0,"data":{"tracks":[{"mid":"radio-mid","name":"私人歌曲","singer":[{"mid":"artist-mid","name":"私人歌手"}],"album":{"mid":"album-mid","name":"私人专辑"},"interval":240}]}}}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"qqmusic_key":"key","wxuin":"o12345","qm_keyst":"keyst"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "qqmusic_radio" },
+            0,
+            50,
+        )
+
+        assertFalse(section.isLoginRequired)
+        assertEquals("qqmusic:radio-mid", section.tracks.single().id)
+        assertEquals("私人歌曲", section.tracks.single().title)
+        assertFalse(section.hasMore)
+
+        client.close()
+    }
+
+    @Test
+    fun qqmusicDeduplicatesPlaylistTracksBeforeRendering() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg", request.url.encodedPath)
+                        respond(
+                            """{"code":0,"cdlist":[{"disstid":"123","dissname":"重复歌曲歌单","songnum":3,"songlist":[{"songmid":"same-mid","songname":"同一首","singer":[],"interval":180},{"songmid":"same-mid","songname":"同一首","singer":[],"interval":180},{"songmid":"other-mid","songname":"另一首","singer":[],"interval":200}]}]}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        val playlist = ProviderPlaylist(
+            id = "playlist:qqmusic:123",
+            title = "重复歌曲歌单",
+            providerId = "qqmusic",
+            providerName = "QQ 音乐",
+        )
+
+        val detail = provider.playlistDetail(playlist, 0, 50)
+
+        assertEquals(listOf("qqmusic:same-mid", "qqmusic:other-mid"), detail.tracks.map { it.id })
+        assertEquals(3, detail.tracksNextOffset)
+        assertFalse(detail.tracksHasMore)
+
+        client.close()
+    }
+
+    @Test
     fun neteaseLoadsPlaylistTracksFromResultEnvelope() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
