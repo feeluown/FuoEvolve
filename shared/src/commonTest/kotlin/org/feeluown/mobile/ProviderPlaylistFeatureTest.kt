@@ -77,7 +77,7 @@ class ProviderPlaylistFeatureTest {
                             "/api/user/playlist/" -> {
                                 assertEquals("GET", request.method.value)
                                 assertEquals("12345", request.url.parameters["uid"])
-                                respond("""{"code":200,"playlist":[{"id":1,"name":"我的歌单","creator":{"nickname":"歌单作者"},"subscribed":false}]}""")
+                                respond("""{"code":200,"playlist":[{"id":1,"name":"我的歌单","creator":{"nickname":"歌单作者"},"subscribed":false},{"id":2,"name":"收藏的歌单","subscribed":true}]}""")
                             }
                             else -> error("unexpected NetEase request: ${request.url.encodedPath}")
                         }
@@ -89,6 +89,7 @@ class ProviderPlaylistFeatureTest {
         provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
         val state = provider.authState()
         val section = provider.loadFeature(provider.features.single { it.id == "netease_user_playlists" }, 0, 50)
+        val favoriteSection = provider.loadFeature(provider.features.single { it.id == "netease_favorite_playlists" }, 0, 50)
 
         assertTrue(state.isLoggedIn)
         assertEquals("tester", state.userName)
@@ -96,6 +97,8 @@ class ProviderPlaylistFeatureTest {
         assertEquals("我的歌单", section.playlists.single().title)
         assertEquals("歌单作者", section.playlists.single().description)
         assertEquals(null, section.errorMessage)
+        assertEquals("收藏的歌单", favoriteSection.playlists.single().title)
+        assertEquals(null, favoriteSection.errorMessage)
 
         client.close()
     }

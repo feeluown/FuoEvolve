@@ -293,7 +293,8 @@ class NeteaseProvider(
                         cacheKey = null,
                     ).value.let { providerJson.parseToJsonElement(it).asObject() }
                     val playlists = root.array("playlist").filter { item ->
-                        feature.id != "netease_favorite_playlists" || item.asObject().boolean("subscribed")
+                        val subscribed = item.asObject().boolean("subscribed")
+                        if (feature.id == "netease_favorite_playlists") subscribed else !subscribed
                     }
                     ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
                 }

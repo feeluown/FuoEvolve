@@ -629,6 +629,7 @@ fun ProviderLoginPanel(
             )
             val authFeedback = controller.message.takeIf { message ->
                 message.contains(provider.providerName) ||
+                    message.contains("Google OAuth") ||
                     message.contains("音源运行时尚未接入")
             }
             authFeedback?.let { message ->
