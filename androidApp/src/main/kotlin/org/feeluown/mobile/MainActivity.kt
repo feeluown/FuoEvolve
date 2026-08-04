@@ -32,6 +32,12 @@ import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.io.File
 
 private data class PendingLocalPlaylistExport(
@@ -49,6 +55,9 @@ private const val CONTENT_URI_SCHEME = "content"
 private const val FILE_URI_SCHEME = "file"
 
 class MainActivity : ComponentActivity() {
+    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val googleOAuthBrowserClient by lazy { GoogleOAuthBrowserClient(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -99,7 +108,7 @@ class MainActivity : ComponentActivity() {
                 pendingWebLoginProviderId = null
             }
             val googleAuthorizationClient = remember {
-                Identity.getAuthorizationClient(this@MainActivity)
+                runCatching { Identity.getAuthorizationClient(this@MainActivity) }.getOrNull()
             }
             fun applyGoogleAuthorization(result: AuthorizationResult) {
                 val accessToken = result.accessToken.orEmpty()
@@ -119,7 +128,8 @@ class MainActivity : ComponentActivity() {
                     controller.showMessage("Google OAuth 授权已取消")
                 } else {
                     runCatching {
-                        googleAuthorizationClient.getAuthorizationResultFromIntent(result.data)
+                        googleAuthorizationClient?.getAuthorizationResultFromIntent(result.data)
+                            ?: error("Google Identity API 不可用")
                     }.onSuccess(::applyGoogleAuthorization)
                         .onFailure { controller.showMessage("Google OAuth 授权失败：${it.message.orEmpty()}") }
                 }
@@ -207,6 +217,8 @@ class MainActivity : ComponentActivity() {
                     val scopes = provider.oauthConfig?.scopes.orEmpty()
                     if (scopes.isEmpty()) {
                         controller.showMessage("未配置 Google OAuth scope")
+                    } else if (googleAuthorizationClient == null) {
+                        startGoogleBrowserOAuth(scopes, controller)
                     } else {
                         val request = AuthorizationRequest.builder()
                             .setRequestedScopes(scopes.map(::Scope))
@@ -218,13 +230,13 @@ class MainActivity : ComponentActivity() {
                                         googleAuthorizationResolutionLauncher.launch(
                                             IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
                                         )
-                                    } ?: controller.showMessage("Google OAuth 无法启动授权页面")
+                                    } ?: startGoogleBrowserOAuth(scopes, controller)
                                 } else {
                                     applyGoogleAuthorization(result)
                                 }
                             }
                             .addOnFailureListener {
-                                controller.showMessage("Google OAuth 授权失败：${it.message.orEmpty()}")
+                                startGoogleBrowserOAuth(scopes, controller)
                             }
                     }
                 },
@@ -241,6 +253,7 @@ class MainActivity : ComponentActivity() {
                 onShareText = ::shareText,
             )
         }
+        handleGoogleOAuthRedirect(intent)
     }
 
     override fun onStop() {
@@ -252,6 +265,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (handleGoogleOAuthRedirect(intent)) return
         val localPlaylistImport = localPlaylistImportFromIntent(intent)
         if (localPlaylistImport != null) {
             handleLocalPlaylistImport(localPlaylistImport)
@@ -260,6 +274,44 @@ class MainActivity : ComponentActivity() {
         sharedTextFromIntent(intent)?.let {
             (application as FuoEvolveApplication).controller.openSharedResource(it)
         }
+    }
+
+    override fun onDestroy() {
+        activityScope.cancel()
+        super.onDestroy()
+    }
+
+    private fun startGoogleBrowserOAuth(
+        scopes: List<String>,
+        controller: FuoPlayerController,
+    ) {
+        runCatching { googleOAuthBrowserClient.startAuthorization(scopes) }
+            .onSuccess { controller.showMessage("Google Play services 不可用，已打开系统浏览器授权") }
+            .onFailure {
+                controller.showMessage("Google OAuth 浏览器授权失败：${it.message.orEmpty()}")
+            }
+    }
+
+    private fun handleGoogleOAuthRedirect(intent: Intent?): Boolean {
+        val uri = intent?.data ?: return false
+        if (!googleOAuthBrowserClient.isRedirectUri(uri)) return false
+        intent.data = null
+        val controller = (application as FuoEvolveApplication).controller
+        activityScope.launch {
+            try {
+                val token = googleOAuthBrowserClient.handleRedirect(uri)
+                controller.loginYtmusicWithOAuth(
+                    accessToken = token.accessToken,
+                    expiresAtMillis = token.expiresAtMillis,
+                    grantedScopes = token.grantedScopes,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (throwable: Throwable) {
+                controller.showMessage("Google OAuth 浏览器授权失败：${throwable.message.orEmpty()}")
+            }
+        }
+        return true
     }
 
     private fun hasAudioPermission(): Boolean {
@@ -389,6 +441,7 @@ class MainActivity : ComponentActivity() {
         return when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
                 ?.takeUnless { it.scheme == CONTENT_URI_SCHEME || it.scheme == FILE_URI_SCHEME }
+                ?.takeUnless(googleOAuthBrowserClient::isRedirectUri)
                 ?.toString()
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             else -> null
