@@ -1,7 +1,9 @@
 package org.feeluown.mobile.provider.netease
 
 import io.ktor.http.Parameters
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.ProviderAuthState
@@ -131,38 +133,64 @@ class NeteaseProvider(
             ?: root.obj("result")?.obj("playlist")
             ?: root.obj("result")
             ?: return ProviderPlaylistDetail(playlist)
-        val tracks = playlistObject.array("tracks").map(::song)
+        val trackValues = playlistObject.array("tracks").takeIf { it.isNotEmpty() }
+            ?: playlistObject.array("trackIds").drop(offset).take(limit).map { trackId ->
+                JsonObject(mapOf("id" to JsonPrimitive(trackId.asObject().string("id"))))
+            }
+        val tracks = loadSongs(trackValues)
         val actualPlaylist = playlistObject.toPlaylist()
         val count = actualPlaylist.trackCount ?: playlist.trackCount ?: tracks.size
         return ProviderPlaylistDetail(
             playlist = actualPlaylist,
             tracks = tracks,
-            tracksNextOffset = offset + tracks.size,
-            tracksHasMore = offset + tracks.size < count,
+            tracksNextOffset = offset + trackValues.size,
+            tracksHasMore = offset + trackValues.size < count,
         )
     }
 
     override suspend fun mediaItemTracks(item: ProviderMediaItem): List<org.feeluown.mobile.MusicTrack> {
-        val (_, identifier) = splitResourceId(item.id, if (item.type == ProviderMediaItemType.Artist) "artist" else "album")
-        val root = if (item.type == ProviderMediaItemType.Artist) {
-            http.getText(ID, queryUrl("$BASE/api/artist", mapOf("id" to identifier)), authenticatedHeaders(), cacheKey = "netease:artist:$identifier", cachePolicy = ProviderCachePolicies.detail)
-                .value.let { providerJson.parseToJsonElement(it).asObject() }
-        } else {
-            http.getText(ID, queryUrl("$BASE/api/album", mapOf("id" to identifier)), authenticatedHeaders(), cacheKey = "netease:album:$identifier", cachePolicy = ProviderCachePolicies.detail)
-                .value.let { providerJson.parseToJsonElement(it).asObject() }
-        }
-        val songs = if (item.type == ProviderMediaItemType.Artist) root.array("hotSongs") else root.obj("album")?.array("songs") ?: root.array("songs")
-        return songs.map(::song)
+        return mediaItemDetail(item, tracksOffset = 0, albumsOffset = 0, limit = 300).tracks
     }
 
     override suspend fun mediaItemDetail(item: ProviderMediaItem, tracksOffset: Int, albumsOffset: Int, limit: Int): ProviderMediaItemDetail {
-        val tracks = mediaItemTracks(item).drop(tracksOffset).take(limit)
-        return ProviderMediaItemDetail(
-            item = item,
-            tracks = tracks,
-            tracksNextOffset = tracksOffset + tracks.size,
-            tracksHasMore = tracks.size == limit,
+        val (_, identifier) = splitResourceId(
+            item.id,
+            if (item.type == ProviderMediaItemType.Artist) "artist" else "album",
         )
+        return if (item.type == ProviderMediaItemType.Artist) {
+            val artistSongs = artistSongsPage(identifier, tracksOffset, limit)
+            val artistAlbums = artistAlbumsPage(identifier, albumsOffset, limit)
+            ProviderMediaItemDetail(
+                item = item.copy(
+                    trackCount = artistSongs.total ?: item.trackCount,
+                    albumCount = artistAlbums.total ?: item.albumCount,
+                ),
+                tracks = artistSongs.values,
+                albums = artistAlbums.values,
+                tracksNextOffset = tracksOffset + artistSongs.rawSize,
+                tracksHasMore = artistSongs.hasMore,
+                albumsNextOffset = albumsOffset + artistAlbums.rawSize,
+                albumsHasMore = artistAlbums.hasMore,
+            )
+        } else {
+            val root = albumRoot(identifier)
+            val albumObject = root.obj("album") ?: root
+            val allTracks = loadSongs(albumObject.array("songs").toList())
+            val tracks = allTracks.drop(tracksOffset).take(limit)
+            ProviderMediaItemDetail(
+                item = item.copy(
+                    title = albumObject.string("name").ifBlank { item.title },
+                    coverUrl = albumObject.stringOrNull("picUrl") ?: item.coverUrl,
+                    description = albumObject.string("description")
+                        .ifBlank { albumObject.string("briefDesc") }
+                        .ifBlank { item.description },
+                    trackCount = albumObject.int("size") ?: allTracks.size,
+                ),
+                tracks = tracks,
+                tracksNextOffset = tracksOffset + tracks.size,
+                tracksHasMore = tracksOffset + tracks.size < allTracks.size,
+            )
+        }
     }
 
     override suspend fun similarTracks(track: org.feeluown.mobile.MusicTrack): List<org.feeluown.mobile.MusicTrack> {
@@ -310,17 +338,7 @@ class NeteaseProvider(
                 ProviderContentSection(feature, tracks = songs.drop(offset).take(limit).map(::song), nextOffset = offset + limit, hasMore = songs.size > offset + limit)
             }
             "netease_cloud_songs" -> {
-                val root = http.getText(
-                    ID,
-                    queryUrl("$BASE/api/user/cloud", mapOf("limit" to "100", "offset" to offset.toString())),
-                    authenticatedHeaders(),
-                    cacheKey = null,
-                ).value.let { providerJson.parseToJsonElement(it).asObject() }
-                val songs = root.array("data").mapNotNull { item ->
-                    val value = item.asObject()["simpleSong"] ?: item
-                    runCatching { song(value) }.getOrNull()
-                }
-                ProviderContentSection(feature, tracks = songs.take(limit), nextOffset = offset + songs.size, hasMore = songs.size == limit)
+                cloudSongs(feature, offset, limit)
             }
             "netease_favorite_artists", "netease_favorite_albums" -> {
                 val endpoint = if (feature.id == "netease_favorite_artists") "artist/sublist" else "album/sublist"
@@ -363,6 +381,177 @@ class NeteaseProvider(
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         return root.array("songs").firstOrNull()?.asObject()
     }
+
+    private suspend fun artistSongsPage(identifier: String, offset: Int, limit: Int): NeteaseSongPage {
+        val request = """
+            {"id":${neteaseId(identifier)},"limit":$limit,"offset":$offset,"order":"hot","work_type":1,"private_cloud":true}
+        """.trimIndent()
+        val weApiRoot = runCatching {
+            neteaseWeApiPost("$BASE/weapi/v1/artist/songs", request)
+        }.getOrNull()
+        val weApiData = weApiRoot?.obj("data")
+        val values = weApiData?.array("songs")?.takeIf { it.isNotEmpty() }
+            ?: weApiRoot?.array("songs")?.takeIf { it.isNotEmpty() }
+        if (values != null) {
+            return NeteaseSongPage(
+                values = loadSongs(values.toList()),
+                rawSize = values.size,
+                total = weApiData?.int("total") ?: weApiRoot?.int("total"),
+                hasMore = weApiData?.boolean("more")
+                    ?: weApiRoot?.boolean("more")
+                    ?: values.size == limit,
+            )
+        }
+        val fallback = http.getText(
+            ID,
+            "$BASE/api/artist/$identifier",
+            authenticatedHeaders(),
+            cacheKey = "netease:artist:$identifier",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val fallbackValues = fallback.array("hotSongs")
+        return NeteaseSongPage(
+            values = loadSongs(fallbackValues.toList()),
+            rawSize = fallbackValues.size,
+            total = fallbackValues.size,
+            hasMore = false,
+        )
+    }
+
+    private suspend fun artistAlbumsPage(identifier: String, offset: Int, limit: Int): NeteaseAlbumPage {
+        val root = http.getText(
+            ID,
+            queryUrl("$BASE/api/artist/albums/$identifier", mapOf("offset" to offset.toString(), "limit" to limit.toString())),
+            authenticatedHeaders(),
+            cacheKey = "netease:artist-albums:$identifier:$offset:$limit",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val values = root.array("hotAlbums").mapNotNull { value ->
+            runCatching { album(value.asObject()) }.getOrNull()
+        }
+        val data = root.obj("artist")
+        val total = root.int("total") ?: data?.int("albumSize")
+        return NeteaseAlbumPage(
+            values = values,
+            rawSize = values.size,
+            total = total,
+            hasMore = root.boolean("more") || total?.let { offset + values.size < it } == true,
+        )
+    }
+
+    private suspend fun albumRoot(identifier: String): JsonObject {
+        val pathRoot = runCatching {
+            http.getText(
+                ID,
+                "$BASE/api/album/$identifier",
+                authenticatedHeaders(),
+                cacheKey = "netease:album:$identifier",
+                cachePolicy = ProviderCachePolicies.detail,
+            ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        }.getOrNull()
+        pathRoot?.let { root ->
+            if (root.obj("album") != null || root.array("songs").isNotEmpty()) return root
+        }
+        return http.getText(
+            ID,
+            queryUrl("$BASE/api/album", mapOf("id" to identifier)),
+            authenticatedHeaders(),
+            cacheKey = "netease:album:$identifier",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+    }
+
+    private suspend fun cloudSongs(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/v1/cloud/get",
+            """{"limit":$limit,"offset":$offset}""",
+        )
+        val entries = root.array("data")
+        val privateIds = entries.mapNotNull { entry ->
+            val value = entry.asObject()
+            value.string("id").takeIf { it.isNotBlank() && it == value.string("s_id") }
+        }
+        val privateSongs = cloudSongDetails(privateIds)
+        val values = entries.mapNotNull { entry ->
+            val value = entry.asObject()
+            val identifier = value.string("id")
+            privateSongs[identifier] ?: value.obj("simpleSong") ?: value
+        }
+        val songs = loadSongs(values)
+        val total = root.int("count")
+        return ProviderContentSection(
+            feature = feature,
+            tracks = songs,
+            nextOffset = offset + entries.size,
+            hasMore = total?.let { offset + entries.size < it } ?: entries.size == limit,
+        )
+    }
+
+    private suspend fun cloudSongDetails(identifiers: List<String>): Map<String, JsonObject> {
+        if (identifiers.isEmpty()) return emptyMap()
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/v1/cloud/get/byids",
+            """{"songIds":[${identifiers.joinToString(",") { "\"$it\"" }}]}""",
+        )
+        return root.array("data").ifEmpty { root.array("songs") }
+            .mapNotNull { value ->
+                val song = value.asObject().obj("simpleSong") ?: value.asObject()
+                song.string("id").takeIf { it.isNotBlank() }?.let { it to song }
+            }
+            .toMap()
+    }
+
+    private suspend fun loadSongs(values: Iterable<JsonElement>): List<org.feeluown.mobile.MusicTrack> {
+        val objects = values.mapNotNull { runCatching { it.asObject() }.getOrNull() }
+        val detailIds = objects.filter(::needsSongDetail).mapNotNull { it.string("id").takeIf(String::isNotBlank) }
+        val details = loadSongDetails(detailIds)
+        return objects.mapNotNull { value ->
+            val identifier = value.string("id").ifBlank { value.string("songId") }
+            runCatching { song(details[identifier] ?: value) }
+                .getOrNull()
+                ?.takeIf { it.id.substringAfterLast(':').isNotBlank() }
+        }
+    }
+
+    private suspend fun loadSongDetails(identifiers: List<String>): Map<String, JsonObject> {
+        val ids = identifiers.distinct().filter { it.toLongOrNull() != null }
+        if (ids.isEmpty()) return emptyMap()
+        return ids.chunked(200).flatMap { batch ->
+            val root = http.getText(
+                ID,
+                queryUrl("$BASE/api/song/detail", mapOf("ids" to "[${batch.joinToString(",")}]")),
+                authenticatedHeaders(),
+                cacheKey = "netease:songs:${batch.joinToString(",")}",
+                cachePolicy = ProviderCachePolicies.detail,
+            ).value.let { providerJson.parseToJsonElement(it).asObject() }
+            root.array("songs").mapNotNull { value ->
+                val song = value.asObject()
+                song.string("id").takeIf { it.isNotBlank() }?.let { it to song }
+            }
+        }.toMap()
+    }
+
+    private fun needsSongDetail(value: JsonObject): Boolean {
+        val artists = value.array("ar").takeIf { it.isNotEmpty() } ?: value.array("artists")
+        val album = value.obj("al") ?: value.obj("album")
+        return artists.isEmpty() || album?.string("name").orEmpty().isBlank()
+    }
+
+    private fun neteaseId(identifier: String): String = identifier.toLongOrNull()?.toString() ?: "0"
+
+    private data class NeteaseSongPage(
+        val values: List<org.feeluown.mobile.MusicTrack>,
+        val rawSize: Int,
+        val total: Int?,
+        val hasMore: Boolean,
+    )
+
+    private data class NeteaseAlbumPage(
+        val values: List<ProviderMediaItem>,
+        val rawSize: Int,
+        val total: Int?,
+        val hasMore: Boolean,
+    )
 
     private suspend fun lyric(identifier: String): String? {
         val root = http.getText(ID, queryUrl("$BASE/api/song/lyric", mapOf("id" to identifier, "lv" to "1", "kv" to "1", "tv" to "-1")), authenticatedHeaders(), cacheKey = "netease:lyric:$identifier", cachePolicy = ProviderCachePolicies.lyric)
@@ -443,16 +632,18 @@ class NeteaseProvider(
 
     private fun song(value: kotlinx.serialization.json.JsonElement): org.feeluown.mobile.MusicTrack {
         val item = value.asObject()
-        val artist = item.array("ar").firstOrNull()?.asObject()
-        val album = item.obj("al")
-        val identifier = item.string("id")
+        val artists = item.array("ar").takeIf { it.isNotEmpty() } ?: item.array("artists")
+        val artist = artists.firstOrNull()?.asObject()
+        val album = item.obj("al") ?: item.obj("album")
+        val identifier = item.string("id").ifBlank { item.string("songId") }
         return track(
             identifier = identifier,
-            title = item.string("name"),
-            artists = item.array("ar").map { it.asObject().string("name") }.filter { it.isNotBlank() }.joinToString(" / "),
-            album = album?.string("name").orEmpty(),
-            coverUrl = album?.stringOrNull("picUrl"),
-            durationMs = item.long("dt") ?: item.long("duration"),
+            title = item.string("name").ifBlank { item.string("songName") }.ifBlank { item.string("title") },
+            artists = artists.map { it.asObject().string("name") }.filter { it.isNotBlank() }.joinToString(" / ")
+                .ifBlank { item.string("artistName") },
+            album = album?.string("name").orEmpty().ifBlank { item.string("albumName") },
+            coverUrl = album?.stringOrNull("picUrl") ?: item.stringOrNull("picUrl"),
+            durationMs = item.long("dt") ?: item.long("duration") ?: item.long("interval")?.times(1_000),
             artistItemId = artist?.stringOrNull("id")?.let { "artist:$ID:$it" },
             albumItemId = album?.stringOrNull("id")?.let { "album:$ID:$it" },
             providerUrl = "https://music.163.com/#/song?id=$identifier",

@@ -335,6 +335,186 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
+    fun neteasePlaylistUsesBatchSongDetailForTrackIds() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/playlist/detail" -> respond(
+                                """{"code":200,"playlist":{"id":123,"name":"缺少歌曲详情的歌单","trackCount":1,"trackIds":[{"id":456}]}}""",
+                            )
+                            "/api/song/detail" -> {
+                                assertEquals("[456]", request.url.parameters["ids"])
+                                respond(
+                                    """{"code":200,"songs":[{"id":456,"name":"补全歌曲","ar":[{"id":7,"name":"补全歌手"}],"al":{"id":8,"name":"补全专辑","picUrl":"https://example.test/cover.jpg"},"dt":180000}]}""",
+                                )
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val playlist = ProviderPlaylist(
+            id = "playlist:netease:123",
+            title = "缺少歌曲详情的歌单",
+            providerId = "netease",
+            providerName = "网易云音乐",
+        )
+
+        val detail = provider.playlistDetail(playlist, 0, 50)
+
+        assertEquals("补全歌手", detail.tracks.single().artists)
+        assertEquals("补全专辑", detail.tracks.single().album)
+        assertEquals("https://example.test/cover.jpg", detail.tracks.single().coverUrl)
+
+        client.close()
+    }
+
+    @Test
+    fun neteaseCloudSongsResolvesPrivateCloudEntries() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/user/level" -> respond("""{"code":200,"data":{"userId":12345}}""")
+                            "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
+                            "/weapi/v1/cloud/get" -> respond(
+                                """{"code":200,"count":2,"data":[{"id":"100","s_id":"99","simpleSong":{"id":100,"name":"普通云盘歌曲","ar":[{"id":7,"name":"普通歌手"}],"al":{"id":8,"name":"普通专辑"}}},{"id":"200","s_id":"200","name":"私有云盘歌曲"}]}""",
+                            )
+                            "/weapi/v1/cloud/get/byids" -> respond(
+                                """{"code":200,"data":[{"id":200,"name":"私有云盘歌曲","ar":[{"id":9,"name":"私有歌手"}],"al":{"id":10,"name":"私有专辑"}}]}""",
+                            )
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "netease_cloud_songs" },
+            0,
+            50,
+        )
+
+        assertEquals(listOf("普通云盘歌曲", "私有云盘歌曲"), section.tracks.map { it.title })
+        assertEquals(listOf("普通歌手", "私有歌手"), section.tracks.map { it.artists })
+        assertEquals(listOf("普通专辑", "私有专辑"), section.tracks.map { it.album })
+
+        client.close()
+    }
+
+    @Test
+    fun neteaseArtistAndAlbumDetailsExposeTracksAndAlbums() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/weapi/v1/artist/songs" -> respond(
+                                """{"code":200,"data":{"total":1,"more":false,"songs":[{"id":101,"name":"歌手歌曲","ar":[{"id":7,"name":"歌手"}],"al":{"id":8,"name":"专辑"}}]}}""",
+                            )
+                            "/api/artist/albums/7" -> respond(
+                                """{"code":200,"artist":{"albumSize":1},"more":false,"hotAlbums":[{"id":8,"name":"专辑","picUrl":"https://example.test/album.jpg"}]}""",
+                            )
+                            "/api/album/8" -> respond(
+                                """{"code":200,"album":{"id":8,"name":"专辑","size":1,"songs":[{"id":101,"name":"专辑歌曲","ar":[{"id":7,"name":"歌手"}],"al":{"id":8,"name":"专辑"}}]}}""",
+                            )
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val artist = ProviderMediaItem(
+            id = "artist:netease:7",
+            title = "歌手",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            type = ProviderMediaItemType.Artist,
+        )
+        val album = ProviderMediaItem(
+            id = "album:netease:8",
+            title = "专辑",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            type = ProviderMediaItemType.Album,
+        )
+
+        val artistDetail = provider.mediaItemDetail(artist, 0, 0, 50)
+        val albumDetail = provider.mediaItemDetail(album, 0, 0, 50)
+
+        assertEquals("歌手歌曲", artistDetail.tracks.single().title)
+        assertEquals("歌手", artistDetail.tracks.single().artists)
+        assertEquals("专辑", artistDetail.tracks.single().album)
+        assertEquals("album:netease:8", artistDetail.albums.single().id)
+        assertEquals("专辑歌曲", albumDetail.tracks.single().title)
+        assertEquals("歌手", albumDetail.tracks.single().artists)
+
+        client.close()
+    }
+
+    @Test
+    fun qqmusicArtistAndAlbumDetailsExposeTracksAndAlbums() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/cgi-bin/musicu.fcg" -> respond(
+                                """{"code":0,"req_0":{"code":0,"data":{"total":1,"songlist":[{"songInfo":{"mid":"song-mid","name":"歌手歌曲","singer":[{"id":42,"mid":"artist-mid","name":"歌手"}],"album":{"id":8,"mid":"album-mid","name":"专辑"},"interval":180}}]}}}""",
+                            )
+                            "/v8/fcg-bin/fcg_v8_singer_album.fcg" -> respond(
+                                """{"code":0,"data":{"total":1,"list":[{"albumID":8,"albumMID":"album-mid","albumName":"专辑","albumPic":"https://example.test/album.jpg"}]}}""",
+                            )
+                            "/v8/fcg-bin/fcg_v8_album_detail_cp.fcg" -> respond(
+                                """{"code":0,"data":{"getAlbumInfo":{"Falbum_id":8,"Falbum_mid":"album-mid","Falbum_name":"专辑"},"getAlbumDesc":{"Falbum_desc":"专辑简介"},"getSongInfo":[{"id":101,"mid":"song-mid","name":"专辑歌曲","singer":[{"id":42,"mid":"artist-mid","name":"歌手"}],"album":{"id":8,"mid":"album-mid","name":"专辑"},"interval":180}]}}""",
+                            )
+                            else -> error("unexpected QQ Music request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        val artist = ProviderMediaItem(
+            id = "artist:qqmusic:42",
+            title = "歌手",
+            providerId = "qqmusic",
+            providerName = "QQ 音乐",
+            type = ProviderMediaItemType.Artist,
+        )
+        val album = ProviderMediaItem(
+            id = "album:qqmusic:8",
+            title = "专辑",
+            providerId = "qqmusic",
+            providerName = "QQ 音乐",
+            type = ProviderMediaItemType.Album,
+        )
+
+        val artistDetail = provider.mediaItemDetail(artist, 0, 0, 50)
+        val albumDetail = provider.mediaItemDetail(album, 0, 0, 50)
+
+        assertEquals("歌手歌曲", artistDetail.tracks.single().title)
+        assertEquals("歌手", artistDetail.tracks.single().artists)
+        assertEquals("专辑", artistDetail.tracks.single().album)
+        assertEquals("artist:qqmusic:42", artistDetail.tracks.single().artistItemId)
+        assertEquals("album:qqmusic:8", artistDetail.tracks.single().albumItemId)
+        assertEquals("album:qqmusic:8", artistDetail.albums.single().id)
+        assertEquals("专辑歌曲", albumDetail.tracks.single().title)
+        assertEquals("歌手", albumDetail.tracks.single().artists)
+
+        client.close()
+    }
+
+    @Test
     fun neteaseRejectedCookiesAreNotReportedAsLoggedIn() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {

@@ -1,5 +1,7 @@
 package org.feeluown.mobile.provider.qqmusic
 
+import io.ktor.http.Parameters
+import kotlinx.serialization.json.JsonObject
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.ProviderCapabilities
@@ -8,6 +10,8 @@ import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderFeature
 import org.feeluown.mobile.ProviderFeatureCategory
 import org.feeluown.mobile.ProviderInfo
+import org.feeluown.mobile.ProviderMediaItem
+import org.feeluown.mobile.ProviderMediaItemDetail
 import org.feeluown.mobile.ProviderMediaItemType
 import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
@@ -22,6 +26,7 @@ import org.feeluown.mobile.provider.core.array
 import org.feeluown.mobile.provider.core.asObject
 import org.feeluown.mobile.provider.core.asString
 import org.feeluown.mobile.provider.core.base64DecodeToString
+import org.feeluown.mobile.provider.core.boolean
 import org.feeluown.mobile.provider.core.int
 import org.feeluown.mobile.provider.core.long
 import org.feeluown.mobile.provider.core.md5Hex
@@ -33,7 +38,6 @@ import org.feeluown.mobile.provider.core.stringOrNull
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderRequestKind
-import io.ktor.http.Parameters
 
 class QQMusicProvider(
     http: ProviderHttpClient,
@@ -148,6 +152,53 @@ class QQMusicProvider(
             tracksNextOffset = nextOffset,
             tracksHasMore = songItems.isNotEmpty() && nextOffset < count,
         )
+    }
+
+    override suspend fun mediaItemTracks(item: ProviderMediaItem): List<org.feeluown.mobile.MusicTrack> =
+        mediaItemDetail(item, tracksOffset = 0, albumsOffset = 0, limit = 300).tracks
+
+    override suspend fun mediaItemDetail(item: ProviderMediaItem, tracksOffset: Int, albumsOffset: Int, limit: Int): ProviderMediaItemDetail {
+        val (_, identifier) = splitResourceId(
+            item.id,
+            if (item.type == ProviderMediaItemType.Artist) "artist" else "album",
+        )
+        return if (item.type == ProviderMediaItemType.Artist) {
+            val artistId = resolveArtistId(identifier)
+            val artistSongs = artistSongsPage(artistId, tracksOffset, limit)
+            val artistAlbums = artistAlbumsPage(artistId, albumsOffset, limit)
+            ProviderMediaItemDetail(
+                item = item.copy(
+                    trackCount = artistSongs.total ?: item.trackCount,
+                    albumCount = artistAlbums.total ?: item.albumCount,
+                ),
+                tracks = artistSongs.values,
+                albums = artistAlbums.values,
+                tracksNextOffset = tracksOffset + artistSongs.rawSize,
+                tracksHasMore = artistSongs.hasMore,
+                albumsNextOffset = albumsOffset + artistAlbums.rawSize,
+                albumsHasMore = artistAlbums.hasMore,
+            )
+        } else {
+            val detail = albumDetailRoot(identifier)
+            val albumInfo = detail.obj("getAlbumInfo")
+            val values = detail.array("getSongInfo").ifEmpty { detail.array("songlist") }
+            val allTracks = songs(values)
+            val tracks = allTracks.drop(tracksOffset).take(limit)
+            val album = albumInfo?.let(::qqAlbum)
+            ProviderMediaItemDetail(
+                item = item.copy(
+                    title = album?.title?.ifBlank { item.title } ?: item.title,
+                    coverUrl = album?.coverUrl ?: item.coverUrl,
+                    description = detail.obj("getAlbumDesc")?.string("Falbum_desc")
+                        ?.ifBlank { item.description }
+                        ?: item.description,
+                    trackCount = album?.trackCount ?: allTracks.size,
+                ),
+                tracks = tracks,
+                tracksNextOffset = tracksOffset + tracks.size,
+                tracksHasMore = tracksOffset + tracks.size < allTracks.size,
+            )
+        }
     }
 
     override suspend fun similarTracks(track: org.feeluown.mobile.MusicTrack): List<org.feeluown.mobile.MusicTrack> {
@@ -268,6 +319,138 @@ class QQMusicProvider(
 
     override suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
         mutatePlaylist("DelSonglist", playlist, track)
+
+    private suspend fun artistSongsPage(identifier: String, offset: Int, limit: Int): QQTrackPage {
+        val root = rpc(
+            """
+            {"req_0":{"module":"music.musichallSong.SongListInter","method":"GetSingerSongList","param":{"singerid":${qqIdentifierJson(identifier)},"begin":$offset,"num":$limit,"order":1,"newsong":1}},"comm":{"format":"json"}}
+            """.trimIndent(),
+        )
+        val data = root.obj("req_0")?.obj("data") ?: root.obj("data") ?: root
+        val values = data.array("songlist").takeIf { it.isNotEmpty() } ?: data.array("list")
+        val tracks = songs(values)
+        val total = data.int("total") ?: data.int("songnum") ?: data.int("song_count")
+        return QQTrackPage(
+            values = tracks,
+            rawSize = values.size,
+            total = total,
+            hasMore = data.boolean("more") || total?.let { offset + values.size < it } == true || values.size == limit,
+        )
+    }
+
+    private suspend fun artistAlbumsPage(identifier: String, offset: Int, limit: Int): QQAlbumPage {
+        val root = http.getText(
+            ID,
+            queryUrl(
+                "$SEARCH_BASE/v8/fcg-bin/fcg_v8_singer_album.fcg",
+                mapOf(
+                    "singerid" to identifier,
+                    "order" to "time",
+                    "begin" to offset.toString(),
+                    "num" to limit.toString(),
+                ),
+            ),
+            authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = "qqmusic:artist-albums:$identifier:$offset:$limit",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val data = root.obj("data") ?: root
+        val rawValues = data.array("list")
+        val values = rawValues.mapNotNull { value ->
+            runCatching { qqAlbum(value.asObject()) }.getOrNull()
+        }
+        val total = data.int("total") ?: data.int("albumnum") ?: data.int("album_num")
+        return QQAlbumPage(
+            values = values,
+            rawSize = rawValues.size,
+            total = total,
+            hasMore = data.boolean("more") || total?.let { offset + rawValues.size < it } == true || rawValues.size == limit,
+        )
+    }
+
+    private suspend fun albumDetailRoot(identifier: String): JsonObject {
+        val root = http.getText(
+            ID,
+            queryUrl(
+                "$SEARCH_BASE/v8/fcg-bin/fcg_v8_album_detail_cp.fcg",
+                mapOf("albumid" to identifier, "format" to "json", "newsong" to "1"),
+            ),
+            authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = "qqmusic:album:$identifier",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return root.obj("data") ?: root
+    }
+
+    private suspend fun resolveArtistId(identifier: String): String {
+        if (identifier.toLongOrNull() != null) return identifier
+        val root = runCatching {
+            rpc(
+                """
+                {"req_0":{"module":"music.musichallSinger.SingerInfoInter","method":"GetSingerDetail","param":{"singer_mids":[${jsonString(identifier)}],"pic":1,"group_singer":1,"wiki_singer":1,"ex_singer":1}}}
+                """.trimIndent(),
+            )
+        }.getOrNull() ?: return identifier
+        val singer = root.obj("req_0")?.obj("data")?.array("singer_list")?.firstOrNull()?.asObject()
+        val basicInfo = singer?.obj("basic_info")
+        return basicInfo?.string("singer_id")?.takeIf { it.isNotBlank() }
+            ?: singer?.string("singer_id")?.takeIf { it.isNotBlank() }
+            ?: identifier
+    }
+
+    private fun qqAlbum(value: JsonObject): ProviderMediaItem {
+        val identifier = value.string("albumID")
+            .ifBlank { value.string("albumid") }
+            .ifBlank { value.string("Falbum_id") }
+            .ifBlank { value.string("album_id") }
+            .ifBlank { value.string("id") }
+        val mid = value.string("albumMID")
+            .ifBlank { value.string("albummid") }
+            .ifBlank { value.string("Falbum_mid") }
+            .ifBlank { value.string("mid") }
+        val realIdentifier = identifier.ifBlank { mid }
+        val title = value.string("albumName")
+            .ifBlank { value.string("albumname") }
+            .ifBlank { value.string("Falbum_name") }
+            .ifBlank { value.string("name") }
+        val cover = value.stringOrNull("albumPic")
+            ?: value.stringOrNull("albumPicUrl")
+            ?: value.stringOrNull("picurl")
+            ?: value.stringOrNull("picUrl")
+            ?: mid.takeIf { it.isNotBlank() }?.let(::qqAlbumCover)
+        return mediaItem(
+            type = ProviderMediaItemType.Album,
+            identifier = realIdentifier,
+            title = title,
+            coverUrl = cover,
+            description = value.string("Falbum_desc"),
+            trackCount = value.int("song_count")
+                ?: value.int("songnum")
+                ?: value.int("Falbum_songnum"),
+            providerUrl = "https://y.qq.com/n/ryqq/albumDetail/$realIdentifier",
+        )
+    }
+
+    private fun qqIdentifierJson(value: String): String = value.toLongOrNull()?.toString() ?: jsonString(value)
+
+    private fun jsonString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+    private fun qqAlbumCover(mid: String): String =
+        "https://y.qq.com/music/photo_new/T002R300x300M000$mid.jpg"
+
+    private data class QQTrackPage(
+        val values: List<org.feeluown.mobile.MusicTrack>,
+        val rawSize: Int,
+        val total: Int?,
+        val hasMore: Boolean,
+    )
+
+    private data class QQAlbumPage(
+        val values: List<ProviderMediaItem>,
+        val rawSize: Int,
+        val total: Int?,
+        val hasMore: Boolean,
+    )
 
     private suspend fun searchRoot(keyword: String) = http.getText(
         ID,
@@ -483,22 +666,46 @@ class QQMusicProvider(
     }.getOrNull()
 
     private fun song(value: kotlinx.serialization.json.JsonElement): org.feeluown.mobile.MusicTrack {
-        val item = value.asObject()
+        val item = value.asObject().obj("songInfo") ?: value.asObject()
         val identifier = item.string("songmid")
             .ifBlank { item.string("mid") }
             .ifBlank { item.string("songid") }
-        val singers = item.array("singer").map { it.asObject().string("name") }.filter { it.isNotBlank() }.joinToString(" / ")
-        val album = item.string("albumname").ifBlank { item.obj("album")?.string("name").orEmpty() }
-        val albumMid = item.stringOrNull("albummid") ?: item.obj("album")?.stringOrNull("mid")
+            .ifBlank { item.string("id") }
+        val singerItems = item.array("singer")
+        val singers = singerItems.map { it.asObject().string("name") }
+            .filter { it.isNotBlank() }
+            .joinToString(" / ")
+        val albumObject = item.obj("album")
+        val album = item.string("albumname").ifBlank { albumObject?.string("name").orEmpty() }
+        val albumId = item.string("albumid")
+            .ifBlank { item.string("albumID") }
+            .ifBlank { item.string("album_id") }
+            .ifBlank { albumObject?.string("id").orEmpty() }
+            .ifBlank { albumObject?.string("albumid").orEmpty() }
+        val albumMid = item.stringOrNull("albummid")
+            ?: albumObject?.stringOrNull("mid")
+        val singer = singerItems.firstOrNull()?.asObject()
+        val artistId = singer?.string("id")
+            ?.ifBlank { singer.string("singerid") }
+            ?.ifBlank { singer.string("singerID") }
+            ?.ifBlank { singer.string("singer_id") }
+            ?.ifBlank { singer.string("mid") }
         return track(
             identifier = identifier,
-            title = item.string("songname").ifBlank { item.string("name") }.ifBlank { item.string("songorig") },
+            title = item.string("songname")
+                .ifBlank { item.string("title") }
+                .ifBlank { item.string("name") }
+                .ifBlank { item.string("songorig") },
             artists = singers,
             album = album,
-            coverUrl = albumMid?.let { "https://y.qq.com/music/photo_new/T002R300x300M000${it}.jpg" },
-            durationMs = item.long("interval")?.times(1_000),
-            artistItemId = item.array("singer").firstOrNull()?.asObject()?.stringOrNull("mid")?.let { "artist:$ID:$it" },
-            albumItemId = albumMid?.let { "album:$ID:$it" },
+            coverUrl = albumObject?.stringOrNull("picurl")
+                ?: albumObject?.stringOrNull("picUrl")
+                ?: albumMid?.let(::qqAlbumCover),
+            durationMs = item.long("interval")?.times(1_000)
+                ?: item.long("duration")?.let { if (it < 10_000) it * 1_000 else it },
+            artistItemId = artistId?.takeIf { it.isNotBlank() }?.let { "artist:$ID:$it" },
+            albumItemId = (albumId.takeIf { it.isNotBlank() } ?: albumMid)
+                ?.let { "album:$ID:$it" },
             providerUrl = "https://y.qq.com/n/ryqq/songDetail/$identifier",
         )
     }
