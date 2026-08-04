@@ -23,10 +23,7 @@ data class GoogleOAuthBrowserToken(
     val grantedScopes: Set<String>,
 )
 
-/**
- * Google OAuth Authorization Code + PKCE flow for devices where Play services Identity API is unavailable.
- * The authorization UI is always provided by the system browser or a Custom Tab; no WebView is used.
- */
+/** Google OAuth Authorization Code + PKCE flow backed by the system browser or a Custom Tab. */
 class GoogleOAuthBrowserClient(
     private val context: Context,
     private val clientId: String = BuildConfig.GOOGLE_OAUTH_BROWSER_CLIENT_ID,

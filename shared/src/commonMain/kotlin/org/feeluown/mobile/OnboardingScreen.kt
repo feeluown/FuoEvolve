@@ -374,7 +374,11 @@ private fun ProviderLoginOnboardingPage(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "登录后可以使用个人歌单和推荐内容；也可以跳过，稍后再登录。",
+            text = if (provider.oauthConfig != null) {
+                "将通过系统浏览器完成 Google 授权，授权后自动返回应用；也可以跳过，稍后再登录。"
+            } else {
+                "登录后可以使用个人歌单和推荐内容；也可以跳过，稍后再登录。"
+            },
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         ProviderLoginPanel(

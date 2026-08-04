@@ -630,6 +630,8 @@ fun ProviderLoginPanel(
             val authFeedback = controller.message.takeIf { message ->
                 message.contains(provider.providerName) ||
                     message.contains("Google OAuth") ||
+                    message.contains("系统浏览器") ||
+                    message.contains("返回应用") ||
                     message.contains("音源运行时尚未接入")
             }
             authFeedback?.let { message ->
@@ -675,18 +677,14 @@ fun ProviderLoginPanel(
             }
             when (activeLoginMode) {
                 ProviderLoginMode.OAuth -> {
-                    Text(
-                        text = "使用 Google OAuth 授权 YouTube Music，不会在应用内嵌入 Google 登录页面。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    BrowserOAuthGuide()
                     Button(
                         enabled = !isAuthBusy && provider.oauthConfig != null && onStartProviderOAuthLogin != null,
                         onClick = { onStartProviderOAuthLogin?.invoke(provider) },
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text(if (isAuthBusy) "授权中" else "使用 Google 登录")
+                        Text(if (isAuthBusy) "授权中" else "打开浏览器授权")
                     }
                 }
                 ProviderLoginMode.WebView -> {
@@ -757,8 +755,38 @@ fun ProviderLoginPanel(
     }
 }
 
+@Composable
+private fun BrowserOAuthGuide() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            modifier = Modifier.padding(FuoSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "浏览器 OAuth 登录",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "登录会在 Chrome、Firefox 或系统 Custom Tab 中完成，应用不会嵌入 Google 登录页面。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                text = "流程：点击“打开浏览器授权” → 完成 Google 登录并同意授权 → 浏览器回调后自动返回应用。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+    }
+}
+
 fun ProviderLoginMode.label(): String = when (this) {
-    ProviderLoginMode.OAuth -> "Google OAuth"
+    ProviderLoginMode.OAuth -> "浏览器 OAuth"
     ProviderLoginMode.WebView -> "WebView"
     ProviderLoginMode.Cookie -> "复制 Cookie"
     ProviderLoginMode.Headers -> "Headers"

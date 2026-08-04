@@ -15,7 +15,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -28,10 +27,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.android.gms.auth.api.identity.AuthorizationRequest
-import com.google.android.gms.auth.api.identity.AuthorizationResult
-import com.google.android.gms.auth.api.identity.Identity
-import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -106,33 +101,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 pendingWebLoginProviderId = null
-            }
-            val googleAuthorizationClient = remember {
-                runCatching { Identity.getAuthorizationClient(this@MainActivity) }.getOrNull()
-            }
-            fun applyGoogleAuthorization(result: AuthorizationResult) {
-                val accessToken = result.accessToken.orEmpty()
-                if (accessToken.isBlank()) {
-                    controller.showMessage("Google OAuth 未返回访问令牌")
-                } else {
-                    controller.loginYtmusicWithOAuth(
-                        accessToken = accessToken,
-                        grantedScopes = result.grantedScopes.toSet(),
-                    )
-                }
-            }
-            val googleAuthorizationResolutionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.StartIntentSenderForResult(),
-            ) { result ->
-                if (result.resultCode != RESULT_OK || result.data == null) {
-                    controller.showMessage("Google OAuth 授权已取消")
-                } else {
-                    runCatching {
-                        googleAuthorizationClient?.getAuthorizationResultFromIntent(result.data)
-                            ?: error("Google Identity API 不可用")
-                    }.onSuccess(::applyGoogleAuthorization)
-                        .onFailure { controller.showMessage("Google OAuth 授权失败：${it.message.orEmpty()}") }
-                }
             }
             var pendingLocalPlaylistExport by remember {
                 mutableStateOf<PendingLocalPlaylistExport?>(null)
@@ -217,27 +185,8 @@ class MainActivity : ComponentActivity() {
                     val scopes = provider.oauthConfig?.scopes.orEmpty()
                     if (scopes.isEmpty()) {
                         controller.showMessage("未配置 Google OAuth scope")
-                    } else if (googleAuthorizationClient == null) {
-                        startGoogleBrowserOAuth(scopes, controller)
                     } else {
-                        val request = AuthorizationRequest.builder()
-                            .setRequestedScopes(scopes.map(::Scope))
-                            .build()
-                        googleAuthorizationClient.authorize(request)
-                            .addOnSuccessListener { result ->
-                                if (result.hasResolution()) {
-                                    result.pendingIntent?.let { pendingIntent ->
-                                        googleAuthorizationResolutionLauncher.launch(
-                                            IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
-                                        )
-                                    } ?: startGoogleBrowserOAuth(scopes, controller)
-                                } else {
-                                    applyGoogleAuthorization(result)
-                                }
-                            }
-                            .addOnFailureListener {
-                                startGoogleBrowserOAuth(scopes, controller)
-                            }
+                        startGoogleBrowserOAuth(scopes, controller)
                     }
                 },
                 onImportLocalPlaylistFile = {
@@ -286,7 +235,7 @@ class MainActivity : ComponentActivity() {
         controller: FuoPlayerController,
     ) {
         runCatching { googleOAuthBrowserClient.startAuthorization(scopes) }
-            .onSuccess { controller.showMessage("Google Play services 不可用，已打开系统浏览器授权") }
+            .onSuccess { controller.showMessage("已打开系统浏览器，请完成 Google 授权后返回应用") }
             .onFailure {
                 controller.showMessage("Google OAuth 浏览器授权失败：${it.message.orEmpty()}")
             }
