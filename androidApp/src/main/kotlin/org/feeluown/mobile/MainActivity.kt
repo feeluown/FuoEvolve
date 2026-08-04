@@ -15,6 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -27,12 +28,12 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.Scope
 import java.io.File
 
 private data class PendingLocalPlaylistExport(
@@ -50,9 +51,6 @@ private const val CONTENT_URI_SCHEME = "content"
 private const val FILE_URI_SCHEME = "file"
 
 class MainActivity : ComponentActivity() {
-    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val googleOAuthBrowserClient by lazy { GoogleOAuthBrowserClient(this) }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -101,6 +99,34 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 pendingWebLoginProviderId = null
+            }
+            val googleAuthorizationClient = remember {
+                Identity.getAuthorizationClient(this@MainActivity)
+            }
+            fun applyGoogleAuthorization(result: AuthorizationResult) {
+                val accessToken = result.accessToken.orEmpty()
+                if (accessToken.isBlank()) {
+                    controller.showMessage("Google OAuth 未返回访问令牌")
+                } else {
+                    controller.loginYtmusicWithOAuth(
+                        accessToken = accessToken,
+                        grantedScopes = result.grantedScopes.toSet(),
+                    )
+                }
+            }
+            val googleAuthorizationResolutionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartIntentSenderForResult(),
+            ) { result ->
+                if (result.resultCode != RESULT_OK || result.data == null) {
+                    controller.showMessage("Google OAuth 授权已取消")
+                } else {
+                    runCatching {
+                        googleAuthorizationClient.getAuthorizationResultFromIntent(result.data)
+                    }.onSuccess(::applyGoogleAuthorization)
+                        .onFailure { throwable ->
+                            controller.showMessage("Google OAuth 授权失败：${throwable.message.orEmpty()}")
+                        }
+                }
             }
             var pendingLocalPlaylistExport by remember {
                 mutableStateOf<PendingLocalPlaylistExport?>(null)
@@ -186,7 +212,24 @@ class MainActivity : ComponentActivity() {
                     if (scopes.isEmpty()) {
                         controller.showMessage("未配置 Google OAuth scope")
                     } else {
-                        startGoogleBrowserOAuth(scopes, controller)
+                        val request = AuthorizationRequest.builder()
+                            .setRequestedScopes(scopes.map(::Scope))
+                            .build()
+                        googleAuthorizationClient.authorize(request)
+                            .addOnSuccessListener { authorizationResult ->
+                                if (authorizationResult.hasResolution()) {
+                                    authorizationResult.pendingIntent?.let { pendingIntent ->
+                                        googleAuthorizationResolutionLauncher.launch(
+                                            IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                                        )
+                                    } ?: controller.showMessage("Google OAuth 未提供授权确认界面")
+                                } else {
+                                    applyGoogleAuthorization(authorizationResult)
+                                }
+                            }
+                            .addOnFailureListener { throwable ->
+                                controller.showMessage(googleAuthorizationErrorMessage(throwable))
+                            }
                     }
                 },
                 onImportLocalPlaylistFile = {
@@ -202,7 +245,6 @@ class MainActivity : ComponentActivity() {
                 onShareText = ::shareText,
             )
         }
-        handleGoogleOAuthRedirect(intent)
     }
 
     override fun onStop() {
@@ -214,7 +256,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (handleGoogleOAuthRedirect(intent)) return
         val localPlaylistImport = localPlaylistImportFromIntent(intent)
         if (localPlaylistImport != null) {
             handleLocalPlaylistImport(localPlaylistImport)
@@ -225,42 +266,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        activityScope.cancel()
-        super.onDestroy()
-    }
-
-    private fun startGoogleBrowserOAuth(
-        scopes: List<String>,
-        controller: FuoPlayerController,
-    ) {
-        runCatching { googleOAuthBrowserClient.startAuthorization(scopes) }
-            .onSuccess { controller.showMessage("已打开系统浏览器，请完成 Google 授权后返回应用") }
-            .onFailure {
-                controller.showMessage("Google OAuth 浏览器授权失败：${it.message.orEmpty()}")
-            }
-    }
-
-    private fun handleGoogleOAuthRedirect(intent: Intent?): Boolean {
-        val uri = intent?.data ?: return false
-        if (!googleOAuthBrowserClient.isRedirectUri(uri)) return false
-        intent.data = null
-        val controller = (application as FuoEvolveApplication).controller
-        activityScope.launch {
-            try {
-                val token = googleOAuthBrowserClient.handleRedirect(uri)
-                controller.loginYtmusicWithOAuth(
-                    accessToken = token.accessToken,
-                    expiresAtMillis = token.expiresAtMillis,
-                    grantedScopes = token.grantedScopes,
-                )
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (throwable: Throwable) {
-                controller.showMessage("Google OAuth 浏览器授权失败：${throwable.message.orEmpty()}")
-            }
+    private fun googleAuthorizationErrorMessage(throwable: Exception): String {
+        val apiException = throwable as? ApiException
+        return when (apiException?.statusCode) {
+            CommonStatusCodes.API_NOT_CONNECTED ->
+                "Google Play 服务不可用，请启用或更新 Google Play 服务后重试"
+            CommonStatusCodes.SIGN_IN_REQUIRED ->
+                "请先在设备上登录 Google 账号后重试"
+            else -> "Google OAuth 授权失败：${throwable.message.orEmpty()}"
         }
-        return true
     }
 
     private fun hasAudioPermission(): Boolean {
@@ -390,7 +404,6 @@ class MainActivity : ComponentActivity() {
         return when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
                 ?.takeUnless { it.scheme == CONTENT_URI_SCHEME || it.scheme == FILE_URI_SCHEME }
-                ?.takeUnless(googleOAuthBrowserClient::isRedirectUri)
                 ?.toString()
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             else -> null

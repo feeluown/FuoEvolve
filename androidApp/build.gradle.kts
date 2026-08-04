@@ -34,10 +34,6 @@ val fuoSigningStoreFile = signingValue("FUO_SIGNING_STORE_FILE", "fuo.signing.st
 val fuoSigningStorePassword = signingValue("FUO_SIGNING_STORE_PASSWORD", "fuo.signing.storePassword")
 val fuoSigningKeyAlias = signingValue("FUO_SIGNING_KEY_ALIAS", "fuo.signing.keyAlias")
 val fuoSigningKeyPassword = signingValue("FUO_SIGNING_KEY_PASSWORD", "fuo.signing.keyPassword")
-val googleOAuthBrowserClientId = signingValue(
-    "FUO_GOOGLE_OAUTH_BROWSER_CLIENT_ID",
-    "fuo.google.oauth.browserClientId",
-).orEmpty()
 val hasFuoSigningConfig = listOf(
     fuoSigningStoreFile,
     fuoSigningStorePassword,
@@ -54,11 +50,6 @@ android {
         targetSdk = 35
         versionCode = gitVersionCode
         versionName = gitVersionName
-        buildConfigField(
-            "String",
-            "GOOGLE_OAUTH_BROWSER_CLIENT_ID",
-            "\"${googleOAuthBrowserClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
-        )
 
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
@@ -122,7 +113,6 @@ dependencies {
     implementation(project(":shared"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.browser)
     implementation(libs.compose.material3.expressive)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.androidx.media3.datasource)
@@ -134,4 +124,5 @@ dependencies {
     implementation(libs.jellyfin.media3.ffmpeg.decoder)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.google.play.services.auth)
 }

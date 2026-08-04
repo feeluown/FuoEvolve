@@ -58,17 +58,6 @@
                     android:pathPrefix="/FuoEvolve/r"
                     android:scheme="https" />
             </intent-filter>
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="feeluown.github.io"
-                    android:path="/FuoEvolve/oauth2redirect"
-                    android:scheme="https" />
-            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
 

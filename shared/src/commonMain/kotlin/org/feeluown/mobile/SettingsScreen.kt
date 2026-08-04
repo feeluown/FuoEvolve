@@ -630,8 +630,6 @@ fun ProviderLoginPanel(
             val authFeedback = controller.message.takeIf { message ->
                 message.contains(provider.providerName) ||
                     message.contains("Google OAuth") ||
-                    message.contains("系统浏览器") ||
-                    message.contains("返回应用") ||
                     message.contains("音源运行时尚未接入")
             }
             authFeedback?.let { message ->
@@ -683,7 +681,7 @@ fun ProviderLoginPanel(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text(if (isAuthBusy) "授权中" else "打开浏览器授权")
+                        Text(if (isAuthBusy) "授权中" else "使用 Google 登录")
                     }
                 }
                 ProviderLoginMode.WebView -> {
