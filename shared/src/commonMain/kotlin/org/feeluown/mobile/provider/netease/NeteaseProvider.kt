@@ -102,20 +102,15 @@ class NeteaseProvider(
     override suspend fun authState(): ProviderAuthState {
         val credentials = currentCredentials()
         if (credentials == null) return authState(null)
-        val user = runCatching {
-            http.getText(
-                providerId = ID,
-                url = "$BASE/api/user/account",
-                headers = authenticatedHeaders(),
-                cacheKey = null,
-            ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        }.getOrNull()
-        return ProviderAuthState(
-            providerId = ID,
-            providerName = NAME,
-            isLoggedIn = user?.let { it.int("code") == 200 } ?: credentialsArePresent(credentials),
-            userName = user?.obj("profile")?.stringOrNull("nickname"),
-        )
+        if (!credentialsArePresent(credentials)) return authState(credentials)
+        return runCatching { remoteAuthState() }.getOrElse { loggedOutState() }
+    }
+
+    override suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState {
+        super.loginWithCookies(cookiesJson)
+        val state = remoteAuthState()
+        if (!state.isLoggedIn) credentials.delete(ID)
+        return state
     }
 
     override suspend fun playlistTracks(playlist: ProviderPlaylist): List<org.feeluown.mobile.MusicTrack> {
@@ -222,7 +217,7 @@ class NeteaseProvider(
         val auth = authState()
         if (!auth.isLoggedIn) return emptyList()
         val uid = currentUserId() ?: return emptyList()
-        val root = http.getText(ID, queryUrl("$BASE/api/user/playlist", mapOf("uid" to uid, "limit" to "100")), authenticatedHeaders(), cacheKey = null)
+        val root = http.getText(ID, queryUrl("$BASE/api/user/playlist/", mapOf("uid" to uid, "limit" to "100")), neteaseAuthenticatedHeaders(), cacheKey = null)
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         return root.array("playlist").map { it.asObject().toPlaylist() }
     }
@@ -290,8 +285,8 @@ class NeteaseProvider(
                 } else {
                     val root = http.getText(
                         ID,
-                        queryUrl("$BASE/api/user/playlist", mapOf("uid" to uid, "limit" to "100")),
-                        authenticatedHeaders(),
+                        queryUrl("$BASE/api/user/playlist/", mapOf("uid" to uid, "limit" to "100")),
+                        neteaseAuthenticatedHeaders(),
                         cacheKey = null,
                     ).value.let { providerJson.parseToJsonElement(it).asObject() }
                     val playlists = root.array("playlist").filter { item ->
@@ -371,18 +366,71 @@ class NeteaseProvider(
         return root.obj("lrc")?.stringOrNull("lyric")
     }
 
-    private suspend fun currentUserId(): String? = runCatching {
-        val root = http.getText(
+    private suspend fun currentUserId(): String? = runCatching { requestCurrentUserId() }.getOrNull()
+
+    private suspend fun requestCurrentUserId(): String? {
+        val root = neteaseWeApiPost("$BASE/api/user/level", "{}")
+        if (root.int("code") != 200) return null
+        val data = root.obj("data") ?: return null
+        return data.long("userId")?.toString() ?: data.stringOrNull("userId")
+    }
+
+    private suspend fun remoteAuthState(): ProviderAuthState {
+        val userId = requestCurrentUserId() ?: return loggedOutState()
+        val userName = runCatching {
+            val numericUserId = userId.toLongOrNull() ?: return@runCatching null
+            val root = neteaseWeApiPost(
+                "$BASE/weapi/share/userprofile/info",
+                "{\"userId\":$numericUserId}",
+            )
+            root.stringOrNull("nickname")
+                ?: root.obj("profile")?.stringOrNull("nickname")
+                ?: root.obj("data")?.stringOrNull("nickname")
+        }.getOrNull()
+        return ProviderAuthState(
             providerId = ID,
-            url = "$BASE/api/user/account",
-            headers = authenticatedHeaders(),
+            providerName = NAME,
+            isLoggedIn = true,
+            userName = userName,
+        )
+    }
+
+    private suspend fun neteaseWeApiPost(url: String, json: String): JsonObject {
+        val payload = NeteaseWeApi.encrypt(json)
+        return http.postForm(
+            providerId = ID,
+            url = url,
+            form = Parameters.build {
+                append("params", payload.params)
+                append("encSecKey", payload.encSecKey)
+            },
+            headers = neteaseAuthenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
+            kind = ProviderRequestKind.Auth,
             cacheKey = null,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        root.obj("profile")?.stringOrNull("userId")
-            ?: root.obj("account")?.stringOrNull("id")
-            ?: root.stringOrNull("userId")
-            ?: root.stringOrNull("id")
-    }.getOrNull()
+    }
+
+    private suspend fun neteaseAuthenticatedHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> {
+        val headers = authenticatedHeaders(extra)
+        val cookies = headers["Cookie"].orEmpty()
+            .split(';')
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .filterNot { cookie ->
+                val name = cookie.substringBefore('=')
+                name.equals("appver", ignoreCase = true) || name.equals("os", ignoreCase = true)
+            }
+            .toMutableList()
+        cookies += "appver=7.2.24"
+        cookies += "os=android"
+        return headers + ("Cookie" to cookies.joinToString("; "))
+    }
+
+    private fun loggedOutState(): ProviderAuthState = ProviderAuthState(
+        providerId = ID,
+        providerName = NAME,
+        isLoggedIn = false,
+    )
 
     private fun credentialsArePresent(credentials: org.feeluown.mobile.provider.core.ProviderCredentials): Boolean =
         credentials.cookies.isNotEmpty() ||

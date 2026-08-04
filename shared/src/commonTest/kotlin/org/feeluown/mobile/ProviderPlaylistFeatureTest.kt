@@ -60,15 +60,22 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
-    fun neteaseUsesAccountUserIdForPlaylistFeatures() = runTest {
+    fun neteaseUsesWeApiUserIdForPlaylistFeatures() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
                 engine {
                     addHandler { request ->
                         when (request.url.encodedPath) {
-                            "/api/user/account" ->
-                                respond("""{"code":200,"profile":{"userId":12345,"nickname":"tester"}}""")
-                            "/api/user/playlist" -> {
+                            "/api/user/level" -> {
+                                assertEquals("POST", request.method.value)
+                                respond("""{"code":200,"data":{"userId":12345}}""")
+                            }
+                            "/weapi/share/userprofile/info" -> {
+                                assertEquals("POST", request.method.value)
+                                respond("""{"code":200,"nickname":"tester"}""")
+                            }
+                            "/api/user/playlist/" -> {
+                                assertEquals("GET", request.method.value)
                                 assertEquals("12345", request.url.parameters["uid"])
                                 respond("""{"code":200,"playlist":[{"id":1,"name":"我的歌单","subscribed":false}]}""")
                             }
@@ -84,6 +91,7 @@ class ProviderPlaylistFeatureTest {
         val section = provider.loadFeature(provider.features.single { it.id == "netease_user_playlists" }, 0, 50)
 
         assertTrue(state.isLoggedIn)
+        assertEquals("tester", state.userName)
         assertFalse(section.isLoginRequired)
         assertEquals("我的歌单", section.playlists.single().title)
         assertEquals(null, section.errorMessage)
