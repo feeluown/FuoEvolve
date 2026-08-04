@@ -127,7 +127,10 @@ class NeteaseProvider(
             cachePolicy = ProviderCachePolicies.detail,
         )
         val root = providerJson.parseToJsonElement(result.value).asObject()
-        val playlistObject = root.obj("playlist") ?: return ProviderPlaylistDetail(playlist)
+        val playlistObject = root.obj("playlist")
+            ?: root.obj("result")?.obj("playlist")
+            ?: root.obj("result")
+            ?: return ProviderPlaylistDetail(playlist)
         val tracks = playlistObject.array("tracks").map(::song)
         val actualPlaylist = playlistObject.toPlaylist()
         val count = actualPlaylist.trackCount ?: playlist.trackCount ?: tracks.size
@@ -273,7 +276,7 @@ class NeteaseProvider(
                 ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
             }
             "netease_daily_playlists" -> {
-                val root = http.getText(ID, queryUrl("$BASE/api/personalized", mapOf("limit" to limit.toString())), authenticatedHeaders(), cacheKey = "netease:personalized:$limit", cachePolicy = ProviderCachePolicies.recommendation)
+                val root = http.getText(ID, queryUrl("$BASE/api/personalized/playlist", mapOf("limit" to limit.toString())), authenticatedHeaders(), cacheKey = "netease:personalized:playlist:$limit", cachePolicy = ProviderCachePolicies.recommendation)
                     .value.let { providerJson.parseToJsonElement(it).asObject() }
                 val playlists = root.array("result")
                 ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
