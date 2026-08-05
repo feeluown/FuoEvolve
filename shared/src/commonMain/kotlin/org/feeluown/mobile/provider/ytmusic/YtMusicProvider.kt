@@ -174,15 +174,15 @@ class YtMusicProvider(
     private suspend fun ensureConfig() {
         if (!apiKey.isNullOrBlank()) return
         val html = http.getText(ID, "https://music.youtube.com", authenticatedHeaders(), cacheKey = "ytmusic:landing", cachePolicy = ProviderCachePolicies.detail).value
-        apiKey = Regex("INNERTUBE_API_KEY\\\"?[:=]\\\"([^\\\"]+)").find(html)?.groupValues?.getOrNull(1)
-            ?: Regex("INNERTUBE_API_KEY=([^&\\\"]+)").find(html)?.groupValues?.getOrNull(1)
+        apiKey = Regex("""["']?INNERTUBE_API_KEY["']?\s*[:=]\s*["']([^"']+)["']""").find(html)?.groupValues?.getOrNull(1)
+            ?: Regex("""["']?INNERTUBE_API_KEY["']?\s*[:=]\s*([^&"'\s,}]+)""").find(html)?.groupValues?.getOrNull(1)
+            ?: FALLBACK_API_KEY
         clientVersion = Regex("INNERTUBE_CLIENT_VERSION\\\"?[:=]\\\"([^\\\"]+)").find(html)?.groupValues?.getOrNull(1)
             ?: DEFAULT_CLIENT_VERSION
         playerJsUrl = Regex("\\\"jsUrl\\\":\\\"([^\\\"]+)").find(html)?.groupValues?.getOrNull(1)
             ?.replace("\\\\/", "/")
             ?: Regex("https://music\\.youtube\\.com/s/player/[^\\\"]+/player_ias\\.vflset/[^\\\"]+/base\\.js")
                 .find(html)?.value
-        require(!apiKey.isNullOrBlank()) { "无法从 YouTube Music 页面读取 API key" }
     }
 
     private fun collectSearchItems(element: kotlinx.serialization.json.JsonElement, output: MutableList<org.feeluown.mobile.MusicTrack>) {
@@ -359,6 +359,7 @@ class YtMusicProvider(
         const val ID = "ytmusic"
         const val NAME = "YouTube Music"
         const val API_BASE = "https://music.youtube.com/youtubei/v1"
+        const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddxYq6X74dJoCTL-WEYFDNX30"
         const val DEFAULT_CLIENT_VERSION = "1.20260801.01.00"
         val INFO = ProviderInfo(
             providerId = ID,
