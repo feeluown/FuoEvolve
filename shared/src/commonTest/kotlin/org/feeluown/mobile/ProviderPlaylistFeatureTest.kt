@@ -3,10 +3,13 @@ package org.feeluown.mobile
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.feeluown.mobile.provider.bilibili.BilibiliProvider
 import org.feeluown.mobile.provider.core.InMemoryProviderCredentialStore
@@ -105,7 +108,7 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
-    fun neteaseLoadsRecommendedPlaylistsFromCurrentEndpoint() = runTest {
+    fun neteaseLoadsRecommendedPlaylistsFromWeApiResource() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
                 engine {
@@ -113,10 +116,9 @@ class ProviderPlaylistFeatureTest {
                         when (request.url.encodedPath) {
                             "/api/user/level" -> respond("""{"code":200,"data":{"userId":12345}}""")
                             "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
-                            "/api/personalized/playlist" -> {
-                                assertEquals("GET", request.method.value)
-                                assertEquals("50", request.url.parameters["limit"])
-                                respond("""{"code":200,"result":[{"id":42,"name":"推荐歌单","trackCount":2}]}""")
+                            "/api/discovery/recommend/resource" -> {
+                                assertEquals("POST", request.method.value)
+                                respond("""{"code":200,"recommend":[{"id":42,"name":"推荐歌单","trackCount":2}]}""")
                             }
                             else -> error("unexpected NetEase request: ${request.url.encodedPath}")
                         }
@@ -133,6 +135,306 @@ class ProviderPlaylistFeatureTest {
         assertEquals("推荐歌单", section.playlists.single().title)
         assertEquals(2, section.playlists.single().trackCount)
 
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsDailySongsFromWeApi() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/user/level" -> {
+                                assertEquals("POST", request.method.value)
+                                respond("""{"code":200,"data":{"userId":12345}}""")
+                            }
+                            "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
+                            "/weapi/v3/discovery/recommend/songs" -> {
+                                assertEquals("POST", request.method.value)
+                                respond(
+                                    """{"code":200,"data":{"dailySongs":[{"id":123,"name":"每日推荐歌曲","ar":[{"id":7,"name":"推荐歌手"}],"al":{"id":8,"name":"推荐专辑","picUrl":"https://example.test/cover.jpg"},"dt":180000}]}}""",
+                                )
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "netease_daily_songs" },
+            0,
+            50,
+        )
+
+        assertFalse(section.isLoginRequired)
+        assertEquals("netease:123", section.tracks.single().id)
+        assertEquals("每日推荐歌曲", section.tracks.single().title)
+        assertEquals("推荐歌手", section.tracks.single().artists)
+        assertFalse(section.hasMore)
+
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsPrivateFmTracksAndResolvesPlaybackUrl() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/user/level" -> respond("""{"code":200,"data":{"userId":12345}}""")
+                            "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
+                            "/api/radio/get" -> {
+                                assertEquals("GET", request.method.value)
+                                respond(
+                                    """{"code":200,"data":[{"id":456,"name":"私人 FM 歌曲","artists":[{"id":9,"name":"FM 歌手"}],"album":{"id":10,"name":"FM 专辑","picUrl":"https://example.test/fm-cover.jpg"},"duration":240000}]}""",
+                                )
+                            }
+                            "/weapi/song/enhance/player/url" -> {
+                                assertEquals("POST", request.method.value)
+                                respond(
+                                    """{"code":200,"data":[{"id":456,"url":"https://example.test/fm.mp3","br":320000,"type":"mp3","time":240000,"freeTrialInfo":null}]}""",
+                                )
+                            }
+                            "/api/song/lyric" -> {
+                                assertEquals("-1", request.url.parameters["lv"])
+                                respond("""{"code":200,"lrc":{"lyric":"[00:00.00]FM"}}""")
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+
+        val section = provider.loadFeature(
+            provider.features.single { it.id == "netease_radio" },
+            0,
+            50,
+        )
+        val payload = provider.resolve(section.tracks.single(), AudioQualityPolicy.High.policy)
+
+        assertFalse(section.isLoginRequired)
+        assertEquals("私人 FM 歌曲", section.tracks.single().title)
+        assertEquals("https://example.test/fm.mp3", payload?.url)
+
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsSimilarTracksFromDiscoveryEndpoint() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/api/discovery/simiSong", request.url.encodedPath)
+                        assertEquals("GET", request.method.value)
+                        assertEquals("456", request.url.parameters["songid"])
+                        assertEquals("0", request.url.parameters["offset"])
+                        assertEquals("true", request.url.parameters["total"])
+                        assertEquals("10", request.url.parameters["limit"])
+                        respond(
+                            """{"code":200,"songs":[{"id":789,"name":"相似歌曲","ar":[{"id":7,"name":"相似歌手"}],"al":{"id":8,"name":"相似专辑"}}]}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+
+        val tracks = provider.similarTracks(neteaseTrack(456))
+
+        assertEquals("netease:789", tracks.single().id)
+        assertEquals("相似歌曲", tracks.single().title)
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsHotCommentsFromResourceCommentsEndpoint() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/weapi/v1/resource/comments/R_SO_4_456", request.url.encodedPath)
+                        assertEquals("POST", request.method.value)
+                        respond(
+                            """{"code":200,"hotComments":[{"commentId":11,"user":{"nickname":"评论用户"},"content":"很好听","likedCount":8,"time":30000}]}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+
+        val comments = provider.hotComments(neteaseTrack(456))
+
+        assertEquals("11", comments.single().id)
+        assertEquals("评论用户", comments.single().userName)
+        assertEquals(30, comments.single().timeSeconds)
+        client.close()
+    }
+
+    @Test
+    fun neteaseSurfacesBusinessErrorInsteadOfReturningEmptySimilarTracks() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { respond("""{"code":404,"message":"接口未找到！"}""") }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+
+        val failure = assertFailsWith<IllegalStateException> {
+            provider.similarTracks(neteaseTrack(456))
+        }
+
+        assertTrue(failure.message.orEmpty().contains("code=404"))
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsFavoriteSongsFromTheFavoritePlaylist() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/user/level" -> respond("""{"code":200,"data":{"userId":12345}}""")
+                            "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
+                            "/api/user/playlist/" -> respond("""{"code":200,"playlist":[{"id":12345,"name":"我喜欢的音乐","subscribed":false,"trackCount":1}]}""")
+                            "/weapi/v3/playlist/detail" -> respond("""{"code":200,"playlist":{"id":12345,"name":"我喜欢的音乐","trackCount":1,"trackIds":[{"id":456}]}}""")
+                            "/weapi/v3/song/detail" -> respond("""{"code":200,"songs":[{"id":456,"name":"喜欢的歌曲","ar":[{"id":7,"name":"喜欢的歌手"}],"al":{"id":8,"name":"喜欢的专辑"}}]}""")
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+
+        val section = provider.loadFeature(provider.features.single { it.id == "netease_favorite_songs" }, 0, 50)
+
+        assertEquals("喜欢的歌曲", section.tracks.single().title)
+        assertFalse(section.hasMore)
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsFavoriteArtistsAndAlbumsThroughWeApi() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/user/level" -> respond("""{"code":200,"data":{"userId":12345}}""")
+                            "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
+                            "/weapi/artist/sublist" -> {
+                                assertEquals("POST", request.method.value)
+                                respond("""{"code":200,"data":[{"id":7,"name":"收藏歌手","picUrl":"https://example.test/artist.jpg"}]}""")
+                            }
+                            "/weapi/album/sublist" -> {
+                                assertEquals("POST", request.method.value)
+                                respond("""{"code":200,"data":[{"id":8,"name":"收藏专辑","picUrl":"https://example.test/album.jpg"}]}""")
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+
+        val artists = provider.loadFeature(provider.features.single { it.id == "netease_favorite_artists" }, 0, 50)
+        val albums = provider.loadFeature(provider.features.single { it.id == "netease_favorite_albums" }, 0, 50)
+
+        assertEquals("收藏歌手", artists.mediaItems.single().title)
+        assertEquals("收藏专辑", albums.mediaItems.single().title)
+        client.close()
+    }
+
+    @Test
+    fun neteaseUsesPlaylistMutationAndCreateContracts() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/user/level" -> respond("""{"code":200,"data":{"userId":12345}}""")
+                            "/weapi/share/userprofile/info" -> respond("""{"code":200,"nickname":"tester"}""")
+                            "/api/playlist/create" -> {
+                                assertEquals("POST", request.method.value)
+                                val body = (request.body as TextContent).text
+                                assertTrue(body.contains("uid=12345"), body)
+                                assertTrue(body.contains("name=%E6%96%B0%E6%AD%8C%E5%8D%95"), body)
+                                respond("""{"code":200,"playlist":{"id":900,"name":"新歌单"}}""")
+                            }
+                            "/api/playlist/manipulate/tracks" -> {
+                                assertEquals("POST", request.method.value)
+                                val body = (request.body as TextContent).text
+                                assertTrue(body.contains("pid=900"), body)
+                                assertTrue(body.contains("trackIds=%5B%22456%22%5D"), body)
+                                assertTrue(body.contains("tracks=456"), body)
+                                assertTrue(body.contains("op=add") || body.contains("op=del"), body)
+                                respond("""{"code":200}""")
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"MUSIC_U":"music-cookie"}""")
+        val playlist = ProviderPlaylist("playlist:netease:900", "目标歌单", "netease", "网易云音乐")
+
+        val created = provider.createPlaylist("新歌单")
+        val added = provider.addTrackToPlaylist(playlist, neteaseTrack(456))
+        val removed = provider.removeTrackFromPlaylist(playlist, neteaseTrack(456))
+
+        assertTrue(created.success)
+        assertTrue(added.success)
+        assertTrue(removed.success)
+        client.close()
+    }
+
+    @Test
+    fun neteaseLoadsMvDetailAndPlaybackUrl() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/api/song/detail" -> respond("""{"code":200,"songs":[{"id":456,"name":"歌曲","mvid":186025,"ar":[{"id":7,"name":"歌手"}],"al":{"id":8,"name":"专辑"}}]}""")
+                            "/api/mv/detail" -> {
+                                assertEquals("186025", request.url.parameters["id"])
+                                respond("""{"code":200,"data":{"id":186025,"name":"歌曲 MV","cover":"https://example.test/mv.jpg","duration":123000,"artists":[{"id":7,"name":"歌手"}],"brs":{"480":"https://example.test/480.mp4","720":"https://example.test/720.mp4"}}}""")
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+
+        val video = assertNotNull(provider.trackVideo(neteaseTrack(456)))
+        val payload = provider.videoPlaybackPayload(video)
+
+        assertEquals("video:netease:186025", video.id)
+        assertEquals("歌曲 MV", video.title)
+        assertEquals("https://example.test/720.mp4", payload.url)
+        assertEquals("https://example.test/720.mp4", payload.videoUrl)
+        assertEquals("720", payload.quality)
         client.close()
     }
 
@@ -727,4 +1029,14 @@ class ProviderPlaylistFeatureTest {
 
         client.close()
     }
+
+    private fun neteaseTrack(identifier: Int): MusicTrack = MusicTrack(
+        id = "netease:$identifier",
+        title = "测试歌曲",
+        artists = "测试歌手",
+        album = "测试专辑",
+        source = "netease",
+        sourceType = TrackSourceType.Provider,
+        providerId = "netease:$identifier",
+    )
 }

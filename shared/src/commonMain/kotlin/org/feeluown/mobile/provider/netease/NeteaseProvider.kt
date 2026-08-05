@@ -30,6 +30,7 @@ import org.feeluown.mobile.provider.core.ProviderCredentials
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.array
 import org.feeluown.mobile.provider.core.asObject
+import org.feeluown.mobile.provider.core.asString
 import org.feeluown.mobile.provider.core.boolean
 import org.feeluown.mobile.provider.core.double
 import org.feeluown.mobile.provider.core.int
@@ -124,7 +125,7 @@ class NeteaseProvider(
                 headers = neteaseAuthenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
                 cacheKey = "netease:playlist:$identifier:$offset:$limit",
                 cachePolicy = ProviderCachePolicies.detail,
-            ).value.let { providerJson.parseToJsonElement(it).asObject() }
+            ).value.let { parseNeteaseResponse(it) }
         val playlistObject = root.obj("playlist")
             ?: root.obj("result")?.obj("playlist")
             ?: root.obj("result")
@@ -135,7 +136,7 @@ class NeteaseProvider(
                 JsonObject(mapOf("id" to JsonPrimitive(trackId.asObject().string("id"))))
             }
         } else {
-            playlistObject.array("tracks")
+            playlistObject.array("tracks").drop(offset).take(limit)
         }
         val tracks = loadSongs(trackValues)
         val actualPlaylist = playlistObject.toPlaylist()
@@ -197,23 +198,24 @@ class NeteaseProvider(
         val (_, identifier) = splitResourceId(track.providerId ?: track.id)
         val root = http.getText(
             ID,
-            queryUrl("$BASE/api/song/similar", mapOf("id" to identifier)),
+            queryUrl(
+                "$BASE/api/discovery/simiSong",
+                mapOf("songid" to identifier, "offset" to "0", "total" to "true", "limit" to "10"),
+            ),
             authenticatedHeaders(),
             cacheKey = "netease:similar:$identifier",
             cachePolicy = ProviderCachePolicies.recommendation,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }
         return root.array("songs").map(::song)
     }
 
     override suspend fun hotComments(track: org.feeluown.mobile.MusicTrack): List<ProviderComment> {
         val (_, identifier) = splitResourceId(track.providerId ?: track.id)
-        val root = http.getText(
-            ID,
-            queryUrl("$BASE/api/comment/hot", mapOf("id" to identifier, "type" to "0", "limit" to "20")),
-            authenticatedHeaders(),
-            cacheKey = "netease:comments:$identifier",
-            cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val resourceId = "R_SO_4_$identifier"
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/v1/resource/comments/$resourceId",
+            """{"rid":"$resourceId","offset":"0","total":"true","limit":"20","csrf_token":"${csrfToken().jsonString()}"}""",
+        )
         return root.array("hotComments").map { element ->
             val comment = element.asObject()
             ProviderComment(
@@ -228,29 +230,58 @@ class NeteaseProvider(
 
     override suspend fun trackVideo(track: org.feeluown.mobile.MusicTrack): ProviderVideo? {
         val (_, identifier) = splitResourceId(track.providerId ?: track.id)
-        val root = http.getText(ID, queryUrl("$BASE/api/song/mv", mapOf("id" to identifier)), authenticatedHeaders(), cacheKey = "netease:mv:$identifier", cachePolicy = ProviderCachePolicies.detail)
-            .value.let { providerJson.parseToJsonElement(it).asObject() }
-        return root.array("mvs").firstOrNull()?.asObject()?.let { mv ->
-            video(
-                identifier = mv.string("id"),
-                title = mv.string("name").ifBlank { track.title },
-                artists = track.artists,
-                coverUrl = mv.stringOrNull("cover"),
-                durationMs = mv.long("duration"),
-                providerUrl = "https://music.163.com/#/mv?id=${mv.string("id")}",
-            )
-        }
+        val songObject = runCatching { songDetail(identifier) }.getOrNull() ?: return null
+        val mvIdentifier = (songObject.long("mvid") ?: songObject.long("mv"))
+            ?.takeIf { it > 0 }
+            ?.toString()
+            ?: return null
+        val mv = runCatching { mvDetail(mvIdentifier).obj("data") }.getOrNull() ?: return null
+        val artists = mv.array("artists").map { it.asObject().string("name") }
+            .filter(String::isNotBlank)
+            .joinToString(" / ")
+            .ifBlank { track.artists }
+        return video(
+            identifier = mvIdentifier,
+            title = mv.string("name").ifBlank { track.title },
+            artists = artists,
+            coverUrl = mv.stringOrNull("cover") ?: mv.stringOrNull("coverUrl"),
+            durationMs = mv.long("duration"),
+            providerUrl = "https://music.163.com/#/mv?id=$mvIdentifier",
+        )
     }
 
-    override suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload = VideoPlaybackPayload(video = video)
+    override suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload {
+        val (_, identifier) = splitResourceId(video.id, "video")
+        val mv = runCatching { mvDetail(identifier).obj("data") }.getOrNull()
+            ?: return VideoPlaybackPayload(video = video)
+        val selected = mv.obj("brs")?.entries
+            ?.mapNotNull { (quality, value) ->
+                value.asString().takeIf(String::isNotBlank)?.let { quality to it }
+            }
+            ?.maxByOrNull { (quality, _) -> quality.toIntOrNull() ?: 0 }
+            ?: return VideoPlaybackPayload(video = video)
+        return VideoPlaybackPayload(
+            video = video,
+            url = selected.second,
+            videoUrl = selected.second,
+            headers = mapOf("Referer" to "https://music.163.com/"),
+            quality = selected.first,
+        )
+    }
+
+    private suspend fun mvDetail(identifier: String): JsonObject = http.getText(
+        ID,
+        queryUrl("$BASE/api/mv/detail", mapOf("id" to identifier)),
+        authenticatedHeaders(),
+        cacheKey = "netease:mv:$identifier",
+        cachePolicy = ProviderCachePolicies.detail,
+    ).value.let { parseNeteaseResponse(it) }
 
     override suspend fun playlistOperationTargets(track: org.feeluown.mobile.MusicTrack): List<ProviderPlaylist> {
         val auth = authState()
         if (!auth.isLoggedIn) return emptyList()
         val uid = currentUserId() ?: return emptyList()
-        val root = http.getText(ID, queryUrl("$BASE/api/user/playlist/", mapOf("uid" to uid, "limit" to "100")), neteaseAuthenticatedHeaders(), cacheKey = null)
-            .value.let { providerJson.parseToJsonElement(it).asObject() }
-        return root.array("playlist").map { it.asObject().toPlaylist() }
+        return userPlaylistObjects(uid).map { it.toPlaylist() }
     }
 
     override suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
@@ -260,7 +291,14 @@ class NeteaseProvider(
         mutatePlaylist("del", playlist, track)
 
     override suspend fun createPlaylist(name: String): ProviderMutationResult {
-        val root = http.postForm(ID, "$BASE/api/playlist/create", Parameters.build { append("name", name) }, authenticatedHeaders(), ProviderRequestKind.Mutation)
+        val uid = currentUserId() ?: return ProviderMutationResult(false, "无法读取网易云音乐用户信息")
+        val root = http.postForm(
+            ID,
+            "$BASE/api/playlist/create",
+            Parameters.build { append("uid", uid); append("name", name) },
+            neteaseAuthenticatedHeaders(),
+            ProviderRequestKind.Mutation,
+        )
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         return mutation(root, "已新建：$name")
     }
@@ -278,49 +316,37 @@ class NeteaseProvider(
         }
         val payload = when (feature.id) {
             "netease_daily_songs" -> {
-                val root = http.getText(
-                    ID,
-                    "$BASE/api/recommend/songs",
-                    authenticatedHeaders(),
-                    cacheKey = "netease:recommend:songs",
-                    cachePolicy = ProviderCachePolicies.recommendation,
-                ).value.let { providerJson.parseToJsonElement(it).asObject() }
+                val root = neteaseWeApiPost("$BASE/weapi/v3/discovery/recommend/songs", "{}")
                 val songs = root.obj("data")?.array("dailySongs").orEmpty()
                 ProviderContentSection(feature, tracks = songs.drop(offset).take(limit).map(::song), nextOffset = offset + limit, hasMore = songs.size > offset + limit)
             }
             "netease_radio" -> {
                 val songs = http.getText(
                     ID,
-                    "$BASE/api/personal_fm",
-                    authenticatedHeaders(),
+                    "$BASE/api/radio/get",
+                    neteaseAuthenticatedHeaders(),
                     cacheKey = null,
-                ).value.let { providerJson.parseToJsonElement(it).asObject().array("data") }
+                ).value.let { parseNeteaseResponse(it).array("data") }
                 ProviderContentSection(feature, tracks = songs.drop(offset).take(limit).map(::song), nextOffset = offset + limit, hasMore = songs.size > offset + limit)
             }
             "netease_toplists" -> {
                 val root = http.getText(ID, "$BASE/api/toplist", authenticatedHeaders(), cacheKey = "netease:toplist", cachePolicy = ProviderCachePolicies.recommendation)
-                    .value.let { providerJson.parseToJsonElement(it).asObject() }
+                    .value.let { parseNeteaseResponse(it) }
                 val playlists = root.array("list")
                 ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
             }
             "netease_daily_playlists" -> {
-                val root = http.getText(ID, queryUrl("$BASE/api/personalized/playlist", mapOf("limit" to limit.toString())), authenticatedHeaders(), cacheKey = "netease:personalized:playlist:$limit", cachePolicy = ProviderCachePolicies.recommendation)
-                    .value.let { providerJson.parseToJsonElement(it).asObject() }
-                val playlists = root.array("result")
-                ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
+                val root = neteaseWeApiPost("$BASE/api/discovery/recommend/resource", "{}")
+                val playlists = root.array("recommend")
+                val page = playlists.drop(offset).take(limit)
+                ProviderContentSection(feature, playlists = page.map { it.asObject().toPlaylist() }, nextOffset = offset + page.size, hasMore = playlists.size > offset + page.size)
             }
             "netease_user_playlists", "netease_favorite_playlists" -> {
                 val uid = currentUserId()
                 if (uid == null) {
                     ProviderContentSection(feature, errorMessage = "无法读取网易云音乐用户信息")
                 } else {
-                    val root = http.getText(
-                        ID,
-                        queryUrl("$BASE/api/user/playlist/", mapOf("uid" to uid, "limit" to "100")),
-                        neteaseAuthenticatedHeaders(),
-                        cacheKey = null,
-                    ).value.let { providerJson.parseToJsonElement(it).asObject() }
-                    val playlists = root.array("playlist").filter { item ->
+                    val playlists = userPlaylistObjects(uid).filter { item ->
                         val subscribed = item.asObject().boolean("subscribed")
                         if (feature.id == "netease_favorite_playlists") subscribed else !subscribed
                     }
@@ -328,26 +354,35 @@ class NeteaseProvider(
                 }
             }
             "netease_favorite_songs" -> {
-                val root = http.getText(
-                    ID,
-                    queryUrl("$BASE/api/song/sublist", mapOf("limit" to "100")),
-                    authenticatedHeaders(),
-                    cacheKey = null,
-                ).value.let { providerJson.parseToJsonElement(it).asObject() }
-                val songs = root.array("data")
-                ProviderContentSection(feature, tracks = songs.drop(offset).take(limit).map(::song), nextOffset = offset + limit, hasMore = songs.size > offset + limit)
+                val uid = currentUserId()
+                if (uid == null) {
+                    ProviderContentSection(feature, errorMessage = "无法读取网易云音乐用户信息")
+                } else {
+                    val playlists = userPlaylistObjects(uid)
+                    val favoritePlaylist = playlists.firstOrNull { it.string("id") == uid }
+                        ?: playlists.firstOrNull { !it.boolean("subscribed") }
+                    if (favoritePlaylist == null) {
+                        ProviderContentSection(feature, errorMessage = "未找到我喜欢的音乐歌单")
+                    } else {
+                        val detail = playlistDetail(favoritePlaylist.toPlaylist(), offset, limit)
+                        ProviderContentSection(
+                            feature,
+                            tracks = detail.tracks,
+                            nextOffset = detail.tracksNextOffset,
+                            hasMore = detail.tracksHasMore,
+                        )
+                    }
+                }
             }
             "netease_cloud_songs" -> {
                 cloudSongs(feature, offset, limit)
             }
             "netease_favorite_artists", "netease_favorite_albums" -> {
                 val endpoint = if (feature.id == "netease_favorite_artists") "artist/sublist" else "album/sublist"
-                val root = http.getText(
-                    ID,
-                    queryUrl("$BASE/api/$endpoint", mapOf("limit" to "100", "offset" to offset.toString())),
-                    authenticatedHeaders(),
-                    cacheKey = null,
-                ).value.let { providerJson.parseToJsonElement(it).asObject() }
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/$endpoint",
+                    """{"limit":$limit,"offset":$offset,"csrf_token":"${csrfToken().jsonString()}"}""",
+                )
                 val type = if (feature.id == "netease_favorite_artists") ProviderMediaItemType.Artist else ProviderMediaItemType.Album
                 val items = root.array("data").map { value ->
                     if (type == ProviderMediaItemType.Artist) artist(value.asObject()) else album(value.asObject())
@@ -373,18 +408,18 @@ class NeteaseProvider(
             authenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
             cacheKey = "netease:search:$type:$keyword",
             cachePolicy = ProviderCachePolicies.search,
-        ).value.let { providerJson.parseToJsonElement(it).asObject().obj("result") ?: providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }.let { it.obj("result") ?: it }
     }
 
     private suspend fun songDetail(identifier: String): JsonObject? {
         val root = http.getText(ID, queryUrl("$BASE/api/song/detail", mapOf("ids" to "[$identifier]")), authenticatedHeaders(), cacheKey = "netease:song:$identifier", cachePolicy = ProviderCachePolicies.detail)
-            .value.let { providerJson.parseToJsonElement(it).asObject() }
+            .value.let { parseNeteaseResponse(it) }
         return root.array("songs").firstOrNull()?.asObject()
     }
 
     private suspend fun artistSongsPage(identifier: String, offset: Int, limit: Int): NeteaseSongPage {
         val request = """
-            {"id":${neteaseId(identifier)},"limit":$limit,"offset":$offset,"order":"hot","work_type":1,"private_cloud":true}
+            {"id":${neteaseId(identifier)},"limit":$limit,"offset":$offset,"order":"hot","work_type":1,"private_cloud":"true"}
         """.trimIndent()
         val weApiRoot = runCatching {
             neteaseWeApiPost("$BASE/weapi/v1/artist/songs", request)
@@ -408,7 +443,7 @@ class NeteaseProvider(
             authenticatedHeaders(),
             cacheKey = "netease:artist:$identifier",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }
         val fallbackValues = fallback.array("hotSongs")
         return NeteaseSongPage(
             values = loadSongs(fallbackValues.toList()),
@@ -425,7 +460,7 @@ class NeteaseProvider(
             authenticatedHeaders(),
             cacheKey = "netease:artist-albums:$identifier:$offset:$limit",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }
         val values = root.array("hotAlbums").mapNotNull { value ->
             runCatching { album(value.asObject()) }.getOrNull()
         }
@@ -447,7 +482,7 @@ class NeteaseProvider(
                 authenticatedHeaders(),
                 cacheKey = "netease:album:$identifier",
                 cachePolicy = ProviderCachePolicies.detail,
-            ).value.let { providerJson.parseToJsonElement(it).asObject() }
+            ).value.let { parseNeteaseResponse(it) }
         }.getOrNull()
         pathRoot?.let { root ->
             if (root.obj("album") != null || root.array("songs").isNotEmpty()) return root
@@ -458,7 +493,7 @@ class NeteaseProvider(
             authenticatedHeaders(),
             cacheKey = "netease:album:$identifier",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }
     }
 
     private suspend fun cloudSongs(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
@@ -530,7 +565,7 @@ class NeteaseProvider(
                 neteaseAuthenticatedHeaders(),
                 cacheKey = "netease:songs:$idList",
                 cachePolicy = ProviderCachePolicies.detail,
-            ).value.let { providerJson.parseToJsonElement(it).asObject() }
+            ).value.let { parseNeteaseResponse(it) }
             root.array("songs").mapNotNull { value ->
                 val song = value.asObject()
                 song.string("id").takeIf { it.isNotBlank() }?.let { it to song }
@@ -563,18 +598,18 @@ class NeteaseProvider(
     private suspend fun lyric(identifier: String): String? = runCatching {
         val root = http.getText(
             ID,
-            queryUrl("$BASE/api/song/lyric", mapOf("id" to identifier, "lv" to "1", "kv" to "1", "tv" to "-1")),
+            queryUrl("$BASE/api/song/lyric", mapOf("id" to identifier, "lv" to "-1", "kv" to "1", "tv" to "-1")),
             neteaseAuthenticatedHeaders(),
             cacheKey = "netease:lyric:$identifier",
             cachePolicy = ProviderCachePolicies.lyric,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }
         root.obj("lrc")?.stringOrNull("lyric")
     }.getOrNull()
 
     private suspend fun currentUserId(): String? = runCatching { requestCurrentUserId() }.getOrNull()
 
     private suspend fun requestCurrentUserId(): String? {
-        val root = neteaseWeApiPost("$BASE/api/user/level", "{}")
+        val root = runCatching { neteaseWeApiPost("$BASE/api/user/level", "{}") }.getOrNull() ?: return null
         if (root.int("code") != 200) return null
         val data = root.obj("data") ?: return null
         return data.long("userId")?.toString() ?: data.stringOrNull("userId")
@@ -612,7 +647,26 @@ class NeteaseProvider(
             headers = neteaseAuthenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
             kind = ProviderRequestKind.Auth,
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseNeteaseResponse(it) }
+    }
+
+    private suspend fun csrfToken(): String = currentCredentials()?.cookies?.get("__csrf").orEmpty()
+
+    private suspend fun userPlaylistObjects(uid: String): List<JsonObject> = http.getText(
+        ID,
+        queryUrl("$BASE/api/user/playlist/", mapOf("uid" to uid, "limit" to "100")),
+        neteaseAuthenticatedHeaders(),
+        cacheKey = null,
+    ).value.let { parseNeteaseResponse(it) }.array("playlist").map { it.asObject() }
+
+    private fun parseNeteaseResponse(raw: String): JsonObject {
+        val root = providerJson.parseToJsonElement(raw).asObject()
+        val code = root.int("code")
+        if (code != null && code != 200) {
+            val message = root.string("message").ifBlank { root.string("msg") }
+            error("网易云音乐接口失败：code=$code${message.takeIf(String::isNotBlank)?.let { ", $it" }.orEmpty()}")
+        }
+        return root
     }
 
     private suspend fun neteaseAuthenticatedHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> {
@@ -691,7 +745,18 @@ class NeteaseProvider(
     private suspend fun mutatePlaylist(action: String, playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult {
         val (_, playlistId) = splitResourceId(playlist.id, "playlist")
         val (_, trackId) = splitResourceId(track.providerId ?: track.id)
-        val root = http.postForm(ID, "$BASE/api/playlist/track/$action", Parameters.build { append("pid", playlistId); append("trackIds", trackId); append("tracks", trackId) }, authenticatedHeaders(), ProviderRequestKind.Mutation)
+        val root = http.postForm(
+            ID,
+            "$BASE/api/playlist/manipulate/tracks",
+            Parameters.build {
+                append("pid", playlistId)
+                append("trackIds", "[\"$trackId\"]")
+                append("tracks", trackId)
+                append("op", action)
+            },
+            neteaseAuthenticatedHeaders(),
+            ProviderRequestKind.Mutation,
+        )
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         return mutation(root, if (action == "add") "已添加到：${playlist.title}" else "已从歌单移除：${track.title}")
     }
