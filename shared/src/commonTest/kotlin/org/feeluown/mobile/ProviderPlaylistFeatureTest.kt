@@ -50,9 +50,11 @@ class ProviderPlaylistFeatureTest {
         val created = provider.loadFeature(provider.features.single { it.id == "bilibili_user_playlists" }, 0, 50)
         val collected = provider.loadFeature(provider.features.single { it.id == "bilibili_favorite_playlists" }, 0, 50)
         val detail = provider.playlistDetail(created.playlists.single(), 0, 50)
+        val operationTargets = provider.playlistOperationTargets(detail.tracks.single())
 
         assertEquals("我的收藏", created.playlists.single().title)
         assertEquals("收藏合集", collected.playlists.single().title)
+        assertEquals("我的收藏", operationTargets.single().title)
         assertEquals("bilibili:BV1demo", detail.tracks.single().providerId)
         assertEquals(120_000L, detail.tracks.single().durationMs)
         assertTrue(detail.tracksHasMore)
@@ -439,13 +441,45 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
+    fun qqmusicSearchUsesCurrentRpcEnvelopeAndCommonParams() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/cgi-bin/musicu.fcg", request.url.encodedPath)
+                        assertEquals("GET", request.method.value)
+                        assertTrue(request.url.parameters["_"].orEmpty().isNotBlank())
+                        assertTrue(request.url.parameters["sign"].orEmpty().startsWith("zza"))
+                        val data = request.url.parameters["data"].orEmpty()
+                        assertTrue(data.contains("DoSearchForQQMusicDesktop"), data)
+                        assertTrue(data.contains("\"query\":\"晴天\""), data)
+                        assertTrue(data.contains("\"g_tk\":193496974"), data)
+                        respond(
+                            """{"code":0,"search":{"code":0,"data":{"body":{"song":{"list":[{"id":97773,"mid":"0039MnYb0qxYhV","name":"晴天","singer":[{"id":4558,"mid":"0025NhlN2yWrP4","name":"周杰伦"}],"album":{"id":8220,"mid":"000MkMni19ClKG","name":"叶惠美"},"interval":269}]}}}}}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"qqmusic_key":"key","wxuin":"o12345","qm_keyst":"keyst"}""")
+
+        val result = provider.search("晴天")
+
+        assertEquals("qqmusic:0039MnYb0qxYhV", result.tracks.single().id)
+        assertEquals("晴天", result.tracks.single().title)
+        assertEquals("周杰伦", result.tracks.single().artists)
+        client.close()
+    }
+
+    @Test
     fun qqmusicLoadsRecommendedPlaylistsFromRpc() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
                 engine {
                     addHandler { request ->
                         assertEquals("/cgi-bin/musicu.fcg", request.url.encodedPath)
-                        assertEquals("POST", request.method.value)
+                        assertEquals("GET", request.method.value)
                         respond(
                             """{"code":0,"recomPlaylist":{"code":0,"data":{"v_hot":[{"content_id":987,"title":"QQ 推荐歌单","cover":"https://example.test/cover.jpg","listen_num":1234,"rcmdtemplate":"编辑推荐"}]}}}""",
                         )
@@ -480,7 +514,7 @@ class ProviderPlaylistFeatureTest {
                         assertEquals("12345", request.url.parameters["userid"])
                         assertEquals("205360838", request.url.parameters["cid"])
                         respond(
-                            """{"code":0,"data":{"creator":{"fav_pid":99},"mydiss":{"list":[{"dissid":123,"title":"我的歌单","logo":"https://example.test/playlist.jpg","songnum":2}]}}}""",
+                            """{"code":0,"data":{"creator":{},"mymusic":[{"id":99}],"mydiss":{"list":[{"dissid":123,"title":"我的歌单","logo":"https://example.test/playlist.jpg","songnum":2}]}}}""",
                         )
                     }
                 }
@@ -499,6 +533,50 @@ class ProviderPlaylistFeatureTest {
         assertEquals(listOf("我喜欢", "我的歌单"), section.playlists.map { it.title })
         assertEquals(2, section.playlists[1].trackCount)
         assertEquals("https://example.test/playlist.jpg", section.playlists[1].coverUrl)
+
+        client.close()
+    }
+
+    @Test
+    fun qqmusicPlaylistMutationUsesDirectoryIdFromPlaylistDetail() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg" -> {
+                                assertEquals("123", request.url.parameters["disstid"])
+                                respond("""{"code":0,"cdlist":[{"disstid":"123","dirid":202}]}""")
+                            }
+                            "/v8/fcg-bin/fcg_play_single_song.fcg" -> respond(
+                                """{"code":0,"data":[{"id":97773,"songmid":"qq-mid","name":"歌曲","singer":[]}]}""",
+                            )
+                            "/cgi-bin/musicu.fcg" -> {
+                                assertEquals("GET", request.method.value)
+                                assertTrue(request.url.parameters["data"].orEmpty().contains("\"dirId\":202"))
+                                respond("""{"code":0,"req_0":{"code":0}}""")
+                            }
+                            else -> error("unexpected QQ Music request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = QQMusicProvider(client, InMemoryProviderCredentialStore())
+        provider.loginWithCookies("""{"qqmusic_key":"key","wxuin":"o12345","qm_keyst":"keyst"}""")
+        val playlist = ProviderPlaylist("playlist:qqmusic:123", "目标歌单", "qqmusic", "QQ 音乐")
+        val track = MusicTrack(
+            id = "qqmusic:qq-mid",
+            title = "歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "qqmusic",
+            sourceType = TrackSourceType.Provider,
+            providerId = "qqmusic:qq-mid",
+        )
+
+        assertTrue(provider.addTrackToPlaylist(playlist, track).success)
+        assertTrue(provider.removeTrackFromPlaylist(playlist, track).success)
 
         client.close()
     }
@@ -549,7 +627,7 @@ class ProviderPlaylistFeatureTest {
                 engine {
                     addHandler { request ->
                         assertEquals("/cgi-bin/musicu.fcg", request.url.encodedPath)
-                        assertEquals("POST", request.method.value)
+                        assertEquals("GET", request.method.value)
                         respond(
                             """{"code":0,"songlist":{"code":0,"data":{"tracks":[{"mid":"radio-mid","name":"私人歌曲","singer":[{"mid":"artist-mid","name":"私人歌手"}],"album":{"mid":"album-mid","name":"私人专辑"},"interval":240}]}}}""",
                         )

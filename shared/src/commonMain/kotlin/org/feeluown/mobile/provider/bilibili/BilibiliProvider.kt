@@ -1,5 +1,6 @@
 package org.feeluown.mobile.provider.bilibili
 
+import io.ktor.http.Parameters
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPart
 import org.feeluown.mobile.PlaybackPayload
@@ -29,12 +30,14 @@ import org.feeluown.mobile.provider.core.int
 import org.feeluown.mobile.provider.core.long
 import org.feeluown.mobile.provider.core.md5Hex
 import org.feeluown.mobile.provider.core.obj
+import org.feeluown.mobile.provider.core.parseCookies
 import org.feeluown.mobile.provider.core.providerJson
 import org.feeluown.mobile.provider.core.splitResourceId
 import org.feeluown.mobile.provider.core.string
 import org.feeluown.mobile.provider.core.stringOrNull
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.core.network.ProviderRequestKind
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -84,6 +87,7 @@ class BilibiliProvider(
         val data = root.obj("data") ?: return null
         val owner = data.obj("owner")
         val pages = data.array("pages")
+        if (page != null && page !in 1..pages.size) return null
         val pageObject = pages.getOrNull((page ?: 1) - 1)?.asObject()
         return track(
             identifier = if (page != null) "paged_${bvid}__${page}" else bvid,
@@ -100,23 +104,11 @@ class BilibiliProvider(
         val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
         val info = videoInfo(bvid).obj("data") ?: return null
         val pages = info.array("pages")
-        val pageNumber = page?.takeIf { it in 1..pages.size } ?: 1
+        if (page != null && page !in 1..pages.size) return null
+        val pageNumber = page ?: 1
         val pageInfo = pages.getOrNull(pageNumber - 1)?.asObject()
         val cid = pageInfo?.long("cid") ?: info.long("cid") ?: return null
-        val response = http.getText(
-            ID,
-            signedQueryUrl(
-                "$BASE/x/player/playurl",
-                mapOf(
-                    "bvid" to bvid,
-                    "cid" to cid.toString(),
-                    "fnval" to "16",
-                ),
-            ),
-            headers(),
-            cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        val data = response.obj("data") ?: return null
+        val data = playUrlData(bvid, cid) ?: return null
         val dash = data.obj("dash")
         val audio = selectAudio(
             qualityPolicy = qualityPolicy,
@@ -171,10 +163,9 @@ class BilibiliProvider(
     }
 
     override suspend fun similarTracks(track: org.feeluown.mobile.MusicTrack): List<org.feeluown.mobile.MusicTrack> {
-        val (bvid, _) = parsePaged(rawIdentifier(track.providerId ?: track.id))
-        val info = videoInfo(bvid).obj("data") ?: return emptyList()
-        val aid = info.long("aid") ?: return emptyList()
-        val root = http.getText(ID, queryUrl("$BASE/x/web-interface/archive/related", mapOf("aid" to aid.toString())), headers(), cacheKey = "bilibili:related:$bvid", cachePolicy = ProviderCachePolicies.recommendation)
+        val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
+        if (page != null) return emptyList()
+        val root = http.getText(ID, queryUrl("$BASE/x/web-interface/archive/related", mapOf("bvid" to bvid)), headers(), cacheKey = "bilibili:related:$bvid", cachePolicy = ProviderCachePolicies.recommendation)
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         return root.array("data").mapNotNull { element -> searchItemToTrack(element.asObject()) }
     }
@@ -182,7 +173,7 @@ class BilibiliProvider(
     override suspend fun hotComments(track: org.feeluown.mobile.MusicTrack): List<ProviderComment> {
         val (bvid, _) = parsePaged(rawIdentifier(track.providerId ?: track.id))
         val aid = videoInfo(bvid).obj("data")?.long("aid") ?: return emptyList()
-        val root = http.getText(ID, queryUrl("$BASE/x/v2/reply", mapOf("type" to "1", "oid" to aid.toString(), "ps" to "20")), headers(), cacheKey = "bilibili:comments:$bvid", cachePolicy = ProviderCachePolicies.detail)
+        val root = http.getText(ID, queryUrl("$BASE/x/v2/reply", mapOf("type" to "1", "oid" to aid.toString(), "pn" to "1", "ps" to "10", "sort" to "2")), headers(), cacheKey = "bilibili:comments:$bvid", cachePolicy = ProviderCachePolicies.detail)
             .value.let { providerJson.parseToJsonElement(it).asObject() }
         return root.obj("data")?.array("replies").orEmpty().map { element ->
             val item = element.asObject()
@@ -197,14 +188,95 @@ class BilibiliProvider(
     }
 
     override suspend fun trackVideo(track: org.feeluown.mobile.MusicTrack): ProviderVideo? {
-        val (bvid, _) = parsePaged(rawIdentifier(track.providerId ?: track.id))
+        val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
+        if (page != null) return null
         return video(bvid, track.title, track.artists, track.coverUrl, track.durationMs, "https://www.bilibili.com/video/$bvid")
     }
 
     override suspend fun videoPlaybackPayload(video: ProviderVideo): VideoPlaybackPayload {
-        val track = trackDetail(splitResourceId(video.id, "video").second) ?: return VideoPlaybackPayload(video = video)
-        val payload = resolve(track, AudioQualityPolicy.High.policy) ?: return VideoPlaybackPayload(video = video)
-        return VideoPlaybackPayload(video = video, url = payload.url, audioUrl = payload.url, headers = payload.headers, quality = payload.audioQuality)
+        val (bvid, page) = parsePaged(splitResourceId(video.id, "video").second)
+        val info = videoInfo(bvid).obj("data") ?: return VideoPlaybackPayload(video = video)
+        val pages = info.array("pages")
+        if (page != null && page !in 1..pages.size) return VideoPlaybackPayload(video = video)
+        val pageNumber = page ?: 1
+        val pageInfo = pages.getOrNull(pageNumber - 1)?.asObject()
+        val cid = pageInfo?.long("cid") ?: info.long("cid") ?: return VideoPlaybackPayload(video = video)
+        val data = playUrlData(bvid, cid) ?: return VideoPlaybackPayload(video = video)
+        val dash = data.obj("dash")
+        val videoStream = dash?.array("video").orEmpty()
+            .mapNotNull { it.asObject().toVideoStream() }
+            .maxByOrNull { it.bandwidth }
+        val audio = selectAudio(
+            qualityPolicy = AudioQualityPolicy.High.policy,
+            audio = dash?.array("audio").orEmpty().mapNotNull { it.asObject().toAudioStream() },
+            flac = dash?.obj("flac")?.obj("audio")?.toAudioStream(isFlac = true),
+        )
+        if (videoStream != null && audio != null) {
+            return VideoPlaybackPayload(
+                video = video,
+                videoUrl = videoStream.url,
+                audioUrl = audio.stream.url,
+                headers = mediaHeaders(),
+                quality = "video",
+            )
+        }
+        val durl = data.array("durl").firstOrNull()?.asObject()?.stringOrNull("url")
+            ?: return VideoPlaybackPayload(video = video)
+        return VideoPlaybackPayload(
+            video = video,
+            url = durl,
+            videoUrl = durl,
+            headers = mediaHeaders(),
+            quality = "video",
+        )
+    }
+
+    override suspend fun playlistOperationTargets(track: org.feeluown.mobile.MusicTrack): List<ProviderPlaylist> {
+        if (!authState().isLoggedIn) return emptyList()
+        val feature = FEATURES.first { it.id == "bilibili_user_playlists" }
+        return loadFavoriteFolders(feature, 0, MAX_FAVORITE_PAGE_SIZE).playlists
+    }
+
+    override suspend fun addTrackToPlaylist(
+        playlist: ProviderPlaylist,
+        track: org.feeluown.mobile.MusicTrack,
+    ): ProviderMutationResult = mutateFavoriteResource(playlist, track, add = true)
+
+    override suspend fun removeTrackFromPlaylist(
+        playlist: ProviderPlaylist,
+        track: org.feeluown.mobile.MusicTrack,
+    ): ProviderMutationResult = mutateFavoriteResource(playlist, track, add = false)
+
+    private suspend fun mutateFavoriteResource(
+        playlist: ProviderPlaylist,
+        track: org.feeluown.mobile.MusicTrack,
+        add: Boolean,
+    ): ProviderMutationResult {
+        val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
+        if (page != null) return ProviderMutationResult(false, "哔哩哔哩不支持对分 P 视频执行收藏操作")
+        val aid = videoInfo(bvid).obj("data")?.long("aid")
+            ?: return ProviderMutationResult(false, "无法读取哔哩哔哩视频编号")
+        val csrf = csrfToken()
+            ?: return ProviderMutationResult(false, "缺少哔哩哔哩 csrf Cookie")
+        val (_, mediaId) = splitResourceId(playlist.id, "playlist")
+        val field = if (add) "add_media_ids" else "del_media_ids"
+        val root = http.postForm(
+            providerId = ID,
+            url = "$BASE/x/v3/fav/resource/deal",
+            form = Parameters.build {
+                append("rid", aid.toString())
+                append("type", "2")
+                append(field, mediaId)
+                append("csrf", csrf)
+            },
+            headers = headers(),
+            kind = ProviderRequestKind.Mutation,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        val success = root.int("code") == 0
+        return ProviderMutationResult(
+            success = success,
+            message = if (success) "操作成功" else root.string("message").ifBlank { "哔哩哔哩收藏操作失败" },
+        )
     }
 
     override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
@@ -264,6 +336,26 @@ class BilibiliProvider(
         cachePolicy = ProviderCachePolicies.detail,
     ).value.let { providerJson.parseToJsonElement(it).asObject() }
 
+    private suspend fun playUrlData(
+        bvid: String,
+        cid: Long,
+    ): kotlinx.serialization.json.JsonObject? {
+        val response = http.getText(
+            ID,
+            signedQueryUrl(
+                "$BASE/x/player/playurl",
+                mapOf(
+                    "bvid" to bvid,
+                    "cid" to cid.toString(),
+                    "fnval" to "16",
+                ),
+            ),
+            headers(),
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return response.obj("data")?.takeIf { response.int("code") == null || response.int("code") == 0 }
+    }
+
     private suspend fun loadFavoriteFolders(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
         val mid = currentUserMid()
             ?: return ProviderContentSection(feature, errorMessage = "无法读取哔哩哔哩用户信息")
@@ -310,6 +402,12 @@ class BilibiliProvider(
     }
 
     private suspend fun currentUserMid(): String? = nav()?.obj("data")?.stringOrNull("mid")
+
+    private suspend fun csrfToken(): String? {
+        val stored = currentCredentials() ?: return null
+        return stored.cookies["bili_jct"]?.takeIf { it.isNotBlank() }
+            ?: parseCookies(stored.cookieHeader.orEmpty())["bili_jct"]?.takeIf { it.isNotBlank() }
+    }
 
     private suspend fun nav(): kotlinx.serialization.json.JsonObject? = runCatching {
         http.getText(
@@ -432,6 +530,14 @@ class BilibiliProvider(
         )
     }
 
+    private fun kotlinx.serialization.json.JsonObject.toVideoStream(): VideoStream? {
+        val url = stringOrNull("baseUrl") ?: stringOrNull("base_url") ?: return null
+        return VideoStream(
+            url = url,
+            bandwidth = long("bandwidth") ?: 0L,
+        )
+    }
+
     private fun AudioStream.qualityLabel(): String = when {
         isFlac -> "SHQ"
         bandwidth <= AUDIO_LOW_MAX_BANDWIDTH -> "LQ"
@@ -487,6 +593,11 @@ class BilibiliProvider(
     private data class SelectedAudio(
         val stream: AudioStream,
         val quality: String,
+    )
+
+    private data class VideoStream(
+        val url: String,
+        val bandwidth: Long,
     )
 
     private companion object {

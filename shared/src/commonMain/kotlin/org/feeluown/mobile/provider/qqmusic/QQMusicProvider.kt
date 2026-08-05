@@ -2,6 +2,8 @@ package org.feeluown.mobile.provider.qqmusic
 
 import io.ktor.http.Parameters
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.ProviderCapabilities
@@ -31,6 +33,7 @@ import org.feeluown.mobile.provider.core.int
 import org.feeluown.mobile.provider.core.long
 import org.feeluown.mobile.provider.core.md5Hex
 import org.feeluown.mobile.provider.core.obj
+import org.feeluown.mobile.provider.core.parseCookies
 import org.feeluown.mobile.provider.core.providerJson
 import org.feeluown.mobile.provider.core.splitResourceId
 import org.feeluown.mobile.provider.core.string
@@ -38,6 +41,7 @@ import org.feeluown.mobile.provider.core.stringOrNull
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderRequestKind
+import org.feeluown.mobile.provider.core.network.currentTimeMillis
 import kotlin.random.Random
 
 class QQMusicProvider(
@@ -54,7 +58,10 @@ class QQMusicProvider(
 ), KotlinMusicProvider {
     override suspend fun search(keyword: String): ProviderSearchResults {
         val root = searchRoot(keyword)
-        return ProviderSearchResults(tracks = root.obj("data")?.obj("song")?.array("list").orEmpty().map(::song))
+        val values = root.obj("search")?.obj("data")?.obj("body")?.obj("song")?.array("list")
+            ?: root.obj("data")?.obj("song")?.array("list")
+            ?: root.array("songlist")
+        return ProviderSearchResults(tracks = values.map(::song))
     }
 
     override suspend fun trackDetail(identifier: String) = songDetail(rawIdentifier(identifier))
@@ -65,10 +72,10 @@ class QQMusicProvider(
         val detail = songDetailObject(songMid) ?: return null
         val file = detail.obj("file")
         val mediaId = file?.stringOrNull("media_mid").orEmpty().ifBlank { songMid }
-        val credentials = currentCredentials()
-        val guid = credentials?.cookies?.get("guid")?.takeIf { it.isNotBlank() } ?: defaultGuid
-        val uin = credentials?.cookies?.get("wxuin")?.removePrefix("o")
-            ?: credentials?.cookies?.get("uin")
+        val cookies = qqCookies()
+        val guid = cookies["guid"]?.takeIf { it.isNotBlank() } ?: defaultGuid
+        val uin = cookies["wxuin"]?.removePrefix("o")
+            ?: cookies["uin"]
             ?: "0"
         qqQualityCandidates(qualityPolicy, file).forEach { quality ->
             val url = qqMediaUrl(songMid, mediaId, quality, guid, uin) ?: return@forEach
@@ -127,7 +134,7 @@ class QQMusicProvider(
     }
 
     override suspend fun playlistTracks(playlist: ProviderPlaylist): List<org.feeluown.mobile.MusicTrack> =
-        playlistDetail(playlist, 0, 300).tracks
+        playlistDetail(playlist, 0, 1_000).tracks
 
     override suspend fun playlistDetail(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail {
         val (_, identifier) = splitResourceId(playlist.id, "playlist")
@@ -139,9 +146,7 @@ class QQMusicProvider(
                     "format" to "json",
                     "disstid" to identifier,
                     "type" to "1",
-                    "json" to "1",
                     "utf8" to "1",
-                    "onlysong" to "0",
                     "new_format" to "1",
                     "song_begin" to offset.toString(),
                     "song_num" to limit.toString(),
@@ -224,7 +229,7 @@ class QQMusicProvider(
         val identifier = rawIdentifier(track.providerId ?: track.id)
         val root = rpc(
             """
-            {"simsongs":{"module":"rcmusic.similarSongRadioServer","method":"get_simsongs","param":{"songid":"$identifier"}}}
+            {"simsongs":{"module":"rcmusic.similarSongRadioServer","method":"get_simsongs","param":{"songid":${jsonString(identifier)}}}}
             """.trimIndent(),
         )
         return root.obj("simsongs")?.obj("data")?.array("songInfoList").orEmpty().map(::song)
@@ -342,7 +347,7 @@ class QQMusicProvider(
     private suspend fun artistSongsPage(identifier: String, offset: Int, limit: Int): QQTrackPage {
         val root = rpc(
             """
-            {"req_0":{"module":"music.musichallSong.SongListInter","method":"GetSingerSongList","param":{"singerid":${qqIdentifierJson(identifier)},"begin":$offset,"num":$limit,"order":1,"newsong":1}},"comm":{"format":"json"}}
+                {"req_0":{"module":"music.musichallSong.SongListInter","method":"GetSingerSongList","param":{"singerid":${qqIdentifierJson(identifier)},"begin":$offset,"num":$limit,"order":1,"newsong":1}},"comm":{"g_tk":${qqToken()},"uin":${jsonString(currentUin() ?: "0")},"format":"json"}}
             """.trimIndent(),
         )
         val data = root.obj("req_0")?.obj("data") ?: root.obj("data") ?: root
@@ -406,7 +411,7 @@ class QQMusicProvider(
         val root = runCatching {
             rpc(
                 """
-                {"req_0":{"module":"music.musichallSinger.SingerInfoInter","method":"GetSingerDetail","param":{"singer_mids":[${jsonString(identifier)}],"pic":1,"group_singer":1,"wiki_singer":1,"ex_singer":1}}}
+                {"req_0":{"module":"music.musichallSinger.SingerInfoInter","method":"GetSingerDetail","param":{"singer_mids":[${jsonString(identifier)}],"pic":1,"group_singer":1,"wiki_singer":1,"ex_singer":1}},"comm":{"g_tk":${qqToken()},"uin":${jsonString(currentUin() ?: "0")},"format":"json"}}
                 """.trimIndent(),
             )
         }.getOrNull() ?: return identifier
@@ -471,13 +476,13 @@ class QQMusicProvider(
         val hasMore: Boolean,
     )
 
-    private suspend fun searchRoot(keyword: String) = http.getText(
-        ID,
-        queryUrl("$SEARCH_BASE/soso/fcgi-bin/search_for_qq_cp", mapOf("format" to "json", "n" to "30", "p" to "1", "w" to keyword, "cr" to "1", "g_tk" to "5381", "t" to "0")),
-        authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+    private suspend fun searchRoot(keyword: String) = rpc(
+        """
+        {"search":{"module":"music.search.SearchCgiService","method":"DoSearchForQQMusicDesktop","param":{"num_per_page":30,"page_num":1,"search_type":0,"query":${jsonString(keyword)}}}}
+        """.trimIndent(),
         cacheKey = "qqmusic:search:$keyword",
         cachePolicy = ProviderCachePolicies.search,
-    ).value.let { providerJson.parseToJsonElement(it).asObject() }
+    )
 
     private suspend fun userPlaylists(): List<ProviderPlaylist> {
         val uin = currentUin() ?: return emptyList()
@@ -496,11 +501,13 @@ class QQMusicProvider(
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
         val data = root.obj("data") ?: return emptyList()
         val creator = data.obj("creator")
+        val favoriteId = creator?.stringOrNull("fav_pid")
+            ?: data.array("mymusic").firstOrNull()?.asObject()?.stringOrNull("id")
         val userPlaylists = data.obj("mydiss")?.array("list")
             ?: data.obj("mymusic")?.array("list")
             ?: data.array("disslist")
         return buildList {
-            creator?.stringOrNull("fav_pid")?.let { favoriteId ->
+            favoriteId?.let { favoriteId ->
                 add(
                     playlist(
                         identifier = favoriteId,
@@ -570,7 +577,7 @@ class QQMusicProvider(
         val uin = currentUin().orEmpty()
         val root = rpc(
             """
-            {"req_0":{"module":"recommend.RecommendFeedServer","method":"get_recommend_feed","param":{"direction":0,"page":1,"v_cache":[],"v_uniq":[],"s_num":0}},"comm":{"ct":20,"cv":1770,"g_tk":5381,"uin":"$uin","format":"json","inCharset":"utf-8","outCharset":"utf-8","platform":"wk_v17","uid":"","guid":""}}
+            {"req_0":{"module":"recommend.RecommendFeedServer","method":"get_recommend_feed","param":{"direction":0,"page":1,"v_cache":[],"v_uniq":[],"s_num":0}},"comm":{"ct":20,"cv":1770,"g_tk":5381,"uin":${jsonString(uin)},"format":"json","inCharset":"utf-8","outCharset":"utf-8","platform":"wk_v17","uid":"","guid":""}}
             """.trimIndent(),
         )
         val cards = root.obj("req_0")?.obj("data")?.array("v_shelf").orEmpty()
@@ -599,11 +606,10 @@ class QQMusicProvider(
         offset: Int,
         limit: Int,
     ): org.feeluown.mobile.ProviderContentSection {
-        val uin = currentUin().orEmpty()
         val requestLimit = limit.coerceIn(1, 50)
         val root = rpc(
             """
-            {"songlist":{"module":"mb_track_radio_svr","method":"get_radio_track","param":{"id":99,"firstplay":0,"num":$requestLimit}},"comm":{"loginUin":"$uin","hostUin":0,"g_tk":5381,"inCharset":"utf8","outCharset":"utf-8","notice":0,"platform":"yqq","needNewCode":0}}
+            {"songlist":{"module":"mb_track_radio_svr","method":"get_radio_track","param":{"id":99,"firstplay":0,"num":$requestLimit}}}
             """.trimIndent(),
         )
         val songItems = root.obj("songlist")?.obj("data")?.array("tracks").orEmpty()
@@ -616,24 +622,73 @@ class QQMusicProvider(
     }
 
     private suspend fun currentUin(): String? {
-        val values = currentCredentials()?.cookies.orEmpty()
+        val values = qqCookies()
         return values["wxuin"]?.removePrefix("o")?.takeIf { it.isNotBlank() }
             ?: values["uin"]?.takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun qqCookies(): Map<String, String> {
+        val stored = currentCredentials() ?: return emptyMap()
+        return parseCookies(stored.cookieHeader.orEmpty()) + stored.cookies
+    }
+
+    private suspend fun qqToken(): String {
+        val cookies = qqCookies()
+        val value = listOf("qqmusic_key", "p_skey", "skey", "p_lskey", "lskey")
+            .asSequence()
+            .mapNotNull { cookies[it] }
+            .firstOrNull()
+            .orEmpty()
+        if (value.isBlank()) return "5381"
+        var hash = 5_381L
+        value.forEach { character ->
+            hash = (hash * 33 + character.code) and 0xffff_ffffL
+        }
+        return (hash and 0x7fff_ffffL).toString()
     }
 
     private suspend fun rpc(
         payload: String,
         kind: ProviderRequestKind = ProviderRequestKind.SafeRead,
+        cacheKey: String? = null,
+        cachePolicy: org.feeluown.mobile.provider.core.network.ProviderCachePolicy = ProviderCachePolicies.none,
     ): kotlinx.serialization.json.JsonObject {
-        val sign = qqSign(payload)
-        return http.postJson(
+        val request = qqRpcPayload(payload)
+        val sign = qqSign(request)
+        return http.getText(
             providerId = ID,
-            url = queryUrl("$VKEY_BASE/cgi-bin/musicu.fcg", mapOf("sign" to sign)),
-            json = payload,
+            url = queryUrl(
+                "$VKEY_BASE/cgi-bin/musicu.fcg",
+                mapOf(
+                    "_" to currentTimeMillis().toString(),
+                    "sign" to sign,
+                    "data" to request,
+                ),
+            ),
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             kind = kind,
-            cacheKey = null,
+            cacheKey = cacheKey,
+            cachePolicy = cachePolicy,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
+    }
+
+    private suspend fun qqRpcPayload(payload: String): String {
+        val root = providerJson.parseToJsonElement(payload).jsonObject
+        val common = mapOf(
+            "loginUin" to JsonPrimitive(currentUin() ?: "0"),
+            "hostUin" to JsonPrimitive(0),
+            "g_tk" to JsonPrimitive(qqToken().toLongOrNull() ?: 5_381L),
+            "inCharset" to JsonPrimitive("utf8"),
+            "outCharset" to JsonPrimitive("utf-8"),
+            "notice" to JsonPrimitive(0),
+            "platform" to JsonPrimitive("yqq"),
+            "needNewCode" to JsonPrimitive(0),
+        )
+        val mergedComm = JsonObject(common + (root.obj("comm") ?: emptyMap()))
+        return providerJson.encodeToString(
+            JsonObject.serializer(),
+            JsonObject(root + ("comm" to mergedComm)),
+        )
     }
 
     private suspend fun mutatePlaylist(
@@ -642,16 +697,39 @@ class QQMusicProvider(
         track: org.feeluown.mobile.MusicTrack,
     ): ProviderMutationResult {
         val (_, playlistId) = splitResourceId(playlist.id, "playlist")
+        val dirId = playlistDirectoryId(playlistId)
+            ?: return ProviderMutationResult(false, "无法读取 QQ 音乐歌单目录编号")
         val songId = songDetailObject(rawIdentifier(track.providerId ?: track.id))?.long("id")
             ?: return ProviderMutationResult(false, "无法读取 QQ 音乐歌曲编号")
         val root = rpc(
             """
-            {"req_0":{"method":"$method","module":"music.musicasset.PlaylistDetailWrite","param":{"dirId":${playlistId.toLongOrNull() ?: 0},"v_songInfo":[{"songId":$songId,"songType":0}]}}}
+            {"req_0":{"method":${jsonString(method)},"module":"music.musicasset.PlaylistDetailWrite","param":{"dirId":$dirId,"v_songInfo":[{"songId":$songId,"songType":0}]}}}
             """.trimIndent(),
             kind = ProviderRequestKind.Mutation,
         )
         val success = root.obj("req_0")?.int("code") == 0
         return ProviderMutationResult(success, if (success) "操作成功" else "QQ 音乐歌单操作失败")
+    }
+
+    private suspend fun playlistDirectoryId(identifier: String): Long? {
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$SEARCH_BASE/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg",
+                mapOf(
+                    "type" to "1",
+                    "utf8" to "1",
+                    "disstid" to identifier,
+                    "format" to "json",
+                    "new_format" to "1",
+                    "song_begin" to "0",
+                    "song_num" to "1",
+                ),
+            ),
+            headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return root.array("cdlist").firstOrNull()?.asObject()?.long("dirid")?.takeIf { it > 0 }
     }
 
     private suspend fun songDetail(identifier: String): org.feeluown.mobile.MusicTrack? {
@@ -675,7 +753,11 @@ class QQMusicProvider(
             providerId = ID,
             url = queryUrl(
                 "$SEARCH_BASE/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
-                mapOf("songmid" to identifier, "format" to "json"),
+                mapOf(
+                    "songmid" to identifier,
+                    "pcachetime" to currentTimeMillis().toString(),
+                    "format" to "json",
+                ),
             ),
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:lyric:$identifier",
