@@ -598,12 +598,25 @@ class NeteaseProvider(
     private suspend fun lyric(identifier: String): String? = runCatching {
         val root = http.getText(
             ID,
-            queryUrl("$BASE/api/song/lyric", mapOf("id" to identifier, "lv" to "-1", "kv" to "1", "tv" to "-1")),
+            queryUrl(
+                "$BASE/api/song/lyric/v1",
+                mapOf(
+                    "id" to identifier,
+                    "lv" to "-1",
+                    "kv" to "-1",
+                    "tv" to "-1",
+                    "rv" to "-1",
+                    "yv" to "-1",
+                    "ytv" to "-1",
+                    "yrv" to "-1",
+                ),
+            ),
             neteaseAuthenticatedHeaders(),
-            cacheKey = "netease:lyric:$identifier",
+            cacheKey = "netease:lyric-v1:$identifier",
             cachePolicy = ProviderCachePolicies.lyric,
         ).value.let { parseNeteaseResponse(it) }
-        root.obj("lrc")?.stringOrNull("lyric")
+        root.obj("yrc")?.stringOrNull("lyric")
+            ?: root.obj("lrc")?.stringOrNull("lyric")
     }.getOrNull()
 
     private suspend fun currentUserId(): String? = runCatching { requestCurrentUserId() }.getOrNull()

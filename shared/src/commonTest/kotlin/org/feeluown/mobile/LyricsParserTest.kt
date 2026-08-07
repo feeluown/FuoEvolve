@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LyricsParserTest {
     @Test
@@ -39,5 +40,55 @@ class LyricsParserTest {
         assertEquals("Hello", lines[0].text)
         assertNull(lines[0].translation)
         assertEquals(1_500, lines[1].timeMs)
+    }
+
+    @Test
+    fun parseYrcParsesWordTimingsAndSkipsJsonMetadata() {
+        val lines = parseYrc(
+            """
+            {"t":0,"c":[{"tx":"作词: "}]}
+            [1000,2000](1000,500,0)逐(1500,500,0)字
+            [3500,1800](3500,600,0)歌(4100,700,0)词
+            """.trimIndent(),
+        )
+
+        assertEquals(2, lines.size)
+        assertEquals(1_000, lines[0].timeMs)
+        assertEquals("逐字", lines[0].text)
+        assertEquals(
+            listOf(
+                LyricWord(1_000, 500, "逐"),
+                LyricWord(1_500, 500, "字"),
+            ),
+            lines[0].words,
+        )
+        assertEquals("歌词", lines[1].text)
+        assertEquals(2, lines[1].words?.size)
+    }
+
+    @Test
+    fun parseLyricsDetectsYrcVersusLrc() {
+        val yrc = parseLyrics("[1000,2000](1000,500,0)逐(1500,500,0)字")
+        val lrc = parseLyrics("[00:01.00]普通歌词")
+
+        assertEquals("逐字", yrc.single().text)
+        assertTrue(!yrc.single().words.isNullOrEmpty())
+        assertEquals("普通歌词", lrc.single().text)
+        assertNull(lrc.single().words)
+    }
+
+    @Test
+    fun karaokeFillProgressUsesWordWidthsAndTimeline() {
+        val words = listOf(
+            LyricWord(1_000, 1_000, "逐"),
+            LyricWord(2_000, 1_000, "字"),
+        )
+        val widths = listOf(10f, 30f)
+
+        assertEquals(0f, karaokeFillProgress(words, 500, widths), absoluteTolerance = 0.0001f)
+        assertEquals(0.125f, karaokeFillProgress(words, 1_500, widths), absoluteTolerance = 0.0001f)
+        assertEquals(0.25f, karaokeFillProgress(words, 2_000, widths), absoluteTolerance = 0.0001f)
+        assertEquals(0.625f, karaokeFillProgress(words, 2_500, widths), absoluteTolerance = 0.0001f)
+        assertEquals(1f, karaokeFillProgress(words, 3_000, widths), absoluteTolerance = 0.0001f)
     }
 }

@@ -203,8 +203,9 @@ class ProviderPlaylistFeatureTest {
                                     """{"code":200,"data":[{"id":456,"url":"https://example.test/fm.mp3","br":320000,"type":"mp3","time":240000,"freeTrialInfo":null}]}""",
                                 )
                             }
-                            "/api/song/lyric" -> {
+                            "/api/song/lyric/v1" -> {
                                 assertEquals("-1", request.url.parameters["lv"])
+                                assertEquals("-1", request.url.parameters["yv"])
                                 respond("""{"code":200,"lrc":{"lyric":"[00:00.00]FM"}}""")
                             }
                             else -> error("unexpected NetEase request: ${request.url.encodedPath}")
@@ -852,6 +853,53 @@ class ProviderPlaylistFeatureTest {
 
         assertEquals("https://example.test/song.mp3", payload?.url)
         assertEquals(null, payload?.lyrics)
+        client.close()
+    }
+
+    @Test
+    fun neteasePrefersYrcLyricsAndFallsBackToLrc() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/weapi/song/enhance/player/url" -> respond(
+                                """{"code":200,"data":[{"id":456,"url":"https://example.test/song.mp3","freeTrialInfo":null,"time":180000,"type":"mp3"}]}""",
+                            )
+                            "/api/song/lyric/v1" -> {
+                                assertEquals("-1", request.url.parameters["yv"])
+                                val id = request.url.parameters["id"]
+                                if (id == "456") {
+                                    respond(
+                                        """{"code":200,"yrc":{"lyric":"[1000,2000](1000,500,0)逐(1500,500,0)字"},"lrc":{"lyric":"[00:01.00]普通"}}""",
+                                    )
+                                } else {
+                                    respond("""{"code":200,"lrc":{"lyric":"[00:02.00]回退"}}""")
+                                }
+                            }
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val withYrc = MusicTrack(
+            id = "netease:456",
+            title = "逐字歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            providerId = "netease:456",
+        )
+        val withoutYrc = withYrc.copy(id = "netease:789", providerId = "netease:789", title = "普通歌曲")
+
+        val yrcPayload = provider.resolve(withYrc, AudioQualityPolicy.High.policy)
+        val lrcPayload = provider.resolve(withoutYrc, AudioQualityPolicy.High.policy)
+
+        assertEquals("[1000,2000](1000,500,0)逐(1500,500,0)字", yrcPayload?.lyrics)
+        assertEquals("[00:02.00]回退", lrcPayload?.lyrics)
         client.close()
     }
 
