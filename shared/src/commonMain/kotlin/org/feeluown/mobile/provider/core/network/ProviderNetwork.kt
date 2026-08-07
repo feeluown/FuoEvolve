@@ -87,11 +87,33 @@ sealed class ProviderNetworkException(message: String, cause: Throwable? = null)
         val statusCode: Int,
         val responseBody: String,
         val retryAfterMillis: Long? = null,
-    ) : ProviderNetworkException("provider request failed with HTTP $statusCode")
+    ) : ProviderNetworkException(httpFailureMessage(statusCode, responseBody))
 
     class Transport(cause: Throwable) : ProviderNetworkException("provider request transport failure", cause)
 
     class Timeout(cause: Throwable) : ProviderNetworkException("provider request timed out", cause)
+}
+
+private fun httpFailureMessage(statusCode: Int, responseBody: String): String {
+    val detail = responseBody
+        .lineSequence()
+        .map { it.trim() }
+        .firstOrNull { it.isNotEmpty() }
+        ?.let { body ->
+            // Prefer JSON error.message when present (YouTube InnerTube, Google OAuth, etc.).
+            val messageMatch = Regex(""""message"\s*:\s*"((?:\\.|[^"\\])*)"""").find(body)
+            val message = messageMatch?.groupValues?.getOrNull(1)
+                ?.replace("\\\"", "\"")
+                ?.replace("\\n", " ")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+            message ?: body.take(160)
+        }
+    return if (detail.isNullOrBlank()) {
+        "provider request failed with HTTP $statusCode"
+    } else {
+        "provider request failed with HTTP $statusCode: $detail"
+    }
 }
 
 private data class CacheRecord(

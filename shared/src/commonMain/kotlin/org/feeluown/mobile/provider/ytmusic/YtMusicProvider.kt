@@ -51,7 +51,8 @@ class YtMusicProvider(
     private var configLoaded: Boolean = false
 
     override suspend fun search(keyword: String): ProviderSearchResults {
-        val root = innerTube("search", "{\"query\":${quote(keyword)}}")
+        // Search is public; avoid OAuth Bearer which can 400 on WEB_REMIX.
+        val root = innerTube("search", "{\"query\":${quote(keyword)}}", useOAuth = false)
         val tracks = mutableListOf<org.feeluown.mobile.MusicTrack>()
         collectSearchItems(root, tracks)
         return ProviderSearchResults(tracks = tracks.distinctBy { it.id }.take(50))
@@ -130,12 +131,21 @@ class YtMusicProvider(
         if (feature.id == "ytmusic_user_playlists" && !authState().isLoggedIn) {
             return ProviderContentSection(feature, isLoginRequired = true)
         }
-        val browseId = when (feature.id) {
-            "ytmusic_toplists" -> "FEmusic_charts"
-            "ytmusic_user_playlists" -> "FEmusic_liked"
-            else -> "FEmusic_home"
+        // Public shelves must not send OAuth Bearer: WEB_REMIX + TV OAuth commonly yields HTTP 400.
+        // Auth-required shelves keep OAuth (and omit the WEB InnerTube key).
+        val payload = when (feature.id) {
+            // ytmusicapi get_charts(country=ZZ)
+            "ytmusic_toplists" ->
+                "{\"browseId\":\"FEmusic_charts\",\"formData\":{\"selectedValues\":[\"ZZ\"]}}"
+            // ytmusicapi get_library_playlists; FEmusic_liked is rejected with HTTP 400.
+            "ytmusic_user_playlists" -> "{\"browseId\":\"FEmusic_liked_playlists\"}"
+            else -> "{\"browseId\":\"FEmusic_home\"}"
         }
-        val root = innerTube("browse", "{\"browseId\":${quote(browseId)}}")
+        val root = innerTube(
+            method = "browse",
+            payload = payload,
+            useOAuth = feature.requiresLogin,
+        )
         return when (feature.contentType) {
             ProviderContentType.Playlists -> {
                 val playlists = mutableListOf<ProviderPlaylist>()
@@ -161,15 +171,19 @@ class YtMusicProvider(
         "{\"videoId\":${quote(videoId)},\"contentCheckOk\":true,\"racyCheckOk\":true}",
     )
 
-    private suspend fun innerTube(method: String, payload: String): kotlinx.serialization.json.JsonObject {
+    private suspend fun innerTube(
+        method: String,
+        payload: String,
+        useOAuth: Boolean = true,
+    ): kotlinx.serialization.json.JsonObject {
         ensureConfig()
-        val oauthToken = ensureOAuthAccessToken()
+        val oauthToken = if (useOAuth) ensureOAuthAccessToken() else null
         // Match ytmusicapi / fuo_ytmusic: WEB_REMIX with hl=zh_CN and no unsupported gl=CN.
         // YouTube Music rejects gl=CN with HTTP 400 INVALID_ARGUMENT on every InnerTube call.
         val body = if (payload.startsWith("{") && payload.endsWith("}")) {
             "{\"context\":{\"client\":{\"clientName\":\"WEB_REMIX\",\"clientVersion\":\"$clientVersion\",\"hl\":\"zh_CN\"},\"user\":{}},${payload.drop(1)}"
         } else payload
-        // Browser auth appends the WEB InnerTube key; OAuth (ytmusicapi OAUTH_CUSTOM_CLIENT) omits it.
+        // Browser / public auth appends the WEB InnerTube key; OAuth omits it.
         val query = buildString {
             append("?alt=json")
             if (oauthToken == null) {
@@ -187,16 +201,15 @@ class YtMusicProvider(
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
     }
 
-    private suspend fun ytMusicHeaders(oauthToken: YtMusicOAuthToken? = null): Map<String, String> {
-        val token = oauthToken ?: ensureOAuthAccessToken()
+    private suspend fun ytMusicHeaders(oauthToken: YtMusicOAuthToken?): Map<String, String> {
         val origin = YTM_ORIGIN
-        if (token != null) {
+        if (oauthToken != null) {
+            // Match ytmusicapi OAUTH_CUSTOM_CLIENT headers (desktop UA + Origin, no Referer).
             return buildMap {
-                put("User-Agent", DEFAULT_USER_AGENT)
+                put("User-Agent", YtMusicOAuth.USER_AGENT)
                 put("Accept", "*/*")
                 put("Origin", origin)
-                put("Referer", "$origin/")
-                put("Authorization", token.asAuthorizationHeader())
+                put("Authorization", oauthToken.asAuthorizationHeader())
                 put("X-Goog-Request-Time", (currentTimeMillis() / 1_000).toString())
                 visitorId?.takeIf { it.isNotBlank() }?.let { put("X-Goog-Visitor-Id", it) }
             }
@@ -292,10 +305,15 @@ class YtMusicProvider(
 
     private suspend fun ensureConfig() {
         if (configLoaded) return
+        // ytmusicapi fetches visitor/config without Authorization (OAuth or SAPISIDHASH).
         val html = http.getText(
             ID,
             YTM_ORIGIN,
-            ytMusicHeaders(),
+            mapOf(
+                "User-Agent" to YtMusicOAuth.USER_AGENT,
+                "Accept" to "*/*",
+                "Origin" to YTM_ORIGIN,
+            ),
             cacheKey = "ytmusic:landing",
             cachePolicy = ProviderCachePolicies.detail,
         ).value
