@@ -49,6 +49,41 @@ class ProviderNetworkTest {
     }
 
     @Test
+    fun httpErrorsPreferJsonMessageFromPrettyPrintedBody() = runTest {
+        val httpClient = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = """
+                            {
+                              "error": {
+                                "code": 400,
+                                "message": "Request contains an invalid argument."
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.BadRequest,
+                    )
+                }
+            }
+        }
+        val client = ProviderHttpClient(
+            httpClient = httpClient,
+            retryPolicy = ProviderRetryPolicy(maxRetries = 0),
+        )
+
+        val error = assertFailsWith<ProviderNetworkException.Http> {
+            client.getText("test", "https://example.test/pretty")
+        }
+
+        assertEquals(
+            "provider request failed with HTTP 400: Request contains an invalid argument.",
+            error.message,
+        )
+        client.close()
+    }
+
+    @Test
     fun mutationsAreNeverRetried() = runTest {
         var calls = 0
         val httpClient = HttpClient(MockEngine) {

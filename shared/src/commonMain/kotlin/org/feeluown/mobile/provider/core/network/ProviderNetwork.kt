@@ -95,20 +95,23 @@ sealed class ProviderNetworkException(message: String, cause: Throwable? = null)
 }
 
 private fun httpFailureMessage(statusCode: Int, responseBody: String): String {
-    val detail = responseBody
-        .lineSequence()
-        .map { it.trim() }
-        .firstOrNull { it.isNotEmpty() }
-        ?.let { body ->
-            // Prefer JSON error.message when present (YouTube InnerTube, Google OAuth, etc.).
-            val messageMatch = Regex(""""message"\s*:\s*"((?:\\.|[^"\\])*)"""").find(body)
-            val message = messageMatch?.groupValues?.getOrNull(1)
-                ?.replace("\\\"", "\"")
-                ?.replace("\\n", " ")
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-            message ?: body.take(160)
-        }
+    val trimmed = responseBody.trim()
+    val detail = if (trimmed.isEmpty()) {
+        null
+    } else {
+        // Prefer JSON error.message when present (YouTube InnerTube, Google OAuth, etc.).
+        // Search the whole body: pretty-printed responses often start with "{" alone.
+        val messageMatch = Regex(""""message"\s*:\s*"((?:\\.|[^"\\])*)"""").find(trimmed)
+        val message = messageMatch?.groupValues?.getOrNull(1)
+            ?.replace("\\\"", "\"")
+            ?.replace("\\n", " ")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        message ?: trimmed.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.take(160)
+    }
     return if (detail.isNullOrBlank()) {
         "provider request failed with HTTP $statusCode"
     } else {
