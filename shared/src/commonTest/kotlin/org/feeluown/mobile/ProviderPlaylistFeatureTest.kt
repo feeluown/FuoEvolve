@@ -203,7 +203,7 @@ class ProviderPlaylistFeatureTest {
                                     """{"code":200,"data":[{"id":456,"url":"https://example.test/fm.mp3","br":320000,"type":"mp3","time":240000,"freeTrialInfo":null}]}""",
                                 )
                             }
-                            "/api/song/lyric/v1" -> {
+                            "/api/song/lyric" -> {
                                 assertEquals("-1", request.url.parameters["lv"])
                                 assertEquals("-1", request.url.parameters["yv"])
                                 respond("""{"code":200,"lrc":{"lyric":"[00:00.00]FM"}}""")
@@ -866,7 +866,7 @@ class ProviderPlaylistFeatureTest {
                             "/weapi/song/enhance/player/url" -> respond(
                                 """{"code":200,"data":[{"id":456,"url":"https://example.test/song.mp3","freeTrialInfo":null,"time":180000,"type":"mp3"}]}""",
                             )
-                            "/api/song/lyric/v1" -> {
+                            "/api/song/lyric" -> {
                                 assertEquals("-1", request.url.parameters["yv"])
                                 val id = request.url.parameters["id"]
                                 if (id == "456") {

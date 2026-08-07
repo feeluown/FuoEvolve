@@ -1256,8 +1256,7 @@ fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
 fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifier) {
     val lines = remember(state.lyrics) { parseLyrics(state.lyrics) }
     val listState = rememberLazyListState()
-    val renderPositionMs = rememberKaraokePositionMs(state.positionMs, state.status == PlayerStatus.Playing)
-    val currentIndex = currentLyricIndex(lines, renderPositionMs)
+    val currentIndex = currentLyricIndex(lines, state.positionMs)
     val activeStyle = when (fontSize) {
         LyricFontSize.Small -> MaterialTheme.typography.titleMedium
         LyricFontSize.Medium -> MaterialTheme.typography.titleLarge
@@ -1306,7 +1305,8 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                     if (active && !line.words.isNullOrEmpty()) {
                         KaraokeLyricText(
                             words = line.words,
-                            positionMs = renderPositionMs,
+                            positionMs = state.positionMs,
+                            isPlaying = state.status == PlayerStatus.Playing,
                             style = activeStyle,
                             activeColor = MaterialTheme.colorScheme.primary,
                             inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1359,37 +1359,44 @@ private fun rememberKaraokePositionMs(positionMs: Long, isPlaying: Boolean): Lon
 private fun KaraokeLyricText(
     words: List<LyricWord>,
     positionMs: Long,
+    isPlaying: Boolean,
     style: TextStyle,
     activeColor: Color,
     inactiveColor: Color,
     modifier: Modifier = Modifier,
 ) {
+    val renderPositionMs = rememberKaraokePositionMs(positionMs, isPlaying)
     val text = remember(words) { words.joinToString("") { it.text } }
-    val textStyle = style.copy(fontWeight = FontWeight.SemiBold)
     val textMeasurer = rememberTextMeasurer()
-    val wordWidths = remember(words, textStyle, textMeasurer) {
+    val fontSize = style.fontSize
+    val wordWidths = remember(words, fontSize, textMeasurer) {
+        val measureStyle = style.copy(fontWeight = FontWeight.SemiBold)
         words.map { word ->
             textMeasurer.measure(
                 text = word.text,
-                style = textStyle,
+                style = measureStyle,
                 constraints = Constraints(),
             ).size.width.toFloat()
         }
     }
-    val progress = karaokeFillProgress(words, positionMs, wordWidths)
+    val progress = karaokeFillProgress(words, renderPositionMs, wordWidths)
+    val textStyle = style.copy(fontWeight = FontWeight.SemiBold)
 
     Box(modifier = modifier) {
         Text(
             text = text,
             style = textStyle,
             color = inactiveColor,
+            softWrap = true,
         )
         Text(
             text = text,
             style = textStyle,
             color = activeColor,
+            softWrap = true,
             modifier = Modifier.drawWithContent {
-                val clipRight = size.width * progress
+                val clipRight = size.width * progress.coerceIn(0f, 1f)
+                if (clipRight <= 0f || !clipRight.isFinite()) return@drawWithContent
                 clipRect(left = 0f, top = 0f, right = clipRight, bottom = size.height) {
                     this@drawWithContent.drawContent()
                 }

@@ -599,20 +599,17 @@ class NeteaseProvider(
         val root = http.getText(
             ID,
             queryUrl(
-                "$BASE/api/song/lyric/v1",
+                "$BASE/api/song/lyric",
                 mapOf(
                     "id" to identifier,
                     "lv" to "-1",
                     "kv" to "-1",
                     "tv" to "-1",
-                    "rv" to "-1",
                     "yv" to "-1",
-                    "ytv" to "-1",
-                    "yrv" to "-1",
                 ),
             ),
             neteaseAuthenticatedHeaders(),
-            cacheKey = "netease:lyric-v1:$identifier",
+            cacheKey = "netease:lyric-yrc:$identifier",
             cachePolicy = ProviderCachePolicies.lyric,
         ).value.let { parseNeteaseResponse(it) }
         root.obj("yrc")?.stringOrNull("lyric")
