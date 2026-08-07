@@ -154,15 +154,17 @@ class AndroidNativeAudioEngine(
     private fun updatePosition() {
         val controller = mediaController ?: return
         if (controller.playbackState == Player.STATE_IDLE) return
+        val currentMediaItem = controller.currentMediaItem
+        val currentMediaLyrics = currentMediaItem?.mediaMetadata
+            ?.extras
+            ?.getString("lyrics")
+            ?.takeIf { it.isNotBlank() }
         mutableState.value = mutableState.value.copy(
-            currentTrack = mutableState.value.currentTrack ?: controller.currentMediaItem?.toMusicTrack(),
+            currentTrack = mutableState.value.currentTrack ?: currentMediaItem?.toMusicTrack(),
             positionMs = controller.currentPosition.coerceAtLeast(0),
             durationMs = controller.duration.takeIf { it > 0 } ?: mutableState.value.durationMs,
             bufferedMs = controller.bufferedPosition.coerceAtLeast(0),
-            lyrics = mutableState.value.lyrics ?: controller.currentMediaItem?.mediaMetadata
-                ?.extras
-                ?.getString("lyrics")
-                ?.takeIf { it.isNotBlank() },
+            lyrics = if (currentMediaItem != null) currentMediaLyrics else mutableState.value.lyrics,
         )
     }
 
