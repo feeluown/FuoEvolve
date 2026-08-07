@@ -88,7 +88,6 @@ class QQMusicProvider(
                 headers = mapOf("Referer" to "https://y.qq.com/"),
                 coverUrl = track.coverUrl,
                 durationMs = track.durationMs,
-                lyrics = lyric(songMid),
                 audioQuality = quality.label,
                 providerName = NAME,
             )

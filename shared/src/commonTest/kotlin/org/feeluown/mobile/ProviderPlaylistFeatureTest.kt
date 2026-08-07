@@ -863,9 +863,6 @@ class ProviderPlaylistFeatureTest {
                 engine {
                     addHandler { request ->
                         when (request.url.encodedPath) {
-                            "/weapi/song/enhance/player/url" -> respond(
-                                """{"code":200,"data":[{"id":456,"url":"https://example.test/song.mp3","freeTrialInfo":null,"time":180000,"type":"mp3"}]}""",
-                            )
                             "/api/song/lyric" -> {
                                 assertEquals("-1", request.url.parameters["yv"])
                                 val id = request.url.parameters["id"]
@@ -895,16 +892,13 @@ class ProviderPlaylistFeatureTest {
         )
         val withoutYrc = withYrc.copy(id = "netease:789", providerId = "netease:789", title = "普通歌曲")
 
-        val yrcPayload = provider.resolve(withYrc, AudioQualityPolicy.High.policy)
-        val lrcPayload = provider.resolve(withoutYrc, AudioQualityPolicy.High.policy)
-
-        assertEquals("[1000,2000](1000,500,0)逐(1500,500,0)字", yrcPayload?.lyrics)
-        assertEquals("[00:02.00]回退", lrcPayload?.lyrics)
+        assertEquals("[1000,2000](1000,500,0)逐(1500,500,0)字", provider.lyrics(withYrc))
+        assertEquals("[00:02.00]回退", provider.lyrics(withoutYrc))
         client.close()
     }
 
     @Test
-    fun smartReplacementKeepsOriginalNeteaseLyricsWhenMediaUnavailable() = runTest {
+    fun smartReplacementDoesNotBlockOnOriginalLyricsFetch() = runTest {
         val lyricRequests = mutableListOf<String>()
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
@@ -963,8 +957,54 @@ class ProviderPlaylistFeatureTest {
         assertEquals(true, payload.isSmartReplacement)
         assertEquals("https://example.test/bilibili.m4s", payload.url)
         assertEquals("哔哩哔哩", payload.replacementProviderName)
-        assertEquals("[1000,2000](1000,500,0)原(1500,500,0)词", payload.lyrics)
+        assertEquals(null, payload.lyrics)
+        assertEquals(emptyList(), lyricRequests)
+
+        val replaced = track.copy(
+            isSmartReplacement = true,
+            originalId = payload.originalId,
+            originalSource = payload.originalSource,
+            originalProviderName = payload.originalProviderName,
+            source = payload.source,
+            providerName = payload.providerName,
+        )
+        assertEquals("[1000,2000](1000,500,0)原(1500,500,0)词", repository.lyrics(replaced))
         assertEquals(listOf("456"), lyricRequests)
+        client.close()
+    }
+
+    @Test
+    fun neteaseResolveDoesNotWaitForLyrics() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/weapi/song/enhance/player/url" -> respond(
+                                """{"code":200,"data":[{"id":456,"url":"https://example.test/song.mp3","freeTrialInfo":null,"time":180000,"type":"mp3"}]}""",
+                            )
+                            "/api/song/lyric" -> error("lyric must not block resolve")
+                            else -> error("unexpected NetEase request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "netease:456",
+            title = "可播放歌曲",
+            artists = "歌手",
+            album = "专辑",
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            providerId = "netease:456",
+        )
+
+        val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
+
+        assertEquals("https://example.test/song.mp3", payload?.url)
+        assertEquals(null, payload?.lyrics)
         client.close()
     }
 

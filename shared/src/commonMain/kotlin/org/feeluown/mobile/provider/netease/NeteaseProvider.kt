@@ -87,7 +87,6 @@ class NeteaseProvider(
             headers = mapOf("Referer" to "https://music.163.com/"),
             coverUrl = track.coverUrl,
             durationMs = data.long("time") ?: track.durationMs,
-            lyrics = lyric(id),
             audioQuality = data.stringOrNull("type") ?: qualityPolicy,
             providerName = NAME,
         )

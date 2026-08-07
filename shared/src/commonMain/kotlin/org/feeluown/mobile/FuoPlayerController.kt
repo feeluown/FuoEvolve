@@ -393,6 +393,8 @@ class FuoPlayerController(
     private var autoAdvanceEligibleTrackId: String? = null
     private var lastRecoveredPlaybackErrorKey: String? = null
     private var playRequestSerial: Long = 0
+    private var lyricsLoadJob: Job? = null
+    private var lyricsLoadedForTrackId: String? = null
     private var localMusicRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
     private var observedCompletedDownloadTaskIds = emptySet<String>()
@@ -513,7 +515,9 @@ class FuoPlayerController(
                     currentTrack = currentQueueTrack() ?: engineState.currentTrack,
                     playbackParts = engineState.playbackParts.ifEmpty { playbackParts },
                     currentPartIndex = engineState.currentPartIndex.takeIf { it >= 0 } ?: currentPartIndex,
+                    lyrics = mergedPlaybackLyrics(engineState),
                 )
+                maybeLoadLyrics(playbackState.currentTrack)
                 if (engineState.playbackParts.isNotEmpty()) {
                     playbackParts = engineState.playbackParts
                     currentPartIndex = engineState.currentPartIndex
@@ -1840,23 +1844,17 @@ class FuoPlayerController(
     }
 
     fun downloadLocalLyrics(track: MusicTrack, providerTrack: MusicTrack) {
-        val providerId = providerTrack.source.takeIf { it.isNotBlank() } ?: providerTrack.providerId
         scope.launch {
             isLoading = true
             message = "正在下载歌词"
             runCatching {
                 withTimeout(25_000) {
-                    providerRepository.resolve(
+                    providerRepository.lyrics(
                         providerTrack.copy(providerId = providerTrack.providerId ?: providerTrack.id),
-                        unavailablePlaybackPolicy,
-                        providerId?.let(::setOf).orEmpty(),
-                        smartReplacementMinScore,
-                        smartReplacementUseOriginalMetadata = true,
-                        smartReplacementUseOriginalLyrics = true,
                     )
                 }
-            }.onSuccess { payload ->
-                val lyrics = payload.lyrics?.takeIf { it.isNotBlank() }
+            }.onSuccess { lyricsText ->
+                val lyrics = lyricsText?.takeIf { it.isNotBlank() }
                 if (lyrics == null) {
                     message = "未获取到歌词"
                     localMetadataSearchMessage = "未获取到歌词"
@@ -3876,6 +3874,63 @@ class FuoPlayerController(
             ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
     }
 
+    private fun mergedPlaybackLyrics(engineState: PlaybackState): String? {
+        engineState.lyrics?.takeIf { it.isNotBlank() }?.let { return it }
+        val engineTrackId = engineState.currentTrack?.id
+        val currentId = currentQueueTrack()?.id ?: playbackState.currentTrack?.id
+        return playbackState.lyrics?.takeIf {
+            it.isNotBlank() && (engineTrackId == null || engineTrackId == currentId)
+        }
+    }
+
+    private fun maybeLoadLyrics(track: MusicTrack?) {
+        if (track == null) return
+        if (!playbackState.lyrics.isNullOrBlank()) {
+            lyricsLoadedForTrackId = track.id
+            return
+        }
+        track.lyrics?.takeIf { it.isNotBlank() }?.let {
+            playbackState = playbackState.copy(lyrics = it)
+            lyricsLoadedForTrackId = track.id
+            return
+        }
+        if (lyricsLoadedForTrackId == track.id) return
+        lyricsLoadedForTrackId = track.id
+        val requestSerial = playRequestSerial
+        lyricsLoadJob?.cancel()
+        lyricsLoadJob = scope.launch {
+            val lyrics = runCatching {
+                providerRepository.lyrics(lyricSourceTrackForPlayback(track))
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+            if (requestSerial != playRequestSerial) return@launch
+            val currentId = currentQueueTrack()?.id ?: playbackState.currentTrack?.id
+            if (currentId != track.id) return@launch
+            if (!lyrics.isNullOrBlank()) {
+                playbackState = playbackState.copy(lyrics = lyrics)
+            }
+        }
+    }
+
+    private fun lyricSourceTrackForPlayback(track: MusicTrack): MusicTrack {
+        if (!track.isSmartReplacement) return track
+        val originalId = track.originalId?.takeIf { it.isNotBlank() } ?: return track
+        val originalSource = track.originalSource?.takeIf { it.isNotBlank() }
+            ?: originalId.substringBefore(':').takeIf { it.isNotBlank() }
+            ?: track.source
+        return track.copy(
+            id = originalId,
+            providerId = originalId,
+            source = originalSource,
+            providerName = track.originalProviderName ?: track.providerName,
+            title = track.originalTitle ?: track.title,
+            artists = track.originalArtists ?: track.artists,
+            album = track.originalAlbum ?: track.album,
+            coverUrl = track.originalCoverUrl ?: track.coverUrl,
+            isSmartReplacement = false,
+            lyrics = null,
+        )
+    }
+
     private fun play(
         track: MusicTrack,
         sourceQueue: List<MusicTrack>,
@@ -3911,6 +3966,8 @@ class FuoPlayerController(
             currentPartIndex = -1
         }
         updateCurrentTrack(playbackTrack)
+        lyricsLoadJob?.cancel()
+        lyricsLoadedForTrackId = null
         playbackState = playbackState.copy(
             status = PlayerStatus.Loading,
             currentTrack = playbackTrack,
@@ -3919,6 +3976,7 @@ class FuoPlayerController(
             positionMs = 0,
             playbackParts = playbackParts,
             currentPartIndex = if (isPlaybackPartRequest) requestedPartIndex ?: -1 else -1,
+            lyrics = playbackTrack.lyrics,
             errorMessage = null,
         )
         persistPlaybackQueue()
@@ -3929,6 +3987,7 @@ class FuoPlayerController(
             ?.let { index -> playbackParts.getOrNull(index) }
             ?.toTrack(playbackTrack)
             ?: playbackTrack
+        maybeLoadLyrics(playbackTrack)
         if (!playbackEngine.resolvesResourcesInternally) {
             scope.launch playRequest@{
                 runCatching {
@@ -3986,11 +4045,12 @@ class FuoPlayerController(
                         currentTrack = playableTrack,
                         queue = displayQueue(),
                         queueIndex = displayQueueIndex(),
-                        lyrics = payload.lyrics,
+                        lyrics = payload.lyrics?.takeIf { it.isNotBlank() } ?: playbackState.lyrics,
                         audioQuality = payload.audioQuality,
                         playbackParts = playbackParts,
                         currentPartIndex = currentPartIndex,
                     )
+                    maybeLoadLyrics(playableTrack)
                     persistPlaybackQueue()
                     message = currentPlaybackPartLabel()?.let { "${playableTrack.title} · $it" }
                         ?: "${playableTrack.title} - ${playableTrack.artists}"

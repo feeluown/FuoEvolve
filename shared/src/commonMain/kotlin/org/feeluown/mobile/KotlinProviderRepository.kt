@@ -128,12 +128,6 @@ class KotlinProviderRepository : ProviderMusicRepository {
             error("media unavailable: ${track.id}")
         }
 
-        val originalLyrics = when {
-            !smartReplacementUseOriginalLyrics -> null
-            !track.lyrics.isNullOrBlank() -> track.lyrics
-            else -> runCatching { originalProvider?.lyrics(track) }.getOrNull()?.takeIf { it.isNotBlank() }
-        }
-
         val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
             .flatMap { provider -> provider.search("${track.title} ${track.artists}").tracks }
             .mapNotNull { candidate ->
@@ -163,11 +157,22 @@ class KotlinProviderRepository : ProviderMusicRepository {
                     artists = if (smartReplacementUseOriginalMetadata) track.artists else candidate.artists,
                     album = if (smartReplacementUseOriginalMetadata) track.album else candidate.album,
                     coverUrl = if (smartReplacementUseOriginalMetadata) track.coverUrl else candidate.coverUrl,
-                    lyrics = if (smartReplacementUseOriginalLyrics) originalLyrics ?: payload.lyrics else payload.lyrics,
+                    // Lyrics are loaded asynchronously after playback starts.
+                    lyrics = if (smartReplacementUseOriginalLyrics) track.lyrics else payload.lyrics,
                 )
             }
             .maxByOrNull { it.first }
         return candidates?.second ?: error("media unavailable and no smart replacement: ${track.id}")
+    }
+
+    override suspend fun lyrics(track: MusicTrack): String? {
+        initialize()
+        track.lyrics?.takeIf { it.isNotBlank() }?.let { return it }
+        val lyricTrack = lyricSourceTrack(track)
+        val providerId = lyricTrack.source.ifBlank {
+            splitResourceId(lyricTrack.providerId ?: lyricTrack.id).first
+        }
+        return providerMap[providerId]?.lyrics(lyricTrack)?.takeIf { it.isNotBlank() }
     }
 
     override suspend fun authState(providerId: String): ProviderAuthState = requireProvider(providerId).authState()
@@ -307,6 +312,25 @@ class KotlinProviderRepository : ProviderMusicRepository {
     private fun selectedProvidersForReplacement(providerIds: Set<String>, originalProviderId: String): List<KotlinMusicProvider> {
         val ids = if (providerIds.isEmpty()) enabledProviderIds else providerIds
         return ids.filter { it != originalProviderId }.mapNotNull { providerMap[it] }
+    }
+
+    private fun lyricSourceTrack(track: MusicTrack): MusicTrack {
+        if (!track.isSmartReplacement) return track
+        val originalId = track.originalId?.takeIf { it.isNotBlank() } ?: return track
+        val originalSource = track.originalSource?.takeIf { it.isNotBlank() }
+            ?: splitResourceId(originalId).first
+        return track.copy(
+            id = originalId,
+            providerId = originalId,
+            source = originalSource,
+            providerName = track.originalProviderName ?: track.providerName,
+            title = track.originalTitle ?: track.title,
+            artists = track.originalArtists ?: track.artists,
+            album = track.originalAlbum ?: track.album,
+            coverUrl = track.originalCoverUrl ?: track.coverUrl,
+            isSmartReplacement = false,
+            lyrics = null,
+        )
     }
 
     private fun requireProvider(providerId: String): KotlinMusicProvider =

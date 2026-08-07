@@ -775,6 +775,7 @@ interface ProviderMusicRepository {
         smartReplacementUseOriginalMetadata: Boolean = true,
         smartReplacementUseOriginalLyrics: Boolean = true,
     ): PlaybackPayload
+    suspend fun lyrics(track: MusicTrack): String? = null
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun refreshAuthState(providerId: String): ProviderAuthState = authState(providerId)
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState

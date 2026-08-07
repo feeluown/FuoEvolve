@@ -1309,14 +1309,19 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                             isPlaying = state.status == PlayerStatus.Playing,
                             style = activeStyle,
                             activeColor = MaterialTheme.colorScheme.primary,
-                            inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            // Keep the unsung portion clearly muted so primary fill pops.
+                            inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
                         Text(
                             text = line.text,
                             style = if (active) activeStyle else inactiveStyle,
-                            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (active) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f)
+                            },
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -1325,8 +1330,8 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         Text(
                             text = translation,
                             style = translationStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                alpha = if (active) 0.88f else 0.72f,
+                            color = MaterialTheme.colorScheme.onSurface.copy(
+                                alpha = if (active) 0.52f else 0.38f,
                             ),
                             modifier = Modifier.fillMaxWidth(),
                         )

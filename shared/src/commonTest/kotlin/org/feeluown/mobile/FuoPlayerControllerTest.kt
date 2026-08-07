@@ -3569,9 +3569,7 @@ class FuoPlayerControllerTest {
         val providerTrack = providerTrack("provider:1", "Provider Title")
         val provider = FakeProviderRepository(
             tracks = listOf(providerTrack),
-            resolveHandler = { track, _, _, _, _, _ ->
-                payloadFor(track).copy(lyrics = "[00:01.00]Provider lyric")
-            },
+            lyricsHandler = { "[00:01.00]Provider lyric" },
         )
         val local = FakeLocalMusicRepository(tracks = listOf(localTrack))
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
@@ -3590,8 +3588,8 @@ class FuoPlayerControllerTest {
 
             assertEquals("[00:01.00]Provider lyric", local.lastSavedLyrics)
             assertEquals("[00:01.00]Provider lyric", controller.localTracks.first().lyrics)
-            assertEquals(1, provider.resolveCount)
-            assertEquals(setOf("netease"), provider.lastSmartReplacementProviderIds)
+            assertEquals(1, provider.lyricsCount)
+            assertEquals(0, provider.resolveCount)
         } finally {
             controllerScope.cancel()
         }
@@ -4153,6 +4151,7 @@ class FuoPlayerControllerTest {
         private val resolveHandler: (
             suspend (MusicTrack, UnavailablePlaybackPolicy, Set<String>, Double, Boolean, Boolean) -> PlaybackPayload
         )? = null,
+        private val lyricsHandler: (suspend (MusicTrack) -> String?)? = null,
         private val availableProviderInfos: List<ProviderInfo> = listOf(
             ProviderInfo(providerId = "netease", providerName = "网易云音乐"),
             ProviderInfo(providerId = "qqmusic", providerName = "QQ 音乐"),
@@ -4168,6 +4167,7 @@ class FuoPlayerControllerTest {
         private var isLoggedIn = initialIsLoggedIn
         private var enabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS
         var resolveCount = 0
+        var lyricsCount = 0
         var logoutCount = 0
         var authStateCount = 0
         var refreshAuthStateCount = 0
@@ -4238,6 +4238,11 @@ class FuoPlayerControllerTest {
                 album = track.album,
                 source = track.source,
             )
+        }
+
+        override suspend fun lyrics(track: MusicTrack): String? {
+            lyricsCount += 1
+            return lyricsHandler?.invoke(track) ?: track.lyrics
         }
 
         override suspend fun authState(providerId: String): ProviderAuthState {
