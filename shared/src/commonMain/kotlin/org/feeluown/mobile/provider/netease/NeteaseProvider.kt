@@ -93,6 +93,12 @@ class NeteaseProvider(
         )
     }
 
+    override suspend fun lyrics(track: org.feeluown.mobile.MusicTrack): String? {
+        val (_, identifier) = splitResourceId(track.providerId ?: track.id)
+        val id = identifier.ifBlank { track.id.substringAfterLast(':') }
+        return lyric(id)
+    }
+
     override suspend fun authState(): ProviderAuthState {
         val credentials = currentCredentials()
         if (credentials == null) return authState(null)

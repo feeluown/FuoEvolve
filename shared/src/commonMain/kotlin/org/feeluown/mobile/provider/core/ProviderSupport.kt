@@ -360,6 +360,8 @@ abstract class BaseKotlinProvider(
 
     override suspend fun resolve(track: MusicTrack, qualityPolicy: String): PlaybackPayload? = null
 
+    override suspend fun lyrics(track: MusicTrack): String? = null
+
     override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = emptyList()
 
     override suspend fun playlistDetail(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail =
@@ -443,6 +445,7 @@ interface KotlinMusicProvider {
     suspend fun search(keyword: String): ProviderSearchResults
     suspend fun trackDetail(identifier: String): MusicTrack?
     suspend fun resolve(track: MusicTrack, qualityPolicy: String): PlaybackPayload?
+    suspend fun lyrics(track: MusicTrack): String? = null
     suspend fun authState(): ProviderAuthState
     suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState

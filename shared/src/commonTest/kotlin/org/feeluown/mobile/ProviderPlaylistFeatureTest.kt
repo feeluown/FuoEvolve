@@ -904,6 +904,71 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
+    fun smartReplacementKeepsOriginalNeteaseLyricsWhenMediaUnavailable() = runTest {
+        val lyricRequests = mutableListOf<String>()
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/weapi/song/enhance/player/url" -> respond(
+                                """{"code":200,"data":[{"id":456,"url":null,"freeTrialInfo":{"start":0,"end":30},"time":180000,"type":"mp3"}]}""",
+                            )
+                            "/api/song/lyric" -> {
+                                lyricRequests += request.url.parameters["id"].orEmpty()
+                                respond(
+                                    """{"code":200,"yrc":{"lyric":"[1000,2000](1000,500,0)原(1500,500,0)词"},"lrc":{"lyric":"[00:01.00]原文"}}""",
+                                )
+                            }
+                            "/x/web-interface/search/type" -> respond(
+                                """{"code":0,"data":{"result":[{"bvid":"BVdemo","title":"人间芳菲","author":"音阙诗听","duration":"3:36","pic":"//example.test/cover.jpg"}]}}""",
+                            )
+                            "/x/web-interface/view" -> respond(
+                                """{"code":0,"data":{"bvid":"BVdemo","cid":123,"title":"人间芳菲","duration":216,"pages":[{"cid":123,"page":1,"part":"人间芳菲","duration":216}]}}""",
+                            )
+                            "/x/web-interface/nav" -> respond(
+                                """{"code":0,"data":{"wbi_img":{"img_url":"https://example.test/wbi/abcdefghijklmnopqrstuvwxyz.png","sub_url":"https://example.test/wbi/0123456789abcdefghijklmnopqrstuvwxyz.png"}}}""",
+                            )
+                            "/x/player/playurl" -> respond(
+                                """{"code":0,"data":{"dash":{"audio":[{"baseUrl":"https://example.test/bilibili.m4s","bandwidth":192000,"length":216000}]}}}""",
+                            )
+                            else -> error("unexpected request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val repository = KotlinProviderRepository(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "netease:456",
+            title = "人间芳菲",
+            artists = "音阙诗听",
+            album = "人间芳菲",
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            providerId = "netease:456",
+            providerName = "网易云音乐",
+            durationMs = 216_000,
+        )
+
+        val payload = repository.resolve(
+            track = track,
+            unavailablePolicy = UnavailablePlaybackPolicy.SmartReplace,
+            smartReplacementProviderIds = setOf("bilibili"),
+            smartReplacementMinScore = 0.5,
+            smartReplacementUseOriginalMetadata = true,
+            smartReplacementUseOriginalLyrics = true,
+        )
+
+        assertEquals(true, payload.isSmartReplacement)
+        assertEquals("https://example.test/bilibili.m4s", payload.url)
+        assertEquals("哔哩哔哩", payload.replacementProviderName)
+        assertEquals("[1000,2000](1000,500,0)原(1500,500,0)词", payload.lyrics)
+        assertEquals(listOf("456"), lyricRequests)
+        client.close()
+    }
+
+    @Test
     fun qqmusicDoesNotUseTestFileAsPlayableMedia() = runTest {
         val requestedData = mutableListOf<String>()
         val client = ProviderHttpClient(

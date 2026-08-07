@@ -748,6 +748,12 @@ class QQMusicProvider(
             ?: root.array("songlist").firstOrNull()?.asObject()
     }
 
+    override suspend fun lyrics(track: org.feeluown.mobile.MusicTrack): String? {
+        val (_, identifier) = splitResourceId(track.providerId ?: track.id)
+        val id = identifier.ifBlank { track.id.substringAfterLast(':') }
+        return lyric(id)
+    }
+
     private suspend fun lyric(identifier: String): String? = runCatching {
         val root = http.getText(
             providerId = ID,

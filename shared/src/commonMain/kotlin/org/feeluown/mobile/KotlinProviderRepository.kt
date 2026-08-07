@@ -128,6 +128,12 @@ class KotlinProviderRepository : ProviderMusicRepository {
             error("media unavailable: ${track.id}")
         }
 
+        val originalLyrics = when {
+            !smartReplacementUseOriginalLyrics -> null
+            !track.lyrics.isNullOrBlank() -> track.lyrics
+            else -> runCatching { originalProvider?.lyrics(track) }.getOrNull()?.takeIf { it.isNotBlank() }
+        }
+
         val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
             .flatMap { provider -> provider.search("${track.title} ${track.artists}").tracks }
             .mapNotNull { candidate ->
@@ -157,7 +163,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
                     artists = if (smartReplacementUseOriginalMetadata) track.artists else candidate.artists,
                     album = if (smartReplacementUseOriginalMetadata) track.album else candidate.album,
                     coverUrl = if (smartReplacementUseOriginalMetadata) track.coverUrl else candidate.coverUrl,
-                    lyrics = if (smartReplacementUseOriginalLyrics) track.lyrics ?: payload.lyrics else payload.lyrics,
+                    lyrics = if (smartReplacementUseOriginalLyrics) originalLyrics ?: payload.lyrics else payload.lyrics,
                 )
             }
             .maxByOrNull { it.first }
