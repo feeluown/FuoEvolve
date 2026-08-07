@@ -75,27 +75,13 @@ Provider implementations currently bundled in the shared Kotlin module:
 | NetEase Cloud Music | `NeteaseProvider` | Enabled | Cookie |
 | QQ Music | `QQMusicProvider` | Available in Settings | Cookie |
 | Bilibili | `BilibiliProvider` | Available in Settings | Cookie |
-| YouTube Music | `YtMusicProvider` | Available in Settings | Google OAuth |
+| YouTube Music | `YtMusicProvider` | Available in Settings | Headers / cookie file |
 
 The app loads NetEase by default. QQ Music, Bilibili, and YouTube Music are
 packaged and can be enabled, disabled, or reordered from Settings.
 
-YouTube Music uses Google OAuth and never embeds the Google sign-in page in a
-WebView. Android requires Google Play services. The experimental iOS target
-requires a Google OAuth iOS client ID and its reversed URL scheme in Xcode.
-
-Google OAuth setup:
-
-- Enable the YouTube Data API in the Google Cloud project and configure the
-  OAuth consent screen. The `youtube` scope is sensitive; public releases may
-  require Google verification.
-- The Android OAuth client must match package `org.feeluown.mobile` and the
-  SHA-1 certificate of the installed build. The login flow relies on Google
-  Play services.
-- Set `GOOGLE_IOS_CLIENT_ID` and `GOOGLE_IOS_REVERSED_CLIENT_ID` in the iOS
-  Xcode Build Settings. The latter is the reversed URL scheme for the iOS
-  OAuth client. The Xcode project resolves `GoogleSignIn` through Swift
-  Package Manager.
+YouTube Music login uses browser Headers / Cookie credentials (for example an
+imported `ytmusic_header.json`), not Google OAuth or an in-app Google WebView.
 
 Legend: ✅ supported, including features that require login; 🧩 supported only
 when the upstream provider exposes the required method or result type; ➖ not

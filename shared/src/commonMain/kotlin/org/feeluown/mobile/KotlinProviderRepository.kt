@@ -174,13 +174,6 @@ class KotlinProviderRepository : ProviderMusicRepository {
     override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState =
         requireProvider(providerId).loginWithHeaders(authorization, cookie)
 
-    override suspend fun loginWithOAuth(
-        providerId: String,
-        accessToken: String,
-        expiresAtMillis: Long?,
-        grantedScopes: Set<String>,
-    ): ProviderAuthState = requireProvider(providerId).loginWithOAuth(accessToken, expiresAtMillis, grantedScopes)
-
     override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =
         requireProvider("ytmusic").loginWithHeaderFile(headerFileJson)
 

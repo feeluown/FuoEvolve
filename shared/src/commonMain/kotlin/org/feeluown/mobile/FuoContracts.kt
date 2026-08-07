@@ -18,7 +18,6 @@ enum class ProviderLoginMode {
     WebView,
     Cookie,
     Headers,
-    OAuth,
 }
 
 @Serializable
@@ -613,16 +612,11 @@ data class ProviderLoginConfig(
     val cookieKeyGroups: List<List<String>>,
 )
 
-data class ProviderOAuthConfig(
-    val scopes: List<String>,
-)
-
 data class ProviderInfo(
     val providerId: String,
     val providerName: String,
     val loginConfig: ProviderLoginConfig? = null,
     val supportedLoginModes: Set<ProviderLoginMode> = setOf(ProviderLoginMode.WebView, ProviderLoginMode.Cookie),
-    val oauthConfig: ProviderOAuthConfig? = null,
 )
 
 enum class ProviderFeatureCategory {
@@ -771,14 +765,6 @@ interface ProviderMusicRepository {
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support header login: $providerId")
-    }
-    suspend fun loginWithOAuth(
-        providerId: String,
-        accessToken: String,
-        expiresAtMillis: Long? = null,
-        grantedScopes: Set<String> = emptySet(),
-    ): ProviderAuthState {
-        throw UnsupportedOperationException("provider does not support OAuth login: $providerId")
     }
     suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support YTMusic header file login")

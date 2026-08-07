@@ -98,9 +98,6 @@ data class ProviderCredentials(
     val authorization: String? = null,
     val cookieHeader: String? = null,
     val headerFileJson: String? = null,
-    val oauthAccessToken: String? = null,
-    val oauthTokenExpiresAtMillis: Long? = null,
-    val oauthGrantedScopes: Set<String> = emptySet(),
 )
 
 interface ProviderCredentialStore {
@@ -179,9 +176,7 @@ abstract class BaseKotlinProvider(
             put("User-Agent", DEFAULT_USER_AGENT)
             putAll(extra)
             cookieHeader(stored).takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
-            val authorization = stored?.oauthAccessToken?.takeIf { it.isNotBlank() }?.let { "Bearer $it" }
-                ?: stored?.authorization?.takeIf { it.isNotBlank() }
-            authorization?.let { put("Authorization", it) }
+            stored?.authorization?.takeIf { it.isNotBlank() }?.let { put("Authorization", it) }
         }
     }
 
@@ -278,8 +273,7 @@ abstract class BaseKotlinProvider(
             credentials.cookies.isNotEmpty() ||
                 !credentials.authorization.isNullOrBlank() ||
                 !credentials.cookieHeader.isNullOrBlank() ||
-                !credentials.headerFileJson.isNullOrBlank() ||
-                !credentials.oauthAccessToken.isNullOrBlank()
+                !credentials.headerFileJson.isNullOrBlank()
             ),
         userName = null,
     )
@@ -299,21 +293,6 @@ abstract class BaseKotlinProvider(
     override suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState {
         require(authorization.isNotBlank() && cookie.isNotBlank()) { "authorization and cookie must be non-empty" }
         val value = ProviderCredentials(authorization = authorization.trim(), cookieHeader = cookie.trim())
-        credentials.write(id, value)
-        return authState(value)
-    }
-
-    override suspend fun loginWithOAuth(
-        accessToken: String,
-        expiresAtMillis: Long?,
-        grantedScopes: Set<String>,
-    ): ProviderAuthState {
-        require(accessToken.isNotBlank()) { "OAuth access token must be non-empty" }
-        val value = ProviderCredentials(
-            oauthAccessToken = accessToken.trim(),
-            oauthTokenExpiresAtMillis = expiresAtMillis,
-            oauthGrantedScopes = grantedScopes,
-        )
         credentials.write(id, value)
         return authState(value)
     }
@@ -431,11 +410,6 @@ interface KotlinMusicProvider {
     suspend fun authState(): ProviderAuthState
     suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState
-    suspend fun loginWithOAuth(
-        accessToken: String,
-        expiresAtMillis: Long? = null,
-        grantedScopes: Set<String> = emptySet(),
-    ): ProviderAuthState
     suspend fun loginWithHeaderFile(headerFileJson: String): ProviderAuthState
     suspend fun logout(): ProviderAuthState
     suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection

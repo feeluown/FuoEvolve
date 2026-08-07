@@ -12,7 +12,6 @@
         A10000000000000000000003 /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* PlayerViewModel.swift */; };
         A10000000000000000000004 /* IOSNativeAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* IOSNativeAudioEngine.swift */; };
         A10000000000000000000006 /* IOSAudioRecognitionOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */; };
-        A10000000000000000000007 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,7 +29,6 @@
             isa = PBXFrameworksBuildPhase;
             buildActionMask = 2147483647;
             files = (
-                A10000000000000000000007 /* GoogleSignIn in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -83,7 +81,6 @@
             dependencies = (
             );
             packageProductDependencies = (
-                A10000000000000000000022 /* GoogleSignIn */,
             );
             name = FuoEvolve;
             productName = FuoEvolve;
@@ -116,7 +113,6 @@
             mainGroup = A10000000000000000000030;
             productRefGroup = A10000000000000000000032 /* Products */;
             packageReferences = (
-                A10000000000000000000021 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
             );
             projectDirPath = "";
             projectRoot = "";
@@ -357,24 +353,7 @@
         };
 /* End XCBuildConfiguration section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-        A10000000000000000000021 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
-            isa = XCRemoteSwiftPackageReference;
-            repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
-            requirement = {
-                kind = upToNextMajorVersion;
-                minimumVersion = 9.0.0;
-            };
-        };
-/* End XCRemoteSwiftPackageReference section */
 
-/* Begin XCSwiftPackageProductDependency section */
-        A10000000000000000000022 /* GoogleSignIn */ = {
-            isa = XCSwiftPackageProductDependency;
-            package = A10000000000000000000021 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-            productName = GoogleSignIn;
-        };
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
         A10000000000000000000080 /* Build configuration list for PBXProject "FuoEvolve" */ = {

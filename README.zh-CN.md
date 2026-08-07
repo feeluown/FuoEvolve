@@ -60,17 +60,11 @@ iOS 仅提供实验性的 Debug 构建产物，不会作为 GitHub Release 发�
 | 网易云音乐 | `NeteaseProvider` | 默认启用 | Cookie |
 | QQ 音乐 | `QQMusicProvider` | 设置中可启用 | Cookie |
 | 哔哩哔哩 | `BilibiliProvider` | 设置中可启用 | Cookie |
-| YouTube Music | `YtMusicProvider` | 设置中可启用 | Google OAuth |
+| YouTube Music | `YtMusicProvider` | 设置中可启用 | Headers / Cookie 文件 |
 
 应用默认只加载网易云音乐。QQ 音乐、哔哩哔哩、YouTube Music 已随 Android 包打包，可在设置中启用、禁用和排序。
 
-YouTube Music 使用 Google OAuth 授权，不使用应用内 WebView。Android 需要设备可用 Google Play services；iOS 需要在 Xcode 配置 Google OAuth iOS Client ID 和反向 URL Scheme。
-
-Google OAuth 配置：
-
-- 在 Google Cloud 项目中启用 YouTube Data API，并配置 OAuth consent screen。`youtube` scope 属于敏感权限，面向公开用户发布时还需要按 Google 要求完成验证。
-- Android OAuth 客户端需要匹配应用包名 `org.feeluown.mobile` 和实际签名证书 SHA-1；登录按钮依赖 Google Play services 提供授权结果。
-- iOS Xcode Build Settings 需要设置 `GOOGLE_IOS_CLIENT_ID` 和 `GOOGLE_IOS_REVERSED_CLIENT_ID`；后者就是 Google OAuth iOS 客户端 ID 的反向 URL Scheme。iOS 工程会通过 Swift Package Manager 引入 `GoogleSignIn`。
+YouTube Music 通过 Headers / Cookie（例如导入 `ytmusic_header.json`）登录，不再使用 Google OAuth 或应用内 Google WebView。
 
 图例：✅ 支持，包括需要登录后使用的能力；🧩 依赖上游音乐源暴露对应方法或返回对应结果类型；➖ 当前应用没有入口或未开放。
 

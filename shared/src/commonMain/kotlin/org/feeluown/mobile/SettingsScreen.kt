@@ -106,7 +106,6 @@ fun SettingsScreen(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     appVersionInfo: String?,
-    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val loginProviderId = controller.settingsLoginProviderId
@@ -155,7 +154,6 @@ fun SettingsScreen(
                     provider = loginProvider,
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
                     onLogoutProvider = onLogoutProvider,
-                    onStartProviderOAuthLogin = onStartProviderOAuthLogin,
                     onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
                 )
             }
@@ -591,14 +589,12 @@ fun ProviderLoginPanel(
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val authState = controller.authStateFor(provider)
     val isAuthBusy = controller.isProviderAuthBusy(provider.providerId)
     val authError = controller.providerAuthError(provider.providerId)
     val supportedLoginModes = listOf(
-        ProviderLoginMode.OAuth,
         ProviderLoginMode.WebView,
         ProviderLoginMode.Cookie,
         ProviderLoginMode.Headers,
@@ -632,8 +628,6 @@ fun ProviderLoginPanel(
             )
             val authFeedback = controller.message.takeIf { message ->
                 message.contains(provider.providerName) ||
-                    message.contains("Google", ignoreCase = true) ||
-                    message.contains("OAuth", ignoreCase = true) ||
                     message.contains("授权") ||
                     message.contains("音源运行时尚未接入")
             }?.takeUnless { feedback ->
@@ -694,16 +688,6 @@ fun ProviderLoginPanel(
                 }
             }
             when (activeLoginMode) {
-                ProviderLoginMode.OAuth -> {
-                    Button(
-                        enabled = !isAuthBusy && provider.oauthConfig != null && onStartProviderOAuthLogin != null,
-                        onClick = { onStartProviderOAuthLogin?.invoke(provider) },
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text(if (isAuthBusy) "授权中" else "使用 Google 登录")
-                    }
-                }
                 ProviderLoginMode.WebView -> {
                     Button(
                         enabled = !isAuthBusy && provider.loginConfig != null,
@@ -782,7 +766,6 @@ fun ProviderLoginPanel(
 }
 
 fun ProviderLoginMode.label(): String = when (this) {
-    ProviderLoginMode.OAuth -> "浏览器 OAuth"
     ProviderLoginMode.WebView -> "WebView"
     ProviderLoginMode.Cookie -> "复制 Cookie"
     ProviderLoginMode.Headers -> "Headers"

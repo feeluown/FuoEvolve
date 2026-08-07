@@ -33,7 +33,6 @@ fun MainViewController(
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
-    oauthOutput: IosOAuthOutput,
     shareOutput: IosShareOutput,
     localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
@@ -45,7 +44,6 @@ fun MainViewController(
         mediaLibraryOutput,
         downloadOutput,
         webLoginOutput,
-        oauthOutput,
         shareOutput,
         localPlaylistFileOutput,
         networkStatusOutput,
@@ -60,7 +58,6 @@ private fun IosApp(
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     webLoginOutput: IosWebLoginOutput,
-    oauthOutput: IosOAuthOutput,
     shareOutput: IosShareOutput,
     localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
@@ -73,7 +70,6 @@ private fun IosApp(
             mediaLibraryOutput,
             downloadOutput,
             webLoginOutput,
-            oauthOutput,
             networkStatusOutput,
             audioRecognitionOutput,
         )
@@ -86,7 +82,6 @@ private fun IosApp(
         onRequestMicrophonePermission = container::requestMicrophonePermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
         onLogoutProvider = container::logoutProvider,
-        onStartProviderOAuthLogin = container::startProviderOAuthLogin,
         onImportLocalPlaylistFile = {
             localPlaylistFileOutput.importFile { fileName, content ->
                 handleIosLocalPlaylistImportResult(
@@ -108,7 +103,6 @@ private class IosAppContainer(
     mediaLibraryOutput: IosMediaLibraryOutput,
     downloadOutput: IosDownloadOutput,
     private val webLoginOutput: IosWebLoginOutput,
-    private val oauthOutput: IosOAuthOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     private val audioRecognitionOutput: IosAudioRecognitionOutput,
 ) {
@@ -187,41 +181,8 @@ private class IosAppContainer(
         }
     }
 
-    fun startProviderOAuthLogin(provider: ProviderInfo) {
-        val scopes = provider.oauthConfig?.scopes.orEmpty()
-        if (scopes.isEmpty()) {
-            controller.failProviderOAuthLogin(provider.providerId, "未配置 Google OAuth scope")
-            return
-        }
-        controller.beginProviderOAuthLogin(provider.providerId)
-        val scopesJson = scopes.joinToString(prefix = "[", postfix = "]") { scope ->
-            "\"${scope.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-        }
-        runCatching {
-            oauthOutput.authorize(scopesJson) { accessToken ->
-                if (accessToken.isNullOrBlank()) {
-                    controller.failProviderOAuthLogin(
-                        provider.providerId,
-                        "Google OAuth 授权失败或已取消",
-                    )
-                } else {
-                    controller.loginYtmusicWithOAuth(
-                        accessToken = accessToken,
-                        grantedScopes = scopes.toSet(),
-                    )
-                }
-            }
-        }.onFailure { throwable ->
-            controller.failProviderOAuthLogin(
-                provider.providerId,
-                "无法启动 Google OAuth：${throwable.message.orEmpty().ifBlank { throwable::class.simpleName.orEmpty() }}",
-            )
-        }
-    }
-
     fun logoutProvider(provider: ProviderInfo) {
         webLoginOutput.clear()
-        oauthOutput.clear()
         controller.logoutProvider(provider.providerId)
     }
 }

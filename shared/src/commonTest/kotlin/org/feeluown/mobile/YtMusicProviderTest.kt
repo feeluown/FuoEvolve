@@ -49,41 +49,6 @@ class YtMusicProviderTest {
     }
 
     @Test
-    fun oauthRequestsOmitInnerTubeApiKey() = runTest {
-        val requests = mutableListOf<CapturedRequest>()
-        val store = InMemoryProviderCredentialStore()
-        store.write(
-            "ytmusic",
-            ProviderCredentials(oauthAccessToken = "ya29.oauth-token"),
-        )
-        val providerHttp = ProviderHttpClient(
-            httpClient = HttpClient(MockEngine) {
-                engine {
-                    addHandler { request ->
-                        requests += capture(request)
-                        if (request.method == HttpMethod.Get) {
-                            respond("<html></html>")
-                        } else {
-                            respond("{}")
-                        }
-                    }
-                }
-            },
-            retryPolicy = ProviderRetryPolicy(maxRetries = 0),
-        )
-        val provider = YtMusicProvider(providerHttp, store)
-
-        provider.search("oauth")
-
-        val apiRequest = requests.first { it.url.contains("/youtubei/v1/search") }
-        assertTrue(apiRequest.url.contains("alt=json"))
-        assertFalse(apiRequest.url.contains("key="), apiRequest.url)
-        assertEquals("Bearer ya29.oauth-token", apiRequest.headers["Authorization"])
-        assertTrue(apiRequest.headers.containsKey("X-Goog-Request-Time"))
-        providerHttp.close()
-    }
-
-    @Test
     fun browserAuthRefreshesSapisidHash() = runTest {
         val requests = mutableListOf<CapturedRequest>()
         val store = InMemoryProviderCredentialStore()

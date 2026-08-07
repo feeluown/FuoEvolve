@@ -80,7 +80,6 @@ fun OnboardingScreen(
     controller: FuoPlayerController,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
@@ -213,7 +212,6 @@ fun OnboardingScreen(
                         provider = selectedProviders[page - 1],
                         onOpenProviderWebLogin = onOpenProviderWebLogin,
                         onLogoutProvider = onLogoutProvider,
-                        onStartProviderOAuthLogin = onStartProviderOAuthLogin,
                         onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
                     )
                 }
@@ -465,7 +463,6 @@ private fun ProviderLoginOnboardingPage(
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)?,
     onImportYtmusicHeaderFile: (() -> Unit)?,
 ) {
     Column(
@@ -482,11 +479,7 @@ private fun ProviderLoginOnboardingPage(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = if (provider.oauthConfig != null) {
-                "将使用设备上的 Google 服务完成授权；也可以跳过，稍后再登录。"
-            } else {
-                "登录后可以使用个人歌单和推荐内容；也可以跳过，稍后再登录。"
-            },
+            text = "登录后可以使用个人歌单和推荐内容；也可以跳过，稍后再登录。",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         ProviderLoginPanel(
@@ -494,7 +487,6 @@ private fun ProviderLoginOnboardingPage(
             provider = provider,
             onOpenProviderWebLogin = onOpenProviderWebLogin,
             onLogoutProvider = onLogoutProvider,
-            onStartProviderOAuthLogin = onStartProviderOAuthLogin,
             onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
         )
     }

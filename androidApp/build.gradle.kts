@@ -130,5 +130,4 @@ dependencies {
     implementation(libs.jellyfin.media3.ffmpeg.decoder)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.google.play.services.auth)
 }

@@ -1301,63 +1301,6 @@ class FuoPlayerController(
         }
     }
 
-    fun beginProviderOAuthLogin(providerId: String) {
-        scope.launch {
-            providerSessionRepository.beginExternalAuth(providerId)
-            message = "正在打开 Google 授权…"
-        }
-    }
-
-    fun failProviderOAuthLogin(providerId: String, errorMessage: String) {
-        val text = errorMessage.ifBlank { "Google OAuth 授权失败" }
-        scope.launch {
-            providerSessionRepository.failExternalAuth(providerId, text)
-            message = text
-        }
-    }
-
-    fun clearProviderOAuthLogin(providerId: String) {
-        scope.launch {
-            providerSessionRepository.clearExternalAuth(providerId)
-        }
-    }
-
-    fun loginYtmusicWithOAuth(
-        accessToken: String,
-        expiresAtMillis: Long? = null,
-        grantedScopes: Set<String> = emptySet(),
-    ) {
-        if (accessToken.isBlank()) {
-            failProviderOAuthLogin("ytmusic", "Google OAuth 未返回访问令牌")
-            return
-        }
-        val providerName = providerName("ytmusic")
-        scope.launch {
-            message = "正在登录 $providerName"
-            runCatching {
-                providerSessionRepository.loginWithOAuth(
-                    providerId = "ytmusic",
-                    accessToken = accessToken,
-                    expiresAtMillis = expiresAtMillis,
-                    grantedScopes = grantedScopes,
-                )
-            }
-                .onSuccess {
-                    message = if (it.isLoggedIn) {
-                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
-                    } else {
-                        "${it.providerName} 未登录"
-                    }
-                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                        refreshActiveMineProviderContent()
-                    } else {
-                        refreshHomeContent(homeSection)
-                    }
-                }
-                .onFailure { setError(it) }
-        }
-    }
-
     fun loginYtmusicWithHeaderFile(headerFileJson: String) {
         if (headerFileJson.isBlank()) {
             message = "无法读取 ytmusic_header.json"

@@ -210,7 +210,6 @@ fun AppRoot(
     onRequestMicrophonePermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
-    onStartProviderOAuthLogin: ((ProviderInfo) -> Unit)? = null,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportLocalPlaylistFile: (() -> Unit)? = null,
     onExportLocalPlaylistFile: ((String, String) -> Unit)? = null,
@@ -235,7 +234,6 @@ fun AppRoot(
                 controller = controller,
                 onOpenProviderWebLogin = onOpenProviderWebLogin,
                 onLogoutProvider = onLogoutProvider,
-                onStartProviderOAuthLogin = onStartProviderOAuthLogin,
                 onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
             )
             return@FuoTheme
@@ -346,7 +344,6 @@ fun AppRoot(
                                                 onOpenProviderWebLogin = onOpenProviderWebLogin,
                                                 onLogoutProvider = onLogoutProvider,
                                                 appVersionInfo = appVersionInfo,
-                                                onStartProviderOAuthLogin = onStartProviderOAuthLogin,
                                                 onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
                                             )
                                             AppRoute.Search -> SearchScreen(

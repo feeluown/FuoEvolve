@@ -25,23 +25,8 @@ interface ProviderSessionRepository {
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
-    suspend fun loginWithOAuth(
-        providerId: String,
-        accessToken: String,
-        expiresAtMillis: Long? = null,
-        grantedScopes: Set<String> = emptySet(),
-    ): ProviderAuthState
     suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState
     suspend fun logout(providerId: String): ProviderAuthState
-
-    /** Mark provider login UI busy while a platform OAuth sheet / Intent is in flight. */
-    suspend fun beginExternalAuth(providerId: String)
-
-    /** Clear busy state and surface an OAuth/platform login error on the provider panel. */
-    suspend fun failExternalAuth(providerId: String, message: String)
-
-    /** Clear busy/error after the platform OAuth UI was dismissed without completing login. */
-    suspend fun clearExternalAuth(providerId: String)
 }
 
 /**
@@ -98,15 +83,6 @@ class DefaultProviderSessionRepository(
         providerRepository.loginWithHeaders(providerId, authorization, cookie)
     }
 
-    override suspend fun loginWithOAuth(
-        providerId: String,
-        accessToken: String,
-        expiresAtMillis: Long?,
-        grantedScopes: Set<String>,
-    ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
-        providerRepository.loginWithOAuth(providerId, accessToken, expiresAtMillis, grantedScopes)
-    }
-
     override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =
         mutate("ytmusic", ProviderSessionOperation.Login) {
             providerRepository.loginWithYtmusicHeaderFile(headerFileJson)
@@ -116,36 +92,6 @@ class DefaultProviderSessionRepository(
         mutate(providerId, ProviderSessionOperation.Logout) {
             providerRepository.logout(providerId)
         }
-
-    override suspend fun beginExternalAuth(providerId: String) {
-        operationMutex.withLock {
-            val current = mutableState.value
-            mutableState.value = current.copy(
-                operations = current.operations + (providerId to ProviderSessionOperation.Login),
-                errors = current.errors - providerId,
-            )
-        }
-    }
-
-    override suspend fun failExternalAuth(providerId: String, message: String) {
-        operationMutex.withLock {
-            val current = mutableState.value
-            mutableState.value = current.copy(
-                operations = current.operations - providerId,
-                errors = current.errors + (providerId to message.ifBlank { "授权失败" }),
-            )
-        }
-    }
-
-    override suspend fun clearExternalAuth(providerId: String) {
-        operationMutex.withLock {
-            val current = mutableState.value
-            mutableState.value = current.copy(
-                operations = current.operations - providerId,
-                errors = current.errors - providerId,
-            )
-        }
-    }
 
     private suspend fun mutate(
         providerId: String,

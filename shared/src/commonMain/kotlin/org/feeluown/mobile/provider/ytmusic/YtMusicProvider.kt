@@ -167,16 +167,11 @@ class YtMusicProvider(
         val body = if (payload.startsWith("{") && payload.endsWith("}")) {
             "{\"context\":{\"client\":{\"clientName\":\"WEB_REMIX\",\"clientVersion\":\"$clientVersion\",\"hl\":\"zh_CN\"},\"user\":{}},${payload.drop(1)}"
         } else payload
-        val credentials = currentCredentials()
-        val oauthBearer = credentials?.oauthAccessToken?.takeIf { it.isNotBlank() }
-        // ytmusicapi only appends the WEB InnerTube key for browser/cookie auth.
-        // Mixing ?key= (WEB project) with an OAuth Bearer from another Google client yields 400.
+        // ytmusicapi appends the WEB InnerTube key for browser/cookie auth.
         val query = buildString {
             append("?alt=json")
-            if (oauthBearer == null) {
-                append("&key=")
-                append(apiKey.orEmpty().ifBlank { FALLBACK_API_KEY })
-            }
+            append("&key=")
+            append(apiKey.orEmpty().ifBlank { FALLBACK_API_KEY })
         }
         return http.postJson(
             providerId = ID,
@@ -199,12 +194,6 @@ class YtMusicProvider(
             ),
         ).toMutableMap()
         visitorId?.takeIf { it.isNotBlank() }?.let { base["X-Goog-Visitor-Id"] = it }
-        val oauthBearer = stored?.oauthAccessToken?.takeIf { it.isNotBlank() }
-        if (oauthBearer != null) {
-            base["Authorization"] = "Bearer $oauthBearer"
-            base["X-Goog-Request-Time"] = (currentTimeMillis() / 1_000).toString()
-            return base
-        }
         val cookie = cookieHeader(stored)
         val sapisid = sapisidFromCookie(cookie)
         if (!sapisid.isNullOrBlank()) {
@@ -422,13 +411,7 @@ class YtMusicProvider(
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,
-            supportedLoginModes = setOf(
-                org.feeluown.mobile.ProviderLoginMode.OAuth,
-                org.feeluown.mobile.ProviderLoginMode.Headers,
-            ),
-            oauthConfig = org.feeluown.mobile.ProviderOAuthConfig(
-                scopes = listOf("https://www.googleapis.com/auth/youtube"),
-            ),
+            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.Headers),
         )
         val CAPABILITIES = ProviderCapabilities(providerId = ID, providerName = NAME, canAddSongToPlaylist = true)
         val FEATURES = listOf(
