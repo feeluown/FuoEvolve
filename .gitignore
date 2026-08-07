@@ -1,3 +1,5 @@
+oauth.json
+client_secret*.json
 .gradle/
 .kotlin/
 build/

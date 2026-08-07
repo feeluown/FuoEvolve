@@ -98,7 +98,16 @@ data class ProviderCredentials(
     val authorization: String? = null,
     val cookieHeader: String? = null,
     val headerFileJson: String? = null,
-)
+    val oauthAccessToken: String? = null,
+    val oauthRefreshToken: String? = null,
+    val oauthExpiresAtMillis: Long? = null,
+    val oauthScope: String? = null,
+    val oauthClientId: String? = null,
+    val oauthClientSecret: String? = null,
+) {
+    fun hasOAuthAccess(): Boolean =
+        !oauthAccessToken.isNullOrBlank() || !oauthRefreshToken.isNullOrBlank()
+}
 
 interface ProviderCredentialStore {
     suspend fun read(providerId: String): ProviderCredentials?
@@ -273,7 +282,8 @@ abstract class BaseKotlinProvider(
             credentials.cookies.isNotEmpty() ||
                 !credentials.authorization.isNullOrBlank() ||
                 !credentials.cookieHeader.isNullOrBlank() ||
-                !credentials.headerFileJson.isNullOrBlank()
+                !credentials.headerFileJson.isNullOrBlank() ||
+                credentials.hasOAuthAccess()
             ),
         userName = null,
     )
@@ -308,6 +318,32 @@ abstract class BaseKotlinProvider(
             authorization = authorization,
             cookieHeader = cookie,
             headerFileJson = headerFileJson,
+        )
+        credentials.write(id, value)
+        return authState(value)
+    }
+
+    override suspend fun loginWithOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState {
+        require(accessToken.isNotBlank() || refreshToken.isNotBlank()) {
+            "oauth access_token or refresh_token is required"
+        }
+        require(clientId.isNotBlank() && clientSecret.isNotBlank()) {
+            "oauth client_id and client_secret are required"
+        }
+        val value = ProviderCredentials(
+            oauthAccessToken = accessToken.trim().takeIf { it.isNotBlank() },
+            oauthRefreshToken = refreshToken.trim().takeIf { it.isNotBlank() },
+            oauthExpiresAtMillis = expiresAtMillis,
+            oauthScope = scope?.trim()?.takeIf { it.isNotBlank() },
+            oauthClientId = clientId.trim(),
+            oauthClientSecret = clientSecret.trim(),
         )
         credentials.write(id, value)
         return authState(value)
@@ -411,6 +447,14 @@ interface KotlinMusicProvider {
     suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithHeaderFile(headerFileJson: String): ProviderAuthState
+    suspend fun loginWithOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = throw UnsupportedOperationException("provider does not support OAuth login: $id")
     suspend fun logout(): ProviderAuthState
     suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>

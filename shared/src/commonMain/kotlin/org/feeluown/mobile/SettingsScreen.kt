@@ -107,6 +107,7 @@ fun SettingsScreen(
     onLogoutProvider: (ProviderInfo) -> Unit,
     appVersionInfo: String?,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
+    onImportYtmusicOAuthFile: (() -> Unit)? = null,
 ) {
     val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
@@ -155,6 +156,7 @@ fun SettingsScreen(
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
                     onLogoutProvider = onLogoutProvider,
                     onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
+                    onImportYtmusicOAuthFile = onImportYtmusicOAuthFile,
                 )
             }
         } else if (layoutInfo.useWideLayout) {
@@ -590,7 +592,9 @@ fun ProviderLoginPanel(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
+    onImportYtmusicOAuthFile: (() -> Unit)? = null,
 ) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     val authState = controller.authStateFor(provider)
     val isAuthBusy = controller.isProviderAuthBusy(provider.providerId)
     val authError = controller.providerAuthError(provider.providerId)
@@ -598,6 +602,7 @@ fun ProviderLoginPanel(
         ProviderLoginMode.WebView,
         ProviderLoginMode.Cookie,
         ProviderLoginMode.Headers,
+        ProviderLoginMode.OAuth,
     ).filter { it in provider.supportedLoginModes }
     val activeLoginMode = supportedLoginModes
         .firstOrNull { it == controller.providerLoginMode }
@@ -760,6 +765,81 @@ fun ProviderLoginPanel(
                         Text(if (isAuthBusy) "登录中" else "登录")
                     }
                 }
+                ProviderLoginMode.OAuth -> {
+                    val oauthInput = controller.providerOAuthInputFor(provider.providerId)
+                    val oauthFlow = controller.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
+                    Text(
+                        text = "使用 Google Cloud「TVs and Limited Input devices」类型的 OAuth 客户端（与 ytmusicapi 相同）。可导入 Console 下载的 client_secret_*.json。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = oauthInput.clientId,
+                        onValueChange = { controller.onProviderOAuthClientIdChange(provider.providerId, it) },
+                        placeholder = { Text("client_id") },
+                        singleLine = true,
+                        enabled = oauthFlow == null,
+                    )
+                    TextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = oauthInput.clientSecret,
+                        onValueChange = { controller.onProviderOAuthClientSecretChange(provider.providerId, it) },
+                        placeholder = { Text("client_secret") },
+                        singleLine = true,
+                        enabled = oauthFlow == null,
+                    )
+                    if (oauthFlow != null) {
+                        Text(
+                            text = oauthFlow.userCode,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = oauthFlow.statusMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = oauthFlow.verificationUrlWithCode,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    runCatching { uriHandler.openUri(oauthFlow.verificationUrlWithCode) }
+                                        .onFailure { controller.showMessage(it.message ?: "无法打开浏览器") }
+                                },
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                                Spacer(Modifier.size(8.dp))
+                                Text("打开浏览器")
+                            }
+                            TextButton(onClick = controller::cancelYtmusicTvOAuthLogin) {
+                                Text("取消")
+                            }
+                        }
+                    } else {
+                        if (provider.providerId == "ytmusic" && onImportYtmusicOAuthFile != null) {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !isAuthBusy,
+                                onClick = onImportYtmusicOAuthFile,
+                            ) {
+                                Text("导入 client_secret.json / oauth.json")
+                            }
+                        }
+                        Button(
+                            enabled = !isAuthBusy,
+                            onClick = { controller.startYtmusicTvOAuthLogin() },
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                            Spacer(Modifier.size(8.dp))
+                            Text(if (isAuthBusy) "登录中" else "使用 Google 登录（TV）")
+                        }
+                    }
+                }
             }
         }
     }
@@ -769,6 +849,7 @@ fun ProviderLoginMode.label(): String = when (this) {
     ProviderLoginMode.WebView -> "WebView"
     ProviderLoginMode.Cookie -> "复制 Cookie"
     ProviderLoginMode.Headers -> "Headers"
+    ProviderLoginMode.OAuth -> "OAuth"
 }
 
 @Composable

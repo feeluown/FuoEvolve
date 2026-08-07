@@ -26,6 +26,19 @@ interface ProviderSessionRepository {
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState
+    suspend fun loginWithYtmusicOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState
+    suspend fun loginWithYtmusicOAuthJson(
+        oauthJson: String,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState
     suspend fun logout(providerId: String): ProviderAuthState
 }
 
@@ -87,6 +100,32 @@ class DefaultProviderSessionRepository(
         mutate("ytmusic", ProviderSessionOperation.Login) {
             providerRepository.loginWithYtmusicHeaderFile(headerFileJson)
         }
+
+    override suspend fun loginWithYtmusicOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = mutate("ytmusic", ProviderSessionOperation.Login) {
+        providerRepository.loginWithYtmusicOAuth(
+            accessToken = accessToken,
+            refreshToken = refreshToken,
+            expiresAtMillis = expiresAtMillis,
+            scope = scope,
+            clientId = clientId,
+            clientSecret = clientSecret,
+        )
+    }
+
+    override suspend fun loginWithYtmusicOAuthJson(
+        oauthJson: String,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = mutate("ytmusic", ProviderSessionOperation.Login) {
+        providerRepository.loginWithYtmusicOAuthJson(oauthJson, clientId, clientSecret)
+    }
 
     override suspend fun logout(providerId: String): ProviderAuthState =
         mutate(providerId, ProviderSessionOperation.Logout) {

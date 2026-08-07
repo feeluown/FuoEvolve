@@ -75,13 +75,24 @@ Provider implementations currently bundled in the shared Kotlin module:
 | NetEase Cloud Music | `NeteaseProvider` | Enabled | Cookie |
 | QQ Music | `QQMusicProvider` | Available in Settings | Cookie |
 | Bilibili | `BilibiliProvider` | Available in Settings | Cookie |
-| YouTube Music | `YtMusicProvider` | Available in Settings | Headers / cookie file |
+| YouTube Music | `YtMusicProvider` | Available in Settings | OAuth (TV) / Headers |
 
 The app loads NetEase by default. QQ Music, Bilibili, and YouTube Music are
 packaged and can be enabled, disabled, or reordered from Settings.
 
-YouTube Music login uses browser Headers / Cookie credentials (for example an
-imported `ytmusic_header.json`), not Google OAuth or an in-app Google WebView.
+YouTube Music supports two login modes:
+
+1. **Google OAuth (TV / Limited Input device-code)** — same flow as
+   [ytmusicapi OAuth](https://ytmusicapi.readthedocs.io/en/stable/setup/oauth.html).
+   Create a Google Cloud OAuth client of type **TVs and Limited Input devices**,
+   enable the YouTube Data API, enter or import the Console `client_secret_*.json`
+   in Settings, then tap **Sign in with Google (TV)** and complete the browser
+   verification code. You can also import an `oauth.json` produced by
+   `ytmusicapi oauth` (client credentials are still required for refresh).
+2. **Headers / Cookie** — import `ytmusic_header.json` or paste Authorization +
+   Cookie manually.
+
+Local `oauth.json` and `client_secret*.json` files are gitignored.
 
 Legend: ✅ supported, including features that require login; 🧩 supported only
 when the upstream provider exposes the required method or result type; ➖ not

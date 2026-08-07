@@ -18,6 +18,7 @@ enum class ProviderLoginMode {
     WebView,
     Cookie,
     Headers,
+    OAuth,
 }
 
 @Serializable
@@ -119,6 +120,19 @@ data class AppSettings(
 data class ProviderHeaderInput(
     val authorization: String = "",
     val cookie: String = "",
+)
+
+@Serializable
+data class ProviderOAuthInput(
+    val clientId: String = "",
+    val clientSecret: String = "",
+)
+
+data class YtMusicOAuthFlowUiState(
+    val userCode: String,
+    val verificationUrl: String,
+    val verificationUrlWithCode: String,
+    val statusMessage: String = "请在浏览器中完成授权",
 )
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
@@ -768,6 +782,33 @@ interface ProviderMusicRepository {
     }
     suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support YTMusic header file login")
+    }
+    suspend fun beginYtmusicOAuth(clientId: String, clientSecret: String): org.feeluown.mobile.provider.ytmusic.YtMusicDeviceAuthCode {
+        throw UnsupportedOperationException("provider does not support YTMusic OAuth")
+    }
+    suspend fun pollYtmusicOAuth(
+        deviceCode: String,
+        clientId: String,
+        clientSecret: String,
+    ): org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult {
+        throw UnsupportedOperationException("provider does not support YTMusic OAuth")
+    }
+    suspend fun loginWithYtmusicOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support YTMusic OAuth")
+    }
+    suspend fun loginWithYtmusicOAuthJson(
+        oauthJson: String,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support YTMusic OAuth")
     }
     suspend fun logout(providerId: String): ProviderAuthState
     suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)

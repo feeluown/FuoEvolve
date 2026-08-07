@@ -129,6 +129,19 @@ class MainActivity : ComponentActivity() {
                     controller.loginYtmusicWithHeaderFile(headerFileJson)
                 }
             }
+            val ytmusicOAuthFileLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) {
+                    val oauthJson = runCatching {
+                        contentResolver.openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                            .orEmpty()
+                    }.getOrDefault("")
+                    controller.importYtmusicOAuthRelatedJson(oauthJson)
+                }
+            }
             var pendingLocalPlaylistExport by remember {
                 mutableStateOf<PendingLocalPlaylistExport?>(null)
             }
@@ -210,6 +223,9 @@ class MainActivity : ComponentActivity() {
                 },
                 onImportYtmusicHeaderFile = {
                     ytmusicHeaderFileLauncher.launch(arrayOf("application/json"))
+                },
+                onImportYtmusicOAuthFile = {
+                    ytmusicOAuthFileLauncher.launch(arrayOf("application/json"))
                 },
                 onImportLocalPlaylistFile = {
                     localPlaylistFileLauncher.launch(

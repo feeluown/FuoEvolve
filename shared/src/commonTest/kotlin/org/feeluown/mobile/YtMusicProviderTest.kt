@@ -101,6 +101,96 @@ class YtMusicProviderTest {
         )
     }
 
+    @Test
+    fun oauthRequestsOmitInnerTubeApiKeyAndUseBearer() = runTest {
+        val requests = mutableListOf<CapturedRequest>()
+        val store = InMemoryProviderCredentialStore()
+        store.write(
+            "ytmusic",
+            ProviderCredentials(
+                oauthAccessToken = "ya29.access",
+                oauthRefreshToken = "1//refresh",
+                oauthExpiresAtMillis = Long.MAX_VALUE / 2,
+                oauthScope = "https://www.googleapis.com/auth/youtube",
+                oauthClientId = "cid",
+                oauthClientSecret = "secret",
+            ),
+        )
+        val providerHttp = ProviderHttpClient(
+            httpClient = HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        requests += capture(request)
+                        if (request.method == HttpMethod.Get) {
+                            respond(
+                                """<html>ytcfg.set({"INNERTUBE_API_KEY":"AIzaSyTestKey","INNERTUBE_CLIENT_VERSION":"1.20260807.01.00","VISITOR_DATA":"visitor-token"});</html>""",
+                            )
+                        } else {
+                            respond("{}")
+                        }
+                    }
+                }
+            },
+            retryPolicy = ProviderRetryPolicy(maxRetries = 0),
+        )
+        val provider = YtMusicProvider(providerHttp, store)
+
+        provider.search("oauth")
+
+        val apiRequest = requests.first { it.url.contains("/youtubei/v1/search") }
+        assertTrue(apiRequest.url.contains("alt=json"))
+        assertFalse(apiRequest.url.contains("key="), apiRequest.url)
+        assertEquals("Bearer ya29.access", apiRequest.headers["Authorization"])
+        assertTrue(!apiRequest.headers["X-Goog-Request-Time"].isNullOrBlank())
+        providerHttp.close()
+    }
+
+    @Test
+    fun oauthRefreshesWhenAccessTokenIsExpiring() = runTest {
+        val requests = mutableListOf<CapturedRequest>()
+        val store = InMemoryProviderCredentialStore()
+        store.write(
+            "ytmusic",
+            ProviderCredentials(
+                oauthAccessToken = "stale-access",
+                oauthRefreshToken = "1//refresh",
+                oauthExpiresAtMillis = 1_000L,
+                oauthScope = "https://www.googleapis.com/auth/youtube",
+                oauthClientId = "cid",
+                oauthClientSecret = "secret",
+            ),
+        )
+        val providerHttp = ProviderHttpClient(
+            httpClient = HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        requests += capture(request)
+                        when {
+                            request.url.toString().contains("oauth2.googleapis.com/token") -> respond(
+                                """{"access_token":"fresh-access","token_type":"Bearer","expires_in":3600,"scope":"https://www.googleapis.com/auth/youtube"}""",
+                            )
+                            request.method == HttpMethod.Get -> respond(
+                                """<html>ytcfg.set({"INNERTUBE_API_KEY":"AIzaSyTestKey","INNERTUBE_CLIENT_VERSION":"1.20260807.01.00","VISITOR_DATA":"visitor-token"});</html>""",
+                            )
+                            else -> respond("{}")
+                        }
+                    }
+                }
+            },
+            retryPolicy = ProviderRetryPolicy(maxRetries = 0),
+        )
+        val provider = YtMusicProvider(providerHttp, store)
+
+        provider.search("refresh")
+
+        assertTrue(requests.any { it.url.contains("oauth2.googleapis.com/token") })
+        val apiRequest = requests.first { it.url.contains("/youtubei/v1/search") }
+        assertEquals("Bearer fresh-access", apiRequest.headers["Authorization"])
+        assertEquals("fresh-access", store.read("ytmusic")?.oauthAccessToken)
+        assertEquals("1//refresh", store.read("ytmusic")?.oauthRefreshToken)
+        providerHttp.close()
+    }
+
     private data class CapturedRequest(
         val method: HttpMethod,
         val url: String,

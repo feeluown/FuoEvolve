@@ -129,6 +129,10 @@ class FuoPlayerController(
     var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
         private set
     var providerHeaderInputs by mutableStateOf<Map<String, ProviderHeaderInput>>(emptyMap())
+    var providerOAuthInputs by mutableStateOf<Map<String, ProviderOAuthInput>>(emptyMap())
+    var ytmusicOAuthFlow by mutableStateOf<YtMusicOAuthFlowUiState?>(null)
+        private set
+    private var ytmusicOAuthJob: Job? = null
         private set
     var enabledProviderIds by mutableStateOf(DEFAULT_ENABLED_PROVIDER_IDS)
         private set
@@ -544,7 +548,8 @@ class FuoPlayerController(
     }
 
     fun isProviderAuthBusy(providerId: String): Boolean =
-        providerId in providerAuthOperations
+        providerId in providerAuthOperations ||
+            (providerId == "ytmusic" && ytmusicOAuthJob?.isActive == true)
 
     fun providerAuthError(providerId: String): String? =
         providerAuthErrors[providerId]
@@ -552,6 +557,8 @@ class FuoPlayerController(
     fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
 
     fun providerHeaderInputFor(providerId: String): ProviderHeaderInput = providerHeaderInputs[providerId] ?: ProviderHeaderInput()
+
+    fun providerOAuthInputFor(providerId: String): ProviderOAuthInput = providerOAuthInputs[providerId] ?: ProviderOAuthInput()
 
     fun isProviderEnabled(providerId: String): Boolean = providerId in enabledProviderIds
 
@@ -1032,6 +1039,16 @@ class FuoPlayerController(
         providerHeaderInputs = providerHeaderInputs + (providerId to input)
     }
 
+    fun onProviderOAuthClientIdChange(providerId: String, value: String) {
+        val input = providerOAuthInputFor(providerId).copy(clientId = value)
+        providerOAuthInputs = providerOAuthInputs + (providerId to input)
+    }
+
+    fun onProviderOAuthClientSecretChange(providerId: String, value: String) {
+        val input = providerOAuthInputFor(providerId).copy(clientSecret = value)
+        providerOAuthInputs = providerOAuthInputs + (providerId to input)
+    }
+
     fun onSettingsProviderChange(providerId: String) {
         selectedSettingsProviderId = providerId
         persistSettings()
@@ -1326,6 +1343,163 @@ class FuoPlayerController(
         }
     }
 
+    fun startYtmusicTvOAuthLogin() {
+        val input = providerOAuthInputFor("ytmusic")
+        val clientId = input.clientId.trim()
+        val clientSecret = input.clientSecret.trim()
+        val providerName = providerName("ytmusic")
+        if (clientId.isEmpty() || clientSecret.isEmpty()) {
+            message = "请输入 $providerName 的 client_id 和 client_secret"
+            return
+        }
+        cancelYtmusicTvOAuthLogin()
+        ytmusicOAuthJob = scope.launch {
+            message = "正在获取 Google 授权码"
+            runCatching {
+                val deviceAuth = providerRepository.beginYtmusicOAuth(clientId, clientSecret)
+                ytmusicOAuthFlow = YtMusicOAuthFlowUiState(
+                    userCode = deviceAuth.userCode,
+                    verificationUrl = deviceAuth.verificationUrl,
+                    verificationUrlWithCode = deviceAuth.verificationUrlWithCode,
+                    statusMessage = "请在浏览器中完成授权",
+                )
+                message = "请在浏览器完成授权：${deviceAuth.userCode}"
+                val token = withTimeout(deviceAuth.expiresInSeconds.coerceAtLeast(1) * 1_000L) {
+                    var intervalSeconds = deviceAuth.intervalSeconds.coerceAtLeast(1)
+                    while (true) {
+                        delay(intervalSeconds * 1_000L)
+                        when (
+                            val result = providerRepository.pollYtmusicOAuth(
+                                deviceCode = deviceAuth.deviceCode,
+                                clientId = clientId,
+                                clientSecret = clientSecret,
+                            )
+                        ) {
+                            is org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Authorized ->
+                                return@withTimeout result.token
+                            org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Pending -> {
+                                ytmusicOAuthFlow = ytmusicOAuthFlow?.copy(statusMessage = "等待授权中…")
+                            }
+                            org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.SlowDown -> {
+                                intervalSeconds += 5
+                                ytmusicOAuthFlow = ytmusicOAuthFlow?.copy(statusMessage = "轮询过快，已放慢…")
+                            }
+                            is org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Denied ->
+                                error(result.message)
+                        }
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    error("unreachable")
+                }
+                providerSessionRepository.loginWithYtmusicOAuth(
+                    accessToken = token.accessToken,
+                    refreshToken = token.refreshToken,
+                    expiresAtMillis = token.expiresAtEpochSeconds * 1_000,
+                    scope = token.scope,
+                    clientId = clientId,
+                    clientSecret = clientSecret,
+                )
+            }.onSuccess {
+                ytmusicOAuthFlow = null
+                message = if (it.isLoggedIn) {
+                    "${it.providerName} 已通过 Google OAuth 登录"
+                } else {
+                    "${it.providerName} 未登录"
+                }
+                if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                    refreshActiveMineProviderContent()
+                } else {
+                    refreshHomeContent(homeSection)
+                }
+            }.onFailure { error ->
+                if (error is TimeoutCancellationException) {
+                    ytmusicOAuthFlow = null
+                    message = "Google OAuth 授权超时，请重试"
+                    return@launch
+                }
+                if (error is CancellationException) {
+                    ytmusicOAuthFlow = null
+                    message = "已取消 Google OAuth 登录"
+                    return@launch
+                }
+                ytmusicOAuthFlow = null
+                setError(error)
+            }
+            ytmusicOAuthJob = null
+        }
+    }
+
+    fun cancelYtmusicTvOAuthLogin() {
+        ytmusicOAuthJob?.cancel()
+        ytmusicOAuthJob = null
+        ytmusicOAuthFlow = null
+    }
+
+    fun loginYtmusicWithOAuthJson(oauthJson: String) {
+        val input = providerOAuthInputFor("ytmusic")
+        val clientId = input.clientId.trim()
+        val clientSecret = input.clientSecret.trim()
+        if (oauthJson.isBlank()) {
+            message = "无法读取 oauth.json"
+            return
+        }
+        if (clientId.isEmpty() || clientSecret.isEmpty()) {
+            message = "导入 oauth.json 前请填写或导入 client_id 和 client_secret"
+            return
+        }
+        val providerName = providerName("ytmusic")
+        cancelYtmusicTvOAuthLogin()
+        scope.launch {
+            message = "正在登录 $providerName"
+            runCatching {
+                providerSessionRepository.loginWithYtmusicOAuthJson(oauthJson, clientId, clientSecret)
+            }.onSuccess {
+                message = if (it.isLoggedIn) {
+                    "${it.providerName} 已通过 oauth.json 登录"
+                } else {
+                    "${it.providerName} 未登录"
+                }
+                if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                    refreshActiveMineProviderContent()
+                } else {
+                    refreshHomeContent(homeSection)
+                }
+            }.onFailure { setError(it) }
+        }
+    }
+
+    /**
+     * Imports either a Google Cloud `client_secret_*.json` (fills client_id/secret)
+     * or a ytmusicapi `oauth.json` (logs in with tokens; client credentials must already be set).
+     */
+    fun importYtmusicOAuthRelatedJson(json: String) {
+        val trimmed = json.trim()
+        if (trimmed.isBlank()) {
+            message = "无法读取 JSON 文件"
+            return
+        }
+        val oauth = org.feeluown.mobile.provider.ytmusic.YtMusicOAuth
+        when {
+            oauth.looksLikeClientSecretJson(trimmed) -> {
+                runCatching { oauth.parseClientSecretJson(trimmed) }
+                    .onSuccess { credentials ->
+                        providerOAuthInputs = providerOAuthInputs + (
+                            "ytmusic" to ProviderOAuthInput(
+                                clientId = credentials.clientId,
+                                clientSecret = credentials.clientSecret,
+                            )
+                        )
+                        message = "已导入 Google OAuth client_id / client_secret"
+                    }
+                    .onFailure { setError(it) }
+            }
+            oauth.looksLikeOauthTokenJson(trimmed) -> loginYtmusicWithOAuthJson(trimmed)
+            else -> {
+                message = "无法识别的 JSON：请导入 Google client_secret.json 或 ytmusicapi oauth.json"
+            }
+        }
+    }
+
     fun logoutProvider(providerId: String) {
         val providerName = providerName(providerId)
         scope.launch {
@@ -1334,6 +1508,8 @@ class FuoPlayerController(
                 .onSuccess {
                     providerCookieInputs = providerCookieInputs - providerId
                     providerHeaderInputs = providerHeaderInputs - providerId
+                    providerOAuthInputs = providerOAuthInputs - providerId
+                    cancelYtmusicTvOAuthLogin()
                     persistSettings()
                     message = "${it.providerName} 已退出登录"
                     if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {

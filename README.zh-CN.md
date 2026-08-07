@@ -60,11 +60,16 @@ iOS 仅提供实验性的 Debug 构建产物，不会作为 GitHub Release 发�
 | 网易云音乐 | `NeteaseProvider` | 默认启用 | Cookie |
 | QQ 音乐 | `QQMusicProvider` | 设置中可启用 | Cookie |
 | 哔哩哔哩 | `BilibiliProvider` | 设置中可启用 | Cookie |
-| YouTube Music | `YtMusicProvider` | 设置中可启用 | Headers / Cookie 文件 |
+| YouTube Music | `YtMusicProvider` | 设置中可启用 | OAuth（TV）/ Headers |
 
 应用默认只加载网易云音乐。QQ 音乐、哔哩哔哩、YouTube Music 已随 Android 包打包，可在设置中启用、禁用和排序。
 
-YouTube Music 通过 Headers / Cookie（例如导入 `ytmusic_header.json`）登录，不再使用 Google OAuth 或应用内 Google WebView。
+YouTube Music 支持两种登录方式：
+
+1. **Google OAuth（TV / Limited Input device-code）**：与 [ytmusicapi OAuth](https://ytmusicapi.readthedocs.io/en/stable/setup/oauth.html) 相同。在 Google Cloud 创建「TVs and Limited Input devices」类型的 OAuth 客户端并启用 YouTube Data API，在设置里填写或导入 Console 下载的 `client_secret_*.json`，然后点击「使用 Google 登录（TV）」按验证码完成授权。也可导入桌面端 `ytmusicapi oauth` 生成的 `oauth.json`（需先有同一对 client 凭证以便刷新）。
+2. **Headers / Cookie**：导入 `ytmusic_header.json` 或手填 Authorization + Cookie。
+
+本地 `oauth.json` 与 `client_secret*.json` 不会被提交到仓库。
 
 图例：✅ 支持，包括需要登录后使用的能力；🧩 依赖上游音乐源暴露对应方法或返回对应结果类型；➖ 当前应用没有入口或未开放。
 

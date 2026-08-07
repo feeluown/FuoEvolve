@@ -177,6 +177,37 @@ class KotlinProviderRepository : ProviderMusicRepository {
     override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =
         requireProvider("ytmusic").loginWithHeaderFile(headerFileJson)
 
+    override suspend fun beginYtmusicOAuth(clientId: String, clientSecret: String) =
+        requireYtMusicProvider().beginOAuth(clientId, clientSecret)
+
+    override suspend fun pollYtmusicOAuth(
+        deviceCode: String,
+        clientId: String,
+        clientSecret: String,
+    ) = requireYtMusicProvider().pollOAuth(deviceCode, clientId, clientSecret)
+
+    override suspend fun loginWithYtmusicOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = requireYtMusicProvider().loginWithOAuth(
+        accessToken = accessToken,
+        refreshToken = refreshToken,
+        expiresAtMillis = expiresAtMillis,
+        scope = scope,
+        clientId = clientId,
+        clientSecret = clientSecret,
+    )
+
+    override suspend fun loginWithYtmusicOAuthJson(
+        oauthJson: String,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = requireYtMusicProvider().loginWithOAuthJson(oauthJson, clientId, clientSecret)
+
     override suspend fun logout(providerId: String): ProviderAuthState = requireProvider(providerId).logout()
 
     override suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy) {
@@ -274,6 +305,10 @@ class KotlinProviderRepository : ProviderMusicRepository {
 
     private fun requireProvider(providerId: String): KotlinMusicProvider =
         providerMap[providerId] ?: error("unknown provider: $providerId")
+
+    private fun requireYtMusicProvider(): YtMusicProvider =
+        requireProvider("ytmusic") as? YtMusicProvider
+            ?: error("ytmusic provider is not available")
 
     private fun providerIdForResource(resourceType: String, resourceId: String): String {
         val expectedPrefix = when (resourceType.lowercase()) {

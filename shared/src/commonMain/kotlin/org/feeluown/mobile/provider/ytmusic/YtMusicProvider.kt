@@ -2,6 +2,7 @@ package org.feeluown.mobile.provider.ytmusic
 
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPayload
+import org.feeluown.mobile.ProviderAuthState
 import org.feeluown.mobile.ProviderCapabilities
 import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderContentSection
@@ -162,30 +163,45 @@ class YtMusicProvider(
 
     private suspend fun innerTube(method: String, payload: String): kotlinx.serialization.json.JsonObject {
         ensureConfig()
+        val oauthToken = ensureOAuthAccessToken()
         // Match ytmusicapi / fuo_ytmusic: WEB_REMIX with hl=zh_CN and no unsupported gl=CN.
         // YouTube Music rejects gl=CN with HTTP 400 INVALID_ARGUMENT on every InnerTube call.
         val body = if (payload.startsWith("{") && payload.endsWith("}")) {
             "{\"context\":{\"client\":{\"clientName\":\"WEB_REMIX\",\"clientVersion\":\"$clientVersion\",\"hl\":\"zh_CN\"},\"user\":{}},${payload.drop(1)}"
         } else payload
-        // ytmusicapi appends the WEB InnerTube key for browser/cookie auth.
+        // Browser auth appends the WEB InnerTube key; OAuth (ytmusicapi OAUTH_CUSTOM_CLIENT) omits it.
         val query = buildString {
             append("?alt=json")
-            append("&key=")
-            append(apiKey.orEmpty().ifBlank { FALLBACK_API_KEY })
+            if (oauthToken == null) {
+                append("&key=")
+                append(apiKey.orEmpty().ifBlank { FALLBACK_API_KEY })
+            }
         }
         return http.postJson(
             providerId = ID,
             url = "$API_BASE/$method$query",
             json = body,
-            headers = ytMusicHeaders(),
+            headers = ytMusicHeaders(oauthToken),
             cacheKey = if (method == "search") "ytmusic:search:$payload" else null,
             cachePolicy = if (method == "search") ProviderCachePolicies.search else ProviderCachePolicies.none,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
     }
 
-    private suspend fun ytMusicHeaders(): Map<String, String> {
-        val stored = currentCredentials()
+    private suspend fun ytMusicHeaders(oauthToken: YtMusicOAuthToken? = null): Map<String, String> {
+        val token = oauthToken ?: ensureOAuthAccessToken()
         val origin = YTM_ORIGIN
+        if (token != null) {
+            return buildMap {
+                put("User-Agent", DEFAULT_USER_AGENT)
+                put("Accept", "*/*")
+                put("Origin", origin)
+                put("Referer", "$origin/")
+                put("Authorization", token.asAuthorizationHeader())
+                put("X-Goog-Request-Time", (currentTimeMillis() / 1_000).toString())
+                visitorId?.takeIf { it.isNotBlank() }?.let { put("X-Goog-Visitor-Id", it) }
+            }
+        }
+        val stored = currentCredentials()
         val base = authenticatedHeaders(
             mapOf(
                 "Accept" to "*/*",
@@ -203,12 +219,83 @@ class YtMusicProvider(
         return base
     }
 
+    private suspend fun ensureOAuthAccessToken(): YtMusicOAuthToken? {
+        val stored = currentCredentials() ?: return null
+        if (!stored.hasOAuthAccess()) return null
+        val clientId = stored.oauthClientId.orEmpty()
+        val clientSecret = stored.oauthClientSecret.orEmpty()
+        require(clientId.isNotBlank() && clientSecret.isNotBlank()) {
+            "YouTube Music OAuth client_id/client_secret are required to refresh tokens"
+        }
+        var token = YtMusicOAuthToken(
+            accessToken = stored.oauthAccessToken.orEmpty(),
+            refreshToken = stored.oauthRefreshToken.orEmpty(),
+            scope = stored.oauthScope ?: YtMusicOAuth.SCOPE,
+            tokenType = "Bearer",
+            expiresAtEpochSeconds = (stored.oauthExpiresAtMillis ?: 0L) / 1_000,
+            expiresInSeconds = 0,
+        )
+        if (token.accessToken.isNotBlank() && !token.isExpiring()) {
+            return token
+        }
+        require(token.refreshToken.isNotBlank()) {
+            "YouTube Music OAuth access token expired and refresh_token is missing"
+        }
+        val client = YtMusicOAuthClient(
+            http = http,
+            credentials = YtMusicOAuthClientCredentials(clientId, clientSecret),
+        )
+        token = client.refreshAccessToken(token.refreshToken)
+        credentials.write(
+            id,
+            stored.copy(
+                oauthAccessToken = token.accessToken,
+                oauthRefreshToken = token.refreshToken,
+                oauthExpiresAtMillis = token.expiresAtEpochSeconds * 1_000,
+                oauthScope = token.scope,
+            ),
+        )
+        return token
+    }
+
+    suspend fun beginOAuth(clientId: String, clientSecret: String): YtMusicDeviceAuthCode {
+        val client = YtMusicOAuthClient(
+            http = http,
+            credentials = YtMusicOAuthClientCredentials(clientId.trim(), clientSecret.trim()),
+        )
+        return client.requestDeviceCode()
+    }
+
+    suspend fun pollOAuth(
+        deviceCode: String,
+        clientId: String,
+        clientSecret: String,
+    ): YtMusicOAuthPollResult {
+        val client = YtMusicOAuthClient(
+            http = http,
+            credentials = YtMusicOAuthClientCredentials(clientId.trim(), clientSecret.trim()),
+        )
+        return client.exchangeDeviceCode(deviceCode)
+    }
+
+    suspend fun loginWithOAuthJson(oauthJson: String, clientId: String, clientSecret: String): ProviderAuthState {
+        val token = YtMusicOAuth.parseOauthJson(oauthJson)
+        return loginWithOAuth(
+            accessToken = token.accessToken,
+            refreshToken = token.refreshToken,
+            expiresAtMillis = token.expiresAtEpochSeconds * 1_000,
+            scope = token.scope,
+            clientId = clientId,
+            clientSecret = clientSecret,
+        )
+    }
+
     private suspend fun ensureConfig() {
         if (configLoaded) return
         val html = http.getText(
             ID,
             YTM_ORIGIN,
-            authenticatedHeaders(mapOf("Origin" to YTM_ORIGIN, "Referer" to "$YTM_ORIGIN/")),
+            ytMusicHeaders(),
             cacheKey = "ytmusic:landing",
             cachePolicy = ProviderCachePolicies.detail,
         ).value
@@ -411,7 +498,10 @@ class YtMusicProvider(
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,
-            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.Headers),
+            supportedLoginModes = setOf(
+                org.feeluown.mobile.ProviderLoginMode.Headers,
+                org.feeluown.mobile.ProviderLoginMode.OAuth,
+            ),
         )
         val CAPABILITIES = ProviderCapabilities(providerId = ID, providerName = NAME, canAddSongToPlaylist = true)
         val FEATURES = listOf(

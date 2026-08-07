@@ -41,8 +41,30 @@ class ProviderSessionRepositoryTest {
         assertEquals(ProviderSessionState().errors, repository.state.value.errors)
     }
 
+    @Test
+    fun ytmusicOAuthLoginPersistsLoggedInState() = runTest {
+        val provider = RacingProviderRepository()
+        provider.allowRefreshToFinish.complete(Unit)
+        val repository = DefaultProviderSessionRepository(provider)
+        repository.updateProviders(listOf(YTMUSIC))
+
+        val state = repository.loginWithYtmusicOAuth(
+            accessToken = "access",
+            refreshToken = "refresh",
+            expiresAtMillis = 1_700_000_000_000L,
+            scope = "https://www.googleapis.com/auth/youtube",
+            clientId = "cid",
+            clientSecret = "secret",
+        )
+
+        assertTrue(state.isLoggedIn)
+        assertTrue(repository.state.value.authStates.getValue(YTMUSIC.providerId).isLoggedIn)
+        assertTrue(provider.oauthLoggedIn)
+    }
+
     private class RacingProviderRepository : ProviderMusicRepository {
         var isLoggedIn = false
+        var oauthLoggedIn = false
         val refreshStarted = CompletableDeferred<Unit>()
         val allowRefreshToFinish = CompletableDeferred<Unit>()
 
@@ -64,23 +86,45 @@ class ProviderSessionRepositoryTest {
             source = track.source,
         )
 
-        override suspend fun authState(providerId: String): ProviderAuthState = state(isLoggedIn)
+        override suspend fun authState(providerId: String): ProviderAuthState = state(providerId, isLoggedIn || oauthLoggedIn)
 
         override suspend fun refreshAuthState(providerId: String): ProviderAuthState {
-            val captured = isLoggedIn
+            val captured = isLoggedIn || oauthLoggedIn
             refreshStarted.complete(Unit)
             allowRefreshToFinish.await()
-            return state(captured)
+            return state(providerId, captured)
         }
 
         override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
             isLoggedIn = true
-            return state(true)
+            return state(providerId, true)
+        }
+
+        override suspend fun loginWithYtmusicOAuth(
+            accessToken: String,
+            refreshToken: String,
+            expiresAtMillis: Long?,
+            scope: String?,
+            clientId: String,
+            clientSecret: String,
+        ): ProviderAuthState {
+            oauthLoggedIn = true
+            return state(YTMUSIC.providerId, true)
+        }
+
+        override suspend fun loginWithYtmusicOAuthJson(
+            oauthJson: String,
+            clientId: String,
+            clientSecret: String,
+        ): ProviderAuthState {
+            oauthLoggedIn = true
+            return state(YTMUSIC.providerId, true)
         }
 
         override suspend fun logout(providerId: String): ProviderAuthState {
             isLoggedIn = false
-            return state(false)
+            oauthLoggedIn = false
+            return state(providerId, false)
         }
 
         override suspend fun updateAudioQualityPolicies(
@@ -95,14 +139,15 @@ class ProviderSessionRepositoryTest {
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = emptyList()
         override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> = emptyList()
 
-        private fun state(loggedIn: Boolean) = ProviderAuthState(
-            providerId = PROVIDER.providerId,
-            providerName = PROVIDER.providerName,
+        private fun state(providerId: String, loggedIn: Boolean) = ProviderAuthState(
+            providerId = providerId,
+            providerName = if (providerId == YTMUSIC.providerId) YTMUSIC.providerName else PROVIDER.providerName,
             isLoggedIn = loggedIn,
         )
     }
 
     private companion object {
         val PROVIDER = ProviderInfo("netease", "网易云音乐")
+        val YTMUSIC = ProviderInfo("ytmusic", "YouTube Music")
     }
 }
