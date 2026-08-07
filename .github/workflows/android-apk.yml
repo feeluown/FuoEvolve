@@ -13,6 +13,7 @@ jobs:
   build-release-apks:
     name: Build signed multi-ABI release APK
     runs-on: ubuntu-latest
+    environment: android-apk
     timeout-minutes: 45
     env:
       FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
