@@ -115,35 +115,38 @@ class KotlinProviderRepository : ProviderMusicRepository {
         smartReplacementUseOriginalLyrics: Boolean,
     ): PlaybackPayload {
         initialize()
-        val originalProviderId = track.source.ifBlank { splitResourceId(track.providerId ?: track.id).first }
+        val originalTrack = track.forPlaybackResolution()
+        val originalProviderId = originalTrack.source.ifBlank {
+            splitResourceId(originalTrack.providerId ?: originalTrack.id).first
+        }
         val originalProvider = providerMap[originalProviderId]
         val quality = if (isCellularConnection()) {
             cellularAudioQualityPolicy.policy
         } else {
             wifiAudioQualityPolicy.policy
         }
-        val direct = originalProvider?.resolve(track, quality)
+        val direct = originalProvider?.resolve(originalTrack, quality)
         if (direct != null) return direct
         if (unavailablePolicy == UnavailablePlaybackPolicy.Skip) {
-            error("media unavailable: ${track.id}")
+            error("media unavailable: ${originalTrack.id}")
         }
 
         val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
-            .flatMap { provider -> provider.search("${track.title} ${track.artists}").tracks }
+            .flatMap { provider -> provider.search("${originalTrack.title} ${originalTrack.artists}").tracks }
             .mapNotNull { candidate ->
-                val score = replacementScore(track, candidate)
+                val score = replacementScore(originalTrack, candidate)
                 if (score < smartReplacementMinScore) return@mapNotNull null
                 val provider = providerMap[candidate.source] ?: return@mapNotNull null
                 val payload = provider.resolve(candidate, quality) ?: return@mapNotNull null
                 score to payload.copy(
                     isSmartReplacement = true,
-                    originalId = track.id,
-                    originalTitle = track.title,
-                    originalArtists = track.artists,
-                    originalAlbum = track.album,
-                    originalSource = track.source,
-                    originalProviderName = track.providerName,
-                    originalCoverUrl = track.coverUrl,
+                    originalId = originalTrack.id,
+                    originalTitle = originalTrack.title,
+                    originalArtists = originalTrack.artists,
+                    originalAlbum = originalTrack.album,
+                    originalSource = originalTrack.source,
+                    originalProviderName = originalTrack.providerName,
+                    originalCoverUrl = originalTrack.coverUrl,
                     replacementId = candidate.id,
                     replacementTitle = candidate.title,
                     replacementArtists = candidate.artists,
@@ -153,15 +156,15 @@ class KotlinProviderRepository : ProviderMusicRepository {
                     replacementCoverUrl = candidate.coverUrl,
                     replacementStrategy = "title_artist_duration",
                     replacementScore = score,
-                    title = if (smartReplacementUseOriginalMetadata) track.title else candidate.title,
-                    artists = if (smartReplacementUseOriginalMetadata) track.artists else candidate.artists,
-                    album = if (smartReplacementUseOriginalMetadata) track.album else candidate.album,
-                    coverUrl = if (smartReplacementUseOriginalMetadata) track.coverUrl else candidate.coverUrl,
-                    lyrics = if (smartReplacementUseOriginalLyrics) track.lyrics ?: payload.lyrics else payload.lyrics,
+                    title = if (smartReplacementUseOriginalMetadata) originalTrack.title else candidate.title,
+                    artists = if (smartReplacementUseOriginalMetadata) originalTrack.artists else candidate.artists,
+                    album = if (smartReplacementUseOriginalMetadata) originalTrack.album else candidate.album,
+                    coverUrl = if (smartReplacementUseOriginalMetadata) originalTrack.coverUrl else candidate.coverUrl,
+                    lyrics = if (smartReplacementUseOriginalLyrics) originalTrack.lyrics ?: payload.lyrics else payload.lyrics,
                 )
             }
             .maxByOrNull { it.first }
-        return candidates?.second ?: error("media unavailable and no smart replacement: ${track.id}")
+        return candidates?.second ?: error("media unavailable and no smart replacement: ${originalTrack.id}")
     }
 
     override suspend fun authState(providerId: String): ProviderAuthState = requireProvider(providerId).authState()
@@ -357,6 +360,42 @@ class KotlinProviderRepository : ProviderMusicRepository {
         "qqmusic" to QQMusicProvider(http, credentials),
         "bilibili" to BilibiliProvider(http, credentials),
         "ytmusic" to YtMusicProvider(http, credentials),
+    )
+}
+
+internal fun MusicTrack.forPlaybackResolution(): MusicTrack {
+    if (!isSmartReplacement) return this
+    val restoredId = originalId ?: id
+    val restoredSource = originalSource
+        ?.takeIf { it.isNotBlank() }
+        ?: runCatching { splitResourceId(restoredId).first }.getOrDefault(source)
+    return copy(
+        id = restoredId,
+        title = originalTitle ?: title,
+        artists = originalArtists ?: artists,
+        album = originalAlbum ?: album,
+        source = restoredSource,
+        coverUrl = originalCoverUrl ?: coverUrl,
+        providerId = originalId ?: providerId,
+        providerName = originalProviderName ?: providerName,
+        isSmartReplacement = false,
+        originalId = null,
+        originalTitle = null,
+        originalArtists = null,
+        originalAlbum = null,
+        originalSource = null,
+        originalProviderName = null,
+        originalCoverUrl = null,
+        replacementId = null,
+        replacementTitle = null,
+        replacementArtists = null,
+        replacementAlbum = null,
+        replacementSource = null,
+        replacementProviderName = null,
+        replacementCoverUrl = null,
+        replacementStrategy = null,
+        replacementScore = null,
+        isUnavailable = false,
     )
 }
 
