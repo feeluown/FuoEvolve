@@ -855,7 +855,8 @@ final class IOSOAuthDeviceCodeOutput: NSObject, IosOAuthDeviceCodeOutput, UNUser
     private let userCodeKey = "user_code"
     private var didConfigure = false
 
-    func copyUserCode(userCode: String) {
+    // Kotlin/Native exports copy* as doCopy* to avoid NSObject.copy collision.
+    func doCopyUserCode(userCode: String) {
         UIPasteboard.general.string = userCode
     }
 
@@ -895,7 +896,7 @@ final class IOSOAuthDeviceCodeOutput: NSObject, IosOAuthDeviceCodeOutput, UNUser
         if response.actionIdentifier == copyActionId ||
             response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             if let userCode, !userCode.isEmpty {
-                copyUserCode(userCode: userCode)
+                doCopyUserCode(userCode: userCode)
             }
         }
         completionHandler()
