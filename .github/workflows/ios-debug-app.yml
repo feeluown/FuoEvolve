@@ -16,6 +16,7 @@ jobs:
   build-debug-app:
     name: Build debug iOS app
     runs-on: macos-26
+    environment: ios-debug-app
     timeout-minutes: 45
 
     steps:
