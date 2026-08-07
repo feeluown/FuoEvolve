@@ -122,6 +122,10 @@ class FuoPlayerController(
         private set
     var providerAuthStates by mutableStateOf<Map<String, ProviderAuthState>>(emptyMap())
         private set
+    var providerAuthOperations by mutableStateOf<Map<String, ProviderSessionOperation>>(emptyMap())
+        private set
+    var providerAuthErrors by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
     var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
         private set
     var providerHeaderInputs by mutableStateOf<Map<String, ProviderHeaderInput>>(emptyMap())
@@ -436,6 +440,8 @@ class FuoPlayerController(
         scope.launch {
             providerSessionRepository.state.collect { sessionState ->
                 providerAuthStates = sessionState.authStates
+                providerAuthOperations = sessionState.operations
+                providerAuthErrors = sessionState.errors
             }
         }
         scope.launch {
@@ -538,10 +544,10 @@ class FuoPlayerController(
     }
 
     fun isProviderAuthBusy(providerId: String): Boolean =
-        providerId in providerSessionRepository.state.value.operations
+        providerId in providerAuthOperations
 
     fun providerAuthError(providerId: String): String? =
-        providerSessionRepository.state.value.errors[providerId]
+        providerAuthErrors[providerId]
 
     fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
 
@@ -1295,13 +1301,34 @@ class FuoPlayerController(
         }
     }
 
+    fun beginProviderOAuthLogin(providerId: String) {
+        scope.launch {
+            providerSessionRepository.beginExternalAuth(providerId)
+            message = "正在打开 Google 授权…"
+        }
+    }
+
+    fun failProviderOAuthLogin(providerId: String, errorMessage: String) {
+        val text = errorMessage.ifBlank { "Google OAuth 授权失败" }
+        scope.launch {
+            providerSessionRepository.failExternalAuth(providerId, text)
+            message = text
+        }
+    }
+
+    fun clearProviderOAuthLogin(providerId: String) {
+        scope.launch {
+            providerSessionRepository.clearExternalAuth(providerId)
+        }
+    }
+
     fun loginYtmusicWithOAuth(
         accessToken: String,
         expiresAtMillis: Long? = null,
         grantedScopes: Set<String> = emptySet(),
     ) {
         if (accessToken.isBlank()) {
-            message = "Google OAuth 未返回访问令牌"
+            failProviderOAuthLogin("ytmusic", "Google OAuth 未返回访问令牌")
             return
         }
         val providerName = providerName("ytmusic")

@@ -139,10 +139,10 @@ class MainActivity : ComponentActivity() {
             val googleAuthorizationClient = remember {
                 Identity.getAuthorizationClient(this@MainActivity)
             }
-            fun applyGoogleAuthorization(result: AuthorizationResult) {
+            fun applyGoogleAuthorization(providerId: String, result: AuthorizationResult) {
                 val accessToken = result.accessToken.orEmpty()
                 if (accessToken.isBlank()) {
-                    controller.showMessage("Google OAuth 未返回访问令牌")
+                    controller.failProviderOAuthLogin(providerId, "Google OAuth 未返回访问令牌")
                 } else {
                     controller.loginYtmusicWithOAuth(
                         accessToken = accessToken,
@@ -150,18 +150,25 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+            var pendingGoogleOAuthProviderId by rememberSaveable { mutableStateOf<String?>(null) }
             val googleAuthorizationResolutionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.StartIntentSenderForResult(),
             ) { result ->
+                val providerId = pendingGoogleOAuthProviderId.orEmpty().ifBlank { "ytmusic" }
+                pendingGoogleOAuthProviderId = null
                 if (result.resultCode != RESULT_OK || result.data == null) {
-                    controller.showMessage("Google OAuth 授权已取消")
+                    controller.failProviderOAuthLogin(providerId, "Google OAuth 授权已取消")
                 } else {
                     runCatching {
                         googleAuthorizationClient.getAuthorizationResultFromIntent(result.data)
-                    }.onSuccess(::applyGoogleAuthorization)
-                        .onFailure { throwable ->
-                            controller.showMessage("Google OAuth 授权失败：${throwable.message.orEmpty()}")
-                        }
+                    }.onSuccess { authorizationResult ->
+                        applyGoogleAuthorization(providerId, authorizationResult)
+                    }.onFailure { throwable ->
+                        controller.failProviderOAuthLogin(
+                            providerId,
+                            "Google OAuth 授权失败：${throwable.message.orEmpty().ifBlank { throwable::class.simpleName.orEmpty() }}",
+                        )
+                    }
                 }
             }
             var pendingLocalPlaylistExport by remember {
@@ -246,25 +253,56 @@ class MainActivity : ComponentActivity() {
                 onStartProviderOAuthLogin = { provider ->
                     val scopes = provider.oauthConfig?.scopes.orEmpty()
                     if (scopes.isEmpty()) {
-                        controller.showMessage("未配置 Google OAuth scope")
+                        controller.failProviderOAuthLogin(provider.providerId, "未配置 Google OAuth scope")
                     } else {
+                        controller.beginProviderOAuthLogin(provider.providerId)
+                        pendingGoogleOAuthProviderId = provider.providerId
                         val request = AuthorizationRequest.builder()
                             .setRequestedScopes(scopes.map(::Scope))
                             .build()
-                        googleAuthorizationClient.authorize(request)
-                            .addOnSuccessListener { authorizationResult ->
-                                if (authorizationResult.hasResolution()) {
-                                    authorizationResult.pendingIntent?.let { pendingIntent ->
-                                        googleAuthorizationResolutionLauncher.launch(
-                                            IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
-                                        )
-                                    } ?: controller.showMessage("Google OAuth 未提供授权确认界面")
-                                } else {
-                                    applyGoogleAuthorization(authorizationResult)
+                        runCatching {
+                            googleAuthorizationClient.authorize(request)
+                                .addOnSuccessListener(this@MainActivity) { authorizationResult ->
+                                    if (authorizationResult.hasResolution()) {
+                                        val pendingIntent = authorizationResult.pendingIntent
+                                        if (pendingIntent == null) {
+                                            controller.failProviderOAuthLogin(
+                                                provider.providerId,
+                                                "Google OAuth 未提供授权确认界面",
+                                            )
+                                        } else {
+                                            runCatching {
+                                                googleAuthorizationResolutionLauncher.launch(
+                                                    IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                                                )
+                                            }.onFailure { throwable ->
+                                                controller.failProviderOAuthLogin(
+                                                    provider.providerId,
+                                                    "无法打开 Google 授权界面：${throwable.message.orEmpty().ifBlank { throwable::class.simpleName.orEmpty() }}",
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        applyGoogleAuthorization(provider.providerId, authorizationResult)
+                                    }
                                 }
-                            }
-                            .addOnFailureListener { throwable ->
-                                controller.showMessage(googleAuthorizationErrorMessage(throwable))
+                                .addOnFailureListener(this@MainActivity) { throwable ->
+                                    controller.failProviderOAuthLogin(
+                                        provider.providerId,
+                                        googleAuthorizationErrorMessage(throwable),
+                                    )
+                                }
+                                .addOnCanceledListener(this@MainActivity) {
+                                    controller.failProviderOAuthLogin(
+                                        provider.providerId,
+                                        "Google OAuth 授权已取消",
+                                    )
+                                }
+                        }.onFailure { throwable ->
+                            controller.failProviderOAuthLogin(
+                                provider.providerId,
+                                "无法启动 Google OAuth：${throwable.message.orEmpty().ifBlank { throwable::class.simpleName.orEmpty() }}",
+                            )
                         }
                     }
                 },
@@ -309,10 +347,21 @@ class MainActivity : ComponentActivity() {
         val apiException = throwable as? ApiException
         return when (apiException?.statusCode) {
             CommonStatusCodes.API_NOT_CONNECTED ->
-                "Google Play 服务不可用，请启用或更新 Google Play 服务后重试"
+                "Google OAuth 失败：Google Play 服务不可用，请启用或更新后重试"
+            CommonStatusCodes.DEVELOPER_ERROR ->
+                "Google OAuth 失败：应用 OAuth 客户端配置不正确（请检查包名与 SHA-1）"
             CommonStatusCodes.SIGN_IN_REQUIRED ->
-                "请先在设备上登录 Google 账号后重试"
-            else -> "Google OAuth 授权失败：${throwable.message.orEmpty()}"
+                "Google OAuth 失败：请先在设备上登录 Google 账号后重试"
+            CommonStatusCodes.NETWORK_ERROR ->
+                "Google OAuth 失败：网络异常，请稍后重试"
+            CommonStatusCodes.CANCELED ->
+                "Google OAuth 授权已取消"
+            else -> {
+                val detail = throwable.message.orEmpty().ifBlank {
+                    apiException?.statusCode?.let { "status=$it" }.orEmpty()
+                }.ifBlank { throwable::class.simpleName.orEmpty() }
+                "Google OAuth 授权失败：$detail"
+            }
         }
     }
 

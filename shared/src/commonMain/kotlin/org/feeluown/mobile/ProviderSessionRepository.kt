@@ -33,6 +33,15 @@ interface ProviderSessionRepository {
     ): ProviderAuthState
     suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState
     suspend fun logout(providerId: String): ProviderAuthState
+
+    /** Mark provider login UI busy while a platform OAuth sheet / Intent is in flight. */
+    suspend fun beginExternalAuth(providerId: String)
+
+    /** Clear busy state and surface an OAuth/platform login error on the provider panel. */
+    suspend fun failExternalAuth(providerId: String, message: String)
+
+    /** Clear busy/error after the platform OAuth UI was dismissed without completing login. */
+    suspend fun clearExternalAuth(providerId: String)
 }
 
 /**
@@ -107,6 +116,36 @@ class DefaultProviderSessionRepository(
         mutate(providerId, ProviderSessionOperation.Logout) {
             providerRepository.logout(providerId)
         }
+
+    override suspend fun beginExternalAuth(providerId: String) {
+        operationMutex.withLock {
+            val current = mutableState.value
+            mutableState.value = current.copy(
+                operations = current.operations + (providerId to ProviderSessionOperation.Login),
+                errors = current.errors - providerId,
+            )
+        }
+    }
+
+    override suspend fun failExternalAuth(providerId: String, message: String) {
+        operationMutex.withLock {
+            val current = mutableState.value
+            mutableState.value = current.copy(
+                operations = current.operations - providerId,
+                errors = current.errors + (providerId to message.ifBlank { "授权失败" }),
+            )
+        }
+    }
+
+    override suspend fun clearExternalAuth(providerId: String) {
+        operationMutex.withLock {
+            val current = mutableState.value
+            mutableState.value = current.copy(
+                operations = current.operations - providerId,
+                errors = current.errors - providerId,
+            )
+        }
+    }
 
     private suspend fun mutate(
         providerId: String,

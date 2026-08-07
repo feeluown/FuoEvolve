@@ -41,6 +41,30 @@ class ProviderSessionRepositoryTest {
         assertEquals(ProviderSessionState().errors, repository.state.value.errors)
     }
 
+    @Test
+    fun externalAuthFailureSurfacesOnProviderPanel() = runTest {
+        val provider = RacingProviderRepository()
+        provider.allowRefreshToFinish.complete(Unit)
+        val repository = DefaultProviderSessionRepository(provider)
+        repository.updateProviders(listOf(PROVIDER))
+
+        repository.beginExternalAuth(PROVIDER.providerId)
+        assertEquals(
+            ProviderSessionOperation.Login,
+            repository.state.value.operations[PROVIDER.providerId],
+        )
+
+        repository.failExternalAuth(PROVIDER.providerId, "Google OAuth 授权失败：测试")
+        assertTrue(repository.state.value.operations.isEmpty())
+        assertEquals(
+            "Google OAuth 授权失败：测试",
+            repository.state.value.errors[PROVIDER.providerId],
+        )
+
+        repository.clearExternalAuth(PROVIDER.providerId)
+        assertTrue(repository.state.value.errors.isEmpty())
+    }
+
     private class RacingProviderRepository : ProviderMusicRepository {
         var isLoggedIn = false
         val refreshStarted = CompletableDeferred<Unit>()

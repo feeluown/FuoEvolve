@@ -632,14 +632,19 @@ fun ProviderLoginPanel(
             )
             val authFeedback = controller.message.takeIf { message ->
                 message.contains(provider.providerName) ||
-                    message.contains("Google OAuth") ||
+                    message.contains("Google", ignoreCase = true) ||
+                    message.contains("OAuth", ignoreCase = true) ||
+                    message.contains("授权") ||
                     message.contains("音源运行时尚未接入")
+            }?.takeUnless { feedback ->
+                // Prefer the dedicated authError banner when both carry the same failure text.
+                !authError.isNullOrBlank() && feedback == authError
             }
             authFeedback?.let { message ->
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (authState.isLoggedIn) {
+                    color = if (authState.isLoggedIn || message.contains("正在")) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.error
@@ -647,11 +652,18 @@ fun ProviderLoginPanel(
                 )
             }
             authError?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        text = message,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
             }
             if (authState.isLoggedIn) {
                 Button(

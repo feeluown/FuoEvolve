@@ -18,6 +18,7 @@ import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.array
 import org.feeluown.mobile.provider.core.asObject
+import org.feeluown.mobile.provider.core.cookieHeader
 import org.feeluown.mobile.provider.core.int
 import org.feeluown.mobile.provider.core.long
 import org.feeluown.mobile.provider.core.obj
@@ -27,6 +28,7 @@ import org.feeluown.mobile.provider.core.string
 import org.feeluown.mobile.provider.core.stringOrNull
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
 class YtMusicProvider(
     http: ProviderHttpClient,
@@ -41,9 +43,11 @@ class YtMusicProvider(
     features = FEATURES,
 ), KotlinMusicProvider {
     private var apiKey: String? = null
-    private var clientVersion: String = DEFAULT_CLIENT_VERSION
+    private var clientVersion: String = dynamicClientVersion()
+    private var visitorId: String? = null
     private var playerJsUrl: String? = null
     private var signatureDecipher: SignatureDecipher? = null
+    private var configLoaded: Boolean = false
 
     override suspend fun search(keyword: String): ProviderSearchResults {
         val root = innerTube("search", "{\"query\":${quote(keyword)}}")
@@ -158,31 +162,84 @@ class YtMusicProvider(
 
     private suspend fun innerTube(method: String, payload: String): kotlinx.serialization.json.JsonObject {
         ensureConfig()
+        // Match ytmusicapi / fuo_ytmusic: WEB_REMIX with hl=zh_CN and no unsupported gl=CN.
+        // YouTube Music rejects gl=CN with HTTP 400 INVALID_ARGUMENT on every InnerTube call.
         val body = if (payload.startsWith("{") && payload.endsWith("}")) {
-            "{\"context\":{\"client\":{\"clientName\":\"WEB_REMIX\",\"clientVersion\":\"$clientVersion\",\"hl\":\"zh-CN\",\"gl\":\"CN\"}},${payload.drop(1)}"
+            "{\"context\":{\"client\":{\"clientName\":\"WEB_REMIX\",\"clientVersion\":\"$clientVersion\",\"hl\":\"zh_CN\"},\"user\":{}},${payload.drop(1)}"
         } else payload
+        val credentials = currentCredentials()
+        val oauthBearer = credentials?.oauthAccessToken?.takeIf { it.isNotBlank() }
+        // ytmusicapi only appends the WEB InnerTube key for browser/cookie auth.
+        // Mixing ?key= (WEB project) with an OAuth Bearer from another Google client yields 400.
+        val query = buildString {
+            append("?alt=json")
+            if (oauthBearer == null) {
+                append("&key=")
+                append(apiKey.orEmpty().ifBlank { FALLBACK_API_KEY })
+            }
+        }
         return http.postJson(
             providerId = ID,
-            url = "$API_BASE/$method?key=${apiKey.orEmpty()}",
+            url = "$API_BASE/$method$query",
             json = body,
-            headers = authenticatedHeaders(mapOf("Origin" to "https://music.youtube.com", "Referer" to "https://music.youtube.com/")),
+            headers = ytMusicHeaders(),
             cacheKey = if (method == "search") "ytmusic:search:$payload" else null,
             cachePolicy = if (method == "search") ProviderCachePolicies.search else ProviderCachePolicies.none,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
     }
 
+    private suspend fun ytMusicHeaders(): Map<String, String> {
+        val stored = currentCredentials()
+        val origin = YTM_ORIGIN
+        val base = authenticatedHeaders(
+            mapOf(
+                "Accept" to "*/*",
+                "Origin" to origin,
+                "Referer" to "$origin/",
+            ),
+        ).toMutableMap()
+        visitorId?.takeIf { it.isNotBlank() }?.let { base["X-Goog-Visitor-Id"] = it }
+        val oauthBearer = stored?.oauthAccessToken?.takeIf { it.isNotBlank() }
+        if (oauthBearer != null) {
+            base["Authorization"] = "Bearer $oauthBearer"
+            base["X-Goog-Request-Time"] = (currentTimeMillis() / 1_000).toString()
+            return base
+        }
+        val cookie = cookieHeader(stored)
+        val sapisid = sapisidFromCookie(cookie)
+        if (!sapisid.isNullOrBlank()) {
+            // Prefer a fresh SAPISIDHASH (ytmusicapi) over a stale Authorization snapshot.
+            base["Authorization"] = sapisidHashAuthorization(sapisid, origin)
+        }
+        return base
+    }
+
     private suspend fun ensureConfig() {
-        if (!apiKey.isNullOrBlank()) return
-        val html = http.getText(ID, "https://music.youtube.com", authenticatedHeaders(), cacheKey = "ytmusic:landing", cachePolicy = ProviderCachePolicies.detail).value
+        if (configLoaded) return
+        val html = http.getText(
+            ID,
+            YTM_ORIGIN,
+            authenticatedHeaders(mapOf("Origin" to YTM_ORIGIN, "Referer" to "$YTM_ORIGIN/")),
+            cacheKey = "ytmusic:landing",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value
         apiKey = Regex("""["']?INNERTUBE_API_KEY["']?\s*[:=]\s*["']([^"']+)["']""").find(html)?.groupValues?.getOrNull(1)
             ?: Regex("""["']?INNERTUBE_API_KEY["']?\s*[:=]\s*([^&"'\s,}]+)""").find(html)?.groupValues?.getOrNull(1)
             ?: FALLBACK_API_KEY
-        clientVersion = Regex("INNERTUBE_CLIENT_VERSION\\\"?[:=]\\\"([^\\\"]+)").find(html)?.groupValues?.getOrNull(1)
-            ?: DEFAULT_CLIENT_VERSION
+        clientVersion = Regex("""["']?INNERTUBE_CLIENT_VERSION["']?\s*[:=]\s*["']([^"']+)["']""")
+            .find(html)?.groupValues?.getOrNull(1)
+            ?: dynamicClientVersion()
+        visitorId = Regex("""["']?VISITOR_DATA["']?\s*[:=]\s*["']([^"']+)["']""")
+            .find(html)?.groupValues?.getOrNull(1)
+            ?: Regex("""ytcfg\.set\s*\(\s*(\{.+?\})\s*\)\s*;""").find(html)?.groupValues?.getOrNull(1)
+                ?.let { blob ->
+                    Regex(""""VISITOR_DATA"\s*:\s*"([^"]+)"""").find(blob)?.groupValues?.getOrNull(1)
+                }
         playerJsUrl = Regex("\\\"jsUrl\\\":\\\"([^\\\"]+)").find(html)?.groupValues?.getOrNull(1)
             ?.replace("\\\\/", "/")
             ?: Regex("https://music\\.youtube\\.com/s/player/[^\\\"]+/player_ias\\.vflset/[^\\\"]+/base\\.js")
                 .find(html)?.value
+        configLoaded = true
     }
 
     private fun collectSearchItems(element: kotlinx.serialization.json.JsonElement, output: MutableList<org.feeluown.mobile.MusicTrack>) {
@@ -355,12 +412,13 @@ class YtMusicProvider(
 
     private fun quote(value: String): String = providerJson.encodeToString(kotlinx.serialization.json.JsonPrimitive.serializer(), kotlinx.serialization.json.JsonPrimitive(value))
 
-    private companion object {
+    companion object {
         const val ID = "ytmusic"
         const val NAME = "YouTube Music"
-        const val API_BASE = "https://music.youtube.com/youtubei/v1"
-        const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddxYq6X74dJoCTL-WEYFDNX30"
-        const val DEFAULT_CLIENT_VERSION = "1.20260801.01.00"
+        const val YTM_ORIGIN = "https://music.youtube.com"
+        const val API_BASE = "$YTM_ORIGIN/youtubei/v1"
+        // Same WEB InnerTube key used by ytmusicapi (note casing: Xya6, not xYq6).
+        const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,
@@ -379,5 +437,130 @@ class YtMusicProvider(
             ProviderFeature("ytmusic_toplists", ID, NAME, "排行榜", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
             ProviderFeature("ytmusic_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
         )
+
+        /** ytmusicapi: `1.` + UTC `YYYYMMDD` + `.01.00`. */
+        fun dynamicClientVersion(nowMillis: Long = currentTimeMillis()): String {
+            val (year, month, day) = utcYmd(nowMillis)
+            return "1.${year.toString().padStart(4, '0')}${month.toString().padStart(2, '0')}${day.toString().padStart(2, '0')}.01.00"
+        }
+
+        private fun utcYmd(epochMillis: Long): Triple<Int, Int, Int> {
+            val days = floorDiv(epochMillis, 86_400_000L)
+            // Civil date from days since Unix epoch (Howard Hinnant algorithm).
+            val z = days + 719_468L
+            val era = floorDiv(z, 146_097L)
+            val doe = (z - era * 146_097L).toInt()
+            val yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365
+            val y = (yoe.toLong() + era * 400L).toInt()
+            val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+            val mp = (5 * doy + 2) / 153
+            val day = doy - (153 * mp + 2) / 5 + 1
+            val month = mp + if (mp < 10) 3 else -9
+            val year = y + if (month <= 2) 1 else 0
+            return Triple(year, month, day)
+        }
+
+        private fun floorDiv(value: Long, divisor: Long): Long {
+            var result = value / divisor
+            if ((value xor divisor) < 0 && result * divisor != value) result -= 1
+            return result
+        }
+
+        fun sapisidFromCookie(cookie: String): String? {
+            if (cookie.isBlank()) return null
+            val parts = cookie.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+            val values = parts.mapNotNull { part ->
+                val index = part.indexOf('=')
+                if (index <= 0) null else part.substring(0, index).trim() to part.substring(index + 1).trim()
+            }.toMap()
+            return values["__Secure-3PAPISID"]
+                ?: values["SAPISID"]
+                ?: values["__Secure-1PAPISID"]
+        }
+
+        fun sapisidHashAuthorization(sapisid: String, origin: String, nowMillis: Long = currentTimeMillis()): String {
+            val timestamp = (nowMillis / 1_000).toString()
+            val digest = sha1Hex("$timestamp $sapisid $origin")
+            return "SAPISIDHASH ${timestamp}_$digest"
+        }
+
+        fun sha1Hex(value: String): String {
+            val bytes = sha1(value.encodeToByteArray())
+            val hex = CharArray(bytes.size * 2)
+            val digits = "0123456789abcdef"
+            bytes.forEachIndexed { index, byte ->
+                val number = byte.toInt() and 0xff
+                hex[index * 2] = digits[number ushr 4]
+                hex[index * 2 + 1] = digits[number and 0x0f]
+            }
+            return hex.concatToString()
+        }
+
+        // Minimal SHA-1 for SAPISIDHASH (no platform crypto dependency in commonMain).
+        fun sha1(message: ByteArray): ByteArray {
+            val h = intArrayOf(0x67452301, 0xEFCDAB89.toInt(), 0x98BADCFE.toInt(), 0x10325476, 0xC3D2E1F0.toInt())
+            val bitLength = message.size.toLong() * 8
+            val withOne = message + byteArrayOf(0x80.toByte())
+            val padding = ((56 - withOne.size % 64) + 64) % 64
+            val padded = withOne + ByteArray(padding) + byteArrayOf(
+                (bitLength ushr 56).toByte(),
+                (bitLength ushr 48).toByte(),
+                (bitLength ushr 40).toByte(),
+                (bitLength ushr 32).toByte(),
+                (bitLength ushr 24).toByte(),
+                (bitLength ushr 16).toByte(),
+                (bitLength ushr 8).toByte(),
+                bitLength.toByte(),
+            )
+            var offset = 0
+            while (offset < padded.size) {
+                val w = IntArray(80)
+                for (i in 0 until 16) {
+                    val j = offset + i * 4
+                    w[i] = ((padded[j].toInt() and 0xff) shl 24) or
+                        ((padded[j + 1].toInt() and 0xff) shl 16) or
+                        ((padded[j + 2].toInt() and 0xff) shl 8) or
+                        (padded[j + 3].toInt() and 0xff)
+                }
+                for (i in 16 until 80) {
+                    w[i] = rotateLeft(w[i - 3] xor w[i - 8] xor w[i - 14] xor w[i - 16], 1)
+                }
+                var a = h[0]
+                var b = h[1]
+                var c = h[2]
+                var d = h[3]
+                var e = h[4]
+                for (i in 0 until 80) {
+                    val (f, k) = when {
+                        i < 20 -> ((b and c) or (b.inv() and d)) to 0x5A827999
+                        i < 40 -> (b xor c xor d) to 0x6ED9EBA1
+                        i < 60 -> ((b and c) or (b and d) or (c and d)) to 0x8F1BBCDC.toInt()
+                        else -> (b xor c xor d) to 0xCA62C1D6.toInt()
+                    }
+                    val temp = rotateLeft(a, 5) + f + e + k + w[i]
+                    e = d
+                    d = c
+                    c = rotateLeft(b, 30)
+                    b = a
+                    a = temp
+                }
+                h[0] += a
+                h[1] += b
+                h[2] += c
+                h[3] += d
+                h[4] += e
+                offset += 64
+            }
+            val out = ByteArray(20)
+            for (i in 0 until 5) {
+                out[i * 4] = (h[i] ushr 24).toByte()
+                out[i * 4 + 1] = (h[i] ushr 16).toByte()
+                out[i * 4 + 2] = (h[i] ushr 8).toByte()
+                out[i * 4 + 3] = h[i].toByte()
+            }
+            return out
+        }
+
+        private fun rotateLeft(value: Int, bits: Int): Int = (value shl bits) or (value ushr (32 - bits))
     }
 }

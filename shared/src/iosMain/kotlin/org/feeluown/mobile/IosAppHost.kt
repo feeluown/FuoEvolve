@@ -190,21 +190,32 @@ private class IosAppContainer(
     fun startProviderOAuthLogin(provider: ProviderInfo) {
         val scopes = provider.oauthConfig?.scopes.orEmpty()
         if (scopes.isEmpty()) {
-            controller.showMessage("未配置 Google OAuth scope")
+            controller.failProviderOAuthLogin(provider.providerId, "未配置 Google OAuth scope")
             return
         }
+        controller.beginProviderOAuthLogin(provider.providerId)
         val scopesJson = scopes.joinToString(prefix = "[", postfix = "]") { scope ->
             "\"${scope.replace("\\", "\\\\").replace("\"", "\\\"")}\""
         }
-        oauthOutput.authorize(scopesJson) { accessToken ->
-            if (accessToken.isNullOrBlank()) {
-                controller.showMessage("Google OAuth 授权失败或已取消")
-            } else {
-                controller.loginYtmusicWithOAuth(
-                    accessToken = accessToken,
-                    grantedScopes = scopes.toSet(),
-                )
+        runCatching {
+            oauthOutput.authorize(scopesJson) { accessToken ->
+                if (accessToken.isNullOrBlank()) {
+                    controller.failProviderOAuthLogin(
+                        provider.providerId,
+                        "Google OAuth 授权失败或已取消",
+                    )
+                } else {
+                    controller.loginYtmusicWithOAuth(
+                        accessToken = accessToken,
+                        grantedScopes = scopes.toSet(),
+                    )
+                }
             }
+        }.onFailure { throwable ->
+            controller.failProviderOAuthLogin(
+                provider.providerId,
+                "无法启动 Google OAuth：${throwable.message.orEmpty().ifBlank { throwable::class.simpleName.orEmpty() }}",
+            )
         }
     }
 
