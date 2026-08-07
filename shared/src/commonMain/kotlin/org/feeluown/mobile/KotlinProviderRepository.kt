@@ -143,22 +143,21 @@ class KotlinProviderRepository : ProviderMusicRepository {
 
         val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
             .flatMap { provider -> provider.search("${mediaTrack.title} ${mediaTrack.artists}").tracks }
-            .mapNotNull { candidate ->
-                val score = replacementScore(mediaTrack, candidate)
-                if (score < smartReplacementMinScore) return@mapNotNull null
-                val provider = providerMap[candidate.source] ?: return@mapNotNull null
-                val payload = provider.resolve(candidate, quality) ?: return@mapNotNull null
-                score to annotateSmartReplacement(
-                    payload = payload,
-                    original = mediaTrack,
-                    candidate = candidate,
-                    score = score,
-                    useOriginalMetadata = smartReplacementUseOriginalMetadata,
-                    useOriginalLyrics = smartReplacementUseOriginalLyrics,
-                )
-            }
-            .maxByOrNull { it.first }
-        return candidates?.second ?: error("media unavailable and no smart replacement: ${mediaTrack.id}")
+        val selected = selectReplacementCandidate(
+            candidates = candidates,
+            minScore = smartReplacementMinScore,
+            scoreOf = { candidate -> replacementScore(mediaTrack, candidate) },
+            resolve = { candidate -> providerMap[candidate.source]?.resolve(candidate, quality) },
+        ) ?: error("media unavailable and no smart replacement: ${mediaTrack.id}")
+        val (candidate, score, payload) = selected
+        return annotateSmartReplacement(
+            payload = payload,
+            original = mediaTrack,
+            candidate = candidate,
+            score = score,
+            useOriginalMetadata = smartReplacementUseOriginalMetadata,
+            useOriginalLyrics = smartReplacementUseOriginalLyrics,
+        )
     }
 
     private suspend fun resolveKnownReplacement(
@@ -450,15 +449,18 @@ class KotlinProviderRepository : ProviderMusicRepository {
     }
 
     private fun replacementScore(origin: MusicTrack, candidate: MusicTrack): Double {
-        val originTitle = normalize(origin.title)
-        val candidateTitle = normalize(candidate.title)
+        if (candidate.source == BILIBILI_PROVIDER_ID) {
+            return bilibiliReplacementScore(origin, candidate)
+        }
+        val originTitle = normalizeReplacementText(origin.title)
+        val candidateTitle = normalizeReplacementText(candidate.title)
         val titleScore = when {
             originTitle == candidateTitle -> 1.0
             originTitle.contains(candidateTitle) || candidateTitle.contains(originTitle) -> 0.8
             else -> tokenSimilarity(originTitle, candidateTitle)
         }
-        val originArtists = normalize(origin.artists)
-        val candidateArtists = normalize(candidate.artists)
+        val originArtists = normalizeReplacementText(origin.artists)
+        val candidateArtists = normalizeReplacementText(candidate.artists)
         val artistScore = when {
             originArtists == candidateArtists -> 1.0
             originArtists.contains(candidateArtists) || candidateArtists.contains(originArtists) -> 0.8
@@ -471,8 +473,6 @@ class KotlinProviderRepository : ProviderMusicRepository {
         }
         return titleScore * 0.55 + artistScore * 0.35 + durationScore * 0.10
     }
-
-    private fun normalize(value: String): String = value.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
 
     private fun tokenSimilarity(left: String, right: String): Double {
         if (left.isBlank() || right.isBlank()) return 0.0
@@ -487,6 +487,78 @@ class KotlinProviderRepository : ProviderMusicRepository {
         "ytmusic" to YtMusicProvider(http, credentials),
     )
 }
+
+internal suspend fun <T> selectReplacementCandidate(
+    candidates: List<MusicTrack>,
+    minScore: Double,
+    scoreOf: (MusicTrack) -> Double,
+    resolve: suspend (MusicTrack) -> T?,
+): Triple<MusicTrack, Double, T>? {
+    val ranked = candidates
+        .map { candidate -> candidate to scoreOf(candidate) }
+        .filter { (_, score) -> score >= minScore }
+        .sortedByDescending { (_, score) -> score }
+    for ((candidate, score) in ranked) {
+        val resolved = resolve(candidate) ?: continue
+        return Triple(candidate, score, resolved)
+    }
+    return null
+}
+
+internal fun bilibiliReplacementScore(origin: MusicTrack, candidate: MusicTrack): Double {
+    val originTitle = normalizeReplacementText(origin.title)
+    val candidateTitle = normalizeReplacementText(candidate.title)
+    if (originTitle.isBlank() || candidateTitle.isBlank()) return 0.0
+
+    var score = 0.0
+    if (originTitle in candidateTitle) {
+        score += 0.40
+    }
+    if (replacementArtistMatchTexts(origin.artists).any { artist -> artist in candidateTitle }) {
+        score += 0.20
+    }
+    if (BILIBILI_REPLACEMENT_BONUS_KEYWORDS.any { keyword -> keyword in candidateTitle }) {
+        score += 0.10
+    }
+    if (
+        BILIBILI_REPLACEMENT_PENALTY_KEYWORDS.none { keyword -> keyword in originTitle } &&
+        BILIBILI_REPLACEMENT_PENALTY_KEYWORDS.any { keyword -> keyword in candidateTitle }
+    ) {
+        score -= 0.20
+    }
+    return applyReplacementDurationPenalty(score, origin, candidate)
+}
+
+private fun applyReplacementDurationPenalty(score: Double, origin: MusicTrack, candidate: MusicTrack): Double {
+    val originDuration = origin.durationMs
+    val candidateDuration = candidate.durationMs
+    if (originDuration != null && originDuration > 0 && candidateDuration != null && candidateDuration > 0) {
+        val diffRatio = kotlin.math.abs(originDuration - candidateDuration).toDouble() / originDuration.toDouble()
+        return (score - minOf(diffRatio * MAX_REPLACEMENT_DURATION_PENALTY, MAX_REPLACEMENT_DURATION_PENALTY))
+            .coerceAtLeast(0.0)
+    }
+    return score.coerceAtLeast(0.0)
+}
+
+private fun normalizeReplacementText(value: String): String =
+    value.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
+
+private fun replacementArtistMatchTexts(value: String): List<String> {
+    var parts = listOf(value)
+    REPLACEMENT_ARTIST_SEPARATORS.forEach { separator ->
+        parts = parts.flatMap { part -> part.split(separator) }
+    }
+    return parts
+        .map { part -> normalizeReplacementText(part.trim()) }
+        .filter { it.isNotBlank() }
+        .distinct()
+}
+
+private const val BILIBILI_PROVIDER_ID = "bilibili"
+private val BILIBILI_REPLACEMENT_BONUS_KEYWORDS = listOf("mv", "hires")
+private val BILIBILI_REPLACEMENT_PENALTY_KEYWORDS = listOf("cover", "翻唱", "remix")
+private val REPLACEMENT_ARTIST_SEPARATORS = listOf(" / ", "/", "、", ",", "，", ";", "；", "&", "+", "＋")
+private const val MAX_REPLACEMENT_DURATION_PENALTY = 0.30
 
 fun createKotlinProviderRepository(
     credentials: ProviderCredentialStore,
