@@ -1685,12 +1685,42 @@ private data class RawLyricLine(
     val order: Int,
 )
 
+const val LYRIC_TRANSLATION_MARKER = "\n__FUO_LYRIC_TRANSLATION__\n"
+
+fun composeLyricsWithTranslation(main: String, translation: String?): String {
+    val trimmedMain = main.trimEnd()
+    val trimmedTranslation = translation?.trim()?.takeIf { it.isNotBlank() } ?: return trimmedMain
+    return trimmedMain + LYRIC_TRANSLATION_MARKER + trimmedTranslation
+}
+
 fun parseLyrics(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
-    return if (raw.lineSequence().any { yrcLineHeaderRegex.containsMatchIn(it.trim()) }) {
-        parseYrc(raw)
+    val parts = raw.split(LYRIC_TRANSLATION_MARKER, limit = 2)
+    val main = parts[0]
+    val translationRaw = parts.getOrNull(1)
+    val lines = if (main.lineSequence().any { yrcLineHeaderRegex.containsMatchIn(it.trim()) }) {
+        parseYrc(main)
     } else {
-        parseLrc(raw)
+        parseLrc(main)
+    }
+    return attachLyricTranslations(lines, translationRaw)
+}
+
+fun attachLyricTranslations(lines: List<LyricLine>, translationRaw: String?): List<LyricLine> {
+    if (translationRaw.isNullOrBlank() || lines.isEmpty()) return lines
+    val translationLines = parseLrc(translationRaw).filter { it.timeMs != Long.MAX_VALUE }
+    if (translationLines.isEmpty()) return lines
+    val byTime = translationLines
+        .groupBy { it.timeMs }
+        .mapValues { (_, value) -> value.first().text }
+    return lines.map { line ->
+        if (line.timeMs == Long.MAX_VALUE || !line.translation.isNullOrBlank()) return@map line
+        val exact = byTime[line.timeMs]
+        val nearest = translationLines
+            .minByOrNull { kotlin.math.abs(it.timeMs - line.timeMs) }
+            ?.takeIf { kotlin.math.abs(it.timeMs - line.timeMs) <= 50 }
+            ?.text
+        line.copy(translation = exact ?: nearest)
     }
 }
 

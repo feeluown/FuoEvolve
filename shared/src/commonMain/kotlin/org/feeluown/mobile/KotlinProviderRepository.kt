@@ -115,60 +115,108 @@ class KotlinProviderRepository : ProviderMusicRepository {
         smartReplacementUseOriginalLyrics: Boolean,
     ): PlaybackPayload {
         initialize()
-        val originalProviderId = track.source.ifBlank { splitResourceId(track.providerId ?: track.id).first }
-        val originalProvider = providerMap[originalProviderId]
         val quality = if (isCellularConnection()) {
             cellularAudioQualityPolicy.policy
         } else {
             wifiAudioQualityPolicy.policy
         }
-        val direct = originalProvider?.resolve(track, quality)
+        // Persisted smart-replaced tracks keep original ids but may flip `source` to the
+        // replacement provider. Prefer the known replacement, then the original identity.
+        if (track.isSmartReplacement) {
+            resolveKnownReplacement(
+                track = track,
+                quality = quality,
+                useOriginalMetadata = smartReplacementUseOriginalMetadata,
+                useOriginalLyrics = smartReplacementUseOriginalLyrics,
+            )?.let { return it }
+        }
+        val mediaTrack = track.asOriginalMediaTrack()
+        val originalProviderId = mediaTrack.source.ifBlank {
+            splitResourceId(mediaTrack.providerId ?: mediaTrack.id).first
+        }
+        val originalProvider = providerMap[originalProviderId]
+        val direct = originalProvider?.resolve(mediaTrack, quality)
         if (direct != null) return direct
         if (unavailablePolicy == UnavailablePlaybackPolicy.Skip) {
-            error("media unavailable: ${track.id}")
+            error("media unavailable: ${mediaTrack.id}")
         }
 
         val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
-            .flatMap { provider -> provider.search("${track.title} ${track.artists}").tracks }
+            .flatMap { provider -> provider.search("${mediaTrack.title} ${mediaTrack.artists}").tracks }
             .mapNotNull { candidate ->
-                val score = replacementScore(track, candidate)
+                val score = replacementScore(mediaTrack, candidate)
                 if (score < smartReplacementMinScore) return@mapNotNull null
                 val provider = providerMap[candidate.source] ?: return@mapNotNull null
                 val payload = provider.resolve(candidate, quality) ?: return@mapNotNull null
-                score to payload.copy(
-                    isSmartReplacement = true,
-                    originalId = track.id,
-                    originalTitle = track.title,
-                    originalArtists = track.artists,
-                    originalAlbum = track.album,
-                    originalSource = track.source,
-                    originalProviderName = track.providerName,
-                    originalCoverUrl = track.coverUrl,
-                    replacementId = candidate.id,
-                    replacementTitle = candidate.title,
-                    replacementArtists = candidate.artists,
-                    replacementAlbum = candidate.album,
-                    replacementSource = candidate.source,
-                    replacementProviderName = candidate.providerName,
-                    replacementCoverUrl = candidate.coverUrl,
-                    replacementStrategy = "title_artist_duration",
-                    replacementScore = score,
-                    title = if (smartReplacementUseOriginalMetadata) track.title else candidate.title,
-                    artists = if (smartReplacementUseOriginalMetadata) track.artists else candidate.artists,
-                    album = if (smartReplacementUseOriginalMetadata) track.album else candidate.album,
-                    coverUrl = if (smartReplacementUseOriginalMetadata) track.coverUrl else candidate.coverUrl,
-                    // Lyrics are loaded asynchronously after playback starts.
-                    lyrics = if (smartReplacementUseOriginalLyrics) track.lyrics else payload.lyrics,
+                score to annotateSmartReplacement(
+                    payload = payload,
+                    original = mediaTrack,
+                    candidate = candidate,
+                    score = score,
+                    useOriginalMetadata = smartReplacementUseOriginalMetadata,
+                    useOriginalLyrics = smartReplacementUseOriginalLyrics,
                 )
             }
             .maxByOrNull { it.first }
-        return candidates?.second ?: error("media unavailable and no smart replacement: ${track.id}")
+        return candidates?.second ?: error("media unavailable and no smart replacement: ${mediaTrack.id}")
     }
+
+    private suspend fun resolveKnownReplacement(
+        track: MusicTrack,
+        quality: String,
+        useOriginalMetadata: Boolean,
+        useOriginalLyrics: Boolean,
+    ): PlaybackPayload? {
+        val replacementTrack = track.asReplacementMediaTrack() ?: return null
+        val provider = providerMap[replacementTrack.source] ?: return null
+        val payload = provider.resolve(replacementTrack, quality) ?: return null
+        val original = track.asOriginalMediaTrack()
+        return annotateSmartReplacement(
+            payload = payload,
+            original = original,
+            candidate = replacementTrack,
+            score = track.replacementScore ?: 1.0,
+            useOriginalMetadata = useOriginalMetadata,
+            useOriginalLyrics = useOriginalLyrics,
+        )
+    }
+
+    private fun annotateSmartReplacement(
+        payload: PlaybackPayload,
+        original: MusicTrack,
+        candidate: MusicTrack,
+        score: Double,
+        useOriginalMetadata: Boolean,
+        useOriginalLyrics: Boolean,
+    ): PlaybackPayload = payload.copy(
+        isSmartReplacement = true,
+        originalId = original.id,
+        originalTitle = original.title,
+        originalArtists = original.artists,
+        originalAlbum = original.album,
+        originalSource = original.source,
+        originalProviderName = original.providerName,
+        originalCoverUrl = original.coverUrl,
+        replacementId = candidate.id,
+        replacementTitle = candidate.title,
+        replacementArtists = candidate.artists,
+        replacementAlbum = candidate.album,
+        replacementSource = candidate.source,
+        replacementProviderName = candidate.providerName,
+        replacementCoverUrl = candidate.coverUrl,
+        replacementStrategy = "title_artist_duration",
+        replacementScore = score,
+        title = if (useOriginalMetadata) original.title else candidate.title,
+        artists = if (useOriginalMetadata) original.artists else candidate.artists,
+        album = if (useOriginalMetadata) original.album else candidate.album,
+        coverUrl = if (useOriginalMetadata) original.coverUrl else candidate.coverUrl,
+        lyrics = if (useOriginalLyrics) original.lyrics else payload.lyrics,
+    )
 
     override suspend fun lyrics(track: MusicTrack): String? {
         initialize()
         track.lyrics?.takeIf { it.isNotBlank() }?.let { return it }
-        val lyricTrack = lyricSourceTrack(track)
+        val lyricTrack = track.asOriginalMediaTrack()
         val providerId = lyricTrack.source.ifBlank {
             splitResourceId(lyricTrack.providerId ?: lyricTrack.id).first
         }
@@ -314,22 +362,72 @@ class KotlinProviderRepository : ProviderMusicRepository {
         return ids.filter { it != originalProviderId }.mapNotNull { providerMap[it] }
     }
 
-    private fun lyricSourceTrack(track: MusicTrack): MusicTrack {
-        if (!track.isSmartReplacement) return track
-        val originalId = track.originalId?.takeIf { it.isNotBlank() } ?: return track
-        val originalSource = track.originalSource?.takeIf { it.isNotBlank() }
-            ?: splitResourceId(originalId).first
-        return track.copy(
+    private fun MusicTrack.asOriginalMediaTrack(): MusicTrack {
+        if (!isSmartReplacement) return this
+        val originalId = originalId?.takeIf { it.isNotBlank() } ?: id
+        val originalSource = originalSource?.takeIf { it.isNotBlank() }
+            ?: splitResourceId(originalId).first.takeIf { it.isNotBlank() }
+            ?: source
+        return copy(
             id = originalId,
             providerId = originalId,
             source = originalSource,
-            providerName = track.originalProviderName ?: track.providerName,
-            title = track.originalTitle ?: track.title,
-            artists = track.originalArtists ?: track.artists,
-            album = track.originalAlbum ?: track.album,
-            coverUrl = track.originalCoverUrl ?: track.coverUrl,
+            providerName = originalProviderName ?: providerName,
+            title = originalTitle ?: title,
+            artists = originalArtists ?: artists,
+            album = originalAlbum ?: album,
+            coverUrl = originalCoverUrl ?: coverUrl,
             isSmartReplacement = false,
-            lyrics = null,
+            originalId = null,
+            originalTitle = null,
+            originalArtists = null,
+            originalAlbum = null,
+            originalSource = null,
+            originalProviderName = null,
+            originalCoverUrl = null,
+            replacementId = null,
+            replacementTitle = null,
+            replacementArtists = null,
+            replacementAlbum = null,
+            replacementSource = null,
+            replacementProviderName = null,
+            replacementCoverUrl = null,
+            replacementStrategy = null,
+            replacementScore = null,
+        )
+    }
+
+    private fun MusicTrack.asReplacementMediaTrack(): MusicTrack? {
+        val replacementId = replacementId?.takeIf { it.isNotBlank() } ?: return null
+        val replacementSource = replacementSource?.takeIf { it.isNotBlank() }
+            ?: splitResourceId(replacementId).first.takeIf { it.isNotBlank() }
+            ?: return null
+        return copy(
+            id = replacementId,
+            providerId = replacementId,
+            source = replacementSource,
+            providerName = replacementProviderName ?: providerName,
+            title = replacementTitle ?: title,
+            artists = replacementArtists ?: artists,
+            album = replacementAlbum ?: album,
+            coverUrl = replacementCoverUrl ?: coverUrl,
+            isSmartReplacement = false,
+            originalId = null,
+            originalTitle = null,
+            originalArtists = null,
+            originalAlbum = null,
+            originalSource = null,
+            originalProviderName = null,
+            originalCoverUrl = null,
+            replacementId = null,
+            replacementTitle = null,
+            replacementArtists = null,
+            replacementAlbum = null,
+            replacementSource = null,
+            replacementProviderName = null,
+            replacementCoverUrl = null,
+            replacementStrategy = null,
+            replacementScore = null,
         )
     }
 

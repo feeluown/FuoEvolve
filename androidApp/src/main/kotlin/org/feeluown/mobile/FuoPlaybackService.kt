@@ -380,10 +380,23 @@ class FuoPlaybackService : MediaSessionService() {
             title = if (parts.isEmpty()) payload.title.ifBlank { request.track.title } else request.track.title,
             artists = payload.artists.ifBlank { request.track.artists },
             album = payload.album.ifBlank { request.track.album },
-            source = payload.source.ifBlank { request.track.source },
+            source = if (payload.isSmartReplacement) {
+                payload.originalSource?.takeIf { it.isNotBlank() } ?: request.track.source
+            } else {
+                payload.source.ifBlank { request.track.source }
+            },
             coverUrl = payload.coverUrl ?: request.track.coverUrl,
             durationMs = if (parts.isEmpty()) payload.durationMs ?: request.track.durationMs else request.track.durationMs,
-            providerName = payload.providerName ?: request.track.providerName,
+            providerId = if (payload.isSmartReplacement) {
+                payload.originalId ?: request.track.providerId
+            } else {
+                request.track.providerId
+            },
+            providerName = if (payload.isSmartReplacement) {
+                payload.originalProviderName ?: request.track.providerName
+            } else {
+                payload.providerName ?: request.track.providerName
+            },
             isSmartReplacement = payload.isSmartReplacement,
             originalId = payload.originalId,
             originalTitle = payload.originalTitle,

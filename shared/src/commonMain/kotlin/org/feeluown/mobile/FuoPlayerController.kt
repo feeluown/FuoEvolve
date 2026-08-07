@@ -3363,10 +3363,9 @@ class FuoPlayerController(
             PlayerStatus.Paused -> {
                 if (playbackState.currentTrack != null) playbackEngine.resume()
             }
-            PlayerStatus.Idle, PlayerStatus.Ended -> {
+            PlayerStatus.Idle, PlayerStatus.Ended, PlayerStatus.Loading, PlayerStatus.Error -> {
                 (currentQueueTrack() ?: playbackState.currentTrack)?.let(::startPlayback)
             }
-            else -> Unit
         }
     }
 
@@ -4015,10 +4014,23 @@ class FuoPlayerController(
                         title = if (isMultipartPlayback) playbackTrack.title else payload.title.ifBlank { playbackTrack.title },
                         artists = payload.artists.ifBlank { playbackTrack.artists },
                         album = payload.album.ifBlank { playbackTrack.album },
-                        source = payload.source.ifBlank { playbackTrack.source },
-                        coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
-                        durationMs = if (isMultipartPlayback) playbackTrack.durationMs else payload.durationMs ?: playbackTrack.durationMs,
-                        providerName = payload.providerName ?: playbackTrack.providerName,
+                    source = if (payload.isSmartReplacement) {
+                        payload.originalSource?.takeIf { it.isNotBlank() } ?: playbackTrack.source
+                    } else {
+                        payload.source.ifBlank { playbackTrack.source }
+                    },
+                    coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
+                    durationMs = if (isMultipartPlayback) playbackTrack.durationMs else payload.durationMs ?: playbackTrack.durationMs,
+                    providerName = if (payload.isSmartReplacement) {
+                        payload.originalProviderName ?: playbackTrack.providerName
+                    } else {
+                        payload.providerName ?: playbackTrack.providerName
+                    },
+                    providerId = if (payload.isSmartReplacement) {
+                        payload.originalId ?: playbackTrack.providerId
+                    } else {
+                        playbackTrack.providerId
+                    },
                         isSmartReplacement = payload.isSmartReplacement,
                         originalId = payload.originalId,
                         originalTitle = payload.originalTitle,

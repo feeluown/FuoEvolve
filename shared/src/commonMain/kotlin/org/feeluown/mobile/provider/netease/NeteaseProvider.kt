@@ -614,11 +614,18 @@ class NeteaseProvider(
                 ),
             ),
             neteaseAuthenticatedHeaders(),
-            cacheKey = "netease:lyric-yrc:$identifier",
+            cacheKey = "netease:lyric-yrc-tr:$identifier",
             cachePolicy = ProviderCachePolicies.lyric,
         ).value.let { parseNeteaseResponse(it) }
-        root.obj("yrc")?.stringOrNull("lyric")
-            ?: root.obj("lrc")?.stringOrNull("lyric")
+        val yrc = root.obj("yrc")?.stringOrNull("lyric")
+        val lrc = root.obj("lrc")?.stringOrNull("lyric")
+        val main = yrc ?: lrc ?: return@runCatching null
+        val translation = when {
+            yrc != null -> root.obj("ytlrc")?.stringOrNull("lyric")
+                ?: root.obj("tlyric")?.stringOrNull("lyric")
+            else -> root.obj("tlyric")?.stringOrNull("lyric")
+        }
+        org.feeluown.mobile.composeLyricsWithTranslation(main, translation)
     }.getOrNull()
 
     private suspend fun currentUserId(): String? = runCatching { requestCurrentUserId() }.getOrNull()

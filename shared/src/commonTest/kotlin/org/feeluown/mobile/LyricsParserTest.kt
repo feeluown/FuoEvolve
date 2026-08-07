@@ -78,6 +78,43 @@ class LyricsParserTest {
     }
 
     @Test
+    fun parseLyricsAttachesYtlrcTranslationToYrcLines() {
+        val raw = composeLyricsWithTranslation(
+            """
+            [11820,2220](11820,120,0)The (11940,420,0)club
+            [14040,1860](14040,180,0)So (14220,150,0)the
+            """.trimIndent(),
+            """
+            [00:11.820]这俱乐部
+            [00:14.040]所以我们
+            """.trimIndent(),
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals(2, lines.size)
+        assertEquals("The club", lines[0].text)
+        assertEquals("这俱乐部", lines[0].translation)
+        assertEquals(2, lines[0].words?.size)
+        assertEquals("So the", lines[1].text)
+        assertEquals("所以我们", lines[1].translation)
+    }
+
+    @Test
+    fun parseLyricsAttachesTlyricTranslationToLrcLines() {
+        val raw = composeLyricsWithTranslation(
+            "[00:11.82]The club isn't the best place",
+            "[00:11.82]这俱乐部不是个能找到安慰的地方",
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals("The club isn't the best place", lines.single().text)
+        assertEquals("这俱乐部不是个能找到安慰的地方", lines.single().translation)
+        assertNull(lines.single().words)
+    }
+
+    @Test
     fun karaokeFillProgressUsesWordWidthsAndTimeline() {
         val words = listOf(
             LyricWord(1_000, 1_000, "逐"),
