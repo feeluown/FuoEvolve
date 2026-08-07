@@ -26,7 +26,13 @@ fun gitOutput(vararg args: String): String? = runCatching {
 }.getOrNull()
 val gitVersionName = gitOutput("describe", "--tags", "--always", "--dirty")
     ?: "0.1.0"
-val gitVersionCode = gitOutput("rev-list", "--count", "HEAD")
+// versionCode tracks master commit count at the branch point so feature-branch
+// commits do not bump it (avoids install conflicts across branches).
+val gitVersionCodeBase = sequenceOf("master", "origin/master")
+    .mapNotNull { ref -> gitOutput("merge-base", "HEAD", ref) }
+    .firstOrNull()
+    ?: "HEAD"
+val gitVersionCode = gitOutput("rev-list", "--count", gitVersionCodeBase)
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
     ?: 1
