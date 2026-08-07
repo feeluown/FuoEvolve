@@ -651,8 +651,7 @@ fun PlayerInfoTags(
 ) {
     var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
     var showAudioFormatInfo by remember(track?.id) { mutableStateOf(false) }
-    var showAudioDecoderInfo by remember(track?.id) { mutableStateOf(false) }
-    val canShowAudioFormatInfo = audioFormatInfo?.hasDisplayableValue() == true
+    val canShowAudioInfo = audioFormatInfo?.hasDisplayableValue() == true || audioDecoderInfo != null
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -670,13 +669,7 @@ fun PlayerInfoTags(
         audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(
                 text = it.uppercase(),
-                onClick = if (canShowAudioFormatInfo) ({ showAudioFormatInfo = true }) else null,
-            )
-        }
-        audioDecoderInfo?.let { decoderInfo ->
-            InfoTag(
-                text = if (decoderInfo.type == AudioDecoderType.Software) "SW" else "HW",
-                onClick = { showAudioDecoderInfo = true },
+                onClick = if (canShowAudioInfo) ({ showAudioFormatInfo = true }) else null,
             )
         }
     }
@@ -692,32 +685,18 @@ fun PlayerInfoTags(
     if (showAudioFormatInfo) {
         AudioFormatInfoDialog(
             info = audioFormatInfo,
+            decoderInfo = audioDecoderInfo,
             onDismiss = { showAudioFormatInfo = false },
-        )
-    }
-    audioDecoderInfo?.let { decoderInfo ->
-        if (!showAudioDecoderInfo) return@let
-        AlertDialog(
-            onDismissRequest = { showAudioDecoderInfo = false },
-            title = { Text("音频解码") },
-            text = {
-                Text(
-                    text = "当前音频正在使用${
-                        if (decoderInfo.type == AudioDecoderType.Software) "软件解码" else "硬件解码"
-                    }\n解码器：${decoderInfo.name}",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showAudioDecoderInfo = false }) {
-                    Text("知道了")
-                }
-            },
         )
     }
 }
 
 @Composable
-fun AudioFormatInfoDialog(info: AudioFormatInfo?, onDismiss: () -> Unit) {
+fun AudioFormatInfoDialog(
+    info: AudioFormatInfo?,
+    decoderInfo: AudioDecoderInfo? = null,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("音频信息") },
@@ -727,6 +706,15 @@ fun AudioFormatInfoDialog(info: AudioFormatInfo?, onDismiss: () -> Unit) {
                 info?.codec?.takeIf { it.isNotBlank() }?.let { ReplacementInfoLine("编码", it) }
                 formatAudioBitrate(info?.averageBitrate)?.let { ReplacementInfoLine("平均比特率", it) }
                 formatAudioBitrate(info?.peakBitrate)?.let { ReplacementInfoLine("峰值比特率", it) }
+                decoderInfo?.let { decoder ->
+                    ReplacementInfoLine(
+                        "解码方式",
+                        if (decoder.type == AudioDecoderType.Software) "软件解码" else "硬件解码",
+                    )
+                    decoder.name.takeIf { it.isNotBlank() }?.let {
+                        ReplacementInfoLine("解码器", it)
+                    }
+                }
             }
         },
         confirmButton = {
