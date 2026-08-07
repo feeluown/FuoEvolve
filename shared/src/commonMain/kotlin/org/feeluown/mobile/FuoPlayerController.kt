@@ -106,6 +106,7 @@ class FuoPlayerController(
     private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository,
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val audioRecognitionRepository: AudioRecognitionRepository = UnsupportedAudioRecognitionRepository,
+    private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant = NoOpOAuthDeviceCodeAssistant,
     private val scope: CoroutineScope,
 ) {
     var isSettingsLoaded by mutableStateOf(false)
@@ -1361,9 +1362,11 @@ class FuoPlayerController(
                     userCode = deviceAuth.userCode,
                     verificationUrl = deviceAuth.verificationUrl,
                     verificationUrlWithCode = deviceAuth.verificationUrlWithCode,
-                    statusMessage = "请在浏览器中完成授权",
+                    statusMessage = "请在浏览器中输入下方验证码完成授权",
+                    browserOpened = false,
                 )
-                message = "请在浏览器完成授权：${deviceAuth.userCode}"
+                oauthDeviceCodeAssistant.showUserCodeNotification(deviceAuth.userCode)
+                message = "验证码 ${deviceAuth.userCode}（已发送通知，可点击复制）"
                 val token = withTimeout(deviceAuth.expiresInSeconds.coerceAtLeast(1) * 1_000L) {
                     var intervalSeconds = deviceAuth.intervalSeconds.coerceAtLeast(1)
                     while (true) {
@@ -1400,7 +1403,7 @@ class FuoPlayerController(
                     clientSecret = clientSecret,
                 )
             }.onSuccess {
-                ytmusicOAuthFlow = null
+                clearYtmusicOAuthUi()
                 message = if (it.isLoggedIn) {
                     "${it.providerName} 已通过 Google OAuth 登录"
                 } else {
@@ -1413,26 +1416,44 @@ class FuoPlayerController(
                 }
             }.onFailure { error ->
                 if (error is TimeoutCancellationException) {
-                    ytmusicOAuthFlow = null
+                    clearYtmusicOAuthUi()
                     message = "Google OAuth 授权超时，请重试"
                     return@launch
                 }
                 if (error is CancellationException) {
-                    ytmusicOAuthFlow = null
+                    clearYtmusicOAuthUi()
                     message = "已取消 Google OAuth 登录"
                     return@launch
                 }
-                ytmusicOAuthFlow = null
+                clearYtmusicOAuthUi()
                 setError(error)
             }
             ytmusicOAuthJob = null
         }
     }
 
+    fun markYtmusicOAuthBrowserOpened() {
+        ytmusicOAuthFlow = ytmusicOAuthFlow?.copy(
+            browserOpened = true,
+            statusMessage = "请在浏览器中输入验证码完成授权",
+        )
+    }
+
+    fun copyYtmusicOAuthUserCode() {
+        val userCode = ytmusicOAuthFlow?.userCode?.takeIf { it.isNotBlank() } ?: return
+        oauthDeviceCodeAssistant.copyUserCode(userCode)
+        message = "验证码已复制：$userCode"
+    }
+
     fun cancelYtmusicTvOAuthLogin() {
         ytmusicOAuthJob?.cancel()
         ytmusicOAuthJob = null
+        clearYtmusicOAuthUi()
+    }
+
+    private fun clearYtmusicOAuthUi() {
         ytmusicOAuthFlow = null
+        oauthDeviceCodeAssistant.clearUserCodeNotification()
     }
 
     fun loginYtmusicWithOAuthJson(oauthJson: String) {

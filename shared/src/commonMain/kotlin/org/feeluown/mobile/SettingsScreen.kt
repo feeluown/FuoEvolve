@@ -790,35 +790,79 @@ fun ProviderLoginPanel(
                         enabled = oauthFlow == null,
                     )
                     if (oauthFlow != null) {
+                        val clipboardManager = LocalClipboardManager.current
+                        LaunchedEffect(oauthFlow.userCode, oauthFlow.verificationUrlWithCode) {
+                            if (!oauthFlow.browserOpened) {
+                                runCatching { uriHandler.openUri(oauthFlow.verificationUrlWithCode) }
+                                    .onSuccess { controller.markYtmusicOAuthBrowserOpened() }
+                                    .onFailure {
+                                        controller.showMessage(it.message ?: "无法打开浏览器")
+                                    }
+                            }
+                        }
                         Text(
-                            text = oauthFlow.userCode,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = oauthFlow.statusMessage,
+                            text = if (oauthFlow.browserOpened) {
+                                "浏览器已打开。请在页面中输入下方验证码："
+                            } else {
+                                oauthFlow.statusMessage
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.medium,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = "设备验证码",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                                Text(
+                                    text = oauthFlow.userCode,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            clipboardManager.setText(AnnotatedString(oauthFlow.userCode))
+                                            controller.copyYtmusicOAuthUserCode()
+                                        },
+                                    ) {
+                                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                                        Spacer(Modifier.size(8.dp))
+                                        Text("复制验证码")
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            runCatching { uriHandler.openUri(oauthFlow.verificationUrlWithCode) }
+                                                .onSuccess { controller.markYtmusicOAuthBrowserOpened() }
+                                                .onFailure {
+                                                    controller.showMessage(it.message ?: "无法打开浏览器")
+                                                }
+                                        },
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                                        Spacer(Modifier.size(8.dp))
+                                        Text("重新打开浏览器")
+                                    }
+                                }
+                            }
+                        }
                         Text(
                             text = oauthFlow.verificationUrlWithCode,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    runCatching { uriHandler.openUri(oauthFlow.verificationUrlWithCode) }
-                                        .onFailure { controller.showMessage(it.message ?: "无法打开浏览器") }
-                                },
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                                Spacer(Modifier.size(8.dp))
-                                Text("打开浏览器")
-                            }
-                            TextButton(onClick = controller::cancelYtmusicTvOAuthLogin) {
-                                Text("取消")
-                            }
+                        TextButton(onClick = controller::cancelYtmusicTvOAuthLogin) {
+                            Text("取消授权")
                         }
                     } else {
                         if (provider.providerId == "ytmusic" && onImportYtmusicOAuthFile != null) {

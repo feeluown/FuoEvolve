@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 import Shared
 
 @main
@@ -15,6 +16,14 @@ struct FuoEvolveApp: App {
 }
 
 private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        _ = IOSOAuthDeviceCodeOutput.shared
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         handleEventsForBackgroundURLSession identifier: String,
@@ -38,7 +47,8 @@ private struct SharedComposeRoot: UIViewControllerRepresentable {
             shareOutput: IOSShareOutput.shared,
             localPlaylistFileOutput: IOSShareOutput.shared,
             networkStatusOutput: IOSNetworkStatusOutput.shared,
-            audioRecognitionOutput: IOSAudioRecognitionOutput.shared
+            audioRecognitionOutput: IOSAudioRecognitionOutput.shared,
+            oauthDeviceCodeOutput: IOSOAuthDeviceCodeOutput.shared
         )
         IOSWebLoginOutput.shared.hostViewController = viewController
         return viewController

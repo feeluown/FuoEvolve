@@ -93,5 +93,13 @@
             android:name=".FuoDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".OAuthUserCodeCopyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.feeluown.mobile.action.OAUTH_COPY_USER_CODE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

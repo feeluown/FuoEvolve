@@ -6,6 +6,7 @@ import Network
 import Shared
 import UIKit
 import UniformTypeIdentifiers
+import UserNotifications
 import WebKit
 
 final class IOSNativeAudioEngine: NSObject, NativeAudioEngine, IosAudioOutput {
@@ -842,5 +843,80 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
                 self.dismiss(animated: true) { self.completion(json) }
             }
         }
+    }
+}
+
+final class IOSOAuthDeviceCodeOutput: NSObject, IosOAuthDeviceCodeOutput, UNUserNotificationCenterDelegate {
+    static let shared = IOSOAuthDeviceCodeOutput()
+
+    private let notificationId = "fuo.oauth.user_code"
+    private let copyActionId = "fuo.oauth.copy_user_code"
+    private let categoryId = "fuo.oauth.user_code.category"
+    private let userCodeKey = "user_code"
+    private var didConfigure = false
+
+    func copyUserCode(userCode: String) {
+        UIPasteboard.general.string = userCode
+    }
+
+    func showUserCodeNotification(userCode: String) {
+        configureIfNeeded()
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "YouTube Music 授权验证码"
+            content.body = "请在浏览器中输入验证码：\(userCode)"
+            content.sound = .default
+            content.categoryIdentifier = self.categoryId
+            content.userInfo = [self.userCodeKey: userCode]
+            let request = UNNotificationRequest(
+                identifier: self.notificationId,
+                content: content,
+                trigger: nil
+            )
+            center.add(request, withCompletionHandler: nil)
+        }
+    }
+
+    func clearUserCodeNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [notificationId])
+        center.removePendingNotificationRequests(withIdentifiers: [notificationId])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        let userCode = userInfo[userCodeKey] as? String
+        if response.actionIdentifier == copyActionId ||
+            response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            if let userCode, !userCode.isEmpty {
+                copyUserCode(userCode: userCode)
+            }
+        }
+        completionHandler()
+    }
+
+    private func configureIfNeeded() {
+        guard !didConfigure else { return }
+        didConfigure = true
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let copyAction = UNNotificationAction(
+            identifier: copyActionId,
+            title: "复制验证码",
+            options: []
+        )
+        let category = UNNotificationCategory(
+            identifier: categoryId,
+            actions: [copyAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
     }
 }

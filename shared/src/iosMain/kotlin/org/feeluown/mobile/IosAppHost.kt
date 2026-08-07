@@ -37,6 +37,7 @@ fun MainViewController(
     localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     audioRecognitionOutput: IosAudioRecognitionOutput,
+    oauthDeviceCodeOutput: IosOAuthDeviceCodeOutput,
 ): UIViewController = ComposeUIViewController {
     IosApp(
         audioOutput,
@@ -48,6 +49,7 @@ fun MainViewController(
         localPlaylistFileOutput,
         networkStatusOutput,
         audioRecognitionOutput,
+        oauthDeviceCodeOutput,
     )
 }
 
@@ -62,6 +64,7 @@ private fun IosApp(
     localPlaylistFileOutput: IosLocalPlaylistFileOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     audioRecognitionOutput: IosAudioRecognitionOutput,
+    oauthDeviceCodeOutput: IosOAuthDeviceCodeOutput,
 ) {
     IosVideoOutputHolder.output = videoOutput
     val container = remember {
@@ -72,6 +75,7 @@ private fun IosApp(
             webLoginOutput,
             networkStatusOutput,
             audioRecognitionOutput,
+            oauthDeviceCodeOutput,
         )
     }
     AppRoot(
@@ -105,6 +109,7 @@ private class IosAppContainer(
     private val webLoginOutput: IosWebLoginOutput,
     networkStatusOutput: IosNetworkStatusOutput,
     private val audioRecognitionOutput: IosAudioRecognitionOutput,
+    oauthDeviceCodeOutput: IosOAuthDeviceCodeOutput,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val providerRepository = createKotlinProviderRepository(
@@ -137,6 +142,7 @@ private class IosAppContainer(
         playbackQueueStore = playbackQueueStore,
         resourceCacheRepository = resourceCacheRepository,
         audioRecognitionRepository = audioRecognitionRepository,
+        oauthDeviceCodeAssistant = IosOAuthDeviceCodeAssistant(oauthDeviceCodeOutput),
         scope = scope,
     )
 

@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val fuoApplication = application as FuoEvolveApplication
+        handleOAuthUserCodeCopyIntent(intent)
         val launchLocalPlaylistImport = localPlaylistImportFromIntent(intent)
         val launchSharedText = sharedTextFromIntent(intent)
 
@@ -251,6 +252,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (handleOAuthUserCodeCopyIntent(intent)) {
+            return
+        }
         val localPlaylistImport = localPlaylistImportFromIntent(intent)
         if (localPlaylistImport != null) {
             handleLocalPlaylistImport(localPlaylistImport)
@@ -259,6 +263,21 @@ class MainActivity : ComponentActivity() {
         sharedTextFromIntent(intent)?.let {
             (application as FuoEvolveApplication).controller.openSharedResource(it)
         }
+    }
+
+    private fun handleOAuthUserCodeCopyIntent(intent: Intent?): Boolean {
+        if (intent?.action != AndroidOAuthDeviceCodeAssistant.ACTION_COPY_OAUTH_USER_CODE) {
+            return false
+        }
+        val userCode = intent.getStringExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)
+            ?.takeIf { it.isNotBlank() }
+            ?: return true
+        val controller = (application as FuoEvolveApplication).controller
+        AndroidOAuthDeviceCodeAssistant.copyToClipboard(this, userCode)
+        controller.showMessage("验证码已复制：$userCode")
+        intent.action = null
+        intent.removeExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)
+        return true
     }
 
     private fun hasAudioPermission(): Boolean {

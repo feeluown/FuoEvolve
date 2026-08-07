@@ -133,6 +133,7 @@ data class YtMusicOAuthFlowUiState(
     val verificationUrl: String,
     val verificationUrlWithCode: String,
     val statusMessage: String = "请在浏览器中完成授权",
+    val browserOpened: Boolean = false,
 )
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512

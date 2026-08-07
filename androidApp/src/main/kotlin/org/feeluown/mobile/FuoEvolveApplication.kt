@@ -85,6 +85,7 @@ class FuoEvolveApplication : Application() {
             resourceCacheRepository = resourceCacheRepository,
             debugLogRepository = debugLogRepository,
             audioRecognitionRepository = audioRecognitionRepository,
+            oauthDeviceCodeAssistant = AndroidOAuthDeviceCodeAssistant(applicationContext),
             scope = appScope,
         ).also { controller ->
             FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
