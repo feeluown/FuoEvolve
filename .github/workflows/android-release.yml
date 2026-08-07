@@ -11,6 +11,7 @@ jobs:
     name: Build signed multi-ABI release APK
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: android-release-build
     timeout-minutes: 45
     permissions:
       contents: read
@@ -83,6 +84,7 @@ jobs:
     needs: build-release-apks
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: android-release
     timeout-minutes: 10
     permissions:
       contents: write
