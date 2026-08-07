@@ -89,6 +89,7 @@ enum class PlaylistTargetType {
 
 private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
+private const val PLAYBACK_PLAN_LOOKAHEAD = 8
 private const val PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS = 3_000L
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
@@ -3874,11 +3875,16 @@ class FuoPlayerController(
     }
 
     private fun mergedPlaybackLyrics(engineState: PlaybackState): String? {
-        engineState.lyrics?.takeIf { it.isNotBlank() }?.let { return it }
         val engineTrackId = engineState.currentTrack?.id
-        val currentId = currentQueueTrack()?.id ?: playbackState.currentTrack?.id
-        return playbackState.lyrics?.takeIf {
+        val currentId = currentQueueTrack()?.id
+            ?: engineTrackId
+            ?: playbackState.currentTrack?.id
+        engineState.lyrics?.takeIf {
             it.isNotBlank() && (engineTrackId == null || engineTrackId == currentId)
+        }?.let { return it }
+        val previousTrackId = playbackState.currentTrack?.id
+        return playbackState.lyrics?.takeIf {
+            it.isNotBlank() && previousTrackId != null && previousTrackId == currentId
         }
     }
 
@@ -4094,6 +4100,7 @@ class FuoPlayerController(
                     )
                     displayQueue()
                         .drop(1)
+                        .take(PLAYBACK_PLAN_LOOKAHEAD)
                         .forEach { queuedTrack ->
                             val nextTrack = queuedTrack.preferDownloaded()
                             add(
