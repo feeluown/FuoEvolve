@@ -204,13 +204,23 @@ class YtMusicProvider(
      * FeelUOwn resolves ytmusic playback via yt-dlp (`ANDROID_VR` player → direct URL,
      * format `m4a/bestaudio/best`, no playback headers).
      *
-     * Mobile cannot ship yt-dlp, so we call the same InnerTube player client yt-dlp uses.
-     * Falls back to WEB_REMIX + signatureTimestamp (ytmusicapi / fuo_ytmusic `get_song`) when needed.
+     * Mobile cannot ship yt-dlp, so we call the same InnerTube player clients yt-dlp uses.
+     * Order:
+     * 1) ANDROID_VR + visitor (yt-dlp default; without visitor → LOGIN_REQUIRED)
+     * 2) ANDROID on www.youtube.com (works without visitor)
+     * 3) WEB_REMIX + signatureTimestamp + cipher (ytmusicapi get_song)
      */
     private suspend fun playablePlayer(videoId: String): PlayedStream? {
-        val androidVr = runCatching { androidVrPlayer(videoId) }.getOrNull()
-        if (androidVr != null && hasPlayableAudio(androidVr, requireDirectUrl = true)) {
-            return PlayedStream(root = androidVr, playbackHeaders = emptyMap())
+        ensureYoutubeVisitorId()
+        if (!visitorId.isNullOrBlank()) {
+            val androidVr = runCatching { androidVrPlayer(videoId) }.getOrNull()
+            if (androidVr != null && hasPlayableAudio(androidVr, requireDirectUrl = true)) {
+                return PlayedStream(root = androidVr, playbackHeaders = emptyMap())
+            }
+        }
+        val android = runCatching { androidPlayer(videoId) }.getOrNull()
+        if (android != null && hasPlayableAudio(android, requireDirectUrl = true)) {
+            return PlayedStream(root = android, playbackHeaders = emptyMap())
         }
         val web = runCatching { player(videoId) }.getOrNull()
         if (web != null && hasPlayableAudio(web, requireDirectUrl = false)) {
@@ -263,8 +273,9 @@ class YtMusicProvider(
     private suspend fun androidVrPlayer(videoId: String): kotlinx.serialization.json.JsonObject {
         ensureConfig()
         ensureYoutubeVisitorId()
+        val visitor = visitorId?.takeIf { it.isNotBlank() }
+            ?: error("ANDROID_VR player requires X-Goog-Visitor-Id")
         val sts = ensureSignatureTimestamp()
-        val visitor = visitorId.orEmpty()
         val body =
             "{" +
                 "\"context\":{\"client\":{" +
@@ -292,14 +303,46 @@ class YtMusicProvider(
             providerId = ID,
             url = "$YOUTUBE_API_BASE/player?prettyPrint=false",
             json = body,
-            headers = buildMap {
-                put("Content-Type", "application/json")
-                put("User-Agent", ANDROID_VR_USER_AGENT)
-                put("Origin", "https://www.youtube.com")
-                put("X-Youtube-Client-Name", ANDROID_VR_CLIENT_NAME)
-                put("X-Youtube-Client-Version", ANDROID_VR_CLIENT_VERSION)
-                if (visitor.isNotBlank()) put("X-Goog-Visitor-Id", visitor)
-            },
+            headers = mapOf(
+                "Content-Type" to "application/json",
+                "User-Agent" to ANDROID_VR_USER_AGENT,
+                "Origin" to "https://www.youtube.com",
+                "X-Youtube-Client-Name" to ANDROID_VR_CLIENT_NAME,
+                "X-Youtube-Client-Version" to ANDROID_VR_CLIENT_VERSION,
+                "X-Goog-Visitor-Id" to visitor,
+            ),
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+    }
+
+    /**
+     * Robust fallback used when ANDROID_VR lacks visitor data.
+     * `www.youtube.com` + ANDROID returns direct audio URLs without visitor.
+     */
+    private suspend fun androidPlayer(videoId: String): kotlinx.serialization.json.JsonObject {
+        ensureConfig()
+        val body =
+            "{" +
+                "\"context\":{\"client\":{" +
+                "\"clientName\":\"ANDROID\"," +
+                "\"clientVersion\":\"$ANDROID_CLIENT_VERSION\"," +
+                "\"androidSdkVersion\":30," +
+                "\"hl\":\"zh_CN\"" +
+                "},\"user\":{}}," +
+                "\"videoId\":${quote(videoId)}," +
+                "\"contentCheckOk\":true," +
+                "\"racyCheckOk\":true" +
+                "}"
+        return http.postJson(
+            providerId = ID,
+            url = "$YOUTUBE_API_BASE/player?prettyPrint=false",
+            json = body,
+            headers = mapOf(
+                "Content-Type" to "application/json",
+                "User-Agent" to ANDROID_USER_AGENT,
+                "Origin" to "https://www.youtube.com",
+                "X-Youtube-Client-Name" to ANDROID_CLIENT_NAME,
+                "X-Youtube-Client-Version" to ANDROID_CLIENT_VERSION,
+            ),
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
     }
 
@@ -307,22 +350,30 @@ class YtMusicProvider(
         if (!visitorId.isNullOrBlank()) return
         ensureConfig()
         if (!visitorId.isNullOrBlank()) return
+        // Do not cache misses: a consent/stub page without VISITOR_DATA would poison ANDROID_VR
+        // for the whole detail TTL and force resolve() → null → 换源.
         val html = http.getText(
             ID,
             "https://www.youtube.com/watch?v=jNQXAC9IVRw",
             mapOf(
                 "User-Agent" to YtMusicOAuth.USER_AGENT,
                 "Accept" to "*/*",
+                "Accept-Language" to "en-US,en;q=0.9",
                 "Cookie" to "SOCS=CAI",
             ),
-            cacheKey = "ytmusic:youtube-visitor",
-            cachePolicy = ProviderCachePolicies.detail,
+            cacheKey = null,
+            cachePolicy = ProviderCachePolicies.none,
         ).value
-        visitorId = Regex(""""VISITOR_DATA"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
+        visitorId = extractVisitorData(html)
         if (playerJsUrl.isNullOrBlank()) {
             playerJsUrl = extractPlayerJsUrl(html)
         }
     }
+
+    private fun extractVisitorData(html: String): String? =
+        Regex(""""VISITOR_DATA"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
+            ?: Regex("""["']VISITOR_DATA["']\s*[:=]\s*["']([^"']+)["']""")
+                .find(html)?.groupValues?.getOrNull(1)
 
     private suspend fun innerTube(
         method: String,
@@ -628,12 +679,7 @@ class YtMusicProvider(
         clientVersion = Regex("""["']?INNERTUBE_CLIENT_VERSION["']?\s*[:=]\s*["']([^"']+)["']""")
             .find(html)?.groupValues?.getOrNull(1)
             ?: dynamicClientVersion()
-        visitorId = Regex("""["']?VISITOR_DATA["']?\s*[:=]\s*["']([^"']+)["']""")
-            .find(html)?.groupValues?.getOrNull(1)
-            ?: Regex("""ytcfg\.set\s*\(\s*(\{.+?\})\s*\)\s*;""").find(html)?.groupValues?.getOrNull(1)
-                ?.let { blob ->
-                    Regex(""""VISITOR_DATA"\s*:\s*"([^"]+)"""").find(blob)?.groupValues?.getOrNull(1)
-                }
+        visitorId = extractVisitorData(html)
         playerJsUrl = extractPlayerJsUrl(html)
         configLoaded = true
     }
@@ -889,6 +935,10 @@ class YtMusicProvider(
         const val ANDROID_VR_CLIENT_VERSION = "1.65.10"
         const val ANDROID_VR_USER_AGENT =
             "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+        const val ANDROID_CLIENT_NAME = "3"
+        const val ANDROID_CLIENT_VERSION = "20.10.38"
+        const val ANDROID_USER_AGENT =
+            "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip"
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,

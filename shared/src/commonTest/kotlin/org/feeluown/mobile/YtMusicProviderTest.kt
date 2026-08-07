@@ -492,6 +492,60 @@ class YtMusicProviderTest {
         providerHttp.close()
     }
 
+    @Test
+    fun resolveFallsBackToAndroidWhenVisitorMissing() = runTest {
+        val requests = mutableListOf<CapturedRequest>()
+        val store = InMemoryProviderCredentialStore()
+        val providerHttp = ProviderHttpClient(
+            httpClient = HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        requests += capture(request)
+                        val url = request.url.toString()
+                        val body = (request.body as? TextContent)?.text.orEmpty()
+                        when {
+                            // music landing stub: no visitor
+                            request.method == HttpMethod.Get && url.contains("music.youtube.com") -> respond(
+                                """<html>YouTube Music is not available in your area</html>""",
+                            )
+                            // youtube watch also fails to expose visitor (consent stub)
+                            request.method == HttpMethod.Get && url.contains("youtube.com/watch") -> respond(
+                                """<html><title>Before you continue</title></html>""",
+                            )
+                            body.contains("ANDROID_VR") -> respond(
+                                """{"playabilityStatus":{"status":"LOGIN_REQUIRED"}}""",
+                            )
+                            body.contains("\"clientName\":\"ANDROID\"") -> respond(
+                                """{"playabilityStatus":{"status":"OK"},"streamingData":{"adaptiveFormats":[{"mimeType":"audio/mp4","bitrate":130000,"url":"https://cdn.example/android.m4a","approxDurationMs":"10000"}]}}""",
+                            )
+                            else -> respond("""{"playabilityStatus":{"status":"UNPLAYABLE"}}""")
+                        }
+                    }
+                }
+            },
+            retryPolicy = ProviderRetryPolicy(maxRetries = 0),
+        )
+        val provider = YtMusicProvider(providerHttp, store)
+        val track = MusicTrack(
+            id = "ytmusic:vid1",
+            title = "T",
+            artists = "A",
+            album = "",
+            source = "ytmusic",
+            sourceType = TrackSourceType.Provider,
+            providerId = "ytmusic:vid1",
+            providerName = "YouTube Music",
+        )
+
+        val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
+
+        assertEquals("https://cdn.example/android.m4a", payload?.url)
+        assertTrue(requests.none { it.body.contains("ANDROID_VR") }, "skip ANDROID_VR without visitor")
+        assertTrue(requests.any { it.body.contains("\"clientName\":\"ANDROID\"") })
+        assertTrue(payload?.headers.isNullOrEmpty())
+        providerHttp.close()
+    }
+
     private data class CapturedRequest(
         val method: HttpMethod,
         val url: String,
