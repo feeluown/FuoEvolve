@@ -1034,7 +1034,7 @@ class FuoPlayerController(
             isLoading = true
             runCatching { debugLogRepository.exportLogFile(lines) }
                 .onSuccess { message = it }
-                .onFailure(::setError)
+                .onFailure { setError(it) }
             isLoading = false
         }
     }
@@ -1697,7 +1697,7 @@ class FuoPlayerController(
                         selectedLocalPlaylistTracks = updated.toMusicTracks()
                     }
                 }
-                if (showLoading) {
+                if (showMessage) {
                     message = if (loaded.isEmpty()) "暂无本地歌单" else "本地歌单 ${loaded.size} 个"
                 }
             }
