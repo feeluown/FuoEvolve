@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 class AndroidNativeAudioEngine(
     private val context: Context,
@@ -22,6 +24,7 @@ class AndroidNativeAudioEngine(
     private val mutableState = MutableStateFlow(PlaybackState())
     private var mediaController: MediaController? = null
     private var controllerConnecting = false
+    private var pendingLockScreenLyrics: PendingLockScreenLyrics? = null
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
     override val resolvesResourcesInternally: Boolean = true
@@ -44,6 +47,7 @@ class AndroidNativeAudioEngine(
                     audioDecoderInfo = mutableState.value.audioDecoderInfo,
                     audioFormatInfo = mutableState.value.audioFormatInfo,
                 )
+                applyPendingLockScreenLyrics()
             }
         }
         scope.launch {
@@ -127,6 +131,16 @@ class AndroidNativeAudioEngine(
         mutableState.value = mutableState.value.copy(positionMs = normalizedPosition)
     }
 
+    /**
+     * Publishes timed lyrics through the OPlus/ColorOS media-session extension.
+     * Non-OPlus Android builds simply ignore the extra metadata.
+     */
+    internal fun publishLockScreenLyrics(trackId: String, lyrics: String?) {
+        val normalizedLyrics = lyrics?.takeIf { it.isNotBlank() } ?: return
+        pendingLockScreenLyrics = PendingLockScreenLyrics(trackId, normalizedLyrics)
+        applyPendingLockScreenLyrics()
+    }
+
     private fun connectController() {
         if (mediaController != null || controllerConnecting) return
         controllerConnecting = true
@@ -138,6 +152,7 @@ class AndroidNativeAudioEngine(
                 runCatching { future.get() }
                     .onSuccess { controller ->
                         mediaController = controller
+                        applyPendingLockScreenLyrics()
                     }
                     .onFailure { throwable ->
                         Log.e(TAG, "connect media controller failed", throwable)
@@ -149,6 +164,53 @@ class AndroidNativeAudioEngine(
             },
             ContextCompat.getMainExecutor(context),
         )
+    }
+
+    private fun applyPendingLockScreenLyrics() {
+        val pending = pendingLockScreenLyrics ?: return
+        val controller = mediaController ?: return
+        val track = mutableState.value.currentTrack ?: return
+        if (track.id != pending.trackId) return
+        if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+            Log.w(TAG, "media session does not allow metadata replacement for ColorOS lyrics")
+            return
+        }
+        val currentItem = controller.currentMediaItem ?: return
+        val currentIndex = controller.currentMediaItemIndex
+        if (currentIndex < 0) return
+        val lineLyrics = toTimedLineLrc(pending.lyrics) ?: return
+        val lyricInfo = JSONObject()
+            .put("songName", track.title)
+            .put("artist", track.artists)
+            .put("songId", track.id)
+            .put("lyric", lineLyrics)
+            .toString()
+        val currentExtras = currentItem.mediaMetadata.extras
+        if (currentExtras?.getString(OPLUS_LYRIC_INFO_KEY) == lyricInfo) {
+            pendingLockScreenLyrics = null
+            return
+        }
+        val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
+            putString("lyrics", pending.lyrics)
+            putString(OPLUS_LYRIC_INFO_KEY, lyricInfo)
+        }
+        val updatedItem = currentItem.buildUpon()
+            .setMediaMetadata(
+                currentItem.mediaMetadata.buildUpon()
+                    .setExtras(extras)
+                    .build(),
+            )
+            .build()
+        runCatching {
+            // URI and playback configuration stay unchanged, so Media3 can update
+            // ProgressiveMediaSource metadata without rebuilding the source.
+            controller.replaceMediaItem(currentIndex, updatedItem)
+        }.onSuccess {
+            pendingLockScreenLyrics = null
+            Log.d(TAG, "published ColorOS lock-screen lyrics trackId=${track.id}")
+        }.onFailure { throwable ->
+            Log.w(TAG, "failed to publish ColorOS lock-screen lyrics trackId=${track.id}", throwable)
+        }
     }
 
     private fun updatePosition() {
@@ -204,7 +266,13 @@ class AndroidNativeAudioEngine(
         )
     }
 
+    private data class PendingLockScreenLyrics(
+        val trackId: String,
+        val lyrics: String,
+    )
+
     private companion object {
         private const val TAG = "FuoAudioEngine"
+        private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
     }
 }
