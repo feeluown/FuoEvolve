@@ -176,6 +176,7 @@ class AndroidNativeAudioEngine(
             return
         }
         val currentItem = controller.currentMediaItem ?: return
+        if (!currentItem.mediaId.endsWith(":${pending.trackId}")) return
         val currentIndex = controller.currentMediaItemIndex
         if (currentIndex < 0) return
         val lineLyrics = toTimedLineLrc(pending.lyrics) ?: return
