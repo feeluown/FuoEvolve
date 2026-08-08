@@ -58,11 +58,21 @@
                     android:pathPrefix="/FuoEvolve/r"
                     android:scheme="https" />
             </intent-filter>
-            <intent-filter>
+        </activity>
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter android:label="用 FuoEvolve 打开">
                 <action android:name="android.intent.action.SEND" />
-
                 <category android:name="android.intent.category.DEFAULT" />
-
+                <data android:mimeType="text/*" />
+            </intent-filter>
+            <intent-filter android:label="用 FuoEvolve 搜索">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
