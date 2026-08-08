@@ -75,6 +75,15 @@ fun ProviderContentHomeSection(
                         EmptyProviderContentHint(title)
                     }
                 } else if (section == HomeSection.Music) {
+                    val entrySections = visibleSections.filter {
+                        it.feature.contentType == ProviderContentType.Songs ||
+                            it.feature.contentType == ProviderContentType.Videos
+                    }
+                    val previewSections = visibleSections.filter {
+                        it.feature.contentType == ProviderContentType.Playlists ||
+                            it.feature.contentType == ProviderContentType.Artists ||
+                            it.feature.contentType == ProviderContentType.Albums
+                    }
                     if (visibleSections.isNotEmpty()) {
                         item(key = "header:explore") {
                             ProviderFeatureHeader(
@@ -86,10 +95,53 @@ fun ProviderContentHomeSection(
                                     .joinToString(" / "),
                             )
                         }
+                    }
+                    if (entrySections.isNotEmpty()) {
                         item(key = "explore-grid") {
                             ProviderFeatureCoverGrid(
-                                features = visibleSections.map { it.feature },
+                                features = entrySections.map { it.feature },
                                 onClick = controller::openFeature,
+                            )
+                        }
+                    }
+                    previewSections.forEach { contentSection ->
+                        item(key = "header:${contentSection.feature.id}") {
+                            ProviderFeatureHeader(feature = contentSection.feature)
+                        }
+                        when {
+                            contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+                                ProviderContentMessage(contentSection.errorMessage)
+                            }
+                            contentSection.playlists.isNotEmpty() -> {
+                                item(key = "playlists:${contentSection.feature.id}") {
+                                    ProviderPlaylistGrid(
+                                        playlists = contentSection.playlists,
+                                        onClick = { controller.openPlaylist(it, contentSection.feature.category) },
+                                        onMore = { controller.openFeature(contentSection.feature) },
+                                        maxRows = 2,
+                                    )
+                                }
+                            }
+                            contentSection.mediaItems.isNotEmpty() -> {
+                                item(key = "media-items:${contentSection.feature.id}") {
+                                    ProviderMediaItemGrid(
+                                        items = contentSection.mediaItems,
+                                        onClick = controller::openMediaItem,
+                                        onMore = { controller.openFeature(contentSection.feature) },
+                                        maxRows = 2,
+                                    )
+                                }
+                            }
+                            else -> item(key = "empty:${contentSection.feature.id}") {
+                                ProviderContentMessage("暂无内容")
+                            }
+                        }
+                    }
+                    if (lockedProviders.isNotEmpty()) {
+                        item(key = "locked-providers:${section.name}") {
+                            ProviderLockedSummary(
+                                providers = lockedProviders,
+                                onClick = { controller.openSettings(it.providerId) },
                             )
                         }
                     }
@@ -585,6 +637,19 @@ fun ProviderPlaylistMoreCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    ProviderCollectionMoreCard(
+        subtitle = "全部歌单",
+        onClick = onClick,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ProviderCollectionMoreCard(
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     Column(
         modifier = modifier
@@ -616,7 +681,7 @@ fun ProviderPlaylistMoreCard(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = "全部歌单",
+            text = subtitle,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -670,31 +735,59 @@ fun ProviderMediaItemGrid(
     items: List<ProviderMediaItem>,
     onClick: (ProviderMediaItem) -> Unit,
     onItemVisible: ((Int) -> Unit)? = null,
+    onMore: (() -> Unit)? = null,
+    maxRows: Int? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
-    val columns = layoutInfo.gridColumns
+    val columns = layoutInfo.gridColumns.coerceAtLeast(1)
     val spacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    val capacity = columns * (maxRows ?: 2)
+    val isLimited = maxRows != null || onMore != null
+    val hasMore = isLimited && items.size > capacity
+    val visibleItems = when {
+        hasMore && onMore != null -> items.take(capacity - 1)
+        hasMore -> items.take(capacity)
+        else -> items
+    }
+    val itemType = items.firstOrNull()?.type
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        items.chunked(columns).forEachIndexed { rowIndex, row ->
+        val cells = visibleItems.map<ProviderMediaItem, MediaItemGridCell> { MediaItemGridCell.Item(it) } +
+            if (hasMore && onMore != null) listOf(MediaItemGridCell.More) else emptyList()
+        cells.chunked(columns).forEachIndexed { rowIndex, row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
-                row.forEachIndexed { columnIndex, item ->
-                    val index = rowIndex * columns + columnIndex
-                    if (onItemVisible != null) {
-                        LaunchedEffect(index, items.size) {
-                            onItemVisible(index)
+                row.forEachIndexed { columnIndex, cell ->
+                    when (cell) {
+                        MediaItemGridCell.More -> {
+                            ProviderCollectionMoreCard(
+                                subtitle = when (itemType) {
+                                    ProviderMediaItemType.Artist -> "全部歌手"
+                                    ProviderMediaItemType.Album -> "全部专辑"
+                                    null -> "全部内容"
+                                },
+                                onClick = { onMore?.invoke() },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        is MediaItemGridCell.Item -> {
+                            val index = rowIndex * columns + columnIndex
+                            if (onItemVisible != null) {
+                                LaunchedEffect(index, items.size) {
+                                    onItemVisible(index)
+                                }
+                            }
+                            ProviderMediaItemCard(
+                                item = cell.value,
+                                onClick = { onClick(cell.value) },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
-                    ProviderMediaItemCard(
-                        item = item,
-                        onClick = { onClick(item) },
-                        modifier = Modifier.weight(1f),
-                    )
                 }
                 repeat(columns - row.size) {
                     Spacer(Modifier.weight(1f))
@@ -702,6 +795,11 @@ fun ProviderMediaItemGrid(
             }
         }
     }
+}
+
+private sealed interface MediaItemGridCell {
+    data class Item(val value: ProviderMediaItem) : MediaItemGridCell
+    data object More : MediaItemGridCell
 }
 
 @Composable
