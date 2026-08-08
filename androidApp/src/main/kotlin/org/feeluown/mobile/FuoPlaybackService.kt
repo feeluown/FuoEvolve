@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.media.MediaCodecList
@@ -510,6 +511,8 @@ class FuoPlaybackService : MediaSessionService() {
             CacheDataSource.Factory()
                 .setCache(AndroidResourceCache.audioCache(this))
                 .setUpstreamDataSourceFactory(upstreamFactory)
+        } else if (mediaItem.localConfiguration?.uri?.scheme == ContentResolver.SCHEME_CONTENT) {
+            MediaStoreDataSource.Factory(contentResolver)
         } else {
             upstreamFactory
         }
