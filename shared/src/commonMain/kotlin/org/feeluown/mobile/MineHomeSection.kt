@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+private const val MINE_PLAYLIST_STATS_KEY_SEPARATOR = "::"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MineHomeSection(
@@ -70,7 +72,7 @@ fun MineHomeSection(
                 .fillMaxWidth(),
         ) {
             when (controller.mineSection) {
-            MineSection.Playlists -> MinePlaylistsSection(
+                MineSection.Playlists -> MinePlaylistsSection(
                     controller = controller,
                     showFilter = !isWideLayout,
                     modifier = Modifier.fillMaxSize(),
@@ -104,6 +106,7 @@ fun MineHomeSection(
         }
     }
 }
+
 @Composable
 fun MineSectionChips(
     controller: FuoPlayerController,
@@ -238,6 +241,7 @@ fun MinePlaylistsSection(
     val fileActions = LocalLocalPlaylistFileActions.current
     val userSections = controller.minePlaylistSections
     val favoriteSections = controller.mineFavoritePlaylistSections
+    val playbackStats = controller.playlistPlaybackStats
     val sections = when (controller.playlistFilter) {
         PlaylistFilter.All -> userSections + favoriteSections
         PlaylistFilter.UserPlaylists -> userSections
@@ -247,7 +251,14 @@ fun MinePlaylistsSection(
     val showLocalPlaylists = controller.playlistFilter == PlaylistFilter.All ||
         controller.playlistFilter == PlaylistFilter.Local
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
-    val frequentPlaylists = controller.frequentlyPlayedPlaylists()
+    val frequentPlaylists = remember(userSections, favoriteSections, playbackStats) {
+        frequentlyPlayedMinePlaylists(
+            playlists = (userSections + favoriteSections)
+                .filterNot { it.isLoginRequired }
+                .flatMap { it.playlists },
+            playbackStats = playbackStats,
+        )
+    }
     val lockedProviders = remember(sections) {
         sections.filter { it.isLoginRequired }
             .map { it.feature }
@@ -295,6 +306,7 @@ fun MinePlaylistsSection(
                     playlistSectionItems(
                         controller = controller,
                         contentSection = contentSection,
+                        playbackStats = playbackStats,
                         onCreatePlaylist = { providerId ->
                             selectedCreateProviderId = providerId
                             showCreateDialog = true
@@ -519,6 +531,7 @@ fun LocalPlaylistImportDialog(
 fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
     controller: FuoPlayerController,
     contentSection: ProviderContentSection,
+    playbackStats: Map<String, PlaylistPlaybackStat>,
     onCreatePlaylist: (String) -> Unit,
 ) {
     item(key = "header:${contentSection.feature.id}") {
@@ -540,11 +553,11 @@ fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
         }
         contentSection.playlists.isNotEmpty() -> {
             item(key = "playlists:${contentSection.feature.id}") {
-            ProviderPlaylistGrid(
-                playlists = controller.sortedMinePlaylists(contentSection.playlists),
-                onClick = { controller.openPlaylist(it, contentSection.feature.category) },
-                onMore = { controller.openFeature(contentSection.feature) },
-            )
+                ProviderPlaylistGrid(
+                    playlists = sortedMinePlaylistsSnapshot(contentSection.playlists, playbackStats),
+                    onClick = { controller.openPlaylist(it, contentSection.feature.category) },
+                    onMore = { controller.openFeature(contentSection.feature) },
+                )
             }
         }
         else -> item(key = "empty:${contentSection.feature.id}") {
@@ -611,3 +624,51 @@ fun MineMediaItemsSection(
         }
     }
 }
+
+internal fun minePlaylistPlaybackStatsKey(playlist: ProviderPlaylist): String =
+    "${playlist.providerId}$MINE_PLAYLIST_STATS_KEY_SEPARATOR${playlist.id}"
+
+internal fun sortedMinePlaylistsSnapshot(
+    playlists: List<ProviderPlaylist>,
+    playbackStats: Map<String, PlaylistPlaybackStat>,
+): List<ProviderPlaylist> = playlists
+    .mapIndexed { index, playlist ->
+        RankedMinePlaylist(
+            playlist = playlist,
+            stat = playbackStats[minePlaylistPlaybackStatsKey(playlist)],
+            originalIndex = index,
+        )
+    }
+    .sortedWith(
+        compareByDescending<RankedMinePlaylist> { it.stat?.lastPlayedAtMillis ?: 0L }
+            .thenBy { it.originalIndex },
+    )
+    .map { it.playlist }
+
+internal fun frequentlyPlayedMinePlaylists(
+    playlists: List<ProviderPlaylist>,
+    playbackStats: Map<String, PlaylistPlaybackStat>,
+): List<ProviderPlaylist> = playlists
+    .distinctBy(::minePlaylistPlaybackStatsKey)
+    .mapIndexedNotNull { index, playlist ->
+        val stat = playbackStats[minePlaylistPlaybackStatsKey(playlist)]
+            ?.takeIf { it.playCount > 0 }
+            ?: return@mapIndexedNotNull null
+        RankedMinePlaylist(
+            playlist = playlist,
+            stat = stat,
+            originalIndex = index,
+        )
+    }
+    .sortedWith(
+        compareByDescending<RankedMinePlaylist> { it.stat?.playCount ?: 0L }
+            .thenByDescending { it.stat?.lastPlayedAtMillis ?: 0L }
+            .thenBy { it.originalIndex },
+    )
+    .map { it.playlist }
+
+private data class RankedMinePlaylist(
+    val playlist: ProviderPlaylist,
+    val stat: PlaylistPlaybackStat?,
+    val originalIndex: Int,
+)
