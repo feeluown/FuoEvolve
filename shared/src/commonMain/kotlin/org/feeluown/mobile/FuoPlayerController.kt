@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
+import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
 @Serializable
 enum class SearchScope {
@@ -131,6 +132,8 @@ class FuoPlayerController(
     var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
         private set
     var providerHeaderInputs by mutableStateOf<Map<String, ProviderHeaderInput>>(emptyMap())
+    var playlistPlaybackStats by mutableStateOf<Map<String, PlaylistPlaybackStat>>(emptyMap())
+        private set
     var providerOAuthInputs by mutableStateOf<Map<String, ProviderOAuthInput>>(emptyMap())
     var ytmusicOAuthFlow by mutableStateOf<YtMusicOAuthFlowUiState?>(null)
         private set
@@ -3257,6 +3260,7 @@ class FuoPlayerController(
         val loadedTracks = selectedPlaylistTracks
         val track = loadedTracks.getOrNull(index) ?: return
         selectedPlaylistBackgroundLoadJob?.cancel()
+        recordPlaylistPlayback(playlist)
         play(track, loadedTracks, index, sourcePlaylistId = playlist.id)
         if (selectedPlaylistTracksHasMore && queuePlaylistId == playlist.id) {
             selectedPlaylistBackgroundLoadJob = scope.launch {
@@ -3279,6 +3283,45 @@ class FuoPlayerController(
                 }
             }
         }
+    }
+
+    fun sortedMinePlaylists(playlists: List<ProviderPlaylist>): List<ProviderPlaylist> =
+        playlists.withIndex().sortedWith(
+            compareByDescending<IndexedValue<ProviderPlaylist>> {
+                playlistPlaybackStats[it.value.playbackStatsKey()]?.lastPlayedAtMillis ?: 0
+            }.thenBy { it.index },
+        ).map { it.value }
+
+    fun frequentlyPlayedPlaylists(): List<ProviderPlaylist> {
+        val playlists = (minePlaylistSections + mineFavoritePlaylistSections)
+            .filterNot { it.isLoginRequired }
+            .flatMap { it.playlists }
+            .distinctBy { it.playbackStatsKey() }
+        return playlists.sortedWith(
+            compareByDescending<ProviderPlaylist> {
+                playlistPlaybackStats[it.playbackStatsKey()]?.playCount ?: 0
+            }.thenByDescending {
+                playlistPlaybackStats[it.playbackStatsKey()]?.lastPlayedAtMillis ?: 0
+            },
+        ).filter { (playlistPlaybackStats[it.playbackStatsKey()]?.playCount ?: 0) > 0 }
+    }
+
+    fun categoryForMinePlaylist(playlist: ProviderPlaylist): ProviderFeatureCategory =
+        if (mineFavoritePlaylistSections.any { section ->
+                section.playlists.any { it.playbackStatsKey() == playlist.playbackStatsKey() }
+            }
+        ) ProviderFeatureCategory.MineFavoritePlaylists else ProviderFeatureCategory.MinePlaylists
+
+    private fun recordPlaylistPlayback(playlist: ProviderPlaylist) {
+        val key = playlist.playbackStatsKey()
+        val previous = playlistPlaybackStats[key] ?: PlaylistPlaybackStat()
+        playlistPlaybackStats = playlistPlaybackStats + (
+            key to previous.copy(
+                playCount = previous.playCount + 1,
+                lastPlayedAtMillis = currentTimeMillis(),
+            )
+        )
+        persistSettings()
     }
 
     fun playFromSelectedFeature(index: Int) {
@@ -4648,6 +4691,7 @@ class FuoPlayerController(
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
         dynamicCoverColorEnabled = settings.dynamicCoverColorEnabled
+        playlistPlaybackStats = settings.playlistPlaybackStats
         pauseOnOtherAppPlayback = settings.pauseOnOtherAppPlayback
     }
 
@@ -4689,9 +4733,12 @@ class FuoPlayerController(
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
             dynamicCoverColorEnabled = dynamicCoverColorEnabled,
+            playlistPlaybackStats = playlistPlaybackStats,
             pauseOnOtherAppPlayback = pauseOnOtherAppPlayback,
         )
     }
+
+    private fun ProviderPlaylist.playbackStatsKey(): String = "$providerId\u0000$id"
 
     private suspend fun updateResourceCacheLimit() {
         resourceCacheRepository.updateLimit(

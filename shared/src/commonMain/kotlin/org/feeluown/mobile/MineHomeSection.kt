@@ -247,6 +247,7 @@ fun MinePlaylistsSection(
     val showLocalPlaylists = controller.playlistFilter == PlaylistFilter.All ||
         controller.playlistFilter == PlaylistFilter.Local
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
+    val frequentPlaylists = controller.frequentlyPlayedPlaylists()
     val lockedProviders = remember(sections) {
         sections.filter { it.isLoginRequired }
             .map { it.feature }
@@ -270,6 +271,18 @@ fun MinePlaylistsSection(
                     EmptyProviderContentHint(controller.playlistFilter.emptyTitle())
                 }
             } else {
+                if (controller.playlistFilter == PlaylistFilter.All && frequentPlaylists.isNotEmpty()) {
+                    item(key = "header:frequent-playlists") {
+                        Text("我的常听", style = MaterialTheme.typography.titleMedium)
+                    }
+                    item(key = "playlists:frequent") {
+                        ProviderPlaylistGrid(
+                            playlists = frequentPlaylists,
+                            onClick = { controller.openPlaylist(it, controller.categoryForMinePlaylist(it)) },
+                            maxRows = 2,
+                        )
+                    }
+                }
                 if (showLocalPlaylists) {
                     localPlaylistSectionItems(
                         controller = controller,
@@ -527,10 +540,11 @@ fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
         }
         contentSection.playlists.isNotEmpty() -> {
             item(key = "playlists:${contentSection.feature.id}") {
-                ProviderPlaylistGrid(
-                    playlists = contentSection.playlists,
-                    onClick = { controller.openPlaylist(it, contentSection.feature.category) },
-                )
+            ProviderPlaylistGrid(
+                playlists = controller.sortedMinePlaylists(contentSection.playlists),
+                onClick = { controller.openPlaylist(it, contentSection.feature.category) },
+                onMore = { controller.openFeature(contentSection.feature) },
+            )
             }
         }
         else -> item(key = "empty:${contentSection.feature.id}") {
