@@ -4,9 +4,13 @@
         <domain includeSubdomains="true">music.163.com</domain>
         <domain includeSubdomains="true">music.126.net</domain>
         <domain includeSubdomains="true">vod.126.net</domain>
+        <domain includeSubdomains="true">163cn.tv</domain>
         <domain includeSubdomains="true">qqmusic.qq.com</domain>
+        <domain includeSubdomains="true">c6.y.qq.com</domain>
         <domain includeSubdomains="true">hdslb.com</domain>
         <domain includeSubdomains="true">bilivideo.com</domain>
         <domain includeSubdomains="true">bilivideo.cn</domain>
+        <domain includeSubdomains="true">b23.tv</domain>
+        <domain includeSubdomains="true">bili2233.cn</domain>
     </domain-config>
 </network-security-config>
