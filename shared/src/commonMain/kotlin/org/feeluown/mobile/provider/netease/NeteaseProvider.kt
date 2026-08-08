@@ -61,7 +61,16 @@ class NeteaseProvider(
         val playlists = searchType(keyword, 1000).array("playlists").map { it.asObject().toPlaylist() }
         val artists = searchType(keyword, 100).array("artists").map { artist(it.asObject()) }
         val albums = searchType(keyword, 10).array("albums").map { album(it.asObject()) }
-        return ProviderSearchResults(tracks = tracks, playlists = playlists, artists = artists, albums = albums)
+        val videos = searchType(keyword, 1004).array("mvs").mapNotNull { value ->
+            runCatching { mvVideo(value.asObject()) }.getOrNull()
+        }
+        return ProviderSearchResults(
+            tracks = tracks,
+            playlists = playlists,
+            artists = artists,
+            albums = albums,
+            videos = videos,
+        )
     }
 
     override suspend fun trackDetail(identifier: String) = songDetail(rawIdentifier(identifier))?.let { song(it) }
@@ -339,6 +348,85 @@ class NeteaseProvider(
                     .value.let { parseNeteaseResponse(it) }
                 val playlists = root.array("list")
                 ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
+            }
+            "netease_new_songs" -> {
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/v1/discovery/new/songs",
+                    """{"areaId":0,"total":true}""",
+                )
+                val songs = root.array("data")
+                val page = songs.drop(offset).take(limit)
+                ProviderContentSection(
+                    feature = feature,
+                    tracks = page.map(::song),
+                    nextOffset = offset + page.size,
+                    hasMore = songs.size > offset + page.size,
+                )
+            }
+            "netease_new_albums" -> {
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/album/new",
+                    """{"limit":$limit,"offset":$offset,"total":true,"area":"ALL"}""",
+                )
+                val values = root.array("albums")
+                ProviderContentSection(
+                    feature = feature,
+                    mediaItems = values.mapNotNull { value -> runCatching { album(value.asObject()) }.getOrNull() },
+                    nextOffset = offset + values.size,
+                    hasMore = root.boolean("more") || root.int("total")?.let { offset + values.size < it } == true || values.size == limit,
+                )
+            }
+            "netease_top_artists" -> {
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/artist/top",
+                    """{"limit":$limit,"offset":$offset,"total":true}""",
+                )
+                val values = root.array("artists")
+                ProviderContentSection(
+                    feature = feature,
+                    mediaItems = values.mapNotNull { value -> runCatching { artist(value.asObject()) }.getOrNull() },
+                    nextOffset = offset + values.size,
+                    hasMore = root.boolean("more") || values.size == limit,
+                )
+            }
+            "netease_highquality_playlists" -> {
+                val requestLimit = (offset + limit).coerceAtLeast(limit)
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/playlist/highquality/list",
+                    """{"cat":"全部","limit":$requestLimit,"lasttime":0,"total":true}""",
+                )
+                val values = root.array("playlists")
+                val page = values.drop(offset).take(limit)
+                ProviderContentSection(
+                    feature = feature,
+                    playlists = page.mapNotNull { value -> runCatching { value.asObject().toPlaylist() }.getOrNull() },
+                    nextOffset = offset + page.size,
+                    hasMore = values.size > offset + page.size || root.boolean("more"),
+                )
+            }
+            "netease_recommended_mvs" -> {
+                val root = neteaseWeApiPost("$BASE/weapi/personalized/mv", "{}")
+                val values = root.array("result")
+                val page = values.drop(offset).take(limit)
+                ProviderContentSection(
+                    feature = feature,
+                    videos = page.mapNotNull { value -> runCatching { mvVideo(value.asObject()) }.getOrNull() },
+                    nextOffset = offset + page.size,
+                    hasMore = values.size > offset + page.size,
+                )
+            }
+            "netease_top_mvs" -> {
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/mv/toplist",
+                    """{"area":"","limit":$limit,"offset":$offset,"total":true}""",
+                )
+                val values = root.array("data")
+                ProviderContentSection(
+                    feature = feature,
+                    videos = values.mapNotNull { value -> runCatching { mvVideo(value.asObject()) }.getOrNull() },
+                    nextOffset = offset + values.size,
+                    hasMore = root.boolean("hasMore") || values.size == limit,
+                )
             }
             "netease_daily_playlists" -> {
                 val root = neteaseWeApiPost("$BASE/api/discovery/recommend/resource", "{}")
@@ -764,6 +852,25 @@ class NeteaseProvider(
         providerUrl = "https://music.163.com/#/album?id=${value.string("id")}",
     )
 
+    private fun mvVideo(value: JsonObject): ProviderVideo {
+        val identifier = value.string("id").ifBlank { value.string("mvId") }
+        val artists = value.array("artists")
+            .map { it.asObject().string("name") }
+            .filter(String::isNotBlank)
+            .joinToString(" / ")
+            .ifBlank { value.string("artistName") }
+        return video(
+            identifier = identifier,
+            title = value.string("name").ifBlank { value.string("title") },
+            artists = artists,
+            coverUrl = value.stringOrNull("cover")
+                ?: value.stringOrNull("coverUrl")
+                ?: value.stringOrNull("picUrl"),
+            durationMs = value.long("duration") ?: value.long("durationMs"),
+            providerUrl = "https://music.163.com/#/mv?id=$identifier",
+        )
+    }
+
     private suspend fun mutatePlaylist(action: String, playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult {
         val (_, playlistId) = splitResourceId(playlist.id, "playlist")
         val (_, trackId) = splitResourceId(track.providerId ?: track.id)
@@ -821,6 +928,12 @@ class NeteaseProvider(
             ProviderFeature("netease_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
             ProviderFeature("netease_radio", ID, NAME, "私人 FM", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
             ProviderFeature("netease_toplists", ID, NAME, "排行榜", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
+            ProviderFeature("netease_new_songs", ID, NAME, "新歌速递", ProviderFeatureCategory.Music, ProviderContentType.Songs, false),
+            ProviderFeature("netease_new_albums", ID, NAME, "新碟上架", ProviderFeatureCategory.Music, ProviderContentType.Albums, false),
+            ProviderFeature("netease_top_artists", ID, NAME, "热门歌手", ProviderFeatureCategory.Music, ProviderContentType.Artists, false),
+            ProviderFeature("netease_highquality_playlists", ID, NAME, "精品歌单", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
+            ProviderFeature("netease_recommended_mvs", ID, NAME, "推荐 MV", ProviderFeatureCategory.Music, ProviderContentType.Videos, false),
+            ProviderFeature("netease_top_mvs", ID, NAME, "MV 排行", ProviderFeatureCategory.Music, ProviderContentType.Videos, false),
             ProviderFeature("netease_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
             ProviderFeature("netease_favorite_songs", ID, NAME, "收藏歌曲", ProviderFeatureCategory.Mine, ProviderContentType.Songs, true),
             ProviderFeature("netease_cloud_songs", ID, NAME, "云盘歌曲", ProviderFeatureCategory.Mine, ProviderContentType.Songs, true),
