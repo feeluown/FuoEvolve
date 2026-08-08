@@ -1034,7 +1034,7 @@ class FuoPlayerController(
             isLoading = true
             runCatching { debugLogRepository.exportLogFile(lines) }
                 .onSuccess { message = it }
-                .onFailure { setError(it) }
+                .onFailure(::setError)
             isLoading = false
         }
     }
@@ -1697,7 +1697,7 @@ class FuoPlayerController(
                         selectedLocalPlaylistTracks = updated.toMusicTracks()
                     }
                 }
-                if (showMessage) {
+                if (showLoading) {
                     message = if (loaded.isEmpty()) "暂无本地歌单" else "本地歌单 ${loaded.size} 个"
                 }
             }
@@ -4639,7 +4639,8 @@ class FuoPlayerController(
         map { section -> section.copy(tracks = section.tracks.filterNot { it.id == trackId }) }
 
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
-        return category == ProviderFeatureCategory.Music ||
+        return (category == ProviderFeatureCategory.Music &&
+            (contentType == ProviderContentType.Songs || contentType == ProviderContentType.Videos)) ||
             (category == ProviderFeatureCategory.Recommend &&
                 (id.endsWith("_daily_songs") || isDynamicQueueFeature() || isBilibiliRecommendedVideos()))
     }
