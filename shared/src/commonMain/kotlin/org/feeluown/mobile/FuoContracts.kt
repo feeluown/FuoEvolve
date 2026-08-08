@@ -114,6 +114,7 @@ data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
     val dynamicCoverColorEnabled: Boolean = false,
+    val playlistPlaybackStatsVersion: Int = 0,
     val playlistPlaybackStats: Map<String, PlaylistPlaybackStat> = emptyMap(),
 )
 

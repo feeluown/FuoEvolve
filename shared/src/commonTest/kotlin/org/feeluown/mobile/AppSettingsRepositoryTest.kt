@@ -127,7 +127,10 @@ class AppSettingsRepositoryTest {
         val stat = PlaylistPlaybackStat(playCount = 3, lastPlayedAtMillis = 1234)
 
         first.update { settings ->
-            settings.copy(playlistPlaybackStats = mapOf("netease::playlist:123" to stat))
+            settings.copy(
+                playlistPlaybackStatsVersion = 1,
+                playlistPlaybackStats = mapOf("netease::playlist:123" to stat),
+            )
         }
         val restored = DataStoreAppSettingsRepository(
             dataStore = dataStore,
@@ -136,6 +139,28 @@ class AppSettingsRepositoryTest {
         ).awaitSettings()
 
         assertEquals(stat, restored.playlistPlaybackStats["netease::playlist:123"])
+    }
+
+    @Test
+    fun incompatibleOrInvalidPlaylistPlaybackStatsAreDiscarded() {
+        val legacy = AppSettings(
+            playlistPlaybackStats = mapOf(
+                "netease\u0000playlist:123" to PlaylistPlaybackStat(2, 1234),
+            ),
+        )
+        val currentWithInvalidEntry = AppSettings(
+            playlistPlaybackStatsVersion = 1,
+            playlistPlaybackStats = mapOf(
+                "netease\u0000playlist:123" to PlaylistPlaybackStat(2, 1234),
+                "netease::playlist:456" to PlaylistPlaybackStat(3, 5678),
+            ),
+        )
+
+        assertTrue(normalizedPlaylistPlaybackStats(legacy).isEmpty())
+        assertEquals(
+            setOf("netease::playlist:456"),
+            normalizedPlaylistPlaybackStats(currentWithInvalidEntry).keys,
+        )
     }
 
     private class FakePreferencesDataStore(

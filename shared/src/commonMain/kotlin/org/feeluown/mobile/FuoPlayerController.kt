@@ -93,6 +93,9 @@ private const val LIST_PREFETCH_REMAINING = 8
 private const val PLAYBACK_PLAN_LOOKAHEAD = 8
 private const val PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS = 3_000L
 private const val MAX_PLAYLIST_PLAYBACK_STATS = 500
+private const val MAX_PLAYLIST_STATS_KEY_LENGTH = 2_048
+private const val MAX_PLAYLIST_PLAY_COUNT = 1_000_000_000L
+private const val PLAYLIST_PLAYBACK_STATS_VERSION = 1
 private const val PLAYLIST_STATS_KEY_SEPARATOR = "::"
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
@@ -4696,12 +4699,7 @@ class FuoPlayerController(
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
         dynamicCoverColorEnabled = settings.dynamicCoverColorEnabled
-        playlistPlaybackStats = settings.playlistPlaybackStats
-            .mapKeys { (key, _) -> key.replace("\u0000", PLAYLIST_STATS_KEY_SEPARATOR) }
-            .entries
-            .sortedByDescending { it.value.lastPlayedAtMillis }
-            .take(MAX_PLAYLIST_PLAYBACK_STATS)
-            .associate { it.toPair() }
+        playlistPlaybackStats = normalizedPlaylistPlaybackStats(settings)
         pauseOnOtherAppPlayback = settings.pauseOnOtherAppPlayback
     }
 
@@ -4743,6 +4741,7 @@ class FuoPlayerController(
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
             dynamicCoverColorEnabled = dynamicCoverColorEnabled,
+            playlistPlaybackStatsVersion = PLAYLIST_PLAYBACK_STATS_VERSION,
             playlistPlaybackStats = playlistPlaybackStats,
             pauseOnOtherAppPlayback = pauseOnOtherAppPlayback,
         )
@@ -4944,4 +4943,20 @@ class FuoPlayerController(
         contains("media not found", ignoreCase = true) || contains("MediaNotFound", ignoreCase = true)
 
     private fun Int.mbToBytes(): Long = this.toLong() * 1024L * 1024L
+}
+
+internal fun normalizedPlaylistPlaybackStats(settings: AppSettings): Map<String, PlaylistPlaybackStat> {
+    if (settings.playlistPlaybackStatsVersion != PLAYLIST_PLAYBACK_STATS_VERSION) return emptyMap()
+    return settings.playlistPlaybackStats.entries
+        .asSequence()
+        .filter { (key, stat) ->
+            key.isNotBlank() &&
+                key.length <= MAX_PLAYLIST_STATS_KEY_LENGTH &&
+                key.none(Char::isISOControl) &&
+                stat.playCount in 1..MAX_PLAYLIST_PLAY_COUNT &&
+                stat.lastPlayedAtMillis > 0
+        }
+        .sortedByDescending { it.value.lastPlayedAtMillis }
+        .take(MAX_PLAYLIST_PLAYBACK_STATS)
+        .associate { it.toPair() }
 }
