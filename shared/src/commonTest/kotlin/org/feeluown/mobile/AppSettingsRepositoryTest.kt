@@ -115,6 +115,29 @@ class AppSettingsRepositoryTest {
         assertTrue(settings.pauseOnOtherAppPlayback)
     }
 
+    @Test
+    fun playlistPlaybackStatsRoundTripWithProviderPlaylistKey() = runTest {
+        val dataStore = FakePreferencesDataStore()
+        val first = DataStoreAppSettingsRepository(
+            dataStore = dataStore,
+            legacyLoader = null,
+            scope = backgroundScope,
+        )
+        first.awaitSettings()
+        val stat = PlaylistPlaybackStat(playCount = 3, lastPlayedAtMillis = 1234)
+
+        first.update { settings ->
+            settings.copy(playlistPlaybackStats = mapOf("netease::playlist:123" to stat))
+        }
+        val restored = DataStoreAppSettingsRepository(
+            dataStore = dataStore,
+            legacyLoader = null,
+            scope = backgroundScope,
+        ).awaitSettings()
+
+        assertEquals(stat, restored.playlistPlaybackStats["netease::playlist:123"])
+    }
+
     private class FakePreferencesDataStore(
         initial: Preferences = emptyPreferences(),
     ) : DataStore<Preferences> {

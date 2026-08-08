@@ -92,6 +92,8 @@ private const val DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 private const val LIST_PREFETCH_REMAINING = 8
 private const val PLAYBACK_PLAN_LOOKAHEAD = 8
 private const val PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS = 3_000L
+private const val MAX_PLAYLIST_PLAYBACK_STATS = 500
+private const val PLAYLIST_STATS_KEY_SEPARATOR = "::"
 private val DEFAULT_DEBUG_LOG_LEVEL_FILTERS = setOf(DebugLogLevel.Info, DebugLogLevel.Warning, DebugLogLevel.Error)
 
 class FuoPlayerController(
@@ -3315,12 +3317,15 @@ class FuoPlayerController(
     private fun recordPlaylistPlayback(playlist: ProviderPlaylist) {
         val key = playlist.playbackStatsKey()
         val previous = playlistPlaybackStats[key] ?: PlaylistPlaybackStat()
-        playlistPlaybackStats = playlistPlaybackStats + (
+        playlistPlaybackStats = (playlistPlaybackStats + (
             key to previous.copy(
                 playCount = previous.playCount + 1,
                 lastPlayedAtMillis = currentTimeMillis(),
             )
-        )
+        )).entries
+            .sortedByDescending { it.value.lastPlayedAtMillis }
+            .take(MAX_PLAYLIST_PLAYBACK_STATS)
+            .associate { it.toPair() }
         persistSettings()
     }
 
@@ -4692,6 +4697,11 @@ class FuoPlayerController(
         themeColorScheme = settings.themeColorScheme
         dynamicCoverColorEnabled = settings.dynamicCoverColorEnabled
         playlistPlaybackStats = settings.playlistPlaybackStats
+            .mapKeys { (key, _) -> key.replace("\u0000", PLAYLIST_STATS_KEY_SEPARATOR) }
+            .entries
+            .sortedByDescending { it.value.lastPlayedAtMillis }
+            .take(MAX_PLAYLIST_PLAYBACK_STATS)
+            .associate { it.toPair() }
         pauseOnOtherAppPlayback = settings.pauseOnOtherAppPlayback
     }
 
@@ -4738,7 +4748,8 @@ class FuoPlayerController(
         )
     }
 
-    private fun ProviderPlaylist.playbackStatsKey(): String = "$providerId\u0000$id"
+    private fun ProviderPlaylist.playbackStatsKey(): String =
+        "$providerId$PLAYLIST_STATS_KEY_SEPARATOR$id"
 
     private suspend fun updateResourceCacheLimit() {
         resourceCacheRepository.updateLimit(
