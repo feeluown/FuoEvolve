@@ -1,0 +1,36 @@
+package org.feeluown.mobile
+
+/**
+ * Converts the app's supported lyric formats (LRC/YRC plus optional translation)
+ * into plain timed line-level LRC suitable for platform media-session extensions.
+ */
+fun toTimedLineLrc(rawLyrics: String?): String? {
+    val timedLines = parseLyrics(rawLyrics)
+        .filter { it.timeMs != Long.MAX_VALUE && it.text.isNotBlank() }
+    if (timedLines.isEmpty()) return null
+
+    return buildString {
+        timedLines.forEach { line ->
+            val timestamp = formatLrcTimestamp(line.timeMs)
+            append(timestamp)
+            append(line.text.trim())
+            append('\n')
+            line.translation
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && it != line.text.trim() }
+                ?.let { translation ->
+                    append(timestamp)
+                    append(translation)
+                    append('\n')
+                }
+        }
+    }.trimEnd()
+}
+
+private fun formatLrcTimestamp(timeMs: Long): String {
+    val normalized = timeMs.coerceAtLeast(0L)
+    val minutes = normalized / 60_000L
+    val seconds = (normalized % 60_000L) / 1_000L
+    val millis = normalized % 1_000L
+    return "[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}]"
+}
