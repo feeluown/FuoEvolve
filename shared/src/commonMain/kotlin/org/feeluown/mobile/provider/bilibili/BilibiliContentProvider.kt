@@ -391,7 +391,7 @@ class BilibiliContentProvider(
             feature = feature,
             mediaItems = items,
             nextOffset = nextOffset,
-            hasMore = total?.let { nextOffset < it } ?: values.size >= pageSize,
+            hasMore = total?.let { nextOffset < it } ?: (values.size >= pageSize),
             errorMessage = apiError(root),
         )
     }
@@ -447,7 +447,7 @@ class BilibiliContentProvider(
             item = actual,
             tracks = tracks,
             tracksNextOffset = nextOffset,
-            tracksHasMore = total?.let { nextOffset < it } ?: values.size >= pageSize,
+            tracksHasMore = total?.let { nextOffset < it } ?: (values.size >= pageSize),
         )
     }
 
@@ -506,7 +506,7 @@ class BilibiliContentProvider(
             feature = presentationFeature,
             mediaItems = items,
             nextOffset = nextOffset,
-            hasMore = total?.let { nextOffset < it } ?: values.size >= pageSize,
+            hasMore = total?.let { nextOffset < it } ?: (values.size >= pageSize),
             errorMessage = apiError(root),
         )
     }
