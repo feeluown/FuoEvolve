@@ -21,33 +21,26 @@ import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 /**
  * Reads the QQ Music account profile and user-created playlists.
  *
- * The user-created-playlist endpoint is the primary source because it returns
- * both `hostname` and `disslist`. The older profile-homepage endpoint is kept
- * only as a fallback for nickname / "我喜欢" when QQ omits them from disslist.
+ * QQ Music's profile-homepage endpoint is the primary source. It can return
+ * the nickname, "我喜欢" and created playlists together and does not require
+ * the legacy `hostuin` parameter. The older user-created-playlist endpoint is
+ * retained only as a fallback for an unambiguously numeric QQ number.
  */
 internal class QQMusicUserLibrary(
     private val http: ProviderHttpClient,
     private val credentials: ProviderCredentialStore,
 ) {
-    suspend fun userName(): String? {
-        val uin = currentUin() ?: return null
-        return runCatching { snapshot(uin).userName }.getOrNull()
-    }
+    suspend fun userName(): String? = runCatching { snapshot().userName }.getOrNull()
 
     suspend fun loadPlaylists(
         feature: ProviderFeature,
         offset: Int,
         limit: Int,
     ): ProviderContentSection {
-        val uin = currentUin()
-            ?: return ProviderContentSection(
-                feature = feature,
-                errorMessage = "无法读取 QQ 音乐账号信息，请重新登录",
-            )
-        val snapshot = runCatching { snapshot(uin) }.getOrElse { throwable ->
+        val snapshot = runCatching { snapshot() }.getOrElse {
             return ProviderContentSection(
                 feature = feature,
-                errorMessage = throwable.message ?: "加载 QQ 音乐歌单失败",
+                errorMessage = "QQ 音乐账号资料加载失败，当前登录状态已保留",
             )
         }
         val page = snapshot.playlists.drop(offset).take(limit)
@@ -59,23 +52,137 @@ internal class QQMusicUserLibrary(
         )
     }
 
-    private suspend fun snapshot(uin: String): QQMusicUserLibrarySnapshot {
-        val created = createdPlaylists(uin)
-        var userName = created.userName
-        var playlists = created.playlists
+    private suspend fun snapshot(): QQMusicUserLibrarySnapshot {
+        val accountIds = currentAccountIds()
+        if (accountIds.isEmpty()) error("QQ Music account id is unavailable")
 
-        if (userName.isNullOrBlank() || !created.hasFavorite) {
-            val home = runCatching { profileHome(uin) }.getOrNull()
-            if (userName.isNullOrBlank()) userName = home?.userName
-            if (!created.hasFavorite) {
-                home?.favoritePlaylist?.let { favorite ->
-                    playlists = (listOf(favorite) + playlists).distinctBy { it.id }
+        var lastFailure: Throwable? = null
+        for (accountId in accountIds) {
+            val profile = runCatching { profileHome(accountId) }
+                .onFailure { lastFailure = it }
+                .getOrNull()
+
+            if (profile != null && profile.isMeaningful()) {
+                if (profile.hasPlaylistPayload || !isLikelyQqNumber(accountId)) {
+                    return QQMusicUserLibrarySnapshot(
+                        userName = profile.userName,
+                        playlists = profile.playlists.distinctBy { it.id },
+                    )
                 }
+
+                val fallback = runCatching { createdPlaylists(accountId) }
+                    .onFailure { lastFailure = it }
+                    .getOrNull()
+                return QQMusicUserLibrarySnapshot(
+                    userName = profile.userName ?: fallback?.userName,
+                    playlists = (profile.playlists + fallback.orEmptyPlaylists()).distinctBy { it.id },
+                )
             }
         }
-        return QQMusicUserLibrarySnapshot(
+
+        for (accountId in accountIds.filter(::isLikelyQqNumber)) {
+            val created = runCatching { createdPlaylists(accountId) }
+                .onFailure { lastFailure = it }
+                .getOrNull()
+                ?: continue
+            if (created.userName != null || created.playlists.isNotEmpty()) {
+                return QQMusicUserLibrarySnapshot(
+                    userName = created.userName,
+                    playlists = created.playlists.distinctBy { it.id },
+                )
+            }
+        }
+
+        throw lastFailure ?: IllegalStateException("QQ Music profile is unavailable")
+    }
+
+    private suspend fun profileHome(accountId: String): ProfileHomeResult {
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$PROFILE_BASE/rsc/fcgi-bin/fcg_get_profile_homepage.fcg",
+                mapOf(
+                    "cv" to "4747474",
+                    "ct" to "24",
+                    "format" to "json",
+                    "inCharset" to "utf-8",
+                    "outCharset" to "utf-8",
+                    "notice" to "0",
+                    "platform" to "yqq.json",
+                    "needNewCode" to "0",
+                    "uin" to accountId,
+                    "g_tk_new_20200303" to "0",
+                    "g_tk" to "0",
+                    "cid" to "205360838",
+                    "userid" to accountId,
+                    "reqfrom" to "1",
+                    "reqtype" to "0",
+                    "hostUin" to "0",
+                    "loginUin" to accountId,
+                ),
+            ),
+            headers = authenticatedHeaders("https://y.qq.com/portal/profile.html?uin=$accountId"),
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+
+        val code = root.int("code")
+        if (code != null && code != 0) {
+            error(root.errorMessage().ifBlank { "QQ Music profile request failed (code=$code)" })
+        }
+        val data = root.obj("data") ?: error("QQ Music profile payload missing data")
+        val creator = data.obj("creator")
+        val userName = creator?.stringOrNull("nick")
+            ?: creator?.stringOrNull("nickname")
+            ?: creator?.stringOrNull("name")
+            ?: creator?.stringOrNull("hostname")
+            ?: data.stringOrNull("hostname")
+            ?: data.stringOrNull("nickname")
+            ?: data.stringOrNull("nick")
+
+        val favoriteValues = data.array("mymusic")
+        val createdValues = firstNonEmpty(
+            data.obj("mydiss")?.array("list").orEmpty(),
+            data.array("mydiss"),
+            data.array("createdDissList"),
+            data.array("createdList"),
+            data.array("playlists"),
+            data.array("playlist"),
+        )
+        val favoriteFromCreator = creator?.stringOrNull("fav_pid")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { identifier ->
+                ProviderPlaylist(
+                    id = playlistKey(ID, identifier),
+                    title = "我喜欢",
+                    providerId = ID,
+                    providerName = NAME,
+                    providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
+                )
+            }
+
+        val playlists = buildList {
+            favoriteValues.mapNotNullTo(this) { value ->
+                playlistFromProfile(value.asObject(), favorite = true)
+            }
+            favoriteFromCreator?.let(::add)
+            createdValues.mapNotNullTo(this) { value ->
+                playlistFromProfile(value.asObject(), favorite = false)
+            }
+        }.distinctBy { it.id }
+
+        val hasPlaylistPayload =
+            data.containsKey("mymusic") ||
+                data.containsKey("mydiss") ||
+                data.containsKey("createdDissList") ||
+                data.containsKey("createdList") ||
+                data.containsKey("playlists") ||
+                data.containsKey("playlist") ||
+                creator?.containsKey("fav_pid") == true
+
+        return ProfileHomeResult(
             userName = userName?.takeIf { it.isNotBlank() },
-            playlists = playlists.distinctBy { it.id },
+            playlists = playlists,
+            hasPlaylistPayload = hasPlaylistPayload,
         )
     }
 
@@ -106,12 +213,7 @@ internal class QQMusicUserLibrary(
         if (data == null) {
             val code = root.int("code")
             if (code == PRIVATE_PLAYLIST_CODE) return CreatedPlaylistsResult()
-            val message = root.string("message").ifBlank { root.string("msg") }
-            error(
-                message.ifBlank {
-                    if (code != null) "QQ 音乐用户歌单加载失败（code=$code）" else "QQ 音乐用户歌单加载失败"
-                },
-            )
+            error(root.errorMessage().ifBlank { "QQ Music user playlists request failed" })
         }
         val rawPlaylists = data.array("disslist")
         return CreatedPlaylistsResult(
@@ -121,53 +223,37 @@ internal class QQMusicUserLibrary(
             playlists = rawPlaylists.mapNotNull { value ->
                 playlistFromCreated(value.asObject())
             },
-            hasFavorite = rawPlaylists.any { value ->
-                val item = value.asObject()
-                item.int("dirid") == FAVORITE_DIR_ID || item.string("dirid").toIntOrNull() == FAVORITE_DIR_ID
-            },
         )
     }
 
-    private suspend fun profileHome(uin: String): ProfileHomeResult {
-        val root = http.getText(
+    private fun playlistFromProfile(item: JsonObject, favorite: Boolean): ProviderPlaylist? {
+        val identifier = item.string("dissid")
+            .ifBlank { item.string("tid") }
+            .ifBlank { item.string("id") }
+            .takeIf { it.isNotBlank() }
+            ?: return null
+        val dirId = item.int("dirid") ?: item.string("dirid").toIntOrNull()
+        val isFavorite = favorite || dirId == FAVORITE_DIR_ID
+        return ProviderPlaylist(
+            id = playlistKey(ID, identifier),
+            title = item.string("title")
+                .ifBlank { item.string("diss_name") }
+                .ifBlank { item.string("dissname") }
+                .ifBlank { item.string("name") }
+                .ifBlank { if (isFavorite) "我喜欢" else "未命名歌单" },
             providerId = ID,
-            url = queryUrl(
-                "$BASE/rsc/fcgi-bin/fcg_get_profile_homepage.fcg",
-                mapOf(
-                    "cid" to "205360838",
-                    "reqfrom" to "1",
-                    "userid" to uin,
-                ),
-            ),
-            headers = authenticatedHeaders("https://y.qq.com/"),
-            cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
-        val data = root.obj("data") ?: return ProfileHomeResult()
-        val creator = data.obj("creator")
-        val userName = creator?.stringOrNull("nick")
-            ?: creator?.stringOrNull("nickname")
-            ?: creator?.stringOrNull("name")
-            ?: data.stringOrNull("hostname")
-            ?: data.stringOrNull("nickname")
-            ?: data.stringOrNull("nick")
-        val favorite = data.array("mymusic").firstOrNull()?.asObject()
-        val favoriteId = creator?.stringOrNull("fav_pid")
-            ?: favorite?.stringOrNull("id")
-        return ProfileHomeResult(
-            userName = userName,
-            favoritePlaylist = favoriteId?.let { identifier ->
-                ProviderPlaylist(
-                    id = playlistKey(ID, identifier),
-                    title = "我喜欢",
-                    providerId = ID,
-                    providerName = NAME,
-                    coverUrl = favorite?.stringOrNull("picurl")
-                        ?: favorite?.stringOrNull("cover")
-                        ?: favorite?.stringOrNull("logo"),
-                    trackCount = favorite?.int("num0") ?: favorite?.int("songnum"),
-                    providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
-                )
-            },
+            providerName = NAME,
+            coverUrl = item.stringOrNull("picurl")
+                ?: item.stringOrNull("diss_cover")
+                ?: item.stringOrNull("logo")
+                ?: item.stringOrNull("cover"),
+            description = item.string("desc"),
+            playCount = item.long("listen_num") ?: item.long("visitnum"),
+            trackCount = item.int("num0")
+                ?: item.int("song_cnt")
+                ?: item.int("songnum")
+                ?: item.int("song_count"),
+            providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
         )
     }
 
@@ -197,21 +283,33 @@ internal class QQMusicUserLibrary(
         )
     }
 
-    private suspend fun currentUin(): String? {
-        val stored = credentials.read(ID) ?: return null
+    private suspend fun currentAccountIds(): List<String> {
+        val stored = credentials.read(ID) ?: return emptyList()
         val values = parseCookies(stored.cookieHeader.orEmpty()) + stored.cookies
         val loginType = values["login_type"]?.toIntOrNull()
-        val candidates = if (loginType == WECHAT_LOGIN_TYPE) {
-            listOf(values["wxuin"], values["uin"])
+        val isWechat = loginType == WECHAT_LOGIN_TYPE ||
+            !values["wxopenid"].isNullOrBlank() ||
+            !values["wxunionid"].isNullOrBlank()
+        val keys = if (isWechat) {
+            listOf("str_musicid", "musicid", "wxuin", "uin")
         } else {
-            listOf(values["uin"], values["wxuin"])
+            listOf("uin", "str_musicid", "musicid", "wxuin")
         }
-        return candidates.asSequence().mapNotNull(::normalizeUin).firstOrNull()
+        return keys.mapNotNull { key -> normalizeAccountId(values[key]) }.distinct()
     }
 
-    private fun normalizeUin(raw: String?): String? = raw
-        ?.filter { character -> character.isDigit() }
-        ?.takeIf { digits -> digits.isNotBlank() && digits.any { character -> character != '0' } }
+    private fun normalizeAccountId(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val digits = when {
+            value.all(Char::isDigit) -> value
+            value.startsWith('o') && value.drop(1).isNotEmpty() && value.drop(1).all(Char::isDigit) -> value.drop(1)
+            else -> return null
+        }
+        return digits.takeIf { it.any { character -> character != '0' } }
+    }
+
+    private fun isLikelyQqNumber(value: String): Boolean =
+        value.length in MIN_QQ_UIN_LENGTH..MAX_QQ_UIN_LENGTH && value.all(Char::isDigit)
 
     private suspend fun authenticatedHeaders(referer: String): Map<String, String> = buildMap {
         put("User-Agent", DEFAULT_USER_AGENT)
@@ -244,24 +342,37 @@ internal class QQMusicUserLibrary(
         }
     }
 
+    private fun firstNonEmpty(vararg values: List<kotlinx.serialization.json.JsonElement>): List<kotlinx.serialization.json.JsonElement> =
+        values.firstOrNull { it.isNotEmpty() }.orEmpty()
+
+    private fun JsonObject.errorMessage(): String =
+        string("message").ifBlank { string("msg") }.ifBlank { string("errmsg") }.ifBlank { string("error") }
+
+    private fun CreatedPlaylistsResult?.orEmptyPlaylists(): List<ProviderPlaylist> = this?.playlists.orEmpty()
+
     private data class CreatedPlaylistsResult(
         val userName: String? = null,
         val playlists: List<ProviderPlaylist> = emptyList(),
-        val hasFavorite: Boolean = false,
     )
 
     private data class ProfileHomeResult(
         val userName: String? = null,
-        val favoritePlaylist: ProviderPlaylist? = null,
-    )
+        val playlists: List<ProviderPlaylist> = emptyList(),
+        val hasPlaylistPayload: Boolean = false,
+    ) {
+        fun isMeaningful(): Boolean = userName != null || playlists.isNotEmpty() || hasPlaylistPayload
+    }
 
     private companion object {
         const val ID = "qqmusic"
         const val NAME = "QQ 音乐"
         const val BASE = "https://c.y.qq.com"
+        const val PROFILE_BASE = "https://c6.y.qq.com"
         const val FAVORITE_DIR_ID = 201
         const val PRIVATE_PLAYLIST_CODE = 4000
         const val WECHAT_LOGIN_TYPE = 2
+        const val MIN_QQ_UIN_LENGTH = 5
+        const val MAX_QQ_UIN_LENGTH = 12
         const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
     }
 }
