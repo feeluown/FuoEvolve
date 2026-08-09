@@ -7,12 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -52,6 +50,7 @@ import androidx.compose.ui.unit.dp
 fun EnhancedProviderVideoScreen(controller: FuoPlayerController, video: ProviderVideo?) {
     val displayVideo = controller.selectedVideo ?: video ?: return
     val isFullscreen = controller.isVideoFullscreen
+    val useWideLayout = LocalAppLayoutInfo.current.useWideLayout
     val videoController = rememberPlatformVideoController()
     val playbackState by videoController.state.collectAsState()
     var metadata by remember(displayVideo.id) { mutableStateOf<ProviderVideoMetadata?>(null) }
@@ -100,79 +99,42 @@ fun EnhancedProviderVideoScreen(controller: FuoPlayerController, video: Provider
             }
         },
     ) { paddingValues ->
-        if (isFullscreen) {
+        val screenModifier = if (isFullscreen) {
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        } else {
+            Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+        }
+        Column(
+            modifier = screenModifier,
+            verticalArrangement = if (isFullscreen) Arrangement.Center else Arrangement.spacedBy(16.dp),
+        ) {
             VideoPlayerFrame(
                 payload = controller.selectedVideoPayload,
                 controller = videoController,
                 playbackState = playbackState,
-                isFullscreen = true,
+                isFullscreen = isFullscreen,
                 onToggleFullscreen = controller::toggleVideoFullscreen,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
+                modifier = if (isFullscreen) {
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(videoAspectRatio(playbackState, metadata))
+                },
             )
-            return@Scaffold
-        }
 
-        if (LocalAppLayoutInfo.current.useWideLayout) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
+            if (!isFullscreen) {
                 Column(
-                    modifier = Modifier.weight(1.2f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    VideoPlayerFrame(
-                        payload = controller.selectedVideoPayload,
-                        controller = videoController,
-                        playbackState = playbackState,
-                        isFullscreen = false,
-                        onToggleFullscreen = controller::toggleVideoFullscreen,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(videoAspectRatio(playbackState, metadata)),
-                    )
-                    controller.selectedVideoError?.let(::ProviderContentMessage)
-                    playbackState.errorMessage?.let(::ProviderContentMessage)
-                }
-                VideoInformationPanel(
-                    video = displayVideo,
-                    metadata = metadata,
-                    metadataLoading = metadataLoading,
-                    playbackState = playbackState,
-                    quality = controller.selectedVideoPayload?.quality,
-                    modifier = Modifier
-                        .weight(0.8f)
-                        .fillMaxHeight()
-                        .widthIn(max = 520.dp)
-                        .verticalScroll(rememberScrollState()),
-                )
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                VideoPlayerFrame(
-                    payload = controller.selectedVideoPayload,
-                    controller = videoController,
-                    playbackState = playbackState,
-                    isFullscreen = false,
-                    onToggleFullscreen = controller::toggleVideoFullscreen,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(videoAspectRatio(playbackState, metadata)),
-                )
-                Column(
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                        .padding(horizontal = if (useWideLayout) 24.dp else 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     controller.selectedVideoError?.let(::ProviderContentMessage)
@@ -185,7 +147,7 @@ fun EnhancedProviderVideoScreen(controller: FuoPlayerController, video: Provider
                         quality = controller.selectedVideoPayload?.quality,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.size(8.dp))
+                    Spacer(Modifier.size(12.dp))
                 }
             }
         }
@@ -251,7 +213,6 @@ private fun VideoControlBar(
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             Slider(
                 value = shownFraction,
