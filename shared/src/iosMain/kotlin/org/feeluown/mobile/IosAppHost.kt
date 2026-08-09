@@ -112,7 +112,7 @@ private class IosAppContainer(
     oauthDeviceCodeOutput: IosOAuthDeviceCodeOutput,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val providerRepository = createKotlinProviderRepository(
+    private val providerRepository = createFuoProviderRepository(
         credentials = IosProviderCredentialStore(),
         persistentCache = IosProviderCacheStore(),
         isCellularConnection = networkStatusOutput::isCellularConnection,
