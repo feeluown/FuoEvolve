@@ -22,6 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -172,9 +175,12 @@ actual fun PlatformVideoPlayer(
     controller: PlatformVideoController,
     modifier: Modifier,
 ) {
+    val context = LocalContext.current
     val androidController = controller as? AndroidPlatformVideoController
     if (payload == null) {
-        LaunchedEffect(androidController) { androidController?.setPayload(LocalContext.current.applicationContext, null) }
+        LaunchedEffect(androidController, context) {
+            androidController?.setPayload(context.applicationContext, null)
+        }
         VideoPlaceholder("正在加载视频", modifier)
         return
     }
@@ -182,7 +188,6 @@ actual fun PlatformVideoPlayer(
         VideoPlaceholder("视频地址不可用", modifier)
         return
     }
-    val context = LocalContext.current
     LaunchedEffect(payload.url, payload.videoUrl, payload.audioUrl, payload.headers) {
         androidController.setPayload(context.applicationContext, payload)
     }
@@ -212,16 +217,21 @@ actual fun PlatformVideoFullscreenEffect(
 
     LaunchedEffect(activity, isFullscreen, isLandscapeVideo) {
         activity ?: return@LaunchedEffect
+        val insetsController = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
         if (isFullscreen) {
             if (previousOrientation == null) {
                 previousOrientation = activity.requestedOrientation
             }
+            insetsController.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
             activity.requestedOrientation = if (isLandscapeVideo) {
                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             } else {
                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
             }
         } else {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
             previousOrientation?.let { activity.requestedOrientation = it }
             previousOrientation = null
         }
@@ -229,8 +239,11 @@ actual fun PlatformVideoFullscreenEffect(
 
     DisposableEffect(activity) {
         onDispose {
+            activity ?: return@onDispose
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .show(WindowInsetsCompat.Type.systemBars())
             previousOrientation?.let { orientation ->
-                activity?.requestedOrientation = orientation
+                activity.requestedOrientation = orientation
             }
         }
     }
