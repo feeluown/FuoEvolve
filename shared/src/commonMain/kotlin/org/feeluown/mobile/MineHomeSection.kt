@@ -211,6 +211,7 @@ fun MinePlaylistsSection(
                 feature.providerId in selectedMineProviderIds
         }
     }
+    val showSongEntries = controller.playlistFilter == PlaylistFilter.All && songEntryFeatures.isNotEmpty()
     val sections = when (controller.playlistFilter) {
         PlaylistFilter.All -> userSections + favoriteSections
         PlaylistFilter.UserPlaylists -> userSections
@@ -246,7 +247,7 @@ fun MinePlaylistsSection(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (sections.isEmpty() && !showLocalPlaylists && songEntryFeatures.isEmpty()) {
+            if (sections.isEmpty() && !showLocalPlaylists && !showSongEntries) {
                 item {
                     EmptyProviderContentHint(controller.playlistFilter.emptyTitle())
                 }
@@ -263,7 +264,7 @@ fun MinePlaylistsSection(
                         )
                     }
                 }
-                if (controller.playlistFilter == PlaylistFilter.All && songEntryFeatures.isNotEmpty()) {
+                if (showSongEntries) {
                     item(key = "header:mine-song-entries") {
                         Text("我的歌曲", style = MaterialTheme.typography.titleMedium)
                     }
