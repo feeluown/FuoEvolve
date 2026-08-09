@@ -21,7 +21,7 @@ fun ProviderFeatureFilters(
     content: ProviderContentSection?,
     modifier: Modifier = Modifier,
 ) {
-    val filters = content?.filters.orEmpty()
+    val filters = content?.let { ProviderFeatureFilterCodec.filters(it.feature.id) }.orEmpty()
     if (filters.isEmpty()) return
 
     Column(
