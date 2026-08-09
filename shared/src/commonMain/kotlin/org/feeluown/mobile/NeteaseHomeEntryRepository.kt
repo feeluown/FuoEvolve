@@ -75,7 +75,7 @@ internal class NeteaseHomeEntryClient(
                 put("User-Agent", NETEASE_HOME_USER_AGENT)
                 cookie?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
             },
-            cacheKey = "netease:homepage:dragon-ball:$authenticatedCacheKey",
+            cacheKey = "netease:homepage:dragon-ball",
             cachePolicy = ProviderCachePolicies.recommendation,
         )
         val root = providerJson.parseToJsonElement(response.value).asObject()
@@ -92,9 +92,6 @@ internal class NeteaseHomeEntryClient(
         }
         return mapNeteaseHomeEntryCovers(entries)
     }
-
-    private val authenticatedCacheKey: String
-        get() = "static"
 }
 
 internal data class NeteaseHomeEntry(
@@ -135,7 +132,7 @@ private fun findNeteaseHomeEntryCover(
     normalizedAliases.forEach { alias ->
         entries.firstOrNull {
             val name = normalizeNeteaseHomeEntryName(it.name)
-            alias.isNotBlank() && (name.contains(alias) || alias.contains(name))
+            name.isNotBlank() && alias.isNotBlank() && (name.contains(alias) || alias.contains(name))
         }?.iconUrl
             ?.takeIf { it.isNotBlank() }
             ?.let { return it }
