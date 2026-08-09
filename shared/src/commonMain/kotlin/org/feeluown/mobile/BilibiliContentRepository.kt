@@ -17,7 +17,19 @@ internal class BilibiliContentRepository(
     override suspend fun features(): List<ProviderFeature> {
         val base = delegate.features()
         if (base.none { it.providerId == BILIBILI_PROVIDER_ID }) return base
-        return base.filterNot { it.providerId == BILIBILI_PROVIDER_ID } + bilibili.features
+        return buildList {
+            var insertedBilibili = false
+            base.forEach { feature ->
+                if (feature.providerId == BILIBILI_PROVIDER_ID) {
+                    if (!insertedBilibili) {
+                        addAll(bilibili.features)
+                        insertedBilibili = true
+                    }
+                } else {
+                    add(feature)
+                }
+            }
+        }
     }
 
     override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
