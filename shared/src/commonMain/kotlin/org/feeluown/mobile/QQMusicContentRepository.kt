@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import org.feeluown.mobile.provider.qqmusic.QQMusicArtistDetailProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicContentProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicUserLibrary
 
@@ -12,6 +13,7 @@ internal class QQMusicContentRepository(
     private val delegate: ProviderMusicRepository,
     private val qqmusic: QQMusicContentProvider,
     private val userLibrary: QQMusicUserLibrary,
+    private val artistDetails: QQMusicArtistDetailProvider,
 ) : ProviderMusicRepository by delegate {
     override suspend fun features(): List<ProviderFeature> {
         val base = delegate.features()
@@ -43,7 +45,10 @@ internal class QQMusicContentRepository(
         val extras = runCatching { qqmusic.searchExtras(keyword) }.getOrElse { return base }
         return base.copy(
             playlists = replaceQQMusic(base.playlists, extras.playlists) { it.providerId },
-            artists = replaceQQMusic(base.artists, extras.artists) { it.providerId },
+            artists = replaceQQMusic(
+                base.artists,
+                extras.artists.map(artistDetails::normalizeArtist),
+            ) { it.providerId },
             albums = replaceQQMusic(base.albums, extras.albums) { it.providerId },
             videos = replaceQQMusic(base.videos, extras.videos) { it.providerId },
         )
@@ -81,7 +86,7 @@ internal class QQMusicContentRepository(
         offset: Int,
         limit: Int,
     ): ProviderContentSection = if (feature.providerId == QQMUSIC_PROVIDER_ID) {
-        if (ProviderFeatureFilterCodec.requestId(feature.id) == QQMUSIC_USER_PLAYLISTS_FEATURE_ID) {
+        val section = if (ProviderFeatureFilterCodec.requestId(feature.id) == QQMUSIC_USER_PLAYLISTS_FEATURE_ID) {
             val auth = delegate.authState(QQMUSIC_PROVIDER_ID)
             if (!auth.isLoggedIn) {
                 ProviderContentSection(feature = feature, isLoginRequired = true)
@@ -91,6 +96,7 @@ internal class QQMusicContentRepository(
         } else {
             qqmusic.loadFeature(feature, offset, limit)
         }
+        normalizeQQMusicArtists(section)
     } else {
         delegate.loadFeaturePage(feature, offset, limit)
     }
@@ -122,12 +128,72 @@ internal class QQMusicContentRepository(
             delegate.playlistTracks(playlist)
         }
 
+    override suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
+        mediaItemDetailPage(item, 0, 0, PROVIDER_PAGE_SIZE)
+
+    override suspend fun mediaItemDetailPage(
+        item: ProviderMediaItem,
+        tracksOffset: Int,
+        albumsOffset: Int,
+        limit: Int,
+    ): ProviderMediaItemDetail {
+        if (item.providerId != QQMUSIC_PROVIDER_ID || item.type != ProviderMediaItemType.Artist) {
+            return delegate.mediaItemDetailPage(item, tracksOffset, albumsOffset, limit)
+        }
+
+        val normalized = artistDetails.normalizeArtist(item)
+        val base = runCatching {
+            delegate.mediaItemDetailPage(normalized, tracksOffset, albumsOffset, limit)
+        }.getOrNull()
+        val trackPage = artistDetails.loadTracksPage(normalized, tracksOffset, limit)
+        val baseItem = base?.item
+        val mergedItem = (baseItem ?: trackPage.item).copy(
+            id = trackPage.item.id,
+            coverUrl = trackPage.item.coverUrl ?: baseItem?.coverUrl,
+            providerUrl = trackPage.item.providerUrl,
+            trackCount = trackPage.total ?: baseItem?.trackCount ?: trackPage.item.trackCount,
+        )
+        return ProviderMediaItemDetail(
+            item = mergedItem,
+            tracks = trackPage.tracks,
+            albums = base?.albums.orEmpty(),
+            tracksNextOffset = trackPage.nextOffset,
+            tracksHasMore = trackPage.hasMore,
+            albumsNextOffset = base?.albumsNextOffset ?: albumsOffset,
+            albumsHasMore = base?.albumsHasMore ?: false,
+        )
+    }
+
+    override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> =
+        if (item.providerId == QQMUSIC_PROVIDER_ID && item.type == ProviderMediaItemType.Artist) {
+            artistDetails.loadTracksPage(
+                item = artistDetails.normalizeArtist(item),
+                offset = 0,
+                limit = MAX_ARTIST_TRACKS,
+            ).tracks
+        } else {
+            delegate.mediaItemTracks(item)
+        }
+
     private suspend fun enrichQQMusicAuth(base: ProviderAuthState): ProviderAuthState {
         if (!base.isLoggedIn) return base
         val userName = runCatching { userLibrary.userName() }.getOrNull()
             ?.takeIf { it.isNotBlank() }
             ?: return base
         return base.copy(userName = userName)
+    }
+
+    private fun normalizeQQMusicArtists(section: ProviderContentSection): ProviderContentSection {
+        if (section.mediaItems.isEmpty()) return section
+        return section.copy(
+            mediaItems = section.mediaItems.map { item ->
+                if (item.providerId == QQMUSIC_PROVIDER_ID && item.type == ProviderMediaItemType.Artist) {
+                    artistDetails.normalizeArtist(item)
+                } else {
+                    item
+                }
+            },
+        )
     }
 
     private fun <T> replaceQQMusic(
@@ -139,5 +205,6 @@ internal class QQMusicContentRepository(
     private companion object {
         const val QQMUSIC_PROVIDER_ID = "qqmusic"
         const val QQMUSIC_USER_PLAYLISTS_FEATURE_ID = "qqmusic_user_playlists"
+        const val MAX_ARTIST_TRACKS = 300
     }
 }
