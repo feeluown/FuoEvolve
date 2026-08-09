@@ -200,13 +200,18 @@ internal class QQMusicUserLibrary(
     private suspend fun currentUin(): String? {
         val stored = credentials.read(ID) ?: return null
         val values = parseCookies(stored.cookieHeader.orEmpty()) + stored.cookies
-        return values["wxuin"]
-            ?.removePrefix("o")
-            ?.takeIf { it.isNotBlank() }
-            ?: values["uin"]
-                ?.removePrefix("o")
-                ?.takeIf { it.isNotBlank() }
+        val loginType = values["login_type"]?.toIntOrNull()
+        val candidates = if (loginType == WECHAT_LOGIN_TYPE) {
+            listOf(values["wxuin"], values["uin"])
+        } else {
+            listOf(values["uin"], values["wxuin"])
+        }
+        return candidates.asSequence().mapNotNull(::normalizeUin).firstOrNull()
     }
+
+    private fun normalizeUin(raw: String?): String? = raw
+        ?.filter { character -> character.isDigit() }
+        ?.takeIf { digits -> digits.isNotBlank() && digits.any { character -> character != '0' } }
 
     private suspend fun authenticatedHeaders(referer: String): Map<String, String> = buildMap {
         put("User-Agent", DEFAULT_USER_AGENT)
@@ -256,6 +261,7 @@ internal class QQMusicUserLibrary(
         const val BASE = "https://c.y.qq.com"
         const val FAVORITE_DIR_ID = 201
         const val PRIVATE_PLAYLIST_CODE = 4000
+        const val WECHAT_LOGIN_TYPE = 2
         const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
     }
 }
