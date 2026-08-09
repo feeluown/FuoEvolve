@@ -137,8 +137,8 @@ fun EnhancedProviderVideoScreen(controller: FuoPlayerController, video: Provider
                         .padding(horizontal = if (useWideLayout) 24.dp else 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    controller.selectedVideoError?.let(::ProviderContentMessage)
-                    playbackState.errorMessage?.let(::ProviderContentMessage)
+                    controller.selectedVideoError?.let { ProviderContentMessage(it) }
+                    playbackState.errorMessage?.let { ProviderContentMessage(it) }
                     VideoInformationPanel(
                         video = displayVideo,
                         metadata = metadata,
