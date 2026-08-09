@@ -14,6 +14,7 @@ import org.feeluown.mobile.ProviderContentSection
 import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderFeature
 import org.feeluown.mobile.ProviderFeatureCategory
+import org.feeluown.mobile.ProviderFeatureFilterCodec
 import org.feeluown.mobile.ProviderInfo
 import org.feeluown.mobile.ProviderMediaItem
 import org.feeluown.mobile.ProviderMediaItemDetail
@@ -56,6 +57,9 @@ class NeteaseProvider(
     capabilities = CAPABILITIES,
     features = FEATURES,
 ), KotlinMusicProvider {
+    private var styleTagCache: List<NeteaseStyleTag>? = null
+    private val styleCursorPages = mutableMapOf<String, MutableMap<Int, String>>()
+
     override suspend fun search(keyword: String): ProviderSearchResults {
         val tracks = searchType(keyword, 1).array("songs").map(::song)
         val playlists = searchType(keyword, 1000).array("playlists").map { it.asObject().toPlaylist() }
@@ -328,7 +332,8 @@ class NeteaseProvider(
         if (feature.requiresLogin && !authState().isLoggedIn) {
             return ProviderContentSection(feature, isLoginRequired = true)
         }
-        val payload = when (feature.id) {
+        val request = parseNeteaseFeatureRequest(feature.id)
+        val payload = when (request.baseId) {
             "netease_daily_songs" -> {
                 val root = neteaseWeApiPost("$BASE/weapi/v3/discovery/recommend/songs", "{}")
                 val songs = root.obj("data")?.array("dailySongs").orEmpty()
@@ -365,6 +370,10 @@ class NeteaseProvider(
                 val playlists = root.array("list")
                 ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
             }
+            NETEASE_PLAYLIST_SQUARE -> playlistSquare(feature, request, offset, limit)
+            NETEASE_ARTIST_SQUARE -> artistSquare(feature, request, offset, limit)
+            NETEASE_MV_SQUARE -> mvSquare(feature, request, offset, limit)
+            NETEASE_STYLES -> styleFeature(feature, request, offset, limit)
             "netease_new_songs" -> {
                 val root = neteaseWeApiPost(
                     "$BASE/weapi/v1/discovery/new/songs",
@@ -457,7 +466,7 @@ class NeteaseProvider(
                 } else {
                     val playlists = userPlaylistObjects(uid).filter { item ->
                         val subscribed = item.asObject().boolean("subscribed")
-                        if (feature.id == "netease_favorite_playlists") subscribed else !subscribed
+                        if (request.baseId == "netease_favorite_playlists") subscribed else !subscribed
                     }
                     ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
                 }
@@ -487,12 +496,12 @@ class NeteaseProvider(
                 cloudSongs(feature, offset, limit)
             }
             "netease_favorite_artists", "netease_favorite_albums" -> {
-                val endpoint = if (feature.id == "netease_favorite_artists") "artist/sublist" else "album/sublist"
+                val endpoint = if (request.baseId == "netease_favorite_artists") "artist/sublist" else "album/sublist"
                 val root = neteaseWeApiPost(
                     "$BASE/weapi/$endpoint",
                     """{"limit":$limit,"offset":$offset,"csrf_token":"${csrfToken().jsonString()}"}""",
                 )
-                val type = if (feature.id == "netease_favorite_artists") ProviderMediaItemType.Artist else ProviderMediaItemType.Album
+                val type = if (request.baseId == "netease_favorite_artists") ProviderMediaItemType.Artist else ProviderMediaItemType.Album
                 val items = root.array("data").map { value ->
                     if (type == ProviderMediaItemType.Artist) artist(value.asObject()) else album(value.asObject())
                 }
@@ -501,6 +510,205 @@ class NeteaseProvider(
             else -> ProviderContentSection(feature, errorMessage = "网易云音乐暂不支持该内容")
         }
         return payload
+    }
+
+    private suspend fun playlistSquare(
+        feature: ProviderFeature,
+        request: NeteaseFeatureRequest,
+        offset: Int,
+        limit: Int,
+    ): ProviderContentSection {
+        val cat = request.params["cat"].orEmpty().ifBlank { "全部" }
+        val order = request.params["order"].orEmpty().ifBlank { "hot" }
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/playlist/list",
+            """{"cat":"${cat.jsonString()}","order":"${order.jsonString()}","limit":$limit,"offset":$offset,"total":true}""",
+        )
+        val values = root.array("playlists")
+        return ProviderContentSection(
+            feature = ProviderFeatureFilterCodec.attach(feature, playlistSquareFilters(cat, order)),
+            playlists = values.mapNotNull { value -> runCatching { value.asObject().toPlaylist() }.getOrNull() },
+            nextOffset = offset + values.size,
+            hasMore = root.boolean("more") || root.int("total")?.let { offset + values.size < it } == true || values.size == limit,
+        )
+    }
+
+    private suspend fun artistSquare(
+        feature: ProviderFeature,
+        request: NeteaseFeatureRequest,
+        offset: Int,
+        limit: Int,
+    ): ProviderContentSection {
+        val area = request.params["area"].orEmpty().ifBlank { "-1" }
+        val type = request.params["type"].orEmpty().ifBlank { "-1" }
+        val initial = request.params["initial"].orEmpty().ifBlank { "-1" }
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/v1/artist/list",
+            """{"initial":$initial,"offset":$offset,"limit":$limit,"total":true,"type":$type,"area":$area}""",
+        )
+        val values = root.array("artists").ifEmpty { root.obj("data")?.array("artists").orEmpty() }
+        return ProviderContentSection(
+            feature = ProviderFeatureFilterCodec.attach(feature, artistSquareFilters(area, type, initial)),
+            mediaItems = values.mapNotNull { value -> runCatching { artist(value.asObject()) }.getOrNull() },
+            nextOffset = offset + values.size,
+            hasMore = root.boolean("more") || root.obj("data")?.boolean("more") == true || values.size == limit,
+        )
+    }
+
+    private suspend fun mvSquare(
+        feature: ProviderFeature,
+        request: NeteaseFeatureRequest,
+        offset: Int,
+        limit: Int,
+    ): ProviderContentSection {
+        val area = request.params["area"].orEmpty().ifBlank { "全部" }
+        val type = request.params["type"].orEmpty().ifBlank { "全部" }
+        val order = request.params["order"].orEmpty().ifBlank { "上升最快" }
+        val tags = """{"地区":"${area.jsonString()}","类型":"${type.jsonString()}","排序":"${order.jsonString()}"}"""
+        val root = http.postForm(
+            ID,
+            "$BASE/api/mv/all",
+            Parameters.build {
+                append("tags", tags)
+                append("offset", offset.toString())
+                append("total", "true")
+                append("limit", limit.toString())
+            },
+            neteaseAuthenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
+            cacheKey = null,
+        ).value.let { parseNeteaseResponse(it) }
+        val values = root.array("data")
+        return ProviderContentSection(
+            feature = ProviderFeatureFilterCodec.attach(feature, mvSquareFilters(area, type, order)),
+            videos = values.mapNotNull { value -> runCatching { mvVideo(value.asObject()) }.getOrNull() },
+            nextOffset = offset + values.size,
+            hasMore = root.boolean("hasMore") || root.boolean("more") || values.size == limit,
+        )
+    }
+
+    private suspend fun styleFeature(
+        feature: ProviderFeature,
+        request: NeteaseFeatureRequest,
+        offset: Int,
+        limit: Int,
+    ): ProviderContentSection {
+        val styles = loadStyleTags()
+        if (styles.isEmpty()) {
+            return ProviderContentSection(feature, errorMessage = "暂无曲风数据")
+        }
+        val requestedTag = request.params["tagId"]
+        val tagId = requestedTag?.takeIf { candidate -> styles.any { it.id == candidate } } ?: styles.first().id
+        val kind = request.params["kind"].takeIf { it in STYLE_KINDS }.orEmpty().ifBlank { "songs" }
+        val cursorKey = "$tagId:$kind"
+        val cursor = if (offset == 0) "0" else styleCursorPages[cursorKey]?.get(offset) ?: "0"
+        val endpoint = when (kind) {
+            "playlists" -> "playlist"
+            "albums" -> "album"
+            "artists" -> "artist"
+            else -> "song"
+        }
+        val sort = if (kind == "songs" || kind == "albums") 0 else null
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/style-tag/home/$endpoint",
+            buildString {
+                append("{\"cursor\":")
+                append(cursor.toLongOrNull()?.toString() ?: "\"${cursor.jsonString()}\"")
+                append(",\"size\":$limit,\"tagId\":")
+                append(tagId.toLongOrNull()?.toString() ?: "\"${tagId.jsonString()}\"")
+                if (sort != null) append(",\"sort\":$sort")
+                append('}')
+            },
+        )
+        val values = styleResourceValues(root, kind)
+        val data = root.obj("data")
+        val nextCursor = data?.stringOrNull("cursor")
+            ?: data?.long("cursor")?.toString()
+            ?: root.stringOrNull("cursor")
+            ?: root.long("cursor")?.toString()
+        val moreFlag = data?.boolean("hasMore") == true || data?.boolean("more") == true || root.boolean("hasMore") || root.boolean("more")
+        val canContinue = !nextCursor.isNullOrBlank() && nextCursor != cursor && nextCursor != "0" && (moreFlag || values.size >= limit)
+        val nextOffset = offset + 1
+        if (canContinue) {
+            styleCursorPages.getOrPut(cursorKey) { mutableMapOf() }[nextOffset] = nextCursor
+        }
+        val presentationFeature = ProviderFeatureFilterCodec.attach(feature, styleFilters(styles, tagId, kind))
+        return when (kind) {
+            "playlists" -> ProviderContentSection(
+                feature = presentationFeature,
+                playlists = values.mapNotNull { value -> runCatching { value.asObject().toPlaylist() }.getOrNull() },
+                nextOffset = nextOffset,
+                hasMore = canContinue,
+            )
+            "albums" -> ProviderContentSection(
+                feature = presentationFeature,
+                mediaItems = values.mapNotNull { value -> runCatching { album(value.asObject()) }.getOrNull() },
+                nextOffset = nextOffset,
+                hasMore = canContinue,
+            )
+            "artists" -> ProviderContentSection(
+                feature = presentationFeature,
+                mediaItems = values.mapNotNull { value -> runCatching { artist(value.asObject()) }.getOrNull() },
+                nextOffset = nextOffset,
+                hasMore = canContinue,
+            )
+            else -> ProviderContentSection(
+                feature = presentationFeature,
+                tracks = loadSongs(values),
+                nextOffset = nextOffset,
+                hasMore = canContinue,
+            )
+        }
+    }
+
+    private suspend fun loadStyleTags(): List<NeteaseStyleTag> {
+        styleTagCache?.takeIf { it.isNotEmpty() }?.let { return it }
+        val root = neteaseWeApiPost("$BASE/weapi/tag/list/get", "{}")
+        val candidates = buildList<JsonElement> {
+            addAll(root.array("tagList"))
+            addAll(root.array("tags"))
+            addAll(root.array("list"))
+            addAll(root.array("data"))
+            root.obj("data")?.let { data ->
+                add(data)
+                addAll(data.array("tagList"))
+                addAll(data.array("tags"))
+                addAll(data.array("list"))
+                addAll(data.array("childrenTags"))
+            }
+        }
+        val styles = flattenStyleTags(candidates).distinctBy { it.id }
+        styleTagCache = styles
+        return styles
+    }
+
+    private fun flattenStyleTags(values: Iterable<JsonElement>): List<NeteaseStyleTag> = buildList {
+        values.forEach { element ->
+            val value = runCatching { element.asObject() }.getOrNull() ?: return@forEach
+            val id = value.string("tagId").ifBlank { value.string("id") }
+            val name = value.string("tagName").ifBlank { value.string("name") }
+            if (id.isNotBlank() && name.isNotBlank()) add(NeteaseStyleTag(id, name))
+            listOf("childrenTags", "children", "tags", "tagList", "list").forEach { key ->
+                val children = value.array(key)
+                if (children.isNotEmpty()) addAll(flattenStyleTags(children))
+            }
+        }
+    }
+
+    private fun styleResourceValues(root: JsonObject, kind: String): List<JsonElement> {
+        val keys = when (kind) {
+            "playlists" -> listOf("playlists", "playlistList", "list")
+            "albums" -> listOf("albums", "albumList", "list")
+            "artists" -> listOf("artists", "artistList", "list")
+            else -> listOf("songs", "songList", "list")
+        }
+        val data = root.obj("data")
+        listOfNotNull(data, root).forEach { container ->
+            keys.forEach { key ->
+                val values = container.array(key)
+                if (values.isNotEmpty()) return values
+            }
+        }
+        return root.array("data")
     }
 
     private suspend fun searchType(keyword: String, type: Int): JsonObject {
@@ -817,12 +1025,12 @@ class NeteaseProvider(
         isLoggedIn = false,
     )
 
-    private fun credentialsArePresent(credentials: org.feeluown.mobile.provider.core.ProviderCredentials): Boolean =
+    private fun credentialsArePresent(credentials: ProviderCredentials): Boolean =
         credentials.cookies.isNotEmpty() ||
             !credentials.cookieHeader.isNullOrBlank() ||
             !credentials.authorization.isNullOrBlank()
 
-    private fun song(value: kotlinx.serialization.json.JsonElement): org.feeluown.mobile.MusicTrack {
+    private fun song(value: JsonElement): org.feeluown.mobile.MusicTrack {
         val item = value.asObject()
         val artists = item.array("ar").takeIf { it.isNotEmpty() } ?: item.array("artists")
         val artist = artists.firstOrNull()?.asObject()
@@ -856,7 +1064,7 @@ class NeteaseProvider(
         type = ProviderMediaItemType.Artist,
         identifier = value.string("id"),
         title = value.string("name"),
-        coverUrl = value.stringOrNull("picUrl"),
+        coverUrl = value.stringOrNull("picUrl") ?: value.stringOrNull("avatar") ?: value.stringOrNull("cover"),
         providerUrl = "https://music.163.com/#/artist?id=${value.string("id")}",
     )
 
@@ -864,7 +1072,7 @@ class NeteaseProvider(
         type = ProviderMediaItemType.Album,
         identifier = value.string("id"),
         title = value.string("name"),
-        coverUrl = value.stringOrNull("picUrl"),
+        coverUrl = value.stringOrNull("picUrl") ?: value.stringOrNull("coverUrl") ?: value.stringOrNull("cover"),
         providerUrl = "https://music.163.com/#/album?id=${value.string("id")}",
     )
 
@@ -906,7 +1114,7 @@ class NeteaseProvider(
         return mutation(root, if (action == "add") "已添加到：${playlist.title}" else "已从歌单移除：${track.title}")
     }
 
-    private fun mutation(root: kotlinx.serialization.json.JsonObject, successMessage: String): ProviderMutationResult =
+    private fun mutation(root: JsonObject, successMessage: String): ProviderMutationResult =
         ProviderMutationResult(root.int("code") == 200 || root.boolean("success"), if (root.int("code") == 200) successMessage else root.string("message").ifBlank { "操作失败" })
 
     private fun String.toNeteaseBitrate(): Int = when (this) {
@@ -925,6 +1133,7 @@ class NeteaseProvider(
         const val ID = "netease"
         const val NAME = "网易云音乐"
         const val BASE = "https://music.163.com"
+        val STYLE_KINDS = setOf("songs", "playlists", "albums", "artists")
         val INFO = ProviderInfo(
             providerId = ID,
             providerName = NAME,
@@ -946,6 +1155,10 @@ class NeteaseProvider(
             ProviderFeature("netease_recommended_new_songs", ID, NAME, "推荐新歌", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, false),
             ProviderFeature("netease_recommended_mvs", ID, NAME, "推荐 MV", ProviderFeatureCategory.Recommend, ProviderContentType.Videos, false),
             ProviderFeature("netease_toplists", ID, NAME, "排行榜", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
+            ProviderFeature(NETEASE_PLAYLIST_SQUARE, ID, NAME, "歌单广场", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
+            ProviderFeature(NETEASE_ARTIST_SQUARE, ID, NAME, "歌手广场", ProviderFeatureCategory.Music, ProviderContentType.Artists, false),
+            ProviderFeature(NETEASE_MV_SQUARE, ID, NAME, "MV 广场", ProviderFeatureCategory.Music, ProviderContentType.Videos, false),
+            ProviderFeature(NETEASE_STYLES, ID, NAME, "曲风", ProviderFeatureCategory.Music, ProviderContentType.Songs, false),
             ProviderFeature("netease_new_songs", ID, NAME, "新歌速递", ProviderFeatureCategory.Music, ProviderContentType.Songs, false),
             ProviderFeature("netease_new_albums", ID, NAME, "新碟上架", ProviderFeatureCategory.Music, ProviderContentType.Albums, false),
             ProviderFeature("netease_top_artists", ID, NAME, "热门歌手", ProviderFeatureCategory.Music, ProviderContentType.Artists, false),
