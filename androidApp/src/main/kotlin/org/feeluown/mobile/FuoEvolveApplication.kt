@@ -13,7 +13,7 @@ class FuoEvolveApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     internal val providerRepository: ProviderMusicRepository by lazy {
-        createKotlinProviderRepository(
+        createFuoProviderRepository(
             credentials = AndroidProviderCredentialStore(applicationContext),
             persistentCache = AndroidProviderCacheStore(applicationContext),
             isCellularConnection = ::isCellularConnection,
