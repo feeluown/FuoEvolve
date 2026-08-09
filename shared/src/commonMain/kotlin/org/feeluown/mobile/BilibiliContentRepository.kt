@@ -195,6 +195,13 @@ fun createFuoProviderRepository(
         persistentCache = persistentCache,
         isCellularConnection = isCellularConnection,
     )
+    val withNeteaseHomeEntries = NeteaseHomeEntryRepository(
+        delegate = delegate,
+        homeEntries = NeteaseHomeEntryClient(
+            http = ProviderHttpClient(persistentCache = persistentCache),
+            credentials = credentials,
+        ),
+    )
     val qqmusicHttp = ProviderHttpClient(persistentCache = persistentCache)
     val qqmusic = QQMusicContentProvider(
         http = qqmusicHttp,
@@ -209,7 +216,7 @@ fun createFuoProviderRepository(
         credentials = credentials,
     )
     val withQQMusicContent = QQMusicContentRepository(
-        delegate,
+        withNeteaseHomeEntries,
         qqmusic,
         qqmusicUserLibrary,
         qqmusicArtistDetails,
