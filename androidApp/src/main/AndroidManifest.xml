@@ -23,7 +23,7 @@
         android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
-            android:configChanges="uiMode"
+            android:configChanges="uiMode|orientation|screenSize"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
