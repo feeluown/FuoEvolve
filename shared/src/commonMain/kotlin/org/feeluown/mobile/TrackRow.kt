@@ -118,7 +118,7 @@ fun CoverBox(
 ) {
     PlatformCoverArt(
         title = track.title,
-        imageUrl = track.coverUrl,
+        imageUrl = track.coverUrl ?: neteaseHomeEntryCoverUrl(track.id),
         modifier = Modifier
             .then(modifier)
             .clip(RoundedCornerShape(cornerRadius)),
