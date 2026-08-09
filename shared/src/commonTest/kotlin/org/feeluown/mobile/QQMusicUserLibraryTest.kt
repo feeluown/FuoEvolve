@@ -142,4 +142,86 @@ class QQMusicUserLibraryTest {
         assertEquals(66, section.playlists.first().trackCount)
         http.close()
     }
+
+    @Test
+    fun normalizesQqUinBeforeLoadingUserLibrary() = runTest {
+        val http = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("123456", request.url.parameters["hostuin"])
+                        respond(
+                            """
+                            {
+                              "code":0,
+                              "data":{
+                                "hostname":"QQ 用户",
+                                "disslist":[{"dirid":201,"tid":"liked","diss_name":"我喜欢"}]
+                              }
+                            }
+                            """.trimIndent(),
+                        )
+                    }
+                }
+            },
+        )
+        val credentials = InMemoryProviderCredentialStore()
+        credentials.write(
+            "qqmusic",
+            org.feeluown.mobile.provider.core.ProviderCredentials(
+                cookies = mapOf(
+                    "login_type" to "1",
+                    "uin" to "o12abc3456",
+                    "wxuin" to "not-a-number",
+                    "qqmusic_key" to "test-key",
+                ),
+            ),
+        )
+
+        val userName = QQMusicUserLibrary(http, credentials).userName()
+
+        assertEquals("QQ 用户", userName)
+        http.close()
+    }
+
+    @Test
+    fun wechatLoginPrefersNormalizedWxuin() = runTest {
+        val http = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("987654", request.url.parameters["hostuin"])
+                        respond(
+                            """
+                            {
+                              "code":0,
+                              "data":{
+                                "hostname":"微信用户",
+                                "disslist":[{"dirid":201,"tid":"liked","diss_name":"我喜欢"}]
+                              }
+                            }
+                            """.trimIndent(),
+                        )
+                    }
+                }
+            },
+        )
+        val credentials = InMemoryProviderCredentialStore()
+        credentials.write(
+            "qqmusic",
+            org.feeluown.mobile.provider.core.ProviderCredentials(
+                cookies = mapOf(
+                    "login_type" to "2",
+                    "uin" to "123456",
+                    "wxuin" to "o987xyz654",
+                    "qqmusic_key" to "test-key",
+                ),
+            ),
+        )
+
+        val userName = QQMusicUserLibrary(http, credentials).userName()
+
+        assertEquals("微信用户", userName)
+        http.close()
+    }
 }
