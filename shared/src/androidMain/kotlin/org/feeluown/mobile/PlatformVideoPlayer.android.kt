@@ -50,6 +50,7 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
     private var playbackError: String? = null
     private var videoWidth: Int = 0
     private var videoHeight: Int = 0
+    private var activePayload: VideoPlaybackPayload? = null
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setRenderersFactory(
@@ -86,6 +87,8 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
             clear()
             return
         }
+        if (payload == activePayload) return
+        activePayload = payload
         playbackError = null
         videoWidth = 0
         videoHeight = 0
@@ -127,6 +130,7 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
     fun clear() {
         player.stop()
         player.clearMediaItems()
+        activePayload = null
         playbackError = null
         videoWidth = 0
         videoHeight = 0
