@@ -334,6 +334,22 @@ class NeteaseProvider(
                 val songs = root.obj("data")?.array("dailySongs").orEmpty()
                 ProviderContentSection(feature, tracks = songs.drop(offset).take(limit).map(::song), nextOffset = offset + limit, hasMore = songs.size > offset + limit)
             }
+            "netease_recommended_new_songs" -> {
+                val requestLimit = (offset + limit).coerceAtLeast(limit)
+                val root = neteaseWeApiPost(
+                    "$BASE/weapi/personalized/newsong",
+                    """{"type":"recommend","limit":$requestLimit,"areaId":0}""",
+                )
+                val values = root.array("result")
+                val songs = values.map { value -> value.asObject().obj("song") ?: value }
+                val page = songs.drop(offset).take(limit)
+                ProviderContentSection(
+                    feature = feature,
+                    tracks = loadSongs(page),
+                    nextOffset = offset + page.size,
+                    hasMore = songs.size > offset + page.size,
+                )
+            }
             "netease_radio" -> {
                 val songs = http.getText(
                     ID,
@@ -925,14 +941,15 @@ class NeteaseProvider(
         )
         val FEATURES = listOf(
             ProviderFeature("netease_daily_songs", ID, NAME, "每日推荐歌曲", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
-            ProviderFeature("netease_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
+            ProviderFeature("netease_daily_playlists", ID, NAME, "每日推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
             ProviderFeature("netease_radio", ID, NAME, "私人 FM", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
+            ProviderFeature("netease_recommended_new_songs", ID, NAME, "推荐新歌", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, false),
+            ProviderFeature("netease_recommended_mvs", ID, NAME, "推荐 MV", ProviderFeatureCategory.Recommend, ProviderContentType.Videos, false),
             ProviderFeature("netease_toplists", ID, NAME, "排行榜", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
             ProviderFeature("netease_new_songs", ID, NAME, "新歌速递", ProviderFeatureCategory.Music, ProviderContentType.Songs, false),
             ProviderFeature("netease_new_albums", ID, NAME, "新碟上架", ProviderFeatureCategory.Music, ProviderContentType.Albums, false),
             ProviderFeature("netease_top_artists", ID, NAME, "热门歌手", ProviderFeatureCategory.Music, ProviderContentType.Artists, false),
             ProviderFeature("netease_highquality_playlists", ID, NAME, "精品歌单", ProviderFeatureCategory.Music, ProviderContentType.Playlists, false),
-            ProviderFeature("netease_recommended_mvs", ID, NAME, "推荐 MV", ProviderFeatureCategory.Music, ProviderContentType.Videos, false),
             ProviderFeature("netease_top_mvs", ID, NAME, "MV 排行", ProviderFeatureCategory.Music, ProviderContentType.Videos, false),
             ProviderFeature("netease_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
             ProviderFeature("netease_favorite_songs", ID, NAME, "收藏歌曲", ProviderFeatureCategory.Mine, ProviderContentType.Songs, true),
