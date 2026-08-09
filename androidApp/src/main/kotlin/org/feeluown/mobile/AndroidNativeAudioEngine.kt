@@ -60,7 +60,6 @@ class AndroidNativeAudioEngine(
 
     override fun prepareLoading(track: MusicTrack) {
         pendingLockScreenLyrics = null
-        clearCurrentLockScreenLyrics()
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
             currentTrack = track,
@@ -144,7 +143,7 @@ class AndroidNativeAudioEngine(
         if (normalizedLyrics == null) {
             pendingLockScreenLyrics = null
             if (mutableState.value.currentTrack?.id == trackId) {
-                clearCurrentLockScreenLyrics()
+                clearCurrentLockScreenLyrics(trackId)
             }
             return
         }
@@ -193,7 +192,7 @@ class AndroidNativeAudioEngine(
         val lineLyrics = toTimedLineLrc(pending.lyrics)
         if (lineLyrics == null) {
             pendingLockScreenLyrics = null
-            clearCurrentLockScreenLyrics()
+            clearCurrentLockScreenLyrics(pending.trackId)
             return
         }
         val lyricInfo = buildLockScreenLyricInfo(track, lineLyrics)
@@ -203,7 +202,6 @@ class AndroidNativeAudioEngine(
             return
         }
         val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
-            putString("lyrics", pending.lyrics)
             putString(OPLUS_LYRIC_INFO_KEY, lyricInfo)
         }
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
@@ -216,10 +214,11 @@ class AndroidNativeAudioEngine(
             }
     }
 
-    private fun clearCurrentLockScreenLyrics() {
+    private fun clearCurrentLockScreenLyrics(trackId: String? = null) {
         val controller = mediaController ?: return
         if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
         val currentItem = controller.currentMediaItem ?: return
+        if (trackId != null && !currentItem.matchesTrack(trackId)) return
         val currentExtras = currentItem.mediaMetadata.extras ?: return
         if (!currentExtras.containsKey(OPLUS_LYRIC_INFO_KEY)) return
         val currentIndex = controller.currentMediaItemIndex
@@ -264,15 +263,20 @@ class AndroidNativeAudioEngine(
     private fun updatePosition() {
         val controller = mediaController ?: return
         if (controller.playbackState == Player.STATE_IDLE) return
-        mutableState.value = mutableState.value.copy(
-            currentTrack = mutableState.value.currentTrack ?: controller.currentMediaItem?.toMusicTrack(),
+        val currentState = mutableState.value
+        val currentItem = controller.currentMediaItem
+        val sessionLyrics = currentItem
+            ?.takeIf { item -> currentState.currentTrack?.let { item.matchesTrack(it.id) } ?: true }
+            ?.mediaMetadata
+            ?.extras
+            ?.getString("lyrics")
+            ?.takeIf { it.isNotBlank() }
+        mutableState.value = currentState.copy(
+            currentTrack = currentState.currentTrack ?: currentItem?.toMusicTrack(),
             positionMs = controller.currentPosition.coerceAtLeast(0),
-            durationMs = controller.duration.takeIf { it > 0 } ?: mutableState.value.durationMs,
+            durationMs = controller.duration.takeIf { it > 0 } ?: currentState.durationMs,
             bufferedMs = controller.bufferedPosition.coerceAtLeast(0),
-            lyrics = mutableState.value.lyrics ?: controller.currentMediaItem?.mediaMetadata
-                ?.extras
-                ?.getString("lyrics")
-                ?.takeIf { it.isNotBlank() },
+            lyrics = currentState.lyrics ?: sessionLyrics,
         )
     }
 
