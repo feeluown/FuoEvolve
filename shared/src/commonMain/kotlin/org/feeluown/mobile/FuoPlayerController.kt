@@ -2977,9 +2977,14 @@ class FuoPlayerController(
     }
 
     fun prefetchSelectedFeatureIfNeeded(visibleIndex: Int) {
-        if (selectedFeatureTracks.size - visibleIndex <= LIST_PREFETCH_REMAINING) {
+        val contentCount = selectedFeatureContent?.contentCount() ?: selectedFeatureTracks.size
+        if (contentCount - visibleIndex <= LIST_PREFETCH_REMAINING) {
             loadMoreSelectedFeatureTracks()
         }
+    }
+
+    fun loadMoreSelectedFeature() {
+        loadMoreSelectedFeatureTracks()
     }
 
     fun prefetchSelectedPlaylistIfNeeded(visibleIndex: Int) {
@@ -3020,21 +3025,34 @@ class FuoPlayerController(
         }.fold(
             onSuccess = { section ->
                 if (selectedFeature != feature) return false
-                val seenIds = selectedFeatureTracks.mapTo(mutableSetOf()) { it.id }
-                val newTracks = section.tracks.filter { seenIds.add(it.id) }
-                if (newTracks.isNotEmpty()) {
-                    selectedFeatureTracks = selectedFeatureTracks + newTracks
-                    val updatedSection = section.copy(
-                        tracks = selectedFeatureTracks,
-                        nextOffset = section.nextOffset,
-                        hasMore = section.hasMore,
-                    )
-                    selectedFeatureContent = updatedSection
-                    updateHomeFeatureSection(updatedSection)
-                }
+                val current = selectedFeatureContent ?: ProviderContentSection(feature)
+                val seenTrackIds = current.tracks.mapTo(mutableSetOf()) { it.id }
+                val newTracks = section.tracks.filter { seenTrackIds.add(it.id) }
+                val seenPlaylistIds = current.playlists.mapTo(mutableSetOf()) { it.id }
+                val newPlaylists = section.playlists.filter { seenPlaylistIds.add(it.id) }
+                val seenMediaItemIds = current.mediaItems.mapTo(mutableSetOf()) { it.id }
+                val newMediaItems = section.mediaItems.filter { seenMediaItemIds.add(it.id) }
+                val seenVideoIds = current.videos.mapTo(mutableSetOf()) { it.id }
+                val newVideos = section.videos.filter { seenVideoIds.add(it.id) }
+
+                val updatedSection = section.copy(
+                    tracks = current.tracks + newTracks,
+                    playlists = current.playlists + newPlaylists,
+                    mediaItems = current.mediaItems + newMediaItems,
+                    videos = current.videos + newVideos,
+                    nextOffset = section.nextOffset,
+                    hasMore = section.hasMore,
+                )
+                selectedFeatureTracks = updatedSection.tracks
+                selectedFeatureContent = updatedSection
+                updateHomeFeatureSection(updatedSection)
                 selectedFeatureTracksNextOffset = section.nextOffset
                 selectedFeatureTracksHasMore = section.hasMore
-                section.nextOffset != offset || newTracks.isNotEmpty()
+                val contentChanged = newTracks.isNotEmpty() ||
+                    newPlaylists.isNotEmpty() ||
+                    newMediaItems.isNotEmpty() ||
+                    newVideos.isNotEmpty()
+                section.nextOffset != offset || contentChanged
             },
             onFailure = {
                 selectedFeatureError = it.message ?: it::class.simpleName.orEmpty()
