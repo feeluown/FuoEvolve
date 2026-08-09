@@ -598,7 +598,7 @@ class NeteaseProvider(
         }
         val requestedTag = request.params["tagId"]
         val tagId = requestedTag?.takeIf { candidate -> styles.any { it.id == candidate } } ?: styles.first().id
-        val kind = request.params["kind"].takeIf { it in STYLE_KINDS }.orEmpty().ifBlank { "songs" }
+        val kind = request.params["kind"]?.takeIf { it in STYLE_KINDS } ?: "songs"
         val cursorKey = "$tagId:$kind"
         val cursor = if (offset == 0) "0" else styleCursorPages[cursorKey]?.get(offset) ?: "0"
         val endpoint = when (kind) {
@@ -629,7 +629,7 @@ class NeteaseProvider(
         val canContinue = !nextCursor.isNullOrBlank() && nextCursor != cursor && nextCursor != "0" && (moreFlag || values.size >= limit)
         val nextOffset = offset + 1
         if (canContinue) {
-            styleCursorPages.getOrPut(cursorKey) { mutableMapOf() }[nextOffset] = nextCursor
+            styleCursorPages.getOrPut(cursorKey) { mutableMapOf() }[nextOffset] = nextCursor.orEmpty()
         }
         val presentationFeature = ProviderFeatureFilterCodec.attach(feature, styleFilters(styles, tagId, kind))
         return when (kind) {
