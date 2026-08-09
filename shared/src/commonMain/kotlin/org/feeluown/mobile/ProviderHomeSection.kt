@@ -150,12 +150,14 @@ fun ProviderContentHomeSection(
                         it.feature.isDailySongs() ||
                             it.feature.isPrivateFm() ||
                             it.feature.isBilibiliRecommendedVideos() ||
+                            it.feature.isBilibiliDynamicVideos() ||
                             it.feature.isRecommendedNewSongs()
                     }
                     val otherSections = visibleSections.filterNot {
                         it.feature.isDailySongs() ||
                             it.feature.isPrivateFm() ||
                             it.feature.isBilibiliRecommendedVideos() ||
+                            it.feature.isBilibiliDynamicVideos() ||
                             it.feature.isRecommendedNewSongs()
                     }
                     if (forYouSections.isNotEmpty()) {
@@ -329,7 +331,9 @@ fun ForYouRecommendGrid(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        section.feature.isBilibiliRecommendedVideos() || section.feature.isRecommendedNewSongs() -> {
+                        section.feature.isBilibiliRecommendedVideos() ||
+                            section.feature.isBilibiliDynamicVideos() ||
+                            section.feature.isRecommendedNewSongs() -> {
                             RecommendationEntryButton(
                                 feature = section.feature,
                                 enabled = enabled,
@@ -981,6 +985,10 @@ fun ProviderFeature.isDailySongs(): Boolean {
 
 fun ProviderFeature.isBilibiliRecommendedVideos(): Boolean {
     return providerId == "bilibili" && id == "bilibili_recommended_videos"
+}
+
+fun ProviderFeature.isBilibiliDynamicVideos(): Boolean {
+    return providerId == "bilibili" && id == "bilibili_dynamic_videos"
 }
 
 fun ProviderFeature.isRecommendedNewSongs(): Boolean {
