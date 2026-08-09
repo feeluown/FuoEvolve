@@ -4,10 +4,13 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 class FuoEvolveApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -112,6 +115,19 @@ class FuoEvolveApplication : Application() {
                 override fun next() {
                     controller.next()
                 }
+            }
+            appScope.launch {
+                snapshotFlow {
+                    controller.playbackState.let { state ->
+                        state.currentTrack?.id to state.lyrics
+                    }
+                }
+                    .distinctUntilChanged()
+                    .collect { (trackId, lyrics) ->
+                        if (trackId != null) {
+                            playbackEngine.publishLockScreenLyrics(trackId, lyrics)
+                        }
+                    }
             }
         }
     }
