@@ -11,18 +11,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,13 +43,18 @@ fun MineHomeSection(
     modifier: Modifier,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    LaunchedEffect(controller.mineSection) {
+        if (controller.mineSection == MineSection.Songs) {
+            controller.onMineSectionChange(MineSection.Playlists)
+        }
+    }
     val refreshMineContent = {
         when (controller.mineSection) {
-            MineSection.Playlists -> {
+            MineSection.Playlists,
+            MineSection.Songs -> {
                 controller.refreshLocalPlaylists()
                 controller.refreshMinePlaylistContent()
             }
-            MineSection.Songs,
             MineSection.Artists,
             MineSection.Albums -> controller.refreshMineContent()
             MineSection.LocalMusic -> if (hasAudioPermission) controller.refreshLocalMusic() else Unit
@@ -72,13 +76,10 @@ fun MineHomeSection(
                 .fillMaxWidth(),
         ) {
             when (controller.mineSection) {
-                MineSection.Playlists -> MinePlaylistsSection(
+                MineSection.Playlists,
+                MineSection.Songs -> MinePlaylistsSection(
                     controller = controller,
                     showFilter = !isWideLayout,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                MineSection.Songs -> MineSongSections(
-                    controller = controller,
                     modifier = Modifier.fillMaxSize(),
                 )
                 MineSection.Artists -> MineMediaItemsSection(
@@ -117,14 +118,9 @@ fun MineSectionChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         CompactFilterChip(
-            selected = controller.mineSection == MineSection.Playlists,
+            selected = controller.mineSection == MineSection.Playlists || controller.mineSection == MineSection.Songs,
             onClick = { controller.onMineSectionChange(MineSection.Playlists) },
             label = "歌单",
-        )
-        CompactFilterChip(
-            selected = controller.mineSection == MineSection.Songs,
-            onClick = { controller.onMineSectionChange(MineSection.Songs) },
-            label = "歌曲",
         )
         CompactFilterChip(
             selected = controller.mineSection == MineSection.Artists,
@@ -143,7 +139,8 @@ fun MineSectionChips(
         )
         if (includeSecondary) {
             when (controller.mineSection) {
-                MineSection.Playlists -> {
+                MineSection.Playlists,
+                MineSection.Songs -> {
                     Spacer(Modifier.width(12.dp))
                     PlaylistFilterChips(controller)
                 }
@@ -152,55 +149,7 @@ fun MineSectionChips(
                     LocalMusicViewModeTabs(controller)
                 }
                 MineSection.Artists,
-                MineSection.Albums,
-                MineSection.Songs -> Unit
-            }
-        }
-    }
-}
-
-@Composable
-fun MineSongSections(controller: FuoPlayerController, modifier: Modifier) {
-    val sections = controller.mineSections.filter { it.feature.contentType == ProviderContentType.Songs }
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (sections.isEmpty()) {
-            item { EmptyProviderContentHint("歌曲") }
-        } else {
-            sections.forEach { section ->
-                item(key = "header:${section.feature.id}") { ProviderFeatureHeader(feature = section.feature) }
-                when {
-                    section.isLoginRequired -> item(key = "locked:${section.feature.id}") {
-                        ProviderLockedSummary(listOf(section.feature)) { controller.openSettings(it.providerId) }
-                    }
-                    section.errorMessage != null -> item(key = "error:${section.feature.id}") {
-                        ProviderContentMessage(section.errorMessage)
-                    }
-                    else -> items(section.tracks, key = { "${section.feature.id}:${it.id}" }) { track ->
-                        TrackRow(
-                            track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playLocalTrack(track, section.tracks) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                            onOpenDetail = trackDetailAction(controller, track),
-                            onAddToPlaylist = addToPlaylistAction(controller, track),
-                            onSetDisliked = when (section.feature.id) {
-                                "qqmusic_disliked_songs" -> { { controller.setSongDisliked(track, false) } }
-                                else -> controller.canSetSongDisliked(track, true).takeIf { it }?.let {
-                                    { controller.setSongDisliked(track, true) }
-                                }
-                            },
-                            dislikedActionLabel = if (section.feature.id == "qqmusic_disliked_songs") "取消不喜欢" else "不喜欢",
-                        )
-                        HorizontalDivider()
-                    }
-                }
+                MineSection.Albums -> Unit
             }
         }
     }
@@ -242,6 +191,26 @@ fun MinePlaylistsSection(
     val userSections = controller.minePlaylistSections
     val favoriteSections = controller.mineFavoritePlaylistSections
     val playbackStats = controller.playlistPlaybackStats
+    val selectedMineProviderIds = remember(
+        controller.mineProviderIds,
+        controller.enabledProviderIds,
+        controller.availableProviders,
+    ) {
+        val configured = controller.mineProviderIds
+        val selected = if (configured.isEmpty()) {
+            controller.availableProviders.map { it.providerId }.toSet()
+        } else {
+            configured
+        }
+        selected.intersect(controller.enabledProviderIds)
+    }
+    val songEntryFeatures = remember(controller.providerFeatures, selectedMineProviderIds) {
+        controller.providerFeatures.filter { feature ->
+            feature.category == ProviderFeatureCategory.Mine &&
+                feature.contentType == ProviderContentType.Songs &&
+                feature.providerId in selectedMineProviderIds
+        }
+    }
     val sections = when (controller.playlistFilter) {
         PlaylistFilter.All -> userSections + favoriteSections
         PlaylistFilter.UserPlaylists -> userSections
@@ -277,7 +246,7 @@ fun MinePlaylistsSection(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (sections.isEmpty() && !showLocalPlaylists) {
+            if (sections.isEmpty() && !showLocalPlaylists && songEntryFeatures.isEmpty()) {
                 item {
                     EmptyProviderContentHint(controller.playlistFilter.emptyTitle())
                 }
@@ -291,6 +260,17 @@ fun MinePlaylistsSection(
                             playlists = frequentPlaylists,
                             onClick = { controller.openPlaylist(it, controller.categoryForMinePlaylist(it)) },
                             maxRows = 2,
+                        )
+                    }
+                }
+                if (controller.playlistFilter == PlaylistFilter.All && songEntryFeatures.isNotEmpty()) {
+                    item(key = "header:mine-song-entries") {
+                        Text("我的歌曲", style = MaterialTheme.typography.titleMedium)
+                    }
+                    item(key = "mine-song-entries") {
+                        ProviderFeatureCoverGrid(
+                            features = songEntryFeatures,
+                            onClick = controller::openFeature,
                         )
                     }
                 }
