@@ -1,5 +1,10 @@
 package org.feeluown.mobile
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.graphics.Color
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
@@ -20,6 +25,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -27,62 +33,206 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+@OptIn(UnstableApi::class)
+private class AndroidPlatformVideoController(context: Context) : PlatformVideoController {
+    private val _state = MutableStateFlow(PlatformVideoPlaybackState())
+    override val state: StateFlow<PlatformVideoPlaybackState> = _state
+
+    private var playbackError: String? = null
+    private var videoWidth: Int = 0
+    private var videoHeight: Int = 0
+
+    val player: ExoPlayer = ExoPlayer.Builder(context)
+        .setRenderersFactory(
+            DefaultRenderersFactory(context)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+                .setEnableDecoderFallback(true),
+        )
+        .build()
+        .also { exoPlayer ->
+            exoPlayer.addListener(object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    playbackError = "视频播放失败：${error.errorCodeName}"
+                    publishState()
+                }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    publishState()
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    publishState()
+                }
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    videoWidth = videoSize.width
+                    videoHeight = videoSize.height
+                    publishState()
+                }
+            })
+        }
+
+    fun setPayload(context: Context, payload: VideoPlaybackPayload?) {
+        if (payload == null || !payload.isPlayable()) {
+            clear()
+            return
+        }
+        playbackError = null
+        videoWidth = 0
+        videoHeight = 0
+        player.setMediaSource(payload.toMediaSource(context))
+        player.prepare()
+        player.playWhenReady = true
+        publishState()
+    }
+
+    fun refreshProgress() {
+        publishState()
+    }
+
+    override fun play() {
+        val duration = player.duration.takeIf { it > 0 } ?: 0
+        if (duration > 0 && player.currentPosition >= duration - 500) {
+            player.seekTo(0)
+        }
+        player.play()
+        publishState()
+    }
+
+    override fun pause() {
+        player.pause()
+        publishState()
+    }
+
+    override fun seekTo(positionMs: Long) {
+        val duration = player.duration.takeIf { it > 0 } ?: 0
+        val target = if (duration > 0) {
+            positionMs.coerceIn(0, duration)
+        } else {
+            positionMs.coerceAtLeast(0)
+        }
+        player.seekTo(target)
+        publishState()
+    }
+
+    fun clear() {
+        player.stop()
+        player.clearMediaItems()
+        playbackError = null
+        videoWidth = 0
+        videoHeight = 0
+        _state.value = PlatformVideoPlaybackState()
+    }
+
+    fun release() {
+        player.release()
+    }
+
+    private fun publishState() {
+        val duration = player.duration.takeIf { it > 0 } ?: 0
+        _state.value = PlatformVideoPlaybackState(
+            isPlaying = player.isPlaying,
+            positionMs = player.currentPosition.coerceAtLeast(0),
+            durationMs = duration,
+            bufferedMs = player.bufferedPosition.coerceAtLeast(0),
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
+            errorMessage = playbackError,
+        )
+    }
+}
+
+@Composable
+actual fun rememberPlatformVideoController(): PlatformVideoController {
+    val context = LocalContext.current
+    val appContext = context.applicationContext
+    val controller = remember(appContext) { AndroidPlatformVideoController(appContext) }
+    LaunchedEffect(controller) {
+        while (true) {
+            controller.refreshProgress()
+            delay(250)
+        }
+    }
+    DisposableEffect(controller) {
+        onDispose { controller.release() }
+    }
+    return controller
+}
 
 @OptIn(UnstableApi::class)
 @Composable
 actual fun PlatformVideoPlayer(
     payload: VideoPlaybackPayload?,
+    controller: PlatformVideoController,
     modifier: Modifier,
 ) {
+    val androidController = controller as? AndroidPlatformVideoController
     if (payload == null) {
+        LaunchedEffect(androidController) { androidController?.setPayload(LocalContext.current.applicationContext, null) }
         VideoPlaceholder("正在加载视频", modifier)
         return
     }
-    val playable = payload.url.isNotBlank() || (payload.videoUrl.isNotBlank() && payload.audioUrl.isNotBlank())
-    if (!playable) {
+    if (!payload.isPlayable() || androidController == null) {
         VideoPlaceholder("视频地址不可用", modifier)
         return
     }
     val context = LocalContext.current
-    var playbackError by remember { mutableStateOf<String?>(null) }
-    val player = remember(context) {
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-            .setEnableDecoderFallback(true)
-        ExoPlayer.Builder(context)
-            .setRenderersFactory(renderersFactory)
-            .build()
-            .also { exoPlayer ->
-                exoPlayer.addListener(object : Player.Listener {
-                    override fun onPlayerError(error: PlaybackException) {
-                        playbackError = "视频播放失败：${error.errorCodeName}"
-                    }
-                })
-            }
-    }
-    DisposableEffect(Unit) {
-        onDispose { player.release() }
-    }
     LaunchedEffect(payload.url, payload.videoUrl, payload.audioUrl, payload.headers) {
-        playbackError = null
-        player.setMediaSource(payload.toMediaSource(context))
-        player.prepare()
-        player.playWhenReady = true
+        androidController.setPayload(context.applicationContext, payload)
     }
-    if (playbackError != null) {
-        VideoPlaceholder(playbackError.orEmpty(), modifier)
-    } else {
-        AndroidView(
-            modifier = modifier,
-            factory = { viewContext ->
-                PlayerView(viewContext).apply {
-                    this.player = player
-                    useController = true
-                }
-            },
-            update = { it.player = player },
-        )
+    AndroidView(
+        modifier = modifier,
+        factory = { viewContext ->
+            PlayerView(viewContext).apply {
+                player = androidController.player
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                setShutterBackgroundColor(Color.BLACK)
+                setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+            }
+        },
+        update = { it.player = androidController.player },
+    )
+}
+
+@Composable
+actual fun PlatformVideoFullscreenEffect(
+    isFullscreen: Boolean,
+    isLandscapeVideo: Boolean,
+) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    var previousOrientation by remember(activity) { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(activity, isFullscreen, isLandscapeVideo) {
+        activity ?: return@LaunchedEffect
+        if (isFullscreen) {
+            if (previousOrientation == null) {
+                previousOrientation = activity.requestedOrientation
+            }
+            activity.requestedOrientation = if (isLandscapeVideo) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
+        } else {
+            previousOrientation?.let { activity.requestedOrientation = it }
+            previousOrientation = null
+        }
+    }
+
+    DisposableEffect(activity) {
+        onDispose {
+            previousOrientation?.let { orientation ->
+                activity?.requestedOrientation = orientation
+            }
+        }
     }
 }
 
@@ -102,8 +252,11 @@ private fun VideoPlaceholder(text: String, modifier: Modifier) {
     }
 }
 
+private fun VideoPlaybackPayload.isPlayable(): Boolean =
+    url.isNotBlank() || (videoUrl.isNotBlank() && audioUrl.isNotBlank())
+
 @OptIn(UnstableApi::class)
-private fun VideoPlaybackPayload.toMediaSource(context: android.content.Context) =
+private fun VideoPlaybackPayload.toMediaSource(context: Context) =
     if (url.isNotBlank()) {
         ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
             .createMediaSource(MediaItem.fromUri(Uri.parse(url)))
@@ -117,11 +270,17 @@ private fun VideoPlaybackPayload.toMediaSource(context: android.content.Context)
     }
 
 @OptIn(UnstableApi::class)
-private fun dataSourceFactory(context: android.content.Context, headers: Map<String, String>): DefaultDataSource.Factory {
+private fun dataSourceFactory(context: Context, headers: Map<String, String>): DefaultDataSource.Factory {
     val httpFactory = DefaultHttpDataSource.Factory()
         .setDefaultRequestProperties(headers)
         .setConnectTimeoutMs(15_000)
         .setReadTimeoutMs(20_000)
         .setAllowCrossProtocolRedirects(true)
     return DefaultDataSource.Factory(context, httpFactory)
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
