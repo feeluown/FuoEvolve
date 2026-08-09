@@ -147,6 +147,11 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    ProviderFeatureFilters(
+                        controller = controller,
+                        feature = feature,
+                        content = content,
+                    )
                     SelectedFeatureContent(
                         controller = controller,
                         content = content,
@@ -195,6 +200,11 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            ProviderFeatureFilters(
+                controller = controller,
+                feature = feature,
+                content = content,
+            )
             SelectedFeatureContent(
                 controller = controller,
                 content = content,
