@@ -24,188 +24,150 @@ jobs:
       - name: Patch provider feature pagination
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
 
           controller_path = Path('shared/src/commonMain/kotlin/org/feeluown/mobile/FuoPlayerController.kt')
           controller = controller_path.read_text()
 
-          old_prefetch = '''    fun prefetchSelectedFeatureIfNeeded(visibleIndex: Int) {
-              if (selectedFeatureTracks.size - visibleIndex <= LIST_PREFETCH_REMAINING) {
-                  loadMoreSelectedFeatureTracks()
-              }
-          }
-          '''
-          new_prefetch = '''    fun prefetchSelectedFeatureIfNeeded(visibleIndex: Int) {
-              val contentCount = selectedFeatureContent?.contentCount() ?: selectedFeatureTracks.size
-              if (contentCount - visibleIndex <= LIST_PREFETCH_REMAINING) {
-                  loadMoreSelectedFeatureTracks()
-              }
-          }
+          prefetch_pattern = re.compile(
+              r"    fun prefetchSelectedFeatureIfNeeded\(visibleIndex: Int\) \{.*?\n    \}\n\n"
+              r"    fun prefetchSelectedPlaylistIfNeeded",
+              re.S,
+          )
+          new_prefetch = "\n".join([
+              "    fun prefetchSelectedFeatureIfNeeded(visibleIndex: Int) {",
+              "        val contentCount = selectedFeatureContent?.contentCount() ?: selectedFeatureTracks.size",
+              "        if (contentCount - visibleIndex <= LIST_PREFETCH_REMAINING) {",
+              "            loadMoreSelectedFeatureTracks()",
+              "        }",
+              "    }",
+              "",
+              "    fun loadMoreSelectedFeature() {",
+              "        loadMoreSelectedFeatureTracks()",
+              "    }",
+              "",
+              "    fun prefetchSelectedPlaylistIfNeeded",
+          ])
+          controller, count = prefetch_pattern.subn(new_prefetch, controller, count=1)
+          if count != 1:
+              raise SystemExit(f'prefetchSelectedFeatureIfNeeded regex matched {count} blocks')
 
-          fun loadMoreSelectedFeature() {
-              loadMoreSelectedFeatureTracks()
-          }
-          '''
-          if old_prefetch not in controller:
-              raise SystemExit('prefetchSelectedFeatureIfNeeded block not found')
-          controller = controller.replace(old_prefetch, new_prefetch, 1)
-
-          old_append = '''    private suspend fun appendSelectedFeatureTracksPage(): Boolean {
-              val feature = selectedFeature ?: return false
-              if (feature.isDynamicQueueFeature() || !selectedFeatureTracksHasMore) return false
-              val offset = selectedFeatureTracksNextOffset
-              return runCatching {
-                  withTimeout(30_000) {
-                      providerRepository.loadFeaturePage(feature, offset)
-                  }
-              }.fold(
-                  onSuccess = { section ->
-                      if (selectedFeature != feature) return false
-                      val seenIds = selectedFeatureTracks.mapTo(mutableSetOf()) { it.id }
-                      val newTracks = section.tracks.filter { seenIds.add(it.id) }
-                      if (newTracks.isNotEmpty()) {
-                          selectedFeatureTracks = selectedFeatureTracks + newTracks
-                          val updatedSection = section.copy(
-                              tracks = selectedFeatureTracks,
-                              nextOffset = section.nextOffset,
-                              hasMore = section.hasMore,
-                          )
-                          selectedFeatureContent = updatedSection
-                          updateHomeFeatureSection(updatedSection)
-                      }
-                      selectedFeatureTracksNextOffset = section.nextOffset
-                      selectedFeatureTracksHasMore = section.hasMore
-                      section.nextOffset != offset || newTracks.isNotEmpty()
-                  },
-                  onFailure = {
-                      selectedFeatureError = it.message ?: it::class.simpleName.orEmpty()
-                      false
-                  },
-              )
-          }
-          '''
-          new_append = '''    private suspend fun appendSelectedFeatureTracksPage(): Boolean {
-              val feature = selectedFeature ?: return false
-              if (feature.isDynamicQueueFeature() || !selectedFeatureTracksHasMore) return false
-              val offset = selectedFeatureTracksNextOffset
-              return runCatching {
-                  withTimeout(30_000) {
-                      providerRepository.loadFeaturePage(feature, offset)
-                  }
-              }.fold(
-                  onSuccess = { section ->
-                      if (selectedFeature != feature) return false
-                      val current = selectedFeatureContent ?: ProviderContentSection(feature)
-                      val seenTrackIds = current.tracks.mapTo(mutableSetOf()) { it.id }
-                      val newTracks = section.tracks.filter { seenTrackIds.add(it.id) }
-                      val seenPlaylistIds = current.playlists.mapTo(mutableSetOf()) { it.id }
-                      val newPlaylists = section.playlists.filter { seenPlaylistIds.add(it.id) }
-                      val seenMediaItemIds = current.mediaItems.mapTo(mutableSetOf()) { it.id }
-                      val newMediaItems = section.mediaItems.filter { seenMediaItemIds.add(it.id) }
-                      val seenVideoIds = current.videos.mapTo(mutableSetOf()) { it.id }
-                      val newVideos = section.videos.filter { seenVideoIds.add(it.id) }
-
-                      val updatedSection = section.copy(
-                          tracks = current.tracks + newTracks,
-                          playlists = current.playlists + newPlaylists,
-                          mediaItems = current.mediaItems + newMediaItems,
-                          videos = current.videos + newVideos,
-                          nextOffset = section.nextOffset,
-                          hasMore = section.hasMore,
-                      )
-                      selectedFeatureTracks = updatedSection.tracks
-                      selectedFeatureContent = updatedSection
-                      updateHomeFeatureSection(updatedSection)
-                      selectedFeatureTracksNextOffset = section.nextOffset
-                      selectedFeatureTracksHasMore = section.hasMore
-                      val contentChanged = newTracks.isNotEmpty() ||
-                          newPlaylists.isNotEmpty() ||
-                          newMediaItems.isNotEmpty() ||
-                          newVideos.isNotEmpty()
-                      section.nextOffset != offset || contentChanged
-                  },
-                  onFailure = {
-                      selectedFeatureError = it.message ?: it::class.simpleName.orEmpty()
-                      false
-                  },
-              )
-          }
-          '''
-          if old_append not in controller:
-              raise SystemExit('appendSelectedFeatureTracksPage block not found')
-          controller = controller.replace(old_append, new_append, 1)
+          append_pattern = re.compile(
+              r"    private suspend fun appendSelectedFeatureTracksPage\(\): Boolean \{.*?\n    \}\n\n"
+              r"    private fun loadMoreSelectedPlaylistTracks",
+              re.S,
+          )
+          new_append = "\n".join([
+              "    private suspend fun appendSelectedFeatureTracksPage(): Boolean {",
+              "        val feature = selectedFeature ?: return false",
+              "        if (feature.isDynamicQueueFeature() || !selectedFeatureTracksHasMore) return false",
+              "        val offset = selectedFeatureTracksNextOffset",
+              "        return runCatching {",
+              "            withTimeout(30_000) {",
+              "                providerRepository.loadFeaturePage(feature, offset)",
+              "            }",
+              "        }.fold(",
+              "            onSuccess = { section ->",
+              "                if (selectedFeature != feature) return false",
+              "                val current = selectedFeatureContent ?: ProviderContentSection(feature)",
+              "                val seenTrackIds = current.tracks.mapTo(mutableSetOf()) { it.id }",
+              "                val newTracks = section.tracks.filter { seenTrackIds.add(it.id) }",
+              "                val seenPlaylistIds = current.playlists.mapTo(mutableSetOf()) { it.id }",
+              "                val newPlaylists = section.playlists.filter { seenPlaylistIds.add(it.id) }",
+              "                val seenMediaItemIds = current.mediaItems.mapTo(mutableSetOf()) { it.id }",
+              "                val newMediaItems = section.mediaItems.filter { seenMediaItemIds.add(it.id) }",
+              "                val seenVideoIds = current.videos.mapTo(mutableSetOf()) { it.id }",
+              "                val newVideos = section.videos.filter { seenVideoIds.add(it.id) }",
+              "",
+              "                val updatedSection = section.copy(",
+              "                    tracks = current.tracks + newTracks,",
+              "                    playlists = current.playlists + newPlaylists,",
+              "                    mediaItems = current.mediaItems + newMediaItems,",
+              "                    videos = current.videos + newVideos,",
+              "                    nextOffset = section.nextOffset,",
+              "                    hasMore = section.hasMore,",
+              "                )",
+              "                selectedFeatureTracks = updatedSection.tracks",
+              "                selectedFeatureContent = updatedSection",
+              "                updateHomeFeatureSection(updatedSection)",
+              "                selectedFeatureTracksNextOffset = section.nextOffset",
+              "                selectedFeatureTracksHasMore = section.hasMore",
+              "                val contentChanged = newTracks.isNotEmpty() ||",
+              "                    newPlaylists.isNotEmpty() ||",
+              "                    newMediaItems.isNotEmpty() ||",
+              "                    newVideos.isNotEmpty()",
+              "                section.nextOffset != offset || contentChanged",
+              "            },",
+              "            onFailure = {",
+              "                selectedFeatureError = it.message ?: it::class.simpleName.orEmpty()",
+              "                false",
+              "            },",
+              "        )",
+              "    }",
+              "",
+              "    private fun loadMoreSelectedPlaylistTracks",
+          ])
+          controller, count = append_pattern.subn(new_append, controller, count=1)
+          if count != 1:
+              raise SystemExit(f'appendSelectedFeatureTracksPage regex matched {count} blocks')
           controller_path.write_text(controller)
 
           screen_path = Path('shared/src/commonMain/kotlin/org/feeluown/mobile/ProviderDetailScreens.kt')
           screen = screen_path.read_text()
-          old_content = '''        content?.playlists?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
-              item {
-                  ProviderPlaylistGrid(
-                      playlists = content.playlists,
-                      onClick = { controller.openPlaylist(it, content.feature.category) },
-                  )
-              }
-          }
-          content?.mediaItems?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
-              item {
-                  ProviderMediaItemGrid(
-                      items = content.mediaItems,
-                      onClick = controller::openMediaItem,
-                  )
-              }
-          }
-          content?.videos?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
-              item {
-                  ProviderVideoList(videos = content.videos, onClick = controller::openVideo)
-              }
-          }
-          '''
-          new_content = '''        content?.playlists?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
-              item {
-                  ProviderPlaylistGrid(
-                      playlists = content.playlists,
-                      onClick = { controller.openPlaylist(it, content.feature.category) },
-                  )
-              }
-              if (content.hasMore) {
-                  item {
-                      Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                          TextButton(onClick = controller::loadMoreSelectedFeature) { Text("加载更多") }
-                      }
-                  }
-              }
-          }
-          content?.mediaItems?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
-              item {
-                  ProviderMediaItemGrid(
-                      items = content.mediaItems,
-                      onClick = controller::openMediaItem,
-                  )
-              }
-              if (content.hasMore) {
-                  item {
-                      Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                          TextButton(onClick = controller::loadMoreSelectedFeature) { Text("加载更多") }
-                      }
-                  }
-              }
-          }
-          content?.videos?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {
-              item {
-                  ProviderVideoList(videos = content.videos, onClick = controller::openVideo)
-              }
-              if (content.hasMore) {
-                  item {
-                      Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                          TextButton(onClick = controller::loadMoreSelectedFeature) { Text("加载更多") }
-                      }
-                  }
-              }
-          }
-          '''
-          if old_content not in screen:
-              raise SystemExit('SelectedFeatureContent non-track block not found')
-          screen = screen.replace(old_content, new_content, 1)
+          content_pattern = re.compile(
+              r"        content\?\.playlists\?\.isNotEmpty\(\) == true -> LazyColumn\(modifier = modifier\) \{.*?"
+              r"\n        else -> TrackCollectionList",
+              re.S,
+          )
+          new_content = "\n".join([
+              "        content?.playlists?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {",
+              "            item {",
+              "                ProviderPlaylistGrid(",
+              "                    playlists = content.playlists,",
+              "                    onClick = { controller.openPlaylist(it, content.feature.category) },",
+              "                )",
+              "            }",
+              "            if (content.hasMore) {",
+              "                item {",
+              "                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {",
+              "                        TextButton(onClick = controller::loadMoreSelectedFeature) { Text(\"加载更多\") }",
+              "                    }",
+              "                }",
+              "            }",
+              "        }",
+              "        content?.mediaItems?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {",
+              "            item {",
+              "                ProviderMediaItemGrid(",
+              "                    items = content.mediaItems,",
+              "                    onClick = controller::openMediaItem,",
+              "                )",
+              "            }",
+              "            if (content.hasMore) {",
+              "                item {",
+              "                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {",
+              "                        TextButton(onClick = controller::loadMoreSelectedFeature) { Text(\"加载更多\") }",
+              "                    }",
+              "                }",
+              "            }",
+              "        }",
+              "        content?.videos?.isNotEmpty() == true -> LazyColumn(modifier = modifier) {",
+              "            item {",
+              "                ProviderVideoList(videos = content.videos, onClick = controller::openVideo)",
+              "            }",
+              "            if (content.hasMore) {",
+              "                item {",
+              "                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {",
+              "                        TextButton(onClick = controller::loadMoreSelectedFeature) { Text(\"加载更多\") }",
+              "                    }",
+              "                }",
+              "            }",
+              "        }",
+              "        else -> TrackCollectionList",
+          ])
+          screen, count = content_pattern.subn(new_content, screen, count=1)
+          if count != 1:
+              raise SystemExit(f'SelectedFeatureContent regex matched {count} blocks')
           screen_path.write_text(screen)
           PY
 
