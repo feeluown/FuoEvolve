@@ -1,6 +1,11 @@
 package org.feeluown.mobile
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,6 +50,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+
+private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 3_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -163,6 +172,27 @@ private fun VideoPlayerFrame(
     onToggleFullscreen: () -> Unit,
     modifier: Modifier,
 ) {
+    var controlsVisible by remember { mutableStateOf(true) }
+    var interactionEpoch by remember { mutableLongStateOf(0L) }
+    val tapInteractionSource = remember { MutableInteractionSource() }
+
+    fun showControlsForInteraction() {
+        controlsVisible = true
+        interactionEpoch += 1
+    }
+
+    LaunchedEffect(playbackState.isPlaying) {
+        if (!playbackState.isPlaying) {
+            controlsVisible = true
+        }
+    }
+    LaunchedEffect(controlsVisible, playbackState.isPlaying, interactionEpoch) {
+        if (controlsVisible && playbackState.isPlaying) {
+            delay(VIDEO_CONTROLS_AUTO_HIDE_MS)
+            controlsVisible = false
+        }
+    }
+
     Box(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center,
@@ -172,14 +202,36 @@ private fun VideoPlayerFrame(
             controller = controller,
             modifier = Modifier.fillMaxSize(),
         )
-        VideoControlBar(
-            controller = controller,
-            state = playbackState,
-            quality = payload?.quality,
-            isFullscreen = isFullscreen,
-            onToggleFullscreen = onToggleFullscreen,
-            modifier = Modifier.align(Alignment.BottomCenter),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = tapInteractionSource,
+                    indication = null,
+                ) {
+                    if (controlsVisible) {
+                        controlsVisible = false
+                    } else {
+                        showControlsForInteraction()
+                    }
+                },
         )
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            VideoControlBar(
+                controller = controller,
+                state = playbackState,
+                quality = payload?.quality,
+                isFullscreen = isFullscreen,
+                onInteraction = ::showControlsForInteraction,
+                onToggleFullscreen = onToggleFullscreen,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -189,6 +241,7 @@ private fun VideoControlBar(
     state: PlatformVideoPlaybackState,
     quality: String?,
     isFullscreen: Boolean,
+    onInteraction: () -> Unit,
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -216,13 +269,17 @@ private fun VideoControlBar(
         ) {
             Slider(
                 value = shownFraction,
-                onValueChange = { scrubbingFraction = it },
+                onValueChange = {
+                    onInteraction()
+                    scrubbingFraction = it
+                },
                 onValueChangeFinished = {
                     val target = scrubbingFraction
                     if (target != null && duration > 0) {
                         controller.seekTo((target * duration).toLong())
                     }
                     scrubbingFraction = null
+                    onInteraction()
                 },
                 enabled = duration > 0,
                 modifier = Modifier.fillMaxWidth(),
@@ -231,17 +288,24 @@ private fun VideoControlBar(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (state.isPlaying) controller.pause() else controller.play() }) {
+                IconButton(onClick = {
+                    onInteraction()
+                    if (state.isPlaying) controller.pause() else controller.play()
+                }) {
                     Icon(
                         imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (state.isPlaying) "暂停" else "播放",
                         tint = Color.White,
                     )
                 }
-                IconButton(onClick = { controller.seekTo((state.positionMs - 10_000).coerceAtLeast(0)) }) {
+                IconButton(onClick = {
+                    onInteraction()
+                    controller.seekTo((state.positionMs - 10_000).coerceAtLeast(0))
+                }) {
                     Icon(Icons.Filled.Replay10, contentDescription = "后退 10 秒", tint = Color.White)
                 }
                 IconButton(onClick = {
+                    onInteraction()
                     val target = state.positionMs + 10_000
                     controller.seekTo(if (duration > 0) target.coerceAtMost(duration) else target)
                 }) {
@@ -268,7 +332,10 @@ private fun VideoControlBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(onClick = onToggleFullscreen) {
+                IconButton(onClick = {
+                    onInteraction()
+                    onToggleFullscreen()
+                }) {
                     Icon(
                         imageVector = if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                         contentDescription = if (isFullscreen) "退出全屏" else "全屏",
