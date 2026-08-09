@@ -2,6 +2,7 @@ package org.feeluown.mobile.provider.netease
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class NeteaseExploreTest {
     @Test
@@ -29,5 +30,20 @@ class NeteaseExploreTest {
         assertEquals("96", request.params["area"])
         assertEquals("3", request.params["type"])
         assertEquals("77", request.params["initial"])
+    }
+
+    @Test
+    fun artistFilterTargetsPreserveOtherDimensions() {
+        val filters = artistSquareFilters(area = "96", type = "3", initial = "77")
+        val initialFilter = filters.first { it.key == "initial" }
+        val selectedInitial = initialFilter.options.single { it.selected }
+        val japanTarget = filters.first { it.key == "area" }.options.first { it.label == "日本" }
+        val request = parseNeteaseFeatureRequest(japanTarget.featureId)
+
+        assertEquals("M", selectedInitial.label)
+        assertEquals("8", request.params["area"])
+        assertEquals("3", request.params["type"])
+        assertEquals("77", request.params["initial"])
+        assertTrue(initialFilter.options.any { it.label == "#" })
     }
 }
