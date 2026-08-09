@@ -149,12 +149,14 @@ fun ProviderContentHomeSection(
                     val forYouSections = visibleSections.filter {
                         it.feature.isDailySongs() ||
                             it.feature.isPrivateFm() ||
-                            it.feature.isBilibiliRecommendedVideos()
+                            it.feature.isBilibiliRecommendedVideos() ||
+                            it.feature.isRecommendedNewSongs()
                     }
                     val otherSections = visibleSections.filterNot {
                         it.feature.isDailySongs() ||
                             it.feature.isPrivateFm() ||
-                            it.feature.isBilibiliRecommendedVideos()
+                            it.feature.isBilibiliRecommendedVideos() ||
+                            it.feature.isRecommendedNewSongs()
                     }
                     if (forYouSections.isNotEmpty()) {
                         item(key = "header:for-you") {
@@ -327,7 +329,7 @@ fun ForYouRecommendGrid(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        section.feature.isBilibiliRecommendedVideos() -> {
+                        section.feature.isBilibiliRecommendedVideos() || section.feature.isRecommendedNewSongs() -> {
                             RecommendationEntryButton(
                                 feature = section.feature,
                                 enabled = enabled,
@@ -979,6 +981,10 @@ fun ProviderFeature.isDailySongs(): Boolean {
 
 fun ProviderFeature.isBilibiliRecommendedVideos(): Boolean {
     return providerId == "bilibili" && id == "bilibili_recommended_videos"
+}
+
+fun ProviderFeature.isRecommendedNewSongs(): Boolean {
+    return providerId == "netease" && id == "netease_recommended_new_songs"
 }
 
 fun ProviderFeature.toDisplayTrack(): MusicTrack {
