@@ -4,6 +4,7 @@ import org.feeluown.mobile.provider.bilibili.BilibiliContentProvider
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
+import org.feeluown.mobile.provider.qqmusic.QQMusicArtistDetailProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicContentProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicUserLibrary
 
@@ -203,7 +204,16 @@ fun createFuoProviderRepository(
         http = qqmusicHttp,
         credentials = credentials,
     )
-    val withQQMusicContent = QQMusicContentRepository(delegate, qqmusic, qqmusicUserLibrary)
+    val qqmusicArtistDetails = QQMusicArtistDetailProvider(
+        http = qqmusicHttp,
+        credentials = credentials,
+    )
+    val withQQMusicContent = QQMusicContentRepository(
+        delegate,
+        qqmusic,
+        qqmusicUserLibrary,
+        qqmusicArtistDetails,
+    )
     val bilibili = BilibiliContentProvider(
         http = ProviderHttpClient(persistentCache = persistentCache),
         credentials = credentials,
