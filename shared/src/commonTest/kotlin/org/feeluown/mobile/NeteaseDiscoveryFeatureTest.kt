@@ -24,18 +24,24 @@ class NeteaseDiscoveryFeatureTest {
         val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
         val features = provider.features.associateBy { it.id }
 
+        assertEquals("每日推荐歌单", features["netease_daily_playlists"]?.title)
+        assertEquals(ProviderContentType.Songs, features["netease_recommended_new_songs"]?.contentType)
+        assertEquals(ProviderFeatureCategory.Recommend, features["netease_recommended_new_songs"]?.category)
+        assertFalse(assertNotNull(features["netease_recommended_new_songs"]).requiresLogin)
+        assertEquals(ProviderContentType.Videos, features["netease_recommended_mvs"]?.contentType)
+        assertEquals(ProviderFeatureCategory.Recommend, features["netease_recommended_mvs"]?.category)
+        assertFalse(assertNotNull(features["netease_recommended_mvs"]).requiresLogin)
+
         assertEquals(ProviderContentType.Songs, features["netease_new_songs"]?.contentType)
         assertEquals(ProviderContentType.Albums, features["netease_new_albums"]?.contentType)
         assertEquals(ProviderContentType.Artists, features["netease_top_artists"]?.contentType)
         assertEquals(ProviderContentType.Playlists, features["netease_highquality_playlists"]?.contentType)
-        assertEquals(ProviderContentType.Videos, features["netease_recommended_mvs"]?.contentType)
         assertEquals(ProviderContentType.Videos, features["netease_top_mvs"]?.contentType)
         listOf(
             "netease_new_songs",
             "netease_new_albums",
             "netease_top_artists",
             "netease_highquality_playlists",
-            "netease_recommended_mvs",
             "netease_top_mvs",
         ).forEach { id ->
             val feature = assertNotNull(features[id])
@@ -52,6 +58,9 @@ class NeteaseDiscoveryFeatureTest {
             engine {
                 addHandler { request ->
                     val json = when (request.url.encodedPath) {
+                        "/weapi/personalized/newsong" -> """
+                            {"code":200,"result":[{"id":7,"name":"推荐新歌","song":{"id":7,"name":"推荐新歌","artists":[{"id":17,"name":"推荐歌手"}],"album":{"id":27,"name":"推荐专辑","picUrl":"recommended-song-cover"}}}]}
+                        """.trimIndent()
                         "/weapi/v1/discovery/new/songs" -> """
                             {"code":200,"data":[{"id":1,"name":"新歌","artists":[{"id":11,"name":"歌手"}],"album":{"id":21,"name":"专辑","picUrl":"song-cover"}}]}
                         """.trimIndent()
@@ -79,6 +88,10 @@ class NeteaseDiscoveryFeatureTest {
         val client = ProviderHttpClient(httpClient = httpClient)
         val provider = NeteaseProvider(client, InMemoryProviderCredentialStore())
         val features = provider.features.associateBy { it.id }
+
+        val recommendedSongs = provider.loadFeature(assertNotNull(features["netease_recommended_new_songs"]), 0, 20)
+        assertEquals("推荐新歌", recommendedSongs.tracks.single().title)
+        assertEquals("推荐歌手", recommendedSongs.tracks.single().artists)
 
         val songs = provider.loadFeature(assertNotNull(features["netease_new_songs"]), 0, 20)
         assertEquals("新歌", songs.tracks.single().title)
