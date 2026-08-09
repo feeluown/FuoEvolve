@@ -446,6 +446,7 @@ class FuoPlaybackService : MediaSessionService() {
     ): MediaItem {
         val url = payload.url
         require(url.isNotBlank()) { "Playback URL is blank" }
+        val lineLyrics = toTimedLineLrc(payload.lyrics)
         val extras = Bundle().apply {
             putString("source", track.source)
             putString("source_type", track.sourceType.name)
@@ -470,6 +471,9 @@ class FuoPlaybackService : MediaSessionService() {
             putString("replacement_strategy", track.replacementStrategy.orEmpty())
             putDouble("replacement_score", track.replacementScore ?: 0.0)
             putString("lyrics", payload.lyrics.orEmpty())
+            lineLyrics?.let { lyrics ->
+                putString(OPLUS_LYRIC_INFO_KEY, buildLockScreenLyricInfo(track, lyrics))
+            }
             putString("audio_quality", payload.audioQuality.orEmpty())
             putString("playback_parts", JSONArray().apply {
                 parts.forEach { part -> put(JSONObject().put("id", part.id).put("title", part.title).put("duration_ms", part.durationMs)) }
@@ -491,6 +495,14 @@ class FuoPlaybackService : MediaSessionService() {
             )
             .build()
     }
+
+    private fun buildLockScreenLyricInfo(track: MusicTrack, lineLyrics: String): String =
+        JSONObject()
+            .put("songName", track.title)
+            .put("artist", track.artists)
+            .put("songId", track.id)
+            .put("lyric", lineLyrics)
+            .toString()
 
     private fun createMediaSource(mediaItem: MediaItem, headers: Map<String, String>): ProgressiveMediaSource {
         val url = mediaItem.localConfiguration?.uri?.toString().orEmpty()
@@ -717,6 +729,7 @@ class FuoPlaybackService : MediaSessionService() {
         private const val EXTRA_PLAN = "plan"
         private const val PLAYBACK_RESOLVE_TIMEOUT_MS = 30_000L
         private const val TAG = "FuoPlaybackService"
+        private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
         private val MEDIA_AUDIO_ATTRIBUTES = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
