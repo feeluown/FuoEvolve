@@ -12,6 +12,7 @@
         A10000000000000000000003 /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* PlayerViewModel.swift */; };
         A10000000000000000000004 /* IOSNativeAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* IOSNativeAudioEngine.swift */; };
         A10000000000000000000006 /* IOSAudioRecognitionOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */; };
+        A10000000000000000000007 /* IOSNativeVideoControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* IOSNativeVideoControls.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
         A10000000000000000000014 /* IOSNativeAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeAudioEngine.swift; sourceTree = "<group>"; };
         A10000000000000000000016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
         A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAudioRecognitionOutput.swift; sourceTree = "<group>"; };
+        A10000000000000000000018 /* IOSNativeVideoControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeVideoControls.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +53,7 @@
                 A10000000000000000000013 /* PlayerViewModel.swift */,
                 A10000000000000000000014 /* IOSNativeAudioEngine.swift */,
                 A10000000000000000000017 /* IOSAudioRecognitionOutput.swift */,
+                A10000000000000000000018 /* IOSNativeVideoControls.swift */,
                 A10000000000000000000016 /* Info.plist */,
             );
             path = FuoEvolve;
@@ -173,6 +176,7 @@
                 A10000000000000000000003 /* PlayerViewModel.swift in Sources */,
                 A10000000000000000000004 /* IOSNativeAudioEngine.swift in Sources */,
                 A10000000000000000000006 /* IOSAudioRecognitionOutput.swift in Sources */,
+                A10000000000000000000007 /* IOSNativeVideoControls.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
