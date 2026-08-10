@@ -16,6 +16,7 @@ import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
 import org.feeluown.mobile.provider.netease.NeteaseProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicProvider
+import org.feeluown.mobile.provider.ytmusic.YtMusicContentProvider
 import org.feeluown.mobile.provider.ytmusic.YtMusicProvider
 
 /**
@@ -433,8 +434,8 @@ class KotlinProviderRepository : ProviderMusicRepository {
     private fun requireProvider(providerId: String): KotlinMusicProvider =
         providerMap[providerId] ?: error("unknown provider: $providerId")
 
-    private fun requireYtMusicProvider(): YtMusicProvider =
-        requireProvider("ytmusic") as? YtMusicProvider
+    private fun requireYtMusicProvider(): YtMusicContentProvider =
+        requireProvider("ytmusic") as? YtMusicContentProvider
             ?: error("ytmusic provider is not available")
 
     private fun providerIdForResource(resourceType: String, resourceId: String): String {
@@ -480,12 +481,15 @@ class KotlinProviderRepository : ProviderMusicRepository {
         return common / maxOf(left.toSet().size, right.toSet().size).toDouble()
     }
 
-    private fun createProviders(http: ProviderHttpClient, credentials: ProviderCredentialStore): Map<String, KotlinMusicProvider> = mapOf(
-        "netease" to NeteaseProvider(http, credentials),
-        "qqmusic" to QQMusicProvider(http, credentials),
-        "bilibili" to BilibiliProvider(http, credentials),
-        "ytmusic" to YtMusicProvider(http, credentials),
-    )
+    private fun createProviders(http: ProviderHttpClient, credentials: ProviderCredentialStore): Map<String, KotlinMusicProvider> {
+        val ytmusic = YtMusicProvider(http, credentials)
+        return mapOf(
+            "netease" to NeteaseProvider(http, credentials),
+            "qqmusic" to QQMusicProvider(http, credentials),
+            "bilibili" to BilibiliProvider(http, credentials),
+            "ytmusic" to YtMusicContentProvider(ytmusic, http, credentials),
+        )
+    }
 }
 
 internal suspend fun <T> selectReplacementCandidate(
