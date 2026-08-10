@@ -37,9 +37,9 @@ fun composeRichLyrics(
                 .filter(String::isNotBlank)
                 .filter { it != line.text.trim() }
                 .distinct()
-            if (values.isNotEmpty()) {
+            values.forEach { value ->
                 append(formatRichLrcTimestamp(line.timeMs))
-                append(values.joinToString(RICH_LYRIC_LINE_SEPARATOR))
+                append(value)
                 append('\n')
             }
         }
@@ -47,8 +47,6 @@ fun composeRichLyrics(
 
     return composeLyricsWithTranslation(primary, secondary.takeIf(String::isNotBlank))
 }
-
-internal const val RICH_LYRIC_LINE_SEPARATOR = "\u2028"
 
 private data class TimedRichText(val timeMs: Long, val text: String)
 
