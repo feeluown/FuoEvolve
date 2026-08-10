@@ -76,7 +76,4 @@ private const val QQ_QRC_KEY = "!@#)(*$%123ZXC!@!@#)(NHL"
 private val qqEncryptedHexRegex = Regex("""^[0-9A-Fa-f]+$""")
 private val qrcLineHeaderRegex = Regex("""^\[\d+,\d+]""")
 private val qrcWordTimestampRegex = Regex("""\((\d+),(\d+)\)""")
-private val qrcXmlLyricRegex = Regex(
-    """LyricContent="(.*?)"""",
-    setOf(RegexOption.DOT_MATCHES_ALL),
-)
+private val qrcXmlLyricRegex = Regex("LyricContent=\"([^\"]*)\"")
