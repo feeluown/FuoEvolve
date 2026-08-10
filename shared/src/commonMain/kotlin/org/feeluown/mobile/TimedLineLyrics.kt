@@ -20,7 +20,7 @@ fun toTimedLineLrc(rawLyrics: String?): String? {
             append(line.text.trim())
             append('\n')
             line.translation
-                ?.split(RICH_LYRIC_LINE_SEPARATOR)
+                ?.lineSequence()
                 ?.map(String::trim)
                 ?.filter(String::isNotBlank)
                 ?.filter { it != line.text.trim() }
