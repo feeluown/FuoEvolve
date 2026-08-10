@@ -21,6 +21,7 @@ import org.feeluown.mobile.ProviderPlaylistDetail
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.ProviderVideo
 import org.feeluown.mobile.VideoPlaybackPayload
+import org.feeluown.mobile.composeRichLyrics
 import org.feeluown.mobile.provider.core.BaseKotlinProvider
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
@@ -753,7 +754,33 @@ class QQMusicProvider(
         return lyric(id)
     }
 
-    private suspend fun lyric(identifier: String): String? = runCatching {
+    private suspend fun lyric(identifier: String): String? {
+        richLyric(identifier)?.let { return it }
+        return legacyLyric(identifier)
+    }
+
+    private suspend fun richLyric(identifier: String): String? = runCatching {
+        val root = rpc(
+            """
+            {"req_0":{"module":"music.musichallSong.PlayLyricInfo","method":"GetPlayLyricInfo","param":{"songMid":${jsonString(identifier)},"type":1,"crypt":1,"lrc_t":0,"qrc":1,"qrc_t":0,"roma":1,"roma_t":0,"trans":1,"trans_t":0,"needSingingAnnotations":true}}}
+            """.trimIndent(),
+            cacheKey = "qqmusic:lyric-v2:$identifier",
+            cachePolicy = ProviderCachePolicies.lyric,
+        )
+        val data = root.obj("req_0")?.obj("data") ?: return@runCatching null
+        val main = decodeQqLyricPayload(data.stringOrNull("lyric")) ?: return@runCatching null
+        val translation = decodeQqLyricPayload(data.stringOrNull("trans"))
+        val romanization = decodeQqLyricPayload(data.stringOrNull("roma"))
+        val annotation = decodeQqLyricPayload(data.stringOrNull("singingAnnotationsLyric"))
+        composeRichLyrics(
+            main = main,
+            translation = translation,
+            romanization = romanization,
+            annotation = annotation,
+        )
+    }.getOrNull()
+
+    private suspend fun legacyLyric(identifier: String): String? = runCatching {
         val root = http.getText(
             providerId = ID,
             url = queryUrl(
@@ -873,7 +900,7 @@ class QQMusicProvider(
         val FEATURES = listOf(
             ProviderFeature("qqmusic_daily_songs", ID, NAME, "每日推荐歌曲", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
             ProviderFeature("qqmusic_radio", ID, NAME, "私人 FM", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
-            ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
+            ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Music, ProviderContentType.Playlists, true),
             ProviderFeature("qqmusic_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
         )
     }
