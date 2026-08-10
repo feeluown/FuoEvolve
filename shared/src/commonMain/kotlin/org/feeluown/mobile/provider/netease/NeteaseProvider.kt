@@ -25,6 +25,7 @@ import org.feeluown.mobile.ProviderPlaylistDetail
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.ProviderVideo
 import org.feeluown.mobile.VideoPlaybackPayload
+import org.feeluown.mobile.composeRichLyrics
 import org.feeluown.mobile.provider.core.BaseKotlinProvider
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderCredentials
@@ -912,7 +913,34 @@ class NeteaseProvider(
         val hasMore: Boolean,
     )
 
-    private suspend fun lyric(identifier: String): String? = runCatching {
+    private suspend fun lyric(identifier: String): String? {
+        richLyric(identifier)?.let { return it }
+        return legacyLyric(identifier)
+    }
+
+    private suspend fun richLyric(identifier: String): String? = runCatching {
+        val root = http.postForm(
+            ID,
+            "$BASE/api/song/lyric/v1",
+            Parameters.build {
+                append("id", identifier)
+                append("cp", "false")
+                append("tv", "0")
+                append("lv", "0")
+                append("rv", "0")
+                append("kv", "0")
+                append("yv", "0")
+                append("ytv", "0")
+                append("yrv", "0")
+            },
+            neteaseAuthenticatedHeaders(),
+            cacheKey = "netease:lyric-v1-rich:$identifier",
+            cachePolicy = ProviderCachePolicies.lyric,
+        ).value.let { parseNeteaseResponse(it) }
+        composeNeteaseRichLyrics(root)
+    }.getOrNull()
+
+    private suspend fun legacyLyric(identifier: String): String? = runCatching {
         val root = http.getText(
             ID,
             queryUrl(
@@ -922,6 +950,7 @@ class NeteaseProvider(
                     "lv" to "-1",
                     "kv" to "-1",
                     "tv" to "-1",
+                    "rv" to "-1",
                     "yv" to "-1",
                 ),
             ),
@@ -929,16 +958,32 @@ class NeteaseProvider(
             cacheKey = "netease:lyric-yrc-tr:$identifier",
             cachePolicy = ProviderCachePolicies.lyric,
         ).value.let { parseNeteaseResponse(it) }
+        composeNeteaseRichLyrics(root)
+    }.getOrNull()
+
+    private fun composeNeteaseRichLyrics(root: JsonObject): String? {
         val yrc = root.obj("yrc")?.stringOrNull("lyric")
         val lrc = root.obj("lrc")?.stringOrNull("lyric")
-        val main = yrc ?: lrc ?: return@runCatching null
-        val translation = when {
-            yrc != null -> root.obj("ytlrc")?.stringOrNull("lyric")
+        val main = yrc ?: lrc ?: return null
+        val translation = if (yrc != null) {
+            root.obj("ytlrc")?.stringOrNull("lyric")
                 ?: root.obj("tlyric")?.stringOrNull("lyric")
-            else -> root.obj("tlyric")?.stringOrNull("lyric")
+        } else {
+            root.obj("tlyric")?.stringOrNull("lyric")
         }
-        org.feeluown.mobile.composeLyricsWithTranslation(main, translation)
-    }.getOrNull()
+        val romanization = if (yrc != null) {
+            root.obj("yromalrc")?.stringOrNull("lyric")
+                ?: root.obj("yrlyric")?.stringOrNull("lyric")
+                ?: root.obj("romalrc")?.stringOrNull("lyric")
+        } else {
+            root.obj("romalrc")?.stringOrNull("lyric")
+        }
+        return composeRichLyrics(
+            main = main,
+            translation = translation,
+            romanization = romanization,
+        )
+    }
 
     private suspend fun currentUserId(): String? = runCatching { requestCurrentUserId() }.getOrNull()
 
