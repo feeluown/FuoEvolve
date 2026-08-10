@@ -1,21 +1,7 @@
 package org.feeluown.mobile.provider.qqmusic
 
-import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.cinterop.alloc
-import kotlinx.cinterop.getPointer
-import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.ptr
-import kotlinx.cinterop.refTo
-import kotlinx.cinterop.reinterpret
-import kotlinx.cinterop.sizeOf
-import platform.zlib.ZLIB_VERSION
-import platform.zlib.Z_NO_FLUSH
-import platform.zlib.Z_OK
-import platform.zlib.Z_STREAM_END
-import platform.zlib.inflate
-import platform.zlib.inflateEnd
-import platform.zlib.inflateInit_
-import platform.zlib.z_stream
+import kotlinx.cinterop.*
+import platform.zlib.*
 
 @OptIn(ExperimentalForeignApi::class)
 internal actual fun qrcInflate(data: ByteArray): ByteArray? = runCatching {
