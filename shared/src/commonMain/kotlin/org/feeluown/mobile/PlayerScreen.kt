@@ -1753,15 +1753,22 @@ fun attachLyricTranslations(lines: List<LyricLine>, translationRaw: String?): Li
     if (translationLines.isEmpty()) return lines
     val byTime = translationLines
         .groupBy { it.timeMs }
-        .mapValues { (_, value) -> value.first().text }
+        .mapValues { (_, value) ->
+            value.flatMap { secondary ->
+                listOfNotNull(secondary.text, secondary.translation)
+            }
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+                .joinToString("\n")
+        }
     return lines.map { line ->
         if (line.timeMs == Long.MAX_VALUE || !line.translation.isNullOrBlank()) return@map line
         val exact = byTime[line.timeMs]
-        val nearest = translationLines
-            .minByOrNull { kotlin.math.abs(it.timeMs - line.timeMs) }
-            ?.takeIf { kotlin.math.abs(it.timeMs - line.timeMs) <= 50 }
-            ?.text
-        line.copy(translation = exact ?: nearest)
+        val nearestTime = byTime.keys
+            .minByOrNull { kotlin.math.abs(it - line.timeMs) }
+            ?.takeIf { kotlin.math.abs(it - line.timeMs) <= 50 }
+        line.copy(translation = exact ?: nearestTime?.let(byTime::get))
     }
 }
 
