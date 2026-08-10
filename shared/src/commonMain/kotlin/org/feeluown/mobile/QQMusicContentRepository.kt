@@ -18,12 +18,13 @@ internal class QQMusicContentRepository(
     override suspend fun features(): List<ProviderFeature> {
         val base = delegate.features()
         if (base.none { it.providerId == QQMUSIC_PROVIDER_ID }) return base
+        val qqFeatures = (qqmusic.features + QQMUSIC_MINE_FEATURES).distinctBy { it.id }
         return buildList {
             var inserted = false
             base.forEach { feature ->
                 if (feature.providerId == QQMUSIC_PROVIDER_ID) {
                     if (!inserted) {
-                        addAll(qqmusic.features)
+                        addAll(qqFeatures)
                         inserted = true
                     }
                 } else {
@@ -86,12 +87,19 @@ internal class QQMusicContentRepository(
         offset: Int,
         limit: Int,
     ): ProviderContentSection = if (feature.providerId == QQMUSIC_PROVIDER_ID) {
-        val section = if (ProviderFeatureFilterCodec.requestId(feature.id) == QQMUSIC_USER_PLAYLISTS_FEATURE_ID) {
+        val featureId = ProviderFeatureFilterCodec.requestId(feature.id)
+        val section = if (featureId in QQMUSIC_USER_LIBRARY_FEATURE_IDS) {
             val auth = delegate.authState(QQMUSIC_PROVIDER_ID)
             if (!auth.isLoggedIn) {
                 ProviderContentSection(feature = feature, isLoginRequired = true)
             } else {
-                userLibrary.loadPlaylists(feature, offset, limit)
+                when (featureId) {
+                    QQMUSIC_USER_PLAYLISTS_FEATURE_ID -> userLibrary.loadPlaylists(feature, offset, limit)
+                    QQMUSIC_FAVORITE_PLAYLISTS_FEATURE_ID -> userLibrary.loadFavoritePlaylists(feature, offset, limit)
+                    QQMUSIC_FOLLOWED_ARTISTS_FEATURE_ID -> userLibrary.loadFollowedArtists(feature, offset, limit)
+                    QQMUSIC_FAVORITE_ALBUMS_FEATURE_ID -> userLibrary.loadFavoriteAlbums(feature, offset, limit)
+                    else -> ProviderContentSection(feature = feature)
+                }
             }
         } else {
             qqmusic.loadFeature(feature, offset, limit)
@@ -205,6 +213,46 @@ internal class QQMusicContentRepository(
     private companion object {
         const val QQMUSIC_PROVIDER_ID = "qqmusic"
         const val QQMUSIC_USER_PLAYLISTS_FEATURE_ID = "qqmusic_user_playlists"
+        const val QQMUSIC_FAVORITE_PLAYLISTS_FEATURE_ID = "qqmusic_favorite_playlists"
+        const val QQMUSIC_FOLLOWED_ARTISTS_FEATURE_ID = "qqmusic_followed_artists"
+        const val QQMUSIC_FAVORITE_ALBUMS_FEATURE_ID = "qqmusic_favorite_albums"
         const val MAX_ARTIST_TRACKS = 300
+
+        val QQMUSIC_USER_LIBRARY_FEATURE_IDS = setOf(
+            QQMUSIC_USER_PLAYLISTS_FEATURE_ID,
+            QQMUSIC_FAVORITE_PLAYLISTS_FEATURE_ID,
+            QQMUSIC_FOLLOWED_ARTISTS_FEATURE_ID,
+            QQMUSIC_FAVORITE_ALBUMS_FEATURE_ID,
+        )
+
+        val QQMUSIC_MINE_FEATURES = listOf(
+            ProviderFeature(
+                QQMUSIC_FAVORITE_PLAYLISTS_FEATURE_ID,
+                QQMUSIC_PROVIDER_ID,
+                "QQ 音乐",
+                "收藏歌单",
+                ProviderFeatureCategory.MineFavoritePlaylists,
+                ProviderContentType.Playlists,
+                true,
+            ),
+            ProviderFeature(
+                QQMUSIC_FOLLOWED_ARTISTS_FEATURE_ID,
+                QQMUSIC_PROVIDER_ID,
+                "QQ 音乐",
+                "关注歌手",
+                ProviderFeatureCategory.Mine,
+                ProviderContentType.Artists,
+                true,
+            ),
+            ProviderFeature(
+                QQMUSIC_FAVORITE_ALBUMS_FEATURE_ID,
+                QQMUSIC_PROVIDER_ID,
+                "QQ 音乐",
+                "收藏专辑",
+                ProviderFeatureCategory.Mine,
+                ProviderContentType.Albums,
+                true,
+            ),
+        )
     }
 }
