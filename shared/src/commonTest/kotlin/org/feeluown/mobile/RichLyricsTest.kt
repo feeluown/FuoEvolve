@@ -6,7 +6,7 @@ import kotlin.test.assertTrue
 
 class RichLyricsTest {
     @Test
-    fun mergesTranslationAndRomanizationIntoExistingSecondaryStyle() {
+    fun rendersTranslationAndRomanizationOnSeparateLines() {
         val raw = composeRichLyrics(
             main = "[00:01.000]Hello\n[00:03.000]World",
             translation = "[00:01.020]你好\n[00:03.000]世界",
@@ -16,8 +16,9 @@ class RichLyricsTest {
         val lines = parseLyrics(raw)
         assertEquals(2, lines.size)
         assertEquals("Hello", lines[0].text)
-        assertEquals("你好${RICH_LYRIC_LINE_SEPARATOR}hello", lines[0].translation)
-        assertEquals("世界${RICH_LYRIC_LINE_SEPARATOR}world", lines[1].translation)
+        assertEquals("你好\nhello", lines[0].translation)
+        assertEquals("世界\nworld", lines[1].translation)
+        assertTrue(!raw.contains('\u2028'))
     }
 
     @Test
