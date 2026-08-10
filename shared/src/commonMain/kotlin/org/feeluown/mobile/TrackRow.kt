@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -13,12 +14,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicVideo
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
@@ -26,6 +32,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -116,14 +124,52 @@ fun CoverBox(
     modifier: Modifier = Modifier.size(48.dp),
     placeholder: CoverPlaceholder = CoverPlaceholder.Song,
 ) {
+    val featureIcon = materialExploreFeatureIcon(track)
+    if (featureIcon != null) {
+        Surface(
+            modifier = Modifier.then(modifier),
+            shape = RoundedCornerShape(cornerRadius),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = featureIcon,
+                    contentDescription = track.title,
+                    modifier = Modifier.size(44.dp),
+                )
+            }
+        }
+        return
+    }
+
     PlatformCoverArt(
         title = track.title,
-        imageUrl = track.coverUrl ?: neteaseHomeEntryCoverUrl(track.id),
+        imageUrl = track.coverUrl,
         modifier = Modifier
             .then(modifier)
             .clip(RoundedCornerShape(cornerRadius)),
         placeholder = placeholder,
     )
+}
+
+private fun materialExploreFeatureIcon(track: MusicTrack): ImageVector? {
+    if (track.sourceType != TrackSourceType.Provider) return null
+    val featureId = track.id.substringBefore("^filters^").substringBefore('|')
+    return when (featureId) {
+        "netease_mv_square",
+        "netease_recommended_mvs",
+        "qqmusic_mv_square" -> Icons.Filled.MusicVideo
+        "netease_new_songs",
+        "netease_recommended_new_songs" -> Icons.Filled.NewReleases
+        "netease_styles" -> Icons.Filled.GraphicEq
+        "netease_top_mvs" -> Icons.Filled.Leaderboard
+        "bilibili_popular_videos" -> Icons.Filled.LocalFireDepartment
+        else -> null
+    }
 }
 
 @Composable
