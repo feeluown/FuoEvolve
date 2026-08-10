@@ -405,6 +405,10 @@ class FuoPlayerController(
     private var lyricsLoadJob: Job? = null
     private var lyricsLoadedForTrackId: String? = null
     private var localMusicRefreshSerial: Long = 0
+    private var recommendContentRefreshSerial: Long = 0
+    private var musicContentRefreshSerial: Long = 0
+    private var minePlaylistRefreshSerial: Long = 0
+    private var mineContentRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
     private var observedCompletedDownloadTaskIds = emptySet<String>()
     private var pendingLocalMusicMediaRefresh: Job? = null
@@ -1972,44 +1976,56 @@ class FuoPlayerController(
             refreshActiveMineSection(refreshCatalog)
             return
         }
+        val refreshSerial = when (section) {
+            HomeSection.Recommend -> ++recommendContentRefreshSerial
+            HomeSection.Music -> ++musicContentRefreshSerial
+            HomeSection.Mine -> error("mine section is loaded separately")
+        }
+        fun isCurrentRefresh(): Boolean = when (section) {
+            HomeSection.Recommend -> refreshSerial == recommendContentRefreshSerial
+            HomeSection.Music -> refreshSerial == musicContentRefreshSerial
+            HomeSection.Mine -> false
+        }
         scope.launch {
-            isLoading = true
+            if (isCurrentRefresh()) isLoading = true
             val title = if (section == HomeSection.Recommend) "推荐" else "探索"
-            message = "正在加载$title"
-            runCatching {
+            if (isCurrentRefresh()) message = "正在加载$title"
+            val result = runCatching {
                 if (refreshCatalog) refreshProviderCatalog()
                 val category = when (section) {
                     HomeSection.Recommend -> ProviderFeatureCategory.Recommend
                     HomeSection.Music -> ProviderFeatureCategory.Music
                     HomeSection.Mine -> error("mine section is loaded separately")
                 }
-                withTimeout(30_000) {
-                    providerFeatures.filter {
-                        it.category == category && it.providerId in selectedProviderIdsFor(
-                            if (section == HomeSection.Recommend) ProviderDisplaySection.Recommend else ProviderDisplaySection.Explore,
-                        )
-                    }.map { feature ->
-                        if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
-                            ProviderContentSection(feature, isLoginRequired = true)
-                        } else if (feature.isDeferredHomeFeature()) {
-                            ProviderContentSection(feature)
-                        } else {
-                            runCatching { providerRepository.loadFeaturePage(feature, offset = 0) }
-                                .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
-                        }
-                    }.sortedSectionsByOrder()
-                }
-            }.onSuccess {
-                if (section == HomeSection.Recommend) {
-                    recommendSections = it
+                val displaySection = if (section == HomeSection.Recommend) {
+                    ProviderDisplaySection.Recommend
                 } else {
-                    musicSections = it
+                    ProviderDisplaySection.Explore
                 }
-                message = if (it.isEmpty()) "$title 暂无内容" else "$title 已更新"
-            }.onFailure {
-                setError(it)
+                val currentSections = if (section == HomeSection.Recommend) recommendSections else musicSections
+                loadProviderSectionsIncrementally(
+                    category = category,
+                    includeFeature = { it.providerId in selectedProviderIdsFor(displaySection) },
+                    currentSections = currentSections,
+                    deferFeature = { it.isDeferredHomeFeature() },
+                ) { sections ->
+                    if (isCurrentRefresh()) {
+                        if (section == HomeSection.Recommend) {
+                            recommendSections = sections
+                        } else {
+                            musicSections = sections
+                        }
+                    }
+                }
             }
-            isLoading = false
+            if (isCurrentRefresh()) {
+                result
+                    .onSuccess { sections ->
+                        message = if (sections.isEmpty()) "$title 暂无内容" else "$title 已更新"
+                    }
+                    .onFailure { setError(it) }
+                isLoading = false
+            }
         }
     }
 
@@ -2018,28 +2034,57 @@ class FuoPlayerController(
     }
 
     private fun refreshMinePlaylistContent(refreshCatalog: Boolean) {
+        val refreshSerial = ++minePlaylistRefreshSerial
+        fun isCurrentRefresh(): Boolean = refreshSerial == minePlaylistRefreshSerial
         scope.launch {
-            isLoading = true
-            message = "正在加载我的歌单"
-            runCatching {
-                if (refreshCatalog) refreshProviderCatalog()
-                val userPlaylists = loadProviderSections(ProviderFeatureCategory.MinePlaylists, ::isMineProviderFeature)
-                val favoritePlaylists = loadProviderSections(ProviderFeatureCategory.MineFavoritePlaylists, ::isMineProviderFeature)
-                val local = localPlaylistRepository.list()
-                Triple(userPlaylists, favoritePlaylists, local)
-            }.onSuccess {
-                minePlaylistSections = it.first
-                mineFavoritePlaylistSections = it.second
-                localPlaylists = it.third
-                message = if (it.first.isEmpty() && it.second.isEmpty() && it.third.isEmpty()) {
-                    "歌单暂无内容"
-                } else {
-                    "歌单已更新"
-                }
-            }.onFailure {
-                setError(it)
+            if (isCurrentRefresh()) {
+                isLoading = true
+                message = "正在加载我的歌单"
             }
-            isLoading = false
+            val result = runCatching {
+                if (refreshCatalog) refreshProviderCatalog()
+                val userPlaylistsDeferred = async {
+                    loadProviderSectionsIncrementally(
+                        category = ProviderFeatureCategory.MinePlaylists,
+                        includeFeature = ::isMineProviderFeature,
+                        currentSections = minePlaylistSections,
+                    ) { sections ->
+                        if (isCurrentRefresh()) minePlaylistSections = sections
+                    }
+                }
+                val favoritePlaylistsDeferred = async {
+                    loadProviderSectionsIncrementally(
+                        category = ProviderFeatureCategory.MineFavoritePlaylists,
+                        includeFeature = ::isMineProviderFeature,
+                        currentSections = mineFavoritePlaylistSections,
+                    ) { sections ->
+                        if (isCurrentRefresh()) mineFavoritePlaylistSections = sections
+                    }
+                }
+                val localDeferred = async {
+                    runCatching { localPlaylistRepository.list() }.also { localResult ->
+                        if (isCurrentRefresh()) {
+                            localResult.onSuccess { localPlaylists = it }
+                        }
+                    }
+                }
+                val userPlaylists = userPlaylistsDeferred.await()
+                val favoritePlaylists = favoritePlaylistsDeferred.await()
+                val local = localDeferred.await().getOrThrow()
+                Triple(userPlaylists, favoritePlaylists, local)
+            }
+            if (isCurrentRefresh()) {
+                result
+                    .onSuccess {
+                        message = if (it.first.isEmpty() && it.second.isEmpty() && it.third.isEmpty()) {
+                            "歌单暂无内容"
+                        } else {
+                            "歌单已更新"
+                        }
+                    }
+                    .onFailure { setError(it) }
+                isLoading = false
+            }
         }
     }
 
@@ -2048,37 +2093,94 @@ class FuoPlayerController(
     }
 
     private fun refreshMineContent(refreshCatalog: Boolean) {
+        val refreshSerial = ++mineContentRefreshSerial
+        fun isCurrentRefresh(): Boolean = refreshSerial == mineContentRefreshSerial
         scope.launch {
-            isLoading = true
-            message = "正在加载我的内容"
-            runCatching {
-                if (refreshCatalog) refreshProviderCatalog()
-                loadProviderSections(ProviderFeatureCategory.Mine, ::isMineProviderFeature)
-            }.onSuccess {
-                mineSections = it
-                message = if (it.isEmpty()) "我的内容暂无内容" else "我的内容已更新"
-            }.onFailure {
-                setError(it)
+            if (isCurrentRefresh()) {
+                isLoading = true
+                message = "正在加载我的内容"
             }
-            isLoading = false
+            val result = runCatching {
+                if (refreshCatalog) refreshProviderCatalog()
+                loadProviderSectionsIncrementally(
+                    category = ProviderFeatureCategory.Mine,
+                    includeFeature = ::isMineProviderFeature,
+                    currentSections = mineSections,
+                ) { sections ->
+                    if (isCurrentRefresh()) mineSections = sections
+                }
+            }
+            if (isCurrentRefresh()) {
+                result
+                    .onSuccess { sections ->
+                        message = if (sections.isEmpty()) "我的内容暂无内容" else "我的内容已更新"
+                    }
+                    .onFailure { setError(it) }
+                isLoading = false
+            }
         }
     }
 
-    private suspend fun loadProviderSections(
+    private suspend fun loadProviderSectionsIncrementally(
         category: ProviderFeatureCategory,
         includeFeature: (ProviderFeature) -> Boolean = { true },
+        currentSections: List<ProviderContentSection> = emptyList(),
+        deferFeature: (ProviderFeature) -> Boolean = { false },
+        onUpdate: (List<ProviderContentSection>) -> Unit,
     ): List<ProviderContentSection> {
-        return withTimeout(30_000) {
-            providerFeatures.filter { it.category == category && includeFeature(it) }.map { feature ->
-                if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
+        val features = providerFeatures.filter { it.category == category && includeFeature(it) }
+        val featureIds = features.mapTo(mutableSetOf()) { it.id }
+        var sections = currentSections
+            .filter { it.feature.id in featureIds }
+            .sortedSectionsByOrder()
+        val loadingFeatures = mutableListOf<ProviderFeature>()
+        features.forEach { feature ->
+            val immediateSection = when {
+                feature.requiresLogin && !isProviderLoggedIn(feature.providerId) ->
                     ProviderContentSection(feature, isLoginRequired = true)
-                } else {
-                    runCatching { providerRepository.loadFeaturePage(feature, offset = 0) }
-                        .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
-                }
-            }.sortedSectionsByOrder()
+                deferFeature(feature) -> ProviderContentSection(feature)
+                else -> null
+            }
+            if (immediateSection != null) {
+                sections = sections.mergeLoadedSection(immediateSection)
+            } else {
+                loadingFeatures += feature
+            }
         }
+        onUpdate(sections)
+        if (loadingFeatures.isEmpty()) return sections
+
+        val updates = Channel<ProviderContentSection>(capacity = Channel.UNLIMITED)
+        loadingFeatures.forEach { feature ->
+            scope.launch {
+                val loaded = runCatching {
+                    withTimeout(30_000) {
+                        providerRepository.loadFeaturePage(feature, offset = 0)
+                    }
+                }.getOrElse { throwable ->
+                    ProviderContentSection(
+                        feature = feature,
+                        errorMessage = when (throwable) {
+                            is TimeoutCancellationException -> "加载超时，请检查网络后重试"
+                            else -> throwable.message ?: "加载失败"
+                        },
+                    )
+                }
+                updates.send(loaded)
+            }
+        }
+        repeat(loadingFeatures.size) {
+            sections = sections.mergeLoadedSection(updates.receive())
+            onUpdate(sections)
+        }
+        updates.close()
+        return sections
     }
+
+    private fun List<ProviderContentSection>.mergeLoadedSection(
+        section: ProviderContentSection,
+    ): List<ProviderContentSection> =
+        (filterNot { it.feature.id == section.feature.id } + section).sortedSectionsByOrder()
 
     private fun refreshActiveMineSectionIfNeeded() {
         when (mineSection) {
