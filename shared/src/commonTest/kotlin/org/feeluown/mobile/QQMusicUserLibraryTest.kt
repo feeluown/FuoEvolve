@@ -10,6 +10,7 @@ import kotlin.test.assertTrue
 import org.feeluown.mobile.provider.core.InMemoryProviderCredentialStore
 import org.feeluown.mobile.provider.core.ProviderCredentials
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.qqmusic.QQMusicArtistDetailProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicContentProvider
 import org.feeluown.mobile.provider.qqmusic.QQMusicUserLibrary
 
@@ -52,7 +53,12 @@ class QQMusicUserLibraryTest {
         val delegate = KotlinProviderRepository(http, credentials)
         val content = QQMusicContentProvider(http, credentials)
         val userLibrary = QQMusicUserLibrary(http, credentials)
-        val repository = QQMusicContentRepository(delegate, content, userLibrary)
+        val repository = QQMusicContentRepository(
+            delegate,
+            content,
+            userLibrary,
+            QQMusicArtistDetailProvider(http, credentials),
+        )
         repository.updateEnabledProviders(setOf("qqmusic"))
 
         val auth = repository.loginWithCookies(
@@ -70,6 +76,158 @@ class QQMusicUserLibraryTest {
         assertEquals("playlist:qqmusic:created-tid", section.playlists[1].id)
         assertEquals(88, section.playlists[0].trackCount)
         assertEquals(2, profileRequests)
+        http.close()
+    }
+
+    @Test
+    fun mineLibraryAddsFavoritePlaylistsFollowedArtistsAndFavoriteAlbums() = runTest {
+        var profileRequests = 0
+        val http = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/rsc/fcgi-bin/fcg_get_profile_homepage.fcg" -> {
+                                profileRequests += 1
+                                assertEquals("123456", request.url.parameters["userid"])
+                                respond(
+                                    """
+                                    {
+                                      "code":0,
+                                      "data":{
+                                        "creator":{
+                                          "nick":"测试用户",
+                                          "encrypt_uin":"encrypted-user"
+                                        },
+                                        "mymusic":[],
+                                        "mydiss":{"list":[]}
+                                      }
+                                    }
+                                    """.trimIndent(),
+                                )
+                            }
+                            "/cgi-bin/musicu.fcg" -> {
+                                assertEquals("u.y.qq.com", request.url.host)
+                                val data = request.url.parameters["data"].orEmpty()
+                                when {
+                                    data.contains("CgiGetPlaylistFavInfo") -> {
+                                        assertTrue(data.contains("encrypted-user"))
+                                        respond(
+                                            """
+                                            {
+                                              "favoritePlaylists":{
+                                                "code":0,
+                                                "data":{
+                                                  "total":1,
+                                                  "hasmore":0,
+                                                  "v_list":[
+                                                    {
+                                                      "tid":7001,
+                                                      "title":"收藏歌单",
+                                                      "picurl":"https://example.test/playlist.jpg",
+                                                      "songnum":31,
+                                                      "play_cnt":900
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            }
+                                            """.trimIndent(),
+                                        )
+                                    }
+                                    data.contains("GetFollowSingerList") -> {
+                                        assertTrue(data.contains("encrypted-user"))
+                                        respond(
+                                            """
+                                            {
+                                              "followedArtists":{
+                                                "code":0,
+                                                "data":{
+                                                  "Total":1,
+                                                  "HasMore":false,
+                                                  "List":[
+                                                    {
+                                                      "MID":"artist-mid",
+                                                      "Name":"关注歌手",
+                                                      "Desc":"歌手简介",
+                                                      "AvatarUrl":"https://example.test/artist.jpg"
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            }
+                                            """.trimIndent(),
+                                        )
+                                    }
+                                    data.contains("CgiGetAlbumFavInfo") -> {
+                                        assertTrue(data.contains("encrypted-user"))
+                                        respond(
+                                            """
+                                            {
+                                              "favoriteAlbums":{
+                                                "code":0,
+                                                "data":{
+                                                  "total":1,
+                                                  "hasmore":0,
+                                                  "v_list":[
+                                                    {
+                                                      "id":9001,
+                                                      "mid":"album-mid",
+                                                      "name":"收藏专辑",
+                                                      "pmid":"album-mid",
+                                                      "songnum":12,
+                                                      "v_singer":[{"name":"专辑歌手"}]
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            }
+                                            """.trimIndent(),
+                                        )
+                                    }
+                                    else -> error("unexpected QQ Music RPC: $data")
+                                }
+                            }
+                            else -> error("unexpected request: ${request.url}")
+                        }
+                    }
+                }
+            },
+        )
+        val credentials = InMemoryProviderCredentialStore()
+        credentials.write(
+            "qqmusic",
+            ProviderCredentials(cookies = mapOf("uin" to "123456", "qqmusic_key" to "test-key")),
+        )
+        val repository = QQMusicContentRepository(
+            KotlinProviderRepository(http, credentials),
+            QQMusicContentProvider(http, credentials),
+            QQMusicUserLibrary(http, credentials),
+            QQMusicArtistDetailProvider(http, credentials),
+        )
+        repository.updateEnabledProviders(setOf("qqmusic"))
+
+        val features = repository.features()
+        val playlistFeature = features.first { it.id == "qqmusic_favorite_playlists" }
+        val artistFeature = features.first { it.id == "qqmusic_followed_artists" }
+        val albumFeature = features.first { it.id == "qqmusic_favorite_albums" }
+        assertEquals(ProviderFeatureCategory.MineFavoritePlaylists, playlistFeature.category)
+        assertEquals(ProviderContentType.Artists, artistFeature.contentType)
+        assertEquals(ProviderContentType.Albums, albumFeature.contentType)
+
+        val playlists = repository.loadFeaturePage(playlistFeature, 0, 20)
+        val artists = repository.loadFeaturePage(artistFeature, 0, 20)
+        val albums = repository.loadFeaturePage(albumFeature, 0, 20)
+
+        assertEquals(listOf("收藏歌单"), playlists.playlists.map { it.title })
+        assertEquals("playlist:qqmusic:7001", playlists.playlists.single().id)
+        assertEquals(31, playlists.playlists.single().trackCount)
+        assertEquals(listOf("关注歌手"), artists.mediaItems.map { it.title })
+        assertEquals("artist:qqmusic:artist-mid", artists.mediaItems.single().id)
+        assertEquals(listOf("收藏专辑"), albums.mediaItems.map { it.title })
+        assertEquals("album:qqmusic:9001", albums.mediaItems.single().id)
+        assertEquals("专辑歌手", albums.mediaItems.single().description)
+        assertEquals(3, profileRequests)
         http.close()
     }
 
