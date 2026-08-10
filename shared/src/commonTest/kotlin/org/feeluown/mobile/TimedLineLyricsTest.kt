@@ -19,6 +19,20 @@ class TimedLineLyricsTest {
     }
 
     @Test
+    fun emitsTimestampForEveryRichSecondaryLine() {
+        val lyrics = composeRichLyrics(
+            main = "[11820,2220](11820,120,0)The (11940,420,0)club",
+            translation = "[00:11.820]这俱乐部",
+            romanization = "[00:11.820]the club",
+        )
+
+        assertEquals(
+            "[00:11.820]The club\n[00:11.820]这俱乐部\n[00:11.820]the club",
+            toTimedLineLrc(lyrics),
+        )
+    }
+
+    @Test
     fun normalizesLrcTimestampsAndKeepsTranslations() {
         val lyrics = """
             [ar:Example]
