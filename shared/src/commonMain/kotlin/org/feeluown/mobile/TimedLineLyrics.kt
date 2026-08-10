@@ -20,11 +20,14 @@ fun toTimedLineLrc(rawLyrics: String?): String? {
             append(line.text.trim())
             append('\n')
             line.translation
-                ?.trim()
-                ?.takeIf { it.isNotBlank() && it != line.text.trim() }
-                ?.let { translation ->
+                ?.split(RICH_LYRIC_LINE_SEPARATOR)
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?.filter { it != line.text.trim() }
+                ?.distinct()
+                ?.forEach { secondaryLine ->
                     append(timestamp)
-                    append(translation)
+                    append(secondaryLine)
                     append('\n')
                 }
         }
