@@ -4,6 +4,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.getPointer
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
 import kotlinx.cinterop.refTo
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.sizeOf
