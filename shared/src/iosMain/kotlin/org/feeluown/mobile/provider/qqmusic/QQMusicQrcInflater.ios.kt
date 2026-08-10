@@ -15,7 +15,7 @@ internal actual fun qrcInflate(data: ByteArray): ByteArray? = runCatching {
         NSData.create(bytes = pinned.addressOf(0), length = data.size.toULong())
     }
     val decompressed = compressed.decompressedDataUsingAlgorithm(
-        algorithm = NSDataCompressionAlgorithmZlib,
+        NSDataCompressionAlgorithmZlib,
         error = null,
     ) ?: return@runCatching null
     val size = decompressed.length.toInt()
