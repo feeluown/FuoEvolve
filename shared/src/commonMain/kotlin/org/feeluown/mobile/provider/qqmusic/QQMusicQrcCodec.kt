@@ -32,15 +32,52 @@ internal fun decryptQqQrc(encrypted: String): String? = runCatching {
 
 internal fun normalizeQqLyricText(raw: String): String {
     val lyric = extractQrcXmlLyric(raw) ?: raw
-    return lyric.lineSequence().joinToString("\n") { line ->
-        if (qrcLineHeaderRegex.containsMatchIn(line.trim())) {
-            qrcWordTimestampRegex.replace(line) { match ->
-                "(${match.groupValues[1]},${match.groupValues[2]},0)"
+    return lyric.lineSequence().joinToString("\n", transform = ::normalizeQrcLine).trim()
+}
+
+private fun normalizeQrcLine(originalLine: String): String {
+    val line = originalLine.trim()
+    val headerMatch = qrcLineHeaderRegex.find(line) ?: return originalLine
+    val header = headerMatch.value
+    val body = line.substring(headerMatch.range.last + 1)
+    val timestamps = qrcWordTimestampRegex.findAll(body).toList()
+    if (timestamps.isEmpty()) return line
+
+    // QQ QRC puts each word timestamp after the corresponding text, e.g.
+    // [1000,1000]你(1000,200)好(1200,300). The app's YRC parser expects
+    // the timestamp before the word, so move each timing token in front of its
+    // text instead of only adding the third YRC field. Otherwise the text before
+    // the first timestamp (the first word of every line) is dropped and all word
+    // timings are shifted by one word.
+    if (timestamps.first().range.first > 0) {
+        return buildString {
+            append(header)
+            var textStart = 0
+            timestamps.forEach { timestamp ->
+                val text = body.substring(textStart, timestamp.range.first)
+                appendNormalizedWordTimestamp(timestamp)
+                append(text)
+                textStart = timestamp.range.last + 1
             }
-        } else {
-            line
+            if (textStart < body.length) {
+                append(body.substring(textStart))
+            }
         }
-    }.trim()
+    }
+
+    // Already prefix-timed input (YRC-like) only needs the QQ two-field timing
+    // normalized to the parser's three-field form.
+    return header + qrcWordTimestampRegex.replace(body) { match ->
+        "(${match.groupValues[1]},${match.groupValues[2]},0)"
+    }
+}
+
+private fun StringBuilder.appendNormalizedWordTimestamp(match: MatchResult) {
+    append('(')
+    append(match.groupValues[1])
+    append(',')
+    append(match.groupValues[2])
+    append(",0)")
 }
 
 private fun extractQrcXmlLyric(raw: String): String? {
@@ -75,5 +112,5 @@ internal expect fun qrcInflate(data: ByteArray): ByteArray?
 private const val QQ_QRC_KEY = "!@#)(*$%123ZXC!@!@#)(NHL"
 private val qqEncryptedHexRegex = Regex("""^[0-9A-Fa-f]+$""")
 private val qrcLineHeaderRegex = Regex("""^\[\d+,\d+]""")
-private val qrcWordTimestampRegex = Regex("""\((\d+),(\d+)\)""")
+private val qrcWordTimestampRegex = Regex("""\((\d+),(\d+)(?:,\d+)?\)""")
 private val qrcXmlLyricRegex = Regex("LyricContent=\"([^\"]*)\"")
