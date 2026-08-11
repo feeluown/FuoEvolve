@@ -2762,9 +2762,13 @@ class FuoPlayerController(
             runCatching { providerRepository.createPlaylist(providerId, name.trim()) }
                 .onSuccess { result ->
                     message = result.message.ifBlank { if (result.success) "歌单已新建" else "新建歌单失败" }
+                    playlistOperationFeedback = message
                     if (result.success) refreshAfterProviderMutation(providerId)
                 }
-                .onFailure(::setError)
+                .onFailure {
+                    setError(it)
+                    playlistOperationFeedback = message
+                }
             isLoading = false
         }
     }
@@ -2785,12 +2789,16 @@ class FuoPlayerController(
             runCatching { providerRepository.deletePlaylist(playlist) }
                 .onSuccess { result ->
                     message = result.message.ifBlank { if (result.success) "歌单已删除" else "删除歌单失败" }
+                    playlistOperationFeedback = message
                     if (result.success) {
                         closePlaylist()
                         refreshAfterProviderMutation(playlist.providerId)
                     }
                 }
-                .onFailure(::setError)
+                .onFailure {
+                    setError(it)
+                    playlistOperationFeedback = message
+                }
             isLoading = false
         }
     }

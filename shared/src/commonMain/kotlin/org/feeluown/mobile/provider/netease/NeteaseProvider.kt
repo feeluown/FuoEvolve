@@ -1,6 +1,7 @@
 package org.feeluown.mobile.provider.netease
 
 import io.ktor.http.Parameters
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -311,6 +312,9 @@ class NeteaseProvider(
 
     override suspend fun createPlaylist(name: String): ProviderMutationResult {
         val uid = currentUserId() ?: return ProviderMutationResult(false, "无法读取网易云音乐用户信息")
+        val knownPlaylistIds: Set<String> = runCatching {
+            userPlaylistObjects(uid).map { it.string("id") }.toSet()
+        }.getOrDefault(emptySet())
         val root = http.postForm(
             ID,
             "$BASE/api/playlist/create",
@@ -319,14 +323,36 @@ class NeteaseProvider(
             ProviderRequestKind.Mutation,
         )
             .value.let { providerJson.parseToJsonElement(it).asObject() }
-        return mutation(root, "已新建：$name")
+        val result = mutation(root, "已新建：$name")
+        if (result.success) {
+            val createdId = root.obj("playlist")?.stringOrNull("id") ?: root.stringOrNull("id")
+            awaitPlaylistMutationVisible(uid) { playlists ->
+                when {
+                    createdId != null -> playlists.any { it.string("id") == createdId }
+                    knownPlaylistIds.isNotEmpty() -> playlists.any { it.string("id") !in knownPlaylistIds }
+                    else -> false
+                }
+            }
+        }
+        return result
     }
 
     override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult {
         val (_, identifier) = splitResourceId(playlist.id, "playlist")
-        val root = http.postForm(ID, "$BASE/api/playlist/delete", Parameters.build { append("id", identifier); append("pid", identifier) }, authenticatedHeaders(), ProviderRequestKind.Mutation)
-            .value.let { providerJson.parseToJsonElement(it).asObject() }
-        return mutation(root, "已删除：${playlist.title}")
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/playlist/remove",
+            """{"ids":"[$identifier]","csrf_token":"${csrfToken().jsonString()}"}""",
+            ProviderRequestKind.Mutation,
+        )
+        val result = mutation(root, "已删除：${playlist.title}")
+        if (result.success) {
+            currentUserId()?.let { uid ->
+                awaitPlaylistMutationVisible(uid) { playlists ->
+                    playlists.none { it.string("id") == identifier }
+                }
+            }
+        }
+        return result
     }
 
     override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
@@ -1014,7 +1040,11 @@ class NeteaseProvider(
         )
     }
 
-    private suspend fun neteaseWeApiPost(url: String, json: String): JsonObject {
+    private suspend fun neteaseWeApiPost(
+        url: String,
+        json: String,
+        kind: ProviderRequestKind = ProviderRequestKind.Auth,
+    ): JsonObject {
         val payload = NeteaseWeApi.encrypt(json)
         return http.postForm(
             providerId = ID,
@@ -1024,7 +1054,7 @@ class NeteaseProvider(
                 append("encSecKey", payload.encSecKey)
             },
             headers = neteaseAuthenticatedHeaders(mapOf("Referer" to "https://music.163.com/")),
-            kind = ProviderRequestKind.Auth,
+            kind = kind,
             cacheKey = null,
         ).value.let { parseNeteaseResponse(it) }
     }
@@ -1037,6 +1067,19 @@ class NeteaseProvider(
         neteaseAuthenticatedHeaders(),
         cacheKey = null,
     ).value.let { parseNeteaseResponse(it) }.array("playlist").map { it.asObject() }
+
+    private suspend fun awaitPlaylistMutationVisible(
+        uid: String,
+        predicate: (List<JsonObject>) -> Boolean,
+    ) {
+        repeat(PLAYLIST_MUTATION_SYNC_ATTEMPTS) { attempt ->
+            val playlists = runCatching { userPlaylistObjects(uid) }.getOrNull()
+            if (playlists != null && predicate(playlists)) return
+            if (attempt < PLAYLIST_MUTATION_SYNC_ATTEMPTS - 1) {
+                delay(PLAYLIST_MUTATION_SYNC_DELAY_MS)
+            }
+        }
+    }
 
     private fun parseNeteaseResponse(raw: String): JsonObject {
         val root = providerJson.parseToJsonElement(raw).asObject()
@@ -1178,6 +1221,8 @@ class NeteaseProvider(
         const val ID = "netease"
         const val NAME = "网易云音乐"
         const val BASE = "https://music.163.com"
+        const val PLAYLIST_MUTATION_SYNC_ATTEMPTS = 6
+        const val PLAYLIST_MUTATION_SYNC_DELAY_MS = 200L
         val STYLE_KINDS = setOf("songs", "playlists", "albums", "artists")
         val INFO = ProviderInfo(
             providerId = ID,
