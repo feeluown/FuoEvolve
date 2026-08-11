@@ -139,7 +139,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
         val direct = originalProvider?.resolve(mediaTrack, quality)
         if (direct != null) return direct
         if (unavailablePolicy == UnavailablePlaybackPolicy.Skip) {
-            error("media unavailable: ${mediaTrack.id}")
+            error("media not found: ${mediaTrack.id}")
         }
 
         val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
@@ -149,7 +149,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
             minScore = smartReplacementMinScore,
             scoreOf = { candidate -> replacementScore(mediaTrack, candidate) },
             resolve = { candidate -> providerMap[candidate.source]?.resolve(candidate, quality) },
-        ) ?: error("media unavailable and no smart replacement: ${mediaTrack.id}")
+        ) ?: error("media not found after smart replacement: ${mediaTrack.id}")
         val (candidate, score, payload) = selected
         return annotateSmartReplacement(
             payload = payload,
