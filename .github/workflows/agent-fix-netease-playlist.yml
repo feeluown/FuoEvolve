@@ -1,21 +1,22 @@
 name: Apply NetEase playlist mutation fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/fix-netease-playlist-mutations
+      - master
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   patch-and-test:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/fix-netease-playlist-mutations
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -395,4 +396,4 @@ jobs:
             shared/src/commonMain/kotlin/org/feeluown/mobile/FuoPlayerController.kt \
             shared/src/commonTest/kotlin/org/feeluown/mobile/NeteasePlaylistMutationTest.kt
           git commit -m "fix: repair NetEase playlist mutations"
-          git push origin HEAD:agent/fix-netease-playlist-mutations
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
