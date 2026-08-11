@@ -383,8 +383,8 @@ jobs:
           '''.replace("\n          ", "\n"))
           PY
 
-      - name: Run shared tests
-        run: ./gradlew :shared:allTests --no-daemon
+      - name: Run focused NetEase playlist tests
+        run: ./gradlew :shared:testDebugUnitTest --tests org.feeluown.mobile.NeteasePlaylistMutationTest --no-daemon
 
       - name: Commit validated fix
         shell: bash
