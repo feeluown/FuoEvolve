@@ -2,11 +2,12 @@ package org.feeluown.mobile
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RichLyricsTest {
     @Test
-    fun rendersTranslationAndRomanizationOnSeparateLines() {
+    fun keepsTranslationAndRomanizationOnDedicatedTracks() {
         val raw = composeRichLyrics(
             main = "[00:01.000]Hello\n[00:03.000]World",
             translation = "[00:01.020]你好\n[00:03.000]世界",
@@ -16,24 +17,34 @@ class RichLyricsTest {
         val lines = parseLyrics(raw)
         assertEquals(2, lines.size)
         assertEquals("Hello", lines[0].text)
-        assertEquals("你好\nhello", lines[0].translation)
-        assertEquals("世界\nworld", lines[1].translation)
+        assertEquals("你好", lines[0].translation)
+        assertEquals("hello", lines[0].romanization)
+        assertEquals("世界", lines[1].translation)
+        assertEquals("world", lines[1].romanization)
+        assertNull(lines[0].romanizationWords)
         assertTrue(!raw.contains('\u2028'))
     }
 
     @Test
-    fun preservesWordTimedPrimaryTrack() {
+    fun preservesWordTimedPrimaryAndRomanizationTracks() {
         val raw = composeRichLyrics(
             main = "[1000,2000](1000,500,0)Hel(1500,1500,0)lo",
             translation = "[00:01.000]你好",
-            romanization = "[00:01.000]hello",
+            romanization = "[1000,2000](1000,500,0)hel(1500,1500,0)lo",
         )
 
         val line = parseLyrics(raw).single()
         assertEquals("Hello", line.text)
         assertEquals(2, line.words?.size)
-        assertTrue(line.translation?.contains("你好") == true)
-        assertTrue(line.translation?.contains("hello") == true)
+        assertEquals("你好", line.translation)
+        assertEquals("hello", line.romanization)
+        assertEquals(
+            listOf(
+                LyricWord(1_000, 500, "hel"),
+                LyricWord(1_500, 1_500, "lo"),
+            ),
+            line.romanizationWords,
+        )
     }
 
     @Test

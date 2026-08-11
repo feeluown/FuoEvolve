@@ -1,8 +1,9 @@
 package org.feeluown.mobile
 
 /**
- * Converts the app's supported lyric formats (LRC/YRC plus optional translation)
- * into plain timed line-level LRC suitable for platform media-session extensions.
+ * Converts the app's supported lyric formats (LRC/YRC plus optional secondary
+ * tracks) into plain timed line-level LRC suitable for platform media-session
+ * extensions.
  *
  * ColorOS accepts this line-level LRC as the required `lyric` payload. Word-level
  * `rawLyric` is intentionally omitted until FuoEvolve can serialize a compatible
@@ -19,13 +20,14 @@ fun toTimedLineLrc(rawLyrics: String?): String? {
             append(timestamp)
             append(line.text.trim())
             append('\n')
-            line.translation
-                ?.lineSequence()
-                ?.map(String::trim)
-                ?.filter(String::isNotBlank)
-                ?.filter { it != line.text.trim() }
-                ?.distinct()
-                ?.forEach { secondaryLine ->
+            listOf(line.translation, line.romanization)
+                .filterNotNull()
+                .flatMap { secondary -> secondary.lineSequence().toList() }
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .filter { it != line.text.trim() }
+                .distinct()
+                .forEach { secondaryLine ->
                     append(timestamp)
                     append(secondaryLine)
                     append('\n')

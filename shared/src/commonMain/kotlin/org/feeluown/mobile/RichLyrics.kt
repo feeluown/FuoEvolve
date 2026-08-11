@@ -8,10 +8,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlin.math.abs
 
 /**
- * Composes provider lyric tracks into the app's existing lyric transport format.
- * The main LRC/YRC/QRC-derived track keeps its timing. Translation,
- * romanization and annotation tracks are aligned and rendered as secondary
- * lines through the existing translation slot for backward-compatible styling.
+ * Composes provider lyric tracks into the app's lyric transport format.
+ * The primary LRC/YRC/QRC-derived track keeps its timing. Romanization is kept
+ * as an independent rich track so word timing can be rendered above the primary
+ * lyric, while translation and annotation remain lower secondary lines.
  */
 fun composeRichLyrics(
     main: String,
@@ -22,39 +22,50 @@ fun composeRichLyrics(
     val primary = stripStructuredYrcMetadata(main).trimEnd()
     if (primary.isBlank()) return primary
 
-    val secondaryTracks = listOf(translation, romanization, annotation)
+    val romanizationTrack = romanization
+        ?.let(::stripStructuredYrcMetadata)
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    val secondaryTracks = listOf(translation, annotation)
         .mapNotNull { raw ->
             raw?.let(::stripStructuredYrcMetadata)
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
         }
-    if (secondaryTracks.isEmpty()) return primary
-    if (secondaryTracks.size == 1) return composeLyricsWithTranslation(primary, secondaryTracks.first())
 
-    val primaryLines = parseTimedRichTrack(primary)
-    val parsedTracks = secondaryTracks.map(::parseTimedRichTrack).filter { it.isNotEmpty() }
-    if (primaryLines.isEmpty() || parsedTracks.isEmpty()) {
+    if (romanizationTrack == null && secondaryTracks.isEmpty()) return primary
+    if (romanizationTrack == null && secondaryTracks.size == 1) {
         return composeLyricsWithTranslation(primary, secondaryTracks.first())
     }
 
-    val secondary = buildString {
-        primaryLines.forEachIndexed { index, line ->
-            val values = parsedTracks.mapNotNull { track ->
-                alignedSecondaryText(track, line.timeMs, index, primaryLines.size)
+    val primaryLines = parseTimedRichTrack(primary)
+    val parsedTracks = secondaryTracks.map(::parseTimedRichTrack).filter { it.isNotEmpty() }
+    val secondary = when {
+        secondaryTracks.isEmpty() -> null
+        primaryLines.isEmpty() || parsedTracks.isEmpty() -> secondaryTracks.first()
+        else -> buildString {
+            primaryLines.forEachIndexed { index, line ->
+                val values = parsedTracks.mapNotNull { track ->
+                    alignedSecondaryText(track, line.timeMs, index, primaryLines.size)
+                }
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .filter { it != line.text.trim() }
+                    .distinct()
+                values.forEach { value ->
+                    append(formatRichLrcTimestamp(line.timeMs))
+                    append(value)
+                    append('\n')
+                }
             }
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .filter { it != line.text.trim() }
-                .distinct()
-            values.forEach { value ->
-                append(formatRichLrcTimestamp(line.timeMs))
-                append(value)
-                append('\n')
-            }
-        }
-    }.trimEnd()
+        }.trimEnd().takeIf(String::isNotBlank)
+    }
 
-    return composeLyricsWithTranslation(primary, secondary.takeIf(String::isNotBlank))
+    return composeLyricsWithRichTracks(
+        main = primary,
+        translation = secondary,
+        romanization = romanizationTrack,
+    )
 }
 
 private data class TimedRichText(val timeMs: Long, val text: String)

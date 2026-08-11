@@ -1268,6 +1268,11 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
         LyricFontSize.Medium -> MaterialTheme.typography.bodyMedium
         LyricFontSize.Large -> MaterialTheme.typography.bodyLarge
     }
+    val romanizationStyle = when (fontSize) {
+        LyricFontSize.Small -> MaterialTheme.typography.labelMedium
+        LyricFontSize.Medium -> MaterialTheme.typography.bodySmall
+        LyricFontSize.Large -> MaterialTheme.typography.bodyMedium
+    }
     val linePadding = when (fontSize) {
         LyricFontSize.Small -> 6.dp
         LyricFontSize.Medium -> 7.dp
@@ -1298,6 +1303,31 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         .padding(vertical = linePadding),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    line.romanization?.takeIf { it.isNotBlank() }?.let { romanization ->
+                        if (active && !line.romanizationWords.isNullOrEmpty()) {
+                            KaraokeLyricText(
+                                words = line.romanizationWords,
+                                positionMs = renderPositionMs,
+                                style = romanizationStyle,
+                                activeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
+                                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            Text(
+                                text = romanization,
+                                style = romanizationStyle,
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f)
+                                },
+                                fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                     if (active && !line.words.isNullOrEmpty()) {
                         KaraokeLyricText(
                             words = line.words,
@@ -1365,13 +1395,14 @@ private fun KaraokeLyricText(
     style: TextStyle,
     activeColor: Color,
     inactiveColor: Color,
+    fontWeight: FontWeight = FontWeight.SemiBold,
     modifier: Modifier = Modifier,
 ) {
     val text = remember(words) { words.joinToString("") { it.text } }
     val textMeasurer = rememberTextMeasurer()
     val fontSize = style.fontSize
-    val wordWidths = remember(words, fontSize, textMeasurer) {
-        val measureStyle = style.copy(fontWeight = FontWeight.SemiBold)
+    val wordWidths = remember(words, fontSize, fontWeight, textMeasurer) {
+        val measureStyle = style.copy(fontWeight = fontWeight)
         words.map { word ->
             textMeasurer.measure(
                 text = word.text,
@@ -1381,7 +1412,7 @@ private fun KaraokeLyricText(
         }
     }
     val progress = karaokeFillProgress(words, positionMs.value, wordWidths)
-    val textStyle = style.copy(fontWeight = FontWeight.SemiBold)
+    val textStyle = style.copy(fontWeight = fontWeight)
 
     BoxWithConstraints(modifier = modifier) {
         val layoutResult = remember(text, textStyle, constraints.maxWidth, textMeasurer) {
@@ -1718,6 +1749,8 @@ data class LyricLine(
     val text: String,
     val translation: String? = null,
     val words: List<LyricWord>? = null,
+    val romanization: String? = null,
+    val romanizationWords: List<LyricWord>? = null,
 )
 
 private data class RawLyricLine(
@@ -1727,24 +1760,55 @@ private data class RawLyricLine(
 )
 
 const val LYRIC_TRANSLATION_MARKER = "\n__FUO_LYRIC_TRANSLATION__\n"
+const val LYRIC_ROMANIZATION_MARKER = "\n__FUO_LYRIC_ROMANIZATION__\n"
 
-fun composeLyricsWithTranslation(main: String, translation: String?): String {
+fun composeLyricsWithTranslation(main: String, translation: String?): String =
+    composeLyricsWithRichTracks(main = main, translation = translation)
+
+fun composeLyricsWithRichTracks(
+    main: String,
+    translation: String? = null,
+    romanization: String? = null,
+): String {
     val trimmedMain = main.trimEnd()
-    val trimmedTranslation = translation?.trim()?.takeIf { it.isNotBlank() } ?: return trimmedMain
-    return trimmedMain + LYRIC_TRANSLATION_MARKER + trimmedTranslation
+    val trimmedRomanization = romanization?.trim()?.takeIf(String::isNotBlank)
+    val trimmedTranslation = translation?.trim()?.takeIf(String::isNotBlank)
+    if (trimmedRomanization == null && trimmedTranslation == null) return trimmedMain
+    return buildString {
+        append(trimmedMain)
+        trimmedRomanization?.let {
+            append(LYRIC_ROMANIZATION_MARKER)
+            append(it)
+        }
+        trimmedTranslation?.let {
+            append(LYRIC_TRANSLATION_MARKER)
+            append(it)
+        }
+    }
 }
 
 fun parseLyrics(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
-    val parts = raw.split(LYRIC_TRANSLATION_MARKER, limit = 2)
-    val main = parts[0]
-    val translationRaw = parts.getOrNull(1)
-    val lines = if (main.lineSequence().any { yrcLineHeaderRegex.containsMatchIn(it.trim()) }) {
-        parseYrc(main)
+    val translationParts = raw.split(LYRIC_TRANSLATION_MARKER, limit = 2)
+    val mainAndRomanization = translationParts[0]
+    val translationRaw = translationParts.getOrNull(1)
+    val romanizationParts = mainAndRomanization.split(LYRIC_ROMANIZATION_MARKER, limit = 2)
+    val main = romanizationParts[0]
+    val romanizationRaw = romanizationParts.getOrNull(1)
+    val lines = parseLyricTrack(main)
+    return attachLyricRomanization(
+        lines = attachLyricTranslations(lines, translationRaw),
+        romanizationRaw = romanizationRaw,
+    )
+}
+
+private fun parseLyricTrack(raw: String?): List<LyricLine> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return if (raw.lineSequence().any { yrcLineHeaderRegex.containsMatchIn(it.trim()) }) {
+        parseYrc(raw)
     } else {
-        parseLrc(main)
+        parseLrc(raw)
     }
-    return attachLyricTranslations(lines, translationRaw)
 }
 
 fun attachLyricTranslations(lines: List<LyricLine>, translationRaw: String?): List<LyricLine> {
@@ -1771,6 +1835,59 @@ fun attachLyricTranslations(lines: List<LyricLine>, translationRaw: String?): Li
         line.copy(translation = exact ?: nearestTime?.let(byTime::get))
     }
 }
+
+fun attachLyricRomanization(lines: List<LyricLine>, romanizationRaw: String?): List<LyricLine> {
+    if (romanizationRaw.isNullOrBlank() || lines.isEmpty()) return lines
+    val romanizationLines = parseLyricTrack(romanizationRaw)
+        .filter { it.timeMs != Long.MAX_VALUE }
+    if (romanizationLines.isEmpty()) return lines
+    val primaryTimedSize = lines.count { it.timeMs != Long.MAX_VALUE }
+    return lines.mapIndexed { index, line ->
+        if (line.timeMs == Long.MAX_VALUE || !line.romanization.isNullOrBlank()) return@mapIndexed line
+        val secondary = alignedRomanizationLine(
+            track = romanizationLines,
+            primaryTimeMs = line.timeMs,
+            primaryIndex = index,
+            primarySize = primaryTimedSize,
+        ) ?: return@mapIndexed line
+        val romanization = listOfNotNull(secondary.text, secondary.translation)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .joinToString("\n")
+            .takeIf { it.isNotBlank() && it != line.text.trim() }
+            ?: return@mapIndexed line
+        val words = secondary.words
+            ?.takeIf { secondary.translation.isNullOrBlank() && secondary.text.trim() == romanization }
+        line.copy(
+            romanization = romanization,
+            romanizationWords = words,
+        )
+    }
+}
+
+private fun alignedRomanizationLine(
+    track: List<LyricLine>,
+    primaryTimeMs: Long,
+    primaryIndex: Int,
+    primarySize: Int,
+): LyricLine? {
+    val nearest = track.minByOrNull { kotlin.math.abs(it.timeMs - primaryTimeMs) }
+    if (
+        nearest != null &&
+        kotlin.math.abs(nearest.timeMs - primaryTimeMs) <= LYRIC_ROMANIZATION_ALIGNMENT_TOLERANCE_MS
+    ) {
+        return nearest
+    }
+    return track.getOrNull(primaryIndex)
+        ?.takeIf {
+            track.size == primarySize &&
+                kotlin.math.abs(it.timeMs - primaryTimeMs) <= LYRIC_ROMANIZATION_INDEX_TOLERANCE_MS
+        }
+}
+
+private const val LYRIC_ROMANIZATION_ALIGNMENT_TOLERANCE_MS = 350L
+private const val LYRIC_ROMANIZATION_INDEX_TOLERANCE_MS = 1_500L
 
 fun parseYrc(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
