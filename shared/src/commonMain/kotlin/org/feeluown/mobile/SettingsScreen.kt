@@ -983,6 +983,17 @@ fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
         "平衡" to DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
         "严格" to 0.70,
     )
+    fun isPresetScore(score: Double): Boolean = presets.any { (_, presetScore) ->
+        kotlin.math.abs(score - presetScore) < 0.001
+    }
+    var customScoreExpanded by remember {
+        mutableStateOf(!isPresetScore(controller.smartReplacementMinScore))
+    }
+    LaunchedEffect(controller.smartReplacementMinScore) {
+        if (!isPresetScore(controller.smartReplacementMinScore)) {
+            customScoreExpanded = true
+        }
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1062,44 +1073,57 @@ fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
             ) {
                 presets.forEach { (label, score) ->
                     FilterChip(
-                        selected = kotlin.math.abs(controller.smartReplacementMinScore - score) < 0.001,
+                        selected = !customScoreExpanded &&
+                            kotlin.math.abs(controller.smartReplacementMinScore - score) < 0.001,
                         enabled = enabled && !controller.isLoading,
-                        onClick = { controller.onSmartReplacementMinScoreChange(score) },
+                        onClick = {
+                            customScoreExpanded = false
+                            controller.onSmartReplacementMinScoreChange(score)
+                        },
                         label = { Text(label) },
                         colors = settingsFilterChipColors(),
                     )
                 }
+                FilterChip(
+                    selected = customScoreExpanded,
+                    enabled = enabled && !controller.isLoading,
+                    onClick = { customScoreExpanded = true },
+                    label = { Text("自定义") },
+                    colors = settingsFilterChipColors(),
+                )
             }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "最低匹配分",
-                        style = MaterialTheme.typography.bodyMedium,
+            if (customScoreExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "最低匹配分",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = formatSmartReplacementScore(controller.smartReplacementMinScore),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Slider(
+                        value = controller.smartReplacementMinScore.toFloat(),
+                        onValueChange = {
+                            controller.onSmartReplacementMinScoreChange(roundSmartReplacementScore(it.toDouble()))
+                        },
+                        valueRange = 0f..1f,
+                        steps = 19,
+                        enabled = enabled && !controller.isLoading,
                     )
                     Text(
-                        text = formatSmartReplacementScore(controller.smartReplacementMinScore),
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "分数越高匹配越严格",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Slider(
-                    value = controller.smartReplacementMinScore.toFloat(),
-                    onValueChange = {
-                        controller.onSmartReplacementMinScoreChange(roundSmartReplacementScore(it.toDouble()))
-                    },
-                    valueRange = 0f..1f,
-                    steps = 19,
-                    enabled = enabled && !controller.isLoading,
-                )
-                Text(
-                    text = "分数越高匹配越严格；自定义滑块会覆盖上方预设",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
