@@ -1,5 +1,8 @@
 package org.feeluown.mobile
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -32,15 +36,56 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+private const val MAX_SEARCH_HISTORY_ITEMS = 20
 
 @Composable
 fun SearchScreen(
     controller: FuoPlayerController,
     onOpenRecognition: () -> Unit,
 ) {
+    val searchHistoryStore = rememberSearchHistoryStore()
+    var searchHistory by remember(searchHistoryStore) {
+        mutableStateOf(searchHistoryStore.load().take(MAX_SEARCH_HISTORY_ITEMS))
+    }
+    var pendingHistoryDeletion by remember { mutableStateOf<String?>(null) }
+
+    fun persistSearchHistory(updated: List<String>) {
+        searchHistory = updated
+        searchHistoryStore.save(updated)
+    }
+
+    fun recordSearch(keyword: String) {
+        val normalized = keyword.trim()
+        if (normalized.isBlank()) return
+        persistSearchHistory(
+            listOf(normalized)
+                .plus(searchHistory.filterNot { it.equals(normalized, ignoreCase = true) })
+                .take(MAX_SEARCH_HISTORY_ITEMS),
+        )
+    }
+
+    fun performSearch(keyword: String? = null) {
+        val requestedKeyword = keyword ?: controller.query
+        val normalized = requestedKeyword.trim()
+        if (keyword != null) {
+            controller.onQueryChange(keyword)
+        }
+        if (normalized.isNotBlank()) {
+            recordSearch(normalized)
+        }
+        controller.search()
+    }
+
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Scaffold { paddingValues ->
             Row(
@@ -67,14 +112,14 @@ fun SearchScreen(
                             modifier = Modifier.fillMaxWidth(),
                             query = controller.query,
                             onQueryChange = controller::onQueryChange,
-                            onSearch = controller::search,
+                            onSearch = { performSearch() },
                             enabled = !controller.isLoading,
                             placeholder = "歌曲、歌手或专辑",
                             trailingContent = {
                                 FuoIconButton(
                                     contentDescription = "搜索",
                                     enabled = !controller.isLoading,
-                                    onClick = controller::search,
+                                    onClick = { performSearch() },
                                 ) {
                                     Icon(Icons.Filled.Search, contentDescription = null)
                                 }
@@ -98,6 +143,11 @@ fun SearchScreen(
                                 SearchProviderChip(controller, provider)
                             }
                         }
+                        SearchHistoryStrip(
+                            history = searchHistory,
+                            onSearch = { performSearch(it) },
+                            onLongPress = { pendingHistoryDeletion = it },
+                        )
                     }
                     TextButton(
                         modifier = Modifier.align(Alignment.BottomStart),
@@ -125,89 +175,178 @@ fun SearchScreen(
                 }
             }
         }
-        return
-    }
-    Scaffold(
-        topBar = {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding(),
-                tonalElevation = 3.dp,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+    } else {
+        Scaffold(
+            topBar = {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 3.dp,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = controller::closeSearch) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                        }
-                        FuoSearchField(
-                            modifier = Modifier.weight(1f),
-                            query = controller.query,
-                            onQueryChange = controller::onQueryChange,
-                            onSearch = controller::search,
-                            enabled = !controller.isLoading,
-                            placeholder = "歌曲、歌手或专辑",
-                            trailingContent = {
-                                Row {
-                                    FuoIconButton(
-                                        contentDescription = "听歌识曲",
-                                        onClick = onOpenRecognition,
-                                    ) {
-                                        Icon(Icons.Filled.Mic, contentDescription = null)
-                                    }
-                                    FuoIconButton(
-                                        contentDescription = "搜索",
-                                        enabled = !controller.isLoading,
-                                        onClick = controller::search,
-                                    ) {
-                                        Icon(Icons.Filled.Search, contentDescription = null)
-                                    }
-                                }
-                            },
-                        )
-                    }
-                    Row(
+                    Column(
                         modifier = Modifier
-                            .padding(start = 56.dp)
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        SearchScopeChip(controller, SearchScope.All, "全部")
-                        SearchScopeChip(controller, SearchScope.Local, "本地")
-                        controller.providers.forEach { provider ->
-                            SearchProviderChip(controller, provider)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = controller::closeSearch) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                            FuoSearchField(
+                                modifier = Modifier.weight(1f),
+                                query = controller.query,
+                                onQueryChange = controller::onQueryChange,
+                                onSearch = { performSearch() },
+                                enabled = !controller.isLoading,
+                                placeholder = "歌曲、歌手或专辑",
+                                trailingContent = {
+                                    Row {
+                                        FuoIconButton(
+                                            contentDescription = "听歌识曲",
+                                            onClick = onOpenRecognition,
+                                        ) {
+                                            Icon(Icons.Filled.Mic, contentDescription = null)
+                                        }
+                                        FuoIconButton(
+                                            contentDescription = "搜索",
+                                            enabled = !controller.isLoading,
+                                            onClick = { performSearch() },
+                                        ) {
+                                            Icon(Icons.Filled.Search, contentDescription = null)
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .padding(start = 56.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            SearchScopeChip(controller, SearchScope.All, "全部")
+                            SearchScopeChip(controller, SearchScope.Local, "本地")
+                            controller.providers.forEach { provider ->
+                                SearchProviderChip(controller, provider)
+                            }
                         }
                     }
                 }
-            }
-        },
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = FuoSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
-        ) {
-            LoadingIndicator(controller.isLoading)
-            ProviderSearchTabs(controller)
-            LazyColumn(
+            },
+        ) { paddingValues ->
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = FuoSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
             ) {
-                searchResultItems(controller)
+                LoadingIndicator(controller.isLoading)
+                ProviderSearchTabs(controller)
+                SearchHistoryStrip(
+                    history = searchHistory,
+                    onSearch = { performSearch(it) },
+                    onLongPress = { pendingHistoryDeletion = it },
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    searchResultItems(controller)
+                }
             }
         }
+    }
+
+    pendingHistoryDeletion?.let { keyword ->
+        AlertDialog(
+            onDismissRequest = { pendingHistoryDeletion = null },
+            title = { Text("删除搜索历史") },
+            text = { Text("确定删除“$keyword”吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        persistSearchHistory(searchHistory.filterNot { it == keyword })
+                        pendingHistoryDeletion = null
+                    },
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingHistoryDeletion = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SearchHistoryStrip(
+    history: List<String>,
+    onSearch: (String) -> Unit,
+    onLongPress: (String) -> Unit,
+) {
+    if (history.isEmpty()) return
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
+    ) {
+        Text(
+            text = "搜索历史",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            history.forEach { keyword ->
+                SearchHistoryChip(
+                    keyword = keyword,
+                    onClick = { onSearch(keyword) },
+                    onLongPress = { onLongPress(keyword) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SearchHistoryChip(
+    keyword: String,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.combinedClickable(
+            role = Role.Button,
+            onClick = onClick,
+            onLongClick = onLongPress,
+        ),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Text(
+            text = keyword,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
