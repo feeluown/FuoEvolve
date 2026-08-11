@@ -180,6 +180,7 @@ fun SettingsScreen(
                     )
                     AudioQualitySettingsPanel(controller)
                     PlaybackPolicySettingsPanel(controller)
+                    SmartReplacementSettingsPanel(controller)
                 }
                 Column(
                     modifier = Modifier
@@ -211,6 +212,7 @@ fun SettingsScreen(
                 )
                 AudioQualitySettingsPanel(controller)
                 PlaybackPolicySettingsPanel(controller)
+                SmartReplacementSettingsPanel(controller)
                 PlayerDisplaySettingsPanel(controller)
                 LocalMusicScanSettingsPanel(controller)
                 DownloadSettingsPanel(controller)
@@ -543,28 +545,30 @@ private fun ProviderDisplaySettingsDialog(
         title = { Text(provider.providerName) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("显示与替换设置", style = MaterialTheme.typography.bodyMedium)
-                ProviderDisplaySection.entries.forEach { section ->
-                    val selected = controller.isProviderShownIn(provider.providerId, section)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(section.label)
-                        IconButton(
-                            enabled = !controller.isLoading && (selected || section != ProviderDisplaySection.Replace),
-                            onClick = {
-                                controller.onProviderShownInChange(provider.providerId, section, !selected)
-                            },
+                Text("显示设置", style = MaterialTheme.typography.bodyMedium)
+                ProviderDisplaySection.entries
+                    .filter { it != ProviderDisplaySection.Replace }
+                    .forEach { section ->
+                        val selected = controller.isProviderShownIn(provider.providerId, section)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                                contentDescription = if (selected) "关闭${section.label}" else "开启${section.label}",
-                            )
+                            Text(section.label)
+                            IconButton(
+                                enabled = !controller.isLoading,
+                                onClick = {
+                                    controller.onProviderShownInChange(provider.providerId, section, !selected)
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                    contentDescription = if (selected) "关闭${section.label}" else "开启${section.label}",
+                                )
+                            }
                         }
                     }
-                }
             }
         },
         confirmButton = { TextButton(onClick = onDismissRequest) { Text("完成") } },
@@ -573,7 +577,7 @@ private fun ProviderDisplaySettingsDialog(
 
 private fun providerDisplaySummary(controller: FuoPlayerController, providerId: String): String {
     return ProviderDisplaySection.entries
-        .filter { controller.isProviderShownIn(providerId, it) }
+        .filter { it != ProviderDisplaySection.Replace && controller.isProviderShownIn(providerId, it) }
         .joinToString("、") { it.label }
         .ifBlank { "未显示" }
 }
@@ -966,38 +970,136 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
                     }
                 }
             }
-            if (controller.unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace) {
+        }
+    }
+}
+
+@Composable
+fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
+    val enabled = controller.unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace
+    val providers = controller.orderedProviders()
+    val presets = listOf(
+        "宽松" to 0.45,
+        "平衡" to DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+        "严格" to 0.70,
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            modifier = Modifier.padding(FuoSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "智能替换",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = if (enabled) {
+                    "原音源无法播放时，从所选音源中搜索并匹配可播放版本"
+                } else {
+                    "当前资源不可用策略为“跳过”，切换为智能替换后以下设置生效"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "替换音源",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (providers.isEmpty()) {
                 Text(
-                    text = "替换设置",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "没有已启用的音源",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "最低打分",
-                            style = MaterialTheme.typography.bodyMedium,
+            } else {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    providers.forEach { provider ->
+                        val selected = controller.isProviderShownIn(
+                            provider.providerId,
+                            ProviderDisplaySection.Replace,
                         )
-                        Text(
-                            text = formatSmartReplacementScore(controller.smartReplacementMinScore),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        FilterChip(
+                            selected = selected,
+                            enabled = enabled && !controller.isLoading,
+                            onClick = {
+                                controller.onSmartReplacementProviderEnabledChange(
+                                    provider.providerId,
+                                    !selected,
+                                )
+                            },
+                            label = { Text(provider.providerName) },
+                            colors = settingsFilterChipColors(),
                         )
                     }
-                    Slider(
-                        value = controller.smartReplacementMinScore.toFloat(),
-                        onValueChange = {
-                            controller.onSmartReplacementMinScoreChange(roundSmartReplacementScore(it.toDouble()))
-                        },
-                        valueRange = 0f..1f,
-                        steps = 19,
-                        enabled = !controller.isLoading,
+                }
+                Text(
+                    text = if (providers.size < 2) {
+                        "仅启用一个音源时无法跨源替换；播放时会自动排除歌曲自身来源"
+                    } else {
+                        "播放时会自动排除歌曲自身来源；候选音源顺序沿用上方音源排序"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "匹配严格度",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                presets.forEach { (label, score) ->
+                    FilterChip(
+                        selected = kotlin.math.abs(controller.smartReplacementMinScore - score) < 0.001,
+                        enabled = enabled && !controller.isLoading,
+                        onClick = { controller.onSmartReplacementMinScoreChange(score) },
+                        label = { Text(label) },
+                        colors = settingsFilterChipColors(),
                     )
                 }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "最低匹配分",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = formatSmartReplacementScore(controller.smartReplacementMinScore),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Slider(
+                    value = controller.smartReplacementMinScore.toFloat(),
+                    onValueChange = {
+                        controller.onSmartReplacementMinScoreChange(roundSmartReplacementScore(it.toDouble()))
+                    },
+                    valueRange = 0f..1f,
+                    steps = 19,
+                    enabled = enabled && !controller.isLoading,
+                )
+                Text(
+                    text = "分数越高匹配越严格；自定义滑块会覆盖上方预设",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
