@@ -281,7 +281,11 @@ class KotlinProviderRepository : ProviderMusicRepository {
 
     override suspend fun features(): List<ProviderFeature> {
         initialize()
-        return enabledProviderIds.flatMap { providerMap[it]?.features.orEmpty() }
+        return enabledProviderIds
+            .flatMap { providerMap[it]?.features.orEmpty() }
+            .filterNot { feature ->
+                feature.providerId == NETEASE_PROVIDER_ID && feature.id == NETEASE_LEGACY_TOP_ARTISTS_FEATURE_ID
+            }
     }
 
     override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
@@ -558,6 +562,8 @@ private fun replacementArtistMatchTexts(value: String): List<String> {
         .distinct()
 }
 
+private const val NETEASE_PROVIDER_ID = "netease"
+private const val NETEASE_LEGACY_TOP_ARTISTS_FEATURE_ID = "netease_top_artists"
 private const val BILIBILI_PROVIDER_ID = "bilibili"
 private val BILIBILI_REPLACEMENT_BONUS_KEYWORDS = listOf("mv", "hires")
 private val BILIBILI_REPLACEMENT_PENALTY_KEYWORDS = listOf("cover", "翻唱", "remix")
