@@ -161,7 +161,13 @@ class NeteaseProvider(
             playlistObject.array("tracks").drop(offset).take(limit)
         }
         val tracks = loadSongs(trackValues)
-        val actualPlaylist = playlistObject.toPlaylist()
+        val actualPlaylist = playlistObject.toPlaylist().copy(
+            isOwnedByCurrentUser = playlist.isOwnedByCurrentUser,
+            isSubscribed = playlist.isSubscribed,
+            canAddTracks = playlist.canAddTracks,
+            canRemoveTracks = playlist.canRemoveTracks,
+            canDelete = playlist.canDelete,
+        )
         val count = actualPlaylist.trackCount ?: playlist.trackCount ?: trackIds.size.coerceAtLeast(tracks.size)
         return ProviderPlaylistDetail(
             playlist = actualPlaylist,
@@ -303,7 +309,9 @@ class NeteaseProvider(
         val auth = authState()
         if (!auth.isLoggedIn) return emptyList()
         val uid = currentUserId() ?: return emptyList()
-        return userPlaylistObjects(uid).map { it.toPlaylist() }
+        return userPlaylistObjects(uid)
+            .filterNot { it.boolean("subscribed") }
+            .map { item -> ownedPlaylist(item) }
     }
 
     override suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
@@ -340,6 +348,7 @@ class NeteaseProvider(
     }
 
     override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult {
+        if (playlist.canDelete == false) return ProviderMutationResult(false, "该歌单不可删除")
         val (_, identifier) = splitResourceId(playlist.id, "playlist")
         val root = neteaseWeApiPost(
             "$BASE/weapi/playlist/remove",
@@ -494,10 +503,18 @@ class NeteaseProvider(
                     ProviderContentSection(feature, errorMessage = "无法读取网易云音乐用户信息")
                 } else {
                     val playlists = userPlaylistObjects(uid).filter { item ->
-                        val subscribed = item.asObject().boolean("subscribed")
+                        val subscribed = item.boolean("subscribed")
                         if (request.baseId == "netease_favorite_playlists") subscribed else !subscribed
                     }
-                    ProviderContentSection(feature, playlists = playlists.drop(offset).take(limit).map { it.asObject().toPlaylist() }, nextOffset = offset + limit, hasMore = playlists.size > offset + limit)
+                    val page = playlists.drop(offset).take(limit).map { item ->
+                        if (item.boolean("subscribed")) subscribedPlaylist(item) else ownedPlaylist(item)
+                    }
+                    ProviderContentSection(
+                        feature = feature,
+                        playlists = page,
+                        nextOffset = offset + page.size,
+                        hasMore = playlists.size > offset + page.size,
+                    )
                 }
             }
             "netease_favorite_songs" -> {
@@ -511,7 +528,7 @@ class NeteaseProvider(
                     if (favoritePlaylist == null) {
                         ProviderContentSection(feature, errorMessage = "未找到我喜欢的音乐歌单")
                     } else {
-                        val detail = playlistDetail(favoritePlaylist.toPlaylist(), offset, limit)
+                        val detail = playlistDetail(ownedPlaylist(favoritePlaylist), offset, limit)
                         ProviderContentSection(
                             feature,
                             tracks = detail.tracks,
@@ -1152,6 +1169,22 @@ class NeteaseProvider(
         providerUrl = "https://music.163.com/#/playlist?id=${string("id")}",
     )
 
+    private fun ownedPlaylist(value: JsonObject): ProviderPlaylist = value.toPlaylist().copy(
+        isOwnedByCurrentUser = true,
+        isSubscribed = false,
+        canAddTracks = true,
+        canRemoveTracks = true,
+        canDelete = value.int("specialType") != 5,
+    )
+
+    private fun subscribedPlaylist(value: JsonObject): ProviderPlaylist = value.toPlaylist().copy(
+        isOwnedByCurrentUser = false,
+        isSubscribed = true,
+        canAddTracks = false,
+        canRemoveTracks = false,
+        canDelete = false,
+    )
+
     private fun artist(value: JsonObject): ProviderMediaItem = mediaItem(
         type = ProviderMediaItemType.Artist,
         identifier = value.string("id"),
@@ -1188,6 +1221,8 @@ class NeteaseProvider(
     }
 
     private suspend fun mutatePlaylist(action: String, playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult {
+        if (action == "add" && playlist.canAddTracks == false) return ProviderMutationResult(false, "该歌单不可添加歌曲")
+        if (action == "del" && playlist.canRemoveTracks == false) return ProviderMutationResult(false, "该歌单不可移除歌曲")
         val (_, playlistId) = splitResourceId(playlist.id, "playlist")
         val (_, trackId) = splitResourceId(track.providerId ?: track.id)
         val root = http.postForm(
