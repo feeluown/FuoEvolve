@@ -104,7 +104,7 @@ internal class QQMusicContentRepository(
         } else {
             qqmusic.loadFeature(feature, offset, limit)
         }
-        normalizeQQMusicArtists(section)
+        normalizeQQMusicArtists(normalizeQQMusicPlaylists(section, featureId))
     } else {
         delegate.loadFeaturePage(feature, offset, limit)
     }
@@ -191,6 +191,36 @@ internal class QQMusicContentRepository(
         return base.copy(userName = userName)
     }
 
+    private fun normalizeQQMusicPlaylists(
+        section: ProviderContentSection,
+        featureId: String,
+    ): ProviderContentSection {
+        if (section.playlists.isEmpty()) return section
+        val playlists = when (featureId) {
+            QQMUSIC_USER_PLAYLISTS_FEATURE_ID -> section.playlists.map { playlist ->
+                val isFavoriteSongs = playlist.title == QQMUSIC_FAVORITE_SONGS_TITLE
+                playlist.copy(
+                    isOwnedByCurrentUser = true,
+                    isSubscribed = false,
+                    canAddTracks = true,
+                    canRemoveTracks = true,
+                    canDelete = !isFavoriteSongs,
+                )
+            }
+            QQMUSIC_FAVORITE_PLAYLISTS_FEATURE_ID -> section.playlists.map { playlist ->
+                playlist.copy(
+                    isOwnedByCurrentUser = false,
+                    isSubscribed = true,
+                    canAddTracks = false,
+                    canRemoveTracks = false,
+                    canDelete = false,
+                )
+            }
+            else -> section.playlists
+        }
+        return section.copy(playlists = playlists)
+    }
+
     private fun normalizeQQMusicArtists(section: ProviderContentSection): ProviderContentSection {
         if (section.mediaItems.isEmpty()) return section
         return section.copy(
@@ -216,6 +246,7 @@ internal class QQMusicContentRepository(
         const val QQMUSIC_FAVORITE_PLAYLISTS_FEATURE_ID = "qqmusic_favorite_playlists"
         const val QQMUSIC_FOLLOWED_ARTISTS_FEATURE_ID = "qqmusic_followed_artists"
         const val QQMUSIC_FAVORITE_ALBUMS_FEATURE_ID = "qqmusic_favorite_albums"
+        const val QQMUSIC_FAVORITE_SONGS_TITLE = "我喜欢"
         const val MAX_ARTIST_TRACKS = 300
 
         val QQMUSIC_USER_LIBRARY_FEATURE_IDS = setOf(
