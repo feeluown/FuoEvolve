@@ -705,6 +705,11 @@ data class ProviderPlaylist(
     val playCount: Long? = null,
     val providerUrl: String? = null,
     val trackCount: Int? = null,
+    val isOwnedByCurrentUser: Boolean? = null,
+    val isSubscribed: Boolean? = null,
+    val canAddTracks: Boolean? = null,
+    val canRemoveTracks: Boolean? = null,
+    val canDelete: Boolean? = null,
 )
 
 enum class ProviderMediaItemType {
