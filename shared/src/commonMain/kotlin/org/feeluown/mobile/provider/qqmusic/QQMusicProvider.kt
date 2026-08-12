@@ -1,6 +1,7 @@
 package org.feeluown.mobile.provider.qqmusic
 
 import io.ktor.http.Parameters
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -167,6 +168,12 @@ class QQMusicProvider(
             playCount = detail.long("visitnum"),
             trackCount = detail.int("songnum") ?: songItems.size,
             providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
+        ).copy(
+            isOwnedByCurrentUser = playlist.isOwnedByCurrentUser,
+            isSubscribed = playlist.isSubscribed,
+            canAddTracks = playlist.canAddTracks,
+            canRemoveTracks = playlist.canRemoveTracks,
+            canDelete = playlist.canDelete,
         )
         val count = actual.trackCount ?: tracks.size
         val nextOffset = offset + songItems.size
@@ -344,6 +351,81 @@ class QQMusicProvider(
     override suspend fun removeTrackFromPlaylist(playlist: ProviderPlaylist, track: org.feeluown.mobile.MusicTrack): ProviderMutationResult =
         mutatePlaylist("DelSonglist", playlist, track)
 
+    override suspend fun createPlaylist(name: String): ProviderMutationResult {
+        val normalizedName = name.trim()
+        if (normalizedName.isBlank()) return ProviderMutationResult(false, "歌单名称不能为空")
+        val knownPlaylistIds: Set<String> = runCatching { userPlaylists().map { it.id }.toSet() }
+            .getOrDefault(emptySet())
+        val root = rpc(
+            """
+            {"req_0":{"module":"music.musicasset.PlaylistBaseWrite","method":"AddPlaylist","param":{"dirName":${jsonString(normalizedName)}}}}
+            """.trimIndent(),
+            kind = ProviderRequestKind.Mutation,
+        )
+        val result = playlistWriteResult(root, "已新建：$normalizedName")
+        if (result.success) {
+            val writeResult = playlistWriteData(root).obj("result")
+            val expectedTid = writeResult?.stringOrNull("tid")
+                ?: writeResult?.long("tid")?.toString()
+            awaitUserPlaylistMutationVisible { playlists ->
+                playlists.any { candidate ->
+                    val candidateId = splitResourceId(candidate.id, "playlist").second
+                    (expectedTid != null && candidateId == expectedTid) ||
+                        (candidate.title == normalizedName && candidate.id !in knownPlaylistIds)
+                }
+            }
+        }
+        return result
+    }
+
+    override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult {
+        if (playlist.canDelete == false) return ProviderMutationResult(false, "该歌单不可删除")
+        val (_, playlistId) = splitResourceId(playlist.id, "playlist")
+        val dirId = playlistDirectoryId(playlistId)
+            ?: return ProviderMutationResult(false, "无法读取 QQ 音乐歌单目录编号")
+        val root = rpc(
+            """
+            {"req_0":{"module":"music.musicasset.PlaylistBaseWrite","method":"DelPlaylist","param":{"dirId":$dirId}}}
+            """.trimIndent(),
+            kind = ProviderRequestKind.Mutation,
+        )
+        val result = playlistWriteResult(root, "已删除：${playlist.title}")
+        if (result.success) {
+            awaitUserPlaylistMutationVisible { playlists ->
+                playlists.none { candidate ->
+                    candidate.id == playlist.id || splitResourceId(candidate.id, "playlist").second == playlistId
+                }
+            }
+        }
+        return result
+    }
+
+    private suspend fun awaitUserPlaylistMutationVisible(predicate: (List<ProviderPlaylist>) -> Boolean) {
+        repeat(PLAYLIST_MUTATION_SYNC_ATTEMPTS) { attempt ->
+            val playlists = runCatching { userPlaylists() }.getOrNull()
+            if (playlists != null && predicate(playlists)) return
+            if (attempt < PLAYLIST_MUTATION_SYNC_ATTEMPTS - 1) delay(PLAYLIST_MUTATION_SYNC_DELAY_MS)
+        }
+    }
+
+    private fun playlistWriteData(root: JsonObject): JsonObject {
+        val response = root.obj("req_0") ?: root
+        return response.obj("data") ?: response
+    }
+
+    private fun playlistWriteResult(root: JsonObject, successMessage: String): ProviderMutationResult {
+        val response = root.obj("req_0") ?: root
+        val data = response.obj("data") ?: response
+        val code = response.int("code")
+        val retCode = data.int("retCode") ?: response.int("retCode")
+        val success = (code == null || code == 0) && (retCode == null || retCode == 0)
+        val failureMessage = data.string("msg")
+            .ifBlank { response.string("msg") }
+            .ifBlank { data.string("message") }
+            .ifBlank { "QQ 音乐歌单操作失败" }
+        return ProviderMutationResult(success, if (success) successMessage else failureMessage)
+    }
+
     private suspend fun artistSongsPage(identifier: String, offset: Int, limit: Int): QQTrackPage {
         val root = rpc(
             """
@@ -513,6 +595,12 @@ class QQMusicProvider(
                         identifier = favoriteId,
                         title = "我喜欢",
                         providerUrl = "https://y.qq.com/n/ryqq/playlist/$favoriteId",
+                    ).copy(
+                        isOwnedByCurrentUser = true,
+                        isSubscribed = false,
+                        canAddTracks = true,
+                        canRemoveTracks = true,
+                        canDelete = false,
                     ),
                 )
             }
@@ -531,6 +619,12 @@ class QQMusicProvider(
                     playCount = value.long("visitnum"),
                     trackCount = value.int("songnum"),
                     providerUrl = "https://y.qq.com/n/ryqq/playlist/$identifier",
+                ).copy(
+                    isOwnedByCurrentUser = true,
+                    isSubscribed = false,
+                    canAddTracks = true,
+                    canRemoveTracks = true,
+                    canDelete = true,
                 )
             })
         }
@@ -696,6 +790,8 @@ class QQMusicProvider(
         playlist: ProviderPlaylist,
         track: org.feeluown.mobile.MusicTrack,
     ): ProviderMutationResult {
+        if (method == "AddSonglist" && playlist.canAddTracks == false) return ProviderMutationResult(false, "该歌单不可添加歌曲")
+        if (method == "DelSonglist" && playlist.canRemoveTracks == false) return ProviderMutationResult(false, "该歌单不可移除歌曲")
         val (_, playlistId) = splitResourceId(playlist.id, "playlist")
         val dirId = playlistDirectoryId(playlistId)
             ?: return ProviderMutationResult(false, "无法读取 QQ 音乐歌单目录编号")
@@ -881,6 +977,8 @@ class QQMusicProvider(
         const val SEARCH_BASE = "https://c.y.qq.com"
         const val VKEY_BASE = "https://u.y.qq.com"
         const val QQ_AUDIO_BASE = "http://isure.stream.qqmusic.qq.com"
+        const val PLAYLIST_MUTATION_SYNC_ATTEMPTS = 6
+        const val PLAYLIST_MUTATION_SYNC_DELAY_MS = 200L
         val defaultGuid = Random.nextLong(100_000_000, 1_000_000_000).toString()
         val INFO = ProviderInfo(
             providerId = ID,
@@ -896,6 +994,8 @@ class QQMusicProvider(
             providerName = NAME,
             canAddSongToPlaylist = true,
             canRemoveSongFromPlaylist = true,
+            canCreatePlaylist = true,
+            canDeletePlaylist = true,
         )
         val FEATURES = listOf(
             ProviderFeature("qqmusic_daily_songs", ID, NAME, "每日推荐歌曲", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
