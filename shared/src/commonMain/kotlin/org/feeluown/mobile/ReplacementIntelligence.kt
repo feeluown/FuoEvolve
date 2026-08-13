@@ -173,20 +173,31 @@ internal suspend fun rankReplacementCandidatesWithFallback(
     }
     val modelRanked = request.candidates.map { base ->
         val model = rankedById.getValue(base.track.id)
-        val score = (model.modelScore ?: model.score).coerceIn(0.0, 1.0)
+        val semantic = (model.modelScore ?: model.score).coerceIn(0.0, 1.0)
+        val versionCompatibility = base.versionCompatibility ?: replacementVersionCompatibility(
+            original = classifyReplacementVersion(request.original),
+            candidate = classifyReplacementVersion(base.track),
+        )
+        val features = replacementPairFeatures(
+            original = request.original,
+            candidate = base.track,
+            semantic = semantic,
+            versionCompatibility = versionCompatibility,
+        )
+        val score = mixReplacementRankingScore(features)
         model.copy(
             track = base.track,
             score = score,
             legacyScore = base.legacyScore,
-            modelScore = score,
+            modelScore = semantic,
             sameSongConfidence = score,
             versionKind = base.versionKind,
-            versionCompatibility = base.versionCompatibility,
+            versionCompatibility = versionCompatibility,
             autoEligible = base.track.passesReplacementIdentityGate(request.original) &&
                 score >= request.strictness.identityThreshold,
             rankingStrategy = strategy,
             strategy = strategy.wireName,
-            reasons = model.reasons,
+            reasons = (model.reasons + features.reasonLabels()).distinct(),
         )
     }
     return modelRanked.sortedByDescending { it.score }
@@ -194,6 +205,89 @@ internal suspend fun rankReplacementCandidatesWithFallback(
 
 interface ReplacementPreferenceAwareRanker {
     val preferenceLearner: ReplacementPreferenceLearner
+}
+
+internal data class ReplacementPairFeatures(
+    val semantic: Double,
+    val title: Double,
+    val artist: Double,
+    val album: Double,
+    val duration: Double,
+    val version: Double,
+    val official: Double,
+    val complete: Double,
+    val quality: Double,
+) {
+    fun asVector(): DoubleArray = doubleArrayOf(
+        semantic,
+        title,
+        artist,
+        album,
+        duration,
+        version,
+        official,
+        complete,
+        quality,
+    )
+}
+
+internal fun replacementPairFeatures(
+    original: MusicTrack,
+    candidate: MusicTrack,
+    semantic: Double,
+    versionCompatibility: Double,
+): ReplacementPairFeatures {
+    val identity = replacementIdentitySignals(original, candidate)
+    val quality = replacementQualitySignals(candidate)
+    return ReplacementPairFeatures(
+        semantic = semantic.coerceIn(0.0, 1.0),
+        title = identity.titleScore,
+        artist = identity.artistScore,
+        album = identity.albumScore,
+        duration = replacementRelativeDurationScore(original.durationMs, candidate.durationMs),
+        version = versionCompatibility.coerceIn(0.0, 1.0),
+        official = quality.official,
+        complete = quality.complete,
+        quality = quality.quality,
+    )
+}
+
+internal fun mixReplacementRankingScore(features: ReplacementPairFeatures): Double {
+    val vector = features.asVector()
+    var score = 0.0
+    for (index in vector.indices) {
+        score += vector[index] * RANKING_HEAD_WEIGHTS[index]
+    }
+    return score.coerceIn(0.0, 1.0)
+}
+
+internal fun ReplacementPairFeatures.reasonLabels(): List<String> {
+    val parts = buildList {
+        if (title >= 0.8) add("歌名相近")
+        if (artist >= 0.8) add("歌手相近")
+        if (duration >= 0.85) add("时长接近")
+        if (album >= 0.8) add("专辑相近")
+        if (version >= 0.9) add("版本相符")
+        if (official >= 1.0) add("官方")
+        if (complete >= 1.0) add("完整版")
+        if (quality >= 1.0) add("无损")
+    }
+    return if (parts.isEmpty()) emptyList() else listOf(parts.joinToString(" · "))
+}
+
+internal data class ReplacementQualitySignals(
+    val official: Double,
+    val complete: Double,
+    val quality: Double,
+)
+
+internal fun replacementQualitySignals(candidate: MusicTrack): ReplacementQualitySignals {
+    val text = "${candidate.title} ${candidate.album}".lowercase()
+    return ReplacementQualitySignals(
+        official = if (QUALITY_OFFICIAL_HINTS.any { it in text }) 1.0 else 0.0,
+        complete = if (QUALITY_COMPLETE_HINTS.any { it in text }) 1.0 else 0.0,
+        quality = if (QUALITY_LOSSLESS_HINTS.any { it in text }) 1.0 else 0.0,
+    )
 }
 
 internal data class ReplacementIdentitySignals(
@@ -233,6 +327,16 @@ internal fun replacementDurationScore(originalDurationMs: Long?, candidateDurati
     if (originalDurationMs == null || candidateDurationMs == null) return 0.5
     return (1.0 - kotlin.math.abs(originalDurationMs - candidateDurationMs).toDouble() / 30_000.0)
         .coerceIn(0.0, 1.0)
+}
+
+internal fun replacementRelativeDurationScore(
+    originalDurationMs: Long?,
+    candidateDurationMs: Long?,
+): Double {
+    val original = originalDurationMs?.takeIf { it > 0 } ?: return 0.5
+    val candidate = candidateDurationMs?.takeIf { it > 0 } ?: return 0.5
+    val scale = maxOf(original, candidate).toDouble()
+    return (1.0 - kotlin.math.abs(original - candidate).toDouble() / scale).coerceIn(0.0, 1.0)
 }
 
 internal fun normalizeReplacementText(value: String): String =
@@ -413,3 +517,17 @@ private val VERSION_CLIP_TOKENS = setOf("clip", "snippet", "medley", "preview")
 private const val LEGACY_TITLE_WEIGHT = 0.55
 private const val LEGACY_ARTIST_WEIGHT = 0.35
 private const val LEGACY_DURATION_WEIGHT = 0.10
+private val RANKING_HEAD_WEIGHTS = doubleArrayOf(
+    0.42, // semantic
+    0.14, // title
+    0.10, // artist
+    0.04, // album
+    0.16, // duration
+    0.08, // version
+    0.03, // official
+    0.015, // complete
+    0.015, // quality
+)
+private val QUALITY_OFFICIAL_HINTS = listOf("官方", "official")
+private val QUALITY_COMPLETE_HINTS = listOf("完整版", "full version", "complete")
+private val QUALITY_LOSSLESS_HINTS = listOf("无损", "母带", "hires", "hi-res", "lossless")

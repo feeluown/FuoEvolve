@@ -219,6 +219,7 @@ class ReplacementIntelligenceTest {
         assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
         assertTrue(ranked.none { it.autoEligible })
         assertTrue(ranked.all { it.score < SmartReplacementStrictness.Balanced.identityThreshold })
+        assertEquals(0.2, ranked.first().modelScore)
     }
 
     @Test
@@ -259,20 +260,23 @@ class ReplacementIntelligenceTest {
             },
         )
 
+        val weakerScore = mixedScore(original, weakerLexical.track, semantic = 0.80)
+        val lexicalScore = mixedScore(original, lexicalBoosted.track, semantic = 0.50)
         assertEquals("bilibili:weaker", ranked.first().track.id)
-        assertEquals(0.80, ranked.first().score)
+        assertEquals(weakerScore, ranked.first().score)
         assertEquals(0.80, ranked.first().modelScore)
-        assertEquals(0.80, ranked.first().sameSongConfidence)
-        assertTrue(ranked.first().autoEligible)
+        assertEquals(weakerScore, ranked.first().sameSongConfidence)
+        assertEquals(ranked.first().autoEligible, weakerScore >= SmartReplacementStrictness.Balanced.identityThreshold)
         assertEquals("bilibili:lexical", ranked.last().track.id)
-        assertEquals(0.50, ranked.last().score)
-        assertFalse(ranked.last().autoEligible)
+        assertEquals(lexicalScore, ranked.last().score)
+        assertTrue(ranked.first().score > ranked.last().score)
     }
 
     @Test
     fun closeTopCandidateScoresKeepTheHighestModelResult() = runTest {
+        val request = rankingRequest()
         val ranked = rankReplacementCandidatesWithFallback(
-            request = rankingRequest(),
+            request = request,
             ranker = object : ReplacementRanker {
                 override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
                     request.candidates.mapIndexed { index, candidate ->
@@ -284,19 +288,21 @@ class ReplacementIntelligenceTest {
                     }
             },
         )
+        val expectedFirst = mixedScore(request.original, request.candidates[0].track, semantic = 0.74)
+        val expectedLast = mixedScore(request.original, request.candidates[1].track, semantic = 0.72)
 
         assertEquals("qqmusic:low", ranked.first().track.id)
-        assertEquals(0.74, ranked.first().score)
+        assertEquals(expectedFirst, ranked.first().score)
         assertEquals(0.74, ranked.first().modelScore)
-        assertEquals(0.74, ranked.first().sameSongConfidence)
+        assertEquals(expectedFirst, ranked.first().sameSongConfidence)
         assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
         assertTrue(ranked.first().autoEligible)
-        assertEquals(0.72, ranked.last().score)
+        assertEquals(expectedLast, ranked.last().score)
         assertTrue(ranked.last().autoEligible)
     }
 
     @Test
-    fun modelCanRerankCandidatesButCannotBypassIdentityGate() = runTest {
+    fun durationMismatchIsDownrankedAndNotAutoEligible() = runTest {
         val original = track("netease:origin", durationMs = 200_000)
         val close = ReplacementCandidate(track("qqmusic:close", durationMs = 198_000), score = 0.40)
         val far = ReplacementCandidate(track("qqmusic:far", durationMs = 400_000), score = 0.40)
@@ -321,11 +327,13 @@ class ReplacementIntelligenceTest {
             },
         )
 
-        assertEquals("qqmusic:far", ranked.first().track.id)
-        assertEquals(0.95, ranked.first().score)
-        assertFalse(ranked.first().autoEligible)
-        assertEquals("qqmusic:close", ranked.last().track.id)
-        assertTrue(ranked.last().autoEligible)
+        assertEquals("qqmusic:close", ranked.first().track.id)
+        assertEquals(mixedScore(original, close.track, semantic = 0.90), ranked.first().score)
+        assertTrue(ranked.first().autoEligible)
+        assertEquals("qqmusic:far", ranked.last().track.id)
+        assertEquals(0.95, ranked.last().modelScore)
+        assertTrue(ranked.last().score < ranked.first().score)
+        assertFalse(ranked.last().autoEligible)
         assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
     }
 
@@ -425,10 +433,50 @@ class ReplacementIntelligenceTest {
         assertEquals(1.0, closeSignals.albumScore)
         assertTrue(closeSignals.durationScore > 0.9)
         assertTrue(closeSignals.lexicalScore > farSignals.lexicalScore)
+        assertTrue(
+            replacementRelativeDurationScore(200_000, 198_000) >
+                replacementRelativeDurationScore(200_000, 320_000),
+        )
     }
 
     @Test
-    fun onDeviceRankingUsesModelScoreNotLexicalIdentity() = runTest {
+    fun rankingHeadMixesDurationVersionAndQualityWithSemantic() {
+        val original = track("netease:origin", title = "晴天", durationMs = 200_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val close = track("qqmusic:close", title = "晴天", durationMs = 198_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val farDuration = track("qqmusic:far-duration", title = "晴天", durationMs = 320_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val official = track("qqmusic:official", title = "晴天 官方完整版 无损", durationMs = 198_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val live = track("qqmusic:live", title = "晴天 Live", durationMs = 198_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+
+        val closeScore = mixedScore(original, close, semantic = 0.80)
+        val farDurationScore = mixedScore(original, farDuration, semantic = 0.80)
+        val officialScore = mixedScore(original, official, semantic = 0.80)
+        val liveScore = mixedScore(original, live, semantic = 0.80)
+
+        assertTrue(closeScore > farDurationScore)
+        assertTrue(officialScore > closeScore)
+        assertTrue(closeScore > liveScore)
+        assertEquals(1.0, replacementQualitySignals(official).official)
+        assertEquals(1.0, replacementQualitySignals(official).complete)
+        assertEquals(1.0, replacementQualitySignals(official).quality)
+    }
+
+    @Test
+    fun onDeviceRankingMixesStructuredFeaturesWithSemantic() = runTest {
         val original = track("netease:origin", title = "晴天", durationMs = 200_000).copy(
             artists = "周杰伦",
             album = "叶惠美",
@@ -471,15 +519,15 @@ class ReplacementIntelligenceTest {
             request.copy(mode = ReplacementRankingMode.Legacy),
             modelRanker,
         )
+        val expectedClose = mixedScore(original, close.track, semantic = 0.90)
 
         assertEquals("qqmusic:close", onDevice.first().track.id)
-        assertEquals(0.90, onDevice.first().score)
+        assertEquals(expectedClose, onDevice.first().score)
         assertEquals(0.90, onDevice.first().modelScore)
-        assertEquals(0.90, onDevice.first().sameSongConfidence)
+        assertEquals(expectedClose, onDevice.first().sameSongConfidence)
         assertTrue(onDevice.first().autoEligible)
-        assertEquals(0.50, onDevice.last().score)
-        assertFalse(onDevice.last().autoEligible)
-        assertTrue(onDevice.none { candidate -> candidate.reasons.any { "歌名相近" in it } })
+        assertTrue(onDevice.first().score > onDevice.last().score)
+        assertTrue(onDevice.first().reasons.any { "歌名相近" in it && "时长接近" in it })
         assertEquals("qqmusic:far", legacy.first().track.id)
         assertEquals(ReplacementRankingStrategy.LegacyRules, legacy.first().rankingStrategy)
     }
@@ -493,6 +541,22 @@ class ReplacementIntelligenceTest {
         mode = ReplacementRankingMode.OnDevice,
         strictness = SmartReplacementStrictness.Balanced,
         modelTier = ReplacementModelTier.Lite,
+    )
+
+    private fun mixedScore(
+        original: MusicTrack,
+        candidate: MusicTrack,
+        semantic: Double,
+    ): Double = mixReplacementRankingScore(
+        replacementPairFeatures(
+            original = original,
+            candidate = candidate,
+            semantic = semantic,
+            versionCompatibility = replacementVersionCompatibility(
+                original = classifyReplacementVersion(original),
+                candidate = classifyReplacementVersion(candidate),
+            ),
+        ),
     )
 
     private fun track(
