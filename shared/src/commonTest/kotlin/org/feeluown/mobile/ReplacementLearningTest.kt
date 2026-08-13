@@ -105,6 +105,46 @@ class ReplacementLearningTest {
     }
 
     @Test
+    fun forgetExactSelectionRemovesMappingWithoutResettingLearnedWeights() {
+        val learner = FtrlReplacementPreferenceLearner()
+        val selected = choice("qqmusic:selected", featureVector(0))
+        val rejected = choice("bilibili:rejected", featureVector(1))
+        val feedback = feedback(selected = selected, rejected = listOf(rejected))
+        learner.recordPlaybackFeedback(feedback, PlayerStatus.Playing, observedAtMillis = 1)
+
+        val selectedAdjustment = learner.adjustment(selected.vector)
+        val rejectedAdjustment = learner.adjustment(rejected.vector)
+        assertEquals(selected.key, learner.exactReplacementKey("netease:origin"))
+        assertTrue(selectedAdjustment > 0.0)
+
+        learner.forgetExactSelection("netease:origin")
+
+        assertNull(learner.exactReplacementKey("netease:origin"))
+        assertEquals(selectedAdjustment, learner.adjustment(selected.vector))
+        assertEquals(rejectedAdjustment, learner.adjustment(rejected.vector))
+        assertEquals(1, learner.snapshot().updateCount)
+    }
+
+    @Test
+    fun forgetExactReplacementMappingRemovesOnlyTheRequestedKey() {
+        val mappings = rememberExactReplacementMapping(
+            mappings = rememberExactReplacementMapping(
+                mappings = emptyMap(),
+                originalKey = "origin:1",
+                replacement = "replacement:1",
+            ),
+            originalKey = "origin:2",
+            replacement = "replacement:2",
+        )
+
+        assertEquals(
+            mapOf("origin:2" to "replacement:2"),
+            forgetExactReplacementMapping(mappings, "origin:1"),
+        )
+        assertEquals(mappings, forgetExactReplacementMapping(mappings, "origin:missing"))
+    }
+
+    @Test
     fun codecRoundTripsLearnedWeightsAndSanitizesInvalidState() {
         val learner = FtrlReplacementPreferenceLearner()
         val feedback = feedback(
@@ -190,6 +230,33 @@ class ReplacementLearningTest {
         val restored = ReplacementLearningRepository(store)
         restored.initialize()
         assertEquals(legacy, restored.exactSelection("netease:legacy"))
+    }
+
+    @Test
+    fun repositoryForgetExactSelectionPersistsRemovalWithoutReset() = runTest {
+        val store = InMemoryReplacementLearningStore()
+        val repository = ReplacementLearningRepository(store)
+        repository.initialize()
+        val selected = choice("qqmusic:selected", featureVector(0))
+        repository.record(
+            feedback = feedback(
+                selected = selected,
+                rejected = listOf(choice("bilibili:automatic", featureVector(1))),
+            ),
+            status = PlayerStatus.Playing,
+            observedAtMillis = 42,
+        )
+        val learnedAdjustment = repository.adjustment(selected.vector)
+
+        repository.forgetExactSelection("netease:origin")
+        repository.persistForgottenExactSelection("netease:origin")
+
+        assertNull(repository.exactSelection("netease:origin"))
+        assertEquals(learnedAdjustment, repository.adjustment(selected.vector))
+        val restored = ReplacementLearningRepository(store)
+        restored.initialize()
+        assertNull(restored.exactSelection("netease:origin"))
+        assertEquals(1, restored.state.value.updateCount)
     }
 
     @Test

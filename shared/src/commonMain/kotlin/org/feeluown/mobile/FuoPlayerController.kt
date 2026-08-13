@@ -2328,9 +2328,7 @@ class FuoPlayerController(
                 if (replacementCandidateState.trackId == trackId) {
                     replacementCandidateState = ReplacementCandidateState(
                         trackId = trackId,
-                        candidates = candidates
-                            .sortedByDescending { candidate -> candidate.score }
-                            .distinctBy { candidate -> candidate.track.id },
+                        candidates = rankedReplacementCandidates(originalTrack, candidates),
                     )
                 }
             }.onFailure { throwable ->
@@ -2369,6 +2367,28 @@ class FuoPlayerController(
                 exactSelection = selection,
             ),
         )
+    }
+
+    fun hasUserReplacementSelection(track: MusicTrack): Boolean {
+        return track.replacementStrategy == "user_selected" ||
+            rememberedUserReplacementId(track) != null
+    }
+
+    fun clearUserReplacementSelection(track: MusicTrack) {
+        if (!hasUserReplacementSelection(track)) return
+        val originalTrack = track.originalDetailTrack()
+        val originalKey = originalTrack.id
+        smartReplacementSelections = forgetExactReplacementMapping(smartReplacementSelections, originalKey)
+        persistSettings()
+        replacementLearningRepository.forgetExactSelection(originalKey)
+        startPlayback(
+            track = originalTrack,
+            messageAfterStart = "已清除手选音源，正在重新匹配",
+        )
+        loadReplacementCandidates(originalTrack)
+        scope.launch {
+            runCatching { replacementLearningRepository.persistForgottenExactSelection(originalKey) }
+        }
     }
 
     private fun ReplacementCandidate.toSmartReplacementSelection(): SmartReplacementSelection {
@@ -4700,6 +4720,30 @@ class FuoPlayerController(
             localUri = downloaded.uri,
             providerId = providerId ?: id,
         )
+    }
+
+    private fun rankedReplacementCandidates(
+        originalTrack: MusicTrack,
+        candidates: List<ReplacementCandidate>,
+    ): List<ReplacementCandidate> {
+        val selectedId = rememberedUserReplacementId(originalTrack)
+        return candidates
+            .sortedWith(
+                compareByDescending<ReplacementCandidate> { candidate ->
+                    candidate.track.id == selectedId
+                }.thenByDescending { candidate -> candidate.score },
+            )
+            .distinctBy { candidate -> candidate.track.id }
+    }
+
+    private fun rememberedUserReplacementId(track: MusicTrack): String? {
+        val originalKey = track.originalDetailTrack().id
+        return pendingManualReplacementSwitch
+            ?.takeIf { it.originalTrackId == originalKey }
+            ?.selection
+            ?.replacementId
+            ?: smartReplacementSelections[originalKey]?.replacementId
+            ?: replacementLearningRepository.exactSelection(originalKey)?.replacementId
     }
 
     private fun MusicTrack.withRememberedReplacement(): MusicTrack {

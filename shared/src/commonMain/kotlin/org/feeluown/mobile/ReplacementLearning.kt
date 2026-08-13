@@ -147,6 +147,8 @@ interface ReplacementPreferenceLearner {
         observedAtMillis: Long,
     )
 
+    fun forgetExactSelection(originalKey: String)
+
     fun snapshot(): ReplacementLearningState
 }
 
@@ -163,6 +165,8 @@ object NoOpReplacementPreferenceLearner : ReplacementPreferenceLearner {
         observedAtMillis: Long,
     ) = Unit
 
+    override fun forgetExactSelection(originalKey: String) = Unit
+
     override fun snapshot(): ReplacementLearningState = ReplacementLearningState()
 }
 
@@ -177,7 +181,7 @@ class ReplacementLearningRepository(
     @Volatile
     private var generalizedLearningEnabled = true
 
-    /** Frozen-model personalization snapshot. Mutations are serialized through [record] and [reset]. */
+    /** Frozen-model personalization snapshot. Mutations are serialized through [record], [persistForgottenExactSelection], and [reset]. */
     val state: StateFlow<ReplacementLearningState> = mutableState.asStateFlow()
 
     suspend fun initialize(
@@ -229,6 +233,18 @@ class ReplacementLearningRepository(
             observedAtMillis = observedAtMillis,
         )
         mutableState.value = learner.snapshot()
+    }
+
+    override fun forgetExactSelection(originalKey: String) {
+        learner.forgetExactSelection(originalKey)
+        mutableState.value = learner.snapshot()
+    }
+
+    suspend fun persistForgottenExactSelection(originalKey: String) {
+        mutex.withLock {
+            learner.forgetExactSelection(originalKey)
+            publishAndSave()
+        }
     }
 
     suspend fun record(
@@ -329,6 +345,10 @@ class FtrlReplacementPreferenceLearner(
         updateCount = updateCount,
         exactSelections = exactSelections.values.toList(),
     )
+
+    override fun forgetExactSelection(originalKey: String) {
+        exactSelections.remove(originalKey)
+    }
 
     private fun updatePair(
         selected: ReplacementPreferenceVector,
@@ -483,6 +503,16 @@ internal fun <T> rememberExactReplacementMapping(
         .toList()
         .takeLast(MAX_REPLACEMENT_EXACT_MAPPINGS)
         .associateTo(linkedMapOf<String, T>()) { it.toPair() }
+}
+
+internal fun <T> forgetExactReplacementMapping(
+    mappings: Map<String, T>,
+    originalKey: String,
+): Map<String, T> {
+    if (originalKey !in mappings) return mappings
+    return mappings.entries
+        .filterNot { it.key == originalKey }
+        .associateTo(linkedMapOf()) { it.toPair() }
 }
 
 internal fun <T> cappedExactReplacementMappings(mappings: Map<String, T>): Map<String, T> =

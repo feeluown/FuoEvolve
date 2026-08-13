@@ -682,20 +682,29 @@ fun PlayerInfoTags(
         }
     }
     replacementInfoTrack?.let { infoTrack ->
+        val infoOriginalId = infoTrack.originalId ?: infoTrack.id
+        val playingTrack = controller?.playbackState?.currentTrack
+        val dialogTrack = playingTrack?.takeIf { candidate ->
+            (candidate.originalId ?: candidate.id) == infoOriginalId
+        } ?: infoTrack
         ReplacementInfoDialog(
-            track = infoTrack,
+            track = dialogTrack,
             candidateState = controller?.replacementCandidateState
-                ?.takeIf { it.trackId == (infoTrack.originalId ?: infoTrack.id) }
+                ?.takeIf { it.trackId == infoOriginalId }
                 ?: ReplacementCandidateState(),
+            hasUserSelection = controller?.hasUserReplacementSelection(dialogTrack) == true,
             onDismiss = { replacementInfoTrack = null },
-            onRetry = { controller?.loadReplacementCandidates(infoTrack) },
+            onRetry = { controller?.loadReplacementCandidates(dialogTrack) },
             onSelectCandidate = { candidate ->
-                controller?.selectReplacementCandidate(infoTrack, candidate)
+                controller?.selectReplacementCandidate(dialogTrack, candidate)
                 replacementInfoTrack = null
             },
+            onClearUserSelection = controller?.let { player ->
+                { player.clearUserReplacementSelection(dialogTrack) }
+            },
             onOpenDetail = onOpenReplacementDetail
-                ?.takeIf { infoTrack.replacementId?.isNotBlank() == true }
-                ?.let { openDetail -> { openDetail(infoTrack) } },
+                ?.takeIf { dialogTrack.replacementId?.isNotBlank() == true }
+                ?.let { openDetail -> { openDetail(dialogTrack) } },
         )
     }
     if (showAudioFormatInfo) {
@@ -764,8 +773,10 @@ fun ReplacementInfoDialog(
     onDismiss: () -> Unit,
     onOpenDetail: (() -> Unit)? = null,
     candidateState: ReplacementCandidateState = ReplacementCandidateState(),
+    hasUserSelection: Boolean = false,
     onRetry: (() -> Unit)? = null,
     onSelectCandidate: ((ReplacementCandidate) -> Unit)? = null,
+    onClearUserSelection: (() -> Unit)? = null,
 ) {
     val detailAction = onOpenDetail?.takeIf { track.replacementId?.isNotBlank() == true }
     AlertDialog(
@@ -783,6 +794,14 @@ fun ReplacementInfoDialog(
                 }
                 track.replacementScore?.let {
                     ReplacementInfoLine("匹配度", formatSmartReplacementScore(it))
+                }
+                if (hasUserSelection && onClearUserSelection != null) {
+                    TextButton(
+                        onClick = onClearUserSelection,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("清除手选并重新匹配")
+                    }
                 }
                 Text(
                     text = "候选音源",
