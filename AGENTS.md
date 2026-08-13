@@ -16,7 +16,7 @@ FuoEvolve is a Kotlin Multiplatform mobile player prototype. The root Gradle pro
 Use the checked-in Gradle wrapper and JDK 17 or newer.
 
 - `./gradlew :androidApp:assembleStandardDebug`: build the standard Android debug APK.
-- `./gradlew :androidApp:assembleSmartDebug`: build the smart Android debug APK with the on-device replacement model.
+- `./gradlew :androidApp:assembleSmartDebug`: build per-ABI smart Android debug APKs with the on-device replacement model.
 - `./gradlew :androidApp:installStandardDebug` / `:androidApp:installSmartDebug`: install the matching debug APK on a connected device or emulator.
 - `./gradlew :shared:allTests`: run shared Kotlin Multiplatform tests across configured targets.
 - `./gradlew :shared:iosSimulatorArm64Test`: run iOS simulator shared tests when Kotlin/Native tooling is available.

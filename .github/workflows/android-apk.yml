@@ -121,34 +121,45 @@ jobs:
       - name: Prepare signed release APK artifacts
         id: artifact
         env:
-          STANDARD_APK_GLOB: androidApp/build/outputs/apk/standard/release/*.apk
-          SMART_APK_GLOB: androidApp/build/outputs/apk/smart/release/*.apk
+          STANDARD_APK_GLOB: androidApp/build/outputs/apk/standard/release/*universal*.apk
+          SMART_ARM64_APK_GLOB: androidApp/build/outputs/apk/smart/release/*arm64-v8a*.apk
+          SMART_X86_64_APK_GLOB: androidApp/build/outputs/apk/smart/release/*x86_64*.apk
         run: |
           mkdir -p build/artifacts
           mapfile -t standard_apks < <(compgen -G "$STANDARD_APK_GLOB" || true)
-          mapfile -t smart_apks < <(compgen -G "$SMART_APK_GLOB" || true)
+          mapfile -t smart_arm64_apks < <(compgen -G "$SMART_ARM64_APK_GLOB" || true)
+          mapfile -t smart_x86_64_apks < <(compgen -G "$SMART_X86_64_APK_GLOB" || true)
           if [ "${#standard_apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one standard release APK, found ${#standard_apks[@]}"
+            echo "::error::Expected exactly one standard universal release APK, found ${#standard_apks[@]}"
             printf '%s\n' "${standard_apks[@]}"
             exit 1
           fi
-          if [ "${#smart_apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one smart release APK, found ${#smart_apks[@]}"
-            printf '%s\n' "${smart_apks[@]}"
+          if [ "${#smart_arm64_apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one smart arm64-v8a release APK, found ${#smart_arm64_apks[@]}"
+            printf '%s\n' "${smart_arm64_apks[@]}"
+            exit 1
+          fi
+          if [ "${#smart_x86_64_apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one smart x86_64 release APK, found ${#smart_x86_64_apks[@]}"
+            printf '%s\n' "${smart_x86_64_apks[@]}"
             exit 1
           fi
           standard_path="build/artifacts/fuo-evolve-release-multi-abi-signed-${GITHUB_SHA}.apk"
-          smart_path="build/artifacts/fuo-evolve-release-smart-multi-abi-signed-${GITHUB_SHA}.apk"
+          smart_arm64_path="build/artifacts/fuo-evolve-release-smart-arm64-v8a-signed-${GITHUB_SHA}.apk"
+          smart_x86_64_path="build/artifacts/fuo-evolve-release-smart-x86_64-signed-${GITHUB_SHA}.apk"
           cp "${standard_apks[0]}" "$standard_path"
-          cp "${smart_apks[0]}" "$smart_path"
+          cp "${smart_arm64_apks[0]}" "$smart_arm64_path"
+          cp "${smart_x86_64_apks[0]}" "$smart_x86_64_path"
           echo "standard_path=$standard_path" >> "$GITHUB_OUTPUT"
-          echo "smart_path=$smart_path" >> "$GITHUB_OUTPUT"
+          echo "smart_arm64_path=$smart_arm64_path" >> "$GITHUB_OUTPUT"
+          echo "smart_x86_64_path=$smart_x86_64_path" >> "$GITHUB_OUTPUT"
 
       - name: Verify release APK identities and flavor isolation
         env:
           STANDARD_APK: ${{ steps.artifact.outputs.standard_path }}
-          SMART_APK: ${{ steps.artifact.outputs.smart_path }}
-        run: bash scripts/verify-android-flavor-apks.sh "$STANDARD_APK" "$SMART_APK"
+          SMART_ARM64_APK: ${{ steps.artifact.outputs.smart_arm64_path }}
+          SMART_X86_64_APK: ${{ steps.artifact.outputs.smart_x86_64_path }}
+        run: bash scripts/verify-android-flavor-apks.sh "$STANDARD_APK" "$SMART_ARM64_APK" "$SMART_X86_64_APK"
 
       - name: Upload signed standard release APK
         uses: actions/upload-artifact@v7
@@ -158,10 +169,18 @@ jobs:
           archive: false
           if-no-files-found: error
 
-      - name: Upload signed smart release APK
+      - name: Upload signed smart arm64-v8a release APK
         uses: actions/upload-artifact@v7
         with:
-          name: fuo-evolve-release-smart-multi-abi-signed-${{ github.sha }}
-          path: ${{ steps.artifact.outputs.smart_path }}
+          name: fuo-evolve-release-smart-arm64-v8a-signed-${{ github.sha }}
+          path: ${{ steps.artifact.outputs.smart_arm64_path }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload signed smart x86_64 release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuo-evolve-release-smart-x86_64-signed-${{ github.sha }}
+          path: ${{ steps.artifact.outputs.smart_x86_64_path }}
           archive: false
           if-no-files-found: error

@@ -22,7 +22,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 | 渠道 | 地址 | 说明 |
 | --- | --- | --- |
-| 正式版 | [GitHub 最新 Release](https://github.com/feeluown/FuoEvolve/releases/latest) | 签名的 Android multi-ABI APK，包含 `arm64-v8a` 和 `x86_64`。 |
+| 正式版 | [GitHub 最新 Release](https://github.com/feeluown/FuoEvolve/releases/latest) | 签名的普通版 multi-ABI APK，以及按 `arm64-v8a` / `x86_64` 分包的智能版 APK。 |
 | F-Droid | [官方自托管仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | 保留近期稳定版本，并在 GitHub Release 发布后自动更新。 |
 | Canary | [master 最新 Android 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster) | 从最新成功的 `master` workflow 下载签名 release APK。 |
 

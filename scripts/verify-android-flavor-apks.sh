@@ -2,16 +2,17 @@
 
 set -euo pipefail
 
-if [[ "$#" -ne 2 ]]; then
-    echo "Usage: $0 <standard.apk> <smart.apk>" >&2
+if [[ "$#" -ne 3 ]]; then
+    echo "Usage: $0 <standard.apk> <smart-arm64-v8a.apk> <smart-x86_64.apk>" >&2
     exit 2
 fi
 
 readonly PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly STANDARD_APK="$1"
-readonly SMART_APK="$2"
+readonly SMART_ARM64_APK="$2"
+readonly SMART_X86_64_APK="$3"
 readonly EXPECTED_PACKAGE="org.feeluown.mobile"
-readonly EXPECTED_ABIS="arm64-v8a x86_64"
+readonly EXPECTED_STANDARD_ABIS="arm64-v8a x86_64"
 readonly EXPECTED_MODEL_PATH="assets/smart_replacement/fuo_replacement_lite_v1.ort"
 readonly EXPECTED_MODEL_SHA256="ccf14ca4aea30d29ad108a167d0c2ad1b521ab2ddac0e41038034167409ad382"
 readonly EXPECTED_VOCAB_PATH="assets/smart_replacement/vocab.txt"
@@ -19,9 +20,9 @@ readonly EXPECTED_VOCAB_SHA256="45bbac6b341c319adc98a532532882e91a9cefc0329aa57b
 readonly EXPECTED_STANDARD_LABEL="FuoEvolve"
 readonly EXPECTED_SMART_LABEL="FuoEvolve 智能版"
 readonly WARN_SMART_APK_DELTA_BYTES=$((50 * 1024 * 1024))
-readonly MAX_SMART_APK_DELTA_BYTES=$((100 * 1024 * 1024))
+readonly MAX_SMART_APK_DELTA_BYTES=$((80 * 1024 * 1024))
 
-for apk in "$STANDARD_APK" "$SMART_APK"; do
+for apk in "$STANDARD_APK" "$SMART_ARM64_APK" "$SMART_X86_64_APK"; do
     if [[ ! -f "$apk" ]]; then
         echo "APK does not exist: $apk" >&2
         exit 1
@@ -85,103 +86,151 @@ apk_abis() {
         paste -sd ' ' -
 }
 
-standard_badging="$(apk_badging "$STANDARD_APK")"
-smart_badging="$(apk_badging "$SMART_APK")"
-standard_package="$(badging_value "$standard_badging" name)"
-smart_package="$(badging_value "$smart_badging" name)"
-standard_version_code="$(badging_value "$standard_badging" versionCode)"
-smart_version_code="$(badging_value "$smart_badging" versionCode)"
-standard_version_name="$(badging_value "$standard_badging" versionName)"
-smart_version_name="$(badging_value "$smart_badging" versionName)"
-standard_signer="$(apk_signer "$STANDARD_APK")"
-smart_signer="$(apk_signer "$SMART_APK")"
-standard_abis="$(apk_abis "$STANDARD_APK")"
-smart_abis="$(apk_abis "$SMART_APK")"
-standard_label="$(apk_application_label "$STANDARD_APK")"
-smart_label="$(apk_application_label "$SMART_APK")"
+verify_smart_apk() {
+    local apk="$1"
+    local expected_abi="$2"
+    local standard_package="$3"
+    local standard_version_code="$4"
+    local standard_version_name="$5"
+    local standard_signer="$6"
+    local standard_size="$7"
+    local badging package version_code version_name signer abis label
+    local smart_models model_method model_sha256 vocab_sha256 smart_size smart_delta
 
-if [[ "$standard_package" != "$EXPECTED_PACKAGE" || "$smart_package" != "$standard_package" ]]; then
-    echo "APK package mismatch: standard=$standard_package smart=$smart_package" >&2
+    badging="$(apk_badging "$apk")"
+    package="$(badging_value "$badging" name)"
+    version_code="$(badging_value "$badging" versionCode)"
+    version_name="$(badging_value "$badging" versionName)"
+    signer="$(apk_signer "$apk")"
+    abis="$(apk_abis "$apk")"
+    label="$(apk_application_label "$apk")"
+
+    if [[ "$package" != "$standard_package" ]]; then
+        echo "Smart APK package mismatch: $package" >&2
+        exit 1
+    fi
+    if [[ "$version_code" != "$standard_version_code" ]]; then
+        echo "Smart APK versionCode mismatch for $expected_abi: $version_code" >&2
+        exit 1
+    fi
+    if [[ "$version_name" != "${standard_version_name}-smart" ]]; then
+        echo "Unexpected smart versionName for $expected_abi: $version_name" >&2
+        exit 1
+    fi
+    if [[ -z "$signer" || "$signer" != "$standard_signer" ]]; then
+        echo "Smart APK signer mismatch for $expected_abi" >&2
+        exit 1
+    fi
+    if [[ "$abis" != "$expected_abi" ]]; then
+        echo "Unexpected smart APK ABI for $apk: $abis (expected $expected_abi)" >&2
+        exit 1
+    fi
+    if [[ "$label" != "$EXPECTED_SMART_LABEL" ]]; then
+        echo "Unexpected smart application label for $expected_abi: $label" >&2
+        exit 1
+    fi
+    mapfile -t smart_models < <(
+        unzip -Z1 "$apk" |
+            grep '^assets/smart_replacement/.*\.ort$' || true
+    )
+    if [[ "${#smart_models[@]}" -ne 1 ]]; then
+        echo "Expected exactly one ORT model in smart $expected_abi APK, found ${#smart_models[@]}" >&2
+        printf '%s\n' "${smart_models[@]}" >&2
+        exit 1
+    fi
+    if [[ "${smart_models[0]}" != "$EXPECTED_MODEL_PATH" ]]; then
+        echo "Unexpected smart replacement model path: ${smart_models[0]}" >&2
+        exit 1
+    fi
+    model_method="$(unzip -lv "$apk" "${smart_models[0]}" | awk -v target="${smart_models[0]}" '$NF == target { print $2 }')"
+    if [[ "$model_method" != "Stored" ]]; then
+        echo "Smart APK ORT model must be stored without compression: ${smart_models[0]} ($model_method)" >&2
+        exit 1
+    fi
+    model_sha256="$(unzip -p "$apk" "$EXPECTED_MODEL_PATH" | sha256sum | awk '{ print $1 }')"
+    vocab_sha256="$(unzip -p "$apk" "$EXPECTED_VOCAB_PATH" | sha256sum | awk '{ print $1 }')"
+    if [[ "$model_sha256" != "$EXPECTED_MODEL_SHA256" ]]; then
+        echo "Unexpected smart replacement model SHA-256: $model_sha256" >&2
+        exit 1
+    fi
+    if [[ "$vocab_sha256" != "$EXPECTED_VOCAB_SHA256" ]]; then
+        echo "Unexpected smart replacement vocabulary SHA-256: $vocab_sha256" >&2
+        exit 1
+    fi
+    if ! unzip -Z1 "$apk" | grep "^lib/${expected_abi}/libonnxruntime.*\\.so$" > /dev/null; then
+        echo "Smart $expected_abi APK is missing ONNX Runtime native library" >&2
+        exit 1
+    fi
+    smart_size="$(stat -c '%s' "$apk")"
+    smart_delta=$((smart_size - standard_size))
+    if (( smart_delta > MAX_SMART_APK_DELTA_BYTES )); then
+        echo "Smart $expected_abi APK exceeds the 80 MiB size delta: $smart_delta bytes" >&2
+        exit 1
+    fi
+    if (( smart_delta > WARN_SMART_APK_DELTA_BYTES )); then
+        echo "Warning: Smart $expected_abi APK exceeds the 50 MiB target delta: $smart_delta bytes" >&2
+    fi
+}
+
+standard_badging="$(apk_badging "$STANDARD_APK")"
+standard_package="$(badging_value "$standard_badging" name)"
+standard_version_code="$(badging_value "$standard_badging" versionCode)"
+standard_version_name="$(badging_value "$standard_badging" versionName)"
+standard_signer="$(apk_signer "$STANDARD_APK")"
+standard_abis="$(apk_abis "$STANDARD_APK")"
+standard_label="$(apk_application_label "$STANDARD_APK")"
+standard_size="$(stat -c '%s' "$STANDARD_APK")"
+
+if [[ "$standard_package" != "$EXPECTED_PACKAGE" ]]; then
+    echo "APK package mismatch: standard=$standard_package" >&2
     exit 1
 fi
-if [[ -z "$standard_version_code" || "$smart_version_code" != "$standard_version_code" ]]; then
-    echo "APK versionCode mismatch: standard=$standard_version_code smart=$smart_version_code" >&2
+if [[ -z "$standard_version_code" ]]; then
+    echo "Standard APK is missing versionCode" >&2
     exit 1
 fi
-if [[ -z "$standard_version_name" || "$smart_version_name" != "${standard_version_name}-smart" ]]; then
-    echo "Unexpected versionName pair: standard=$standard_version_name smart=$smart_version_name" >&2
+if [[ -z "$standard_version_name" ]]; then
+    echo "Standard APK is missing versionName" >&2
     exit 1
 fi
-if [[ -z "$standard_signer" || "$smart_signer" != "$standard_signer" ]]; then
-    echo "APK signer mismatch" >&2
+if [[ -z "$standard_signer" ]]; then
+    echo "Standard APK signer is missing" >&2
     exit 1
 fi
-if [[ "$standard_abis" != "$EXPECTED_ABIS" || "$smart_abis" != "$standard_abis" ]]; then
-    echo "Unexpected APK ABIs: standard=$standard_abis smart=$smart_abis" >&2
+if [[ "$standard_abis" != "$EXPECTED_STANDARD_ABIS" ]]; then
+    echo "Unexpected standard APK ABIs: $standard_abis" >&2
     exit 1
 fi
 if [[ "$standard_label" != "$EXPECTED_STANDARD_LABEL" ]]; then
     echo "Unexpected standard application label: $standard_label" >&2
     exit 1
 fi
-if [[ "$smart_label" != "$EXPECTED_SMART_LABEL" ]]; then
-    echo "Unexpected smart application label: $smart_label" >&2
-    exit 1
-fi
 if unzip -Z1 "$STANDARD_APK" | grep '^assets/smart_replacement/' > /dev/null; then
     echo "Standard APK contains smart replacement assets" >&2
-    exit 1
-fi
-mapfile -t smart_models < <(
-    unzip -Z1 "$SMART_APK" |
-        grep '^assets/smart_replacement/.*\.ort$' || true
-)
-if [[ "${#smart_models[@]}" -ne 1 ]]; then
-    echo "Expected exactly one ORT model in smart APK, found ${#smart_models[@]}" >&2
-    printf '%s\n' "${smart_models[@]}" >&2
-    exit 1
-fi
-if [[ "${smart_models[0]}" != "$EXPECTED_MODEL_PATH" ]]; then
-    echo "Unexpected smart replacement model path: ${smart_models[0]}" >&2
-    exit 1
-fi
-model_method="$(unzip -lv "$SMART_APK" "${smart_models[0]}" | awk -v target="${smart_models[0]}" '$NF == target { print $2 }')"
-if [[ "$model_method" != "Stored" ]]; then
-    echo "Smart APK ORT model must be stored without compression: ${smart_models[0]} ($model_method)" >&2
-    exit 1
-fi
-model_sha256="$(unzip -p "$SMART_APK" "$EXPECTED_MODEL_PATH" | sha256sum | awk '{ print $1 }')"
-vocab_sha256="$(unzip -p "$SMART_APK" "$EXPECTED_VOCAB_PATH" | sha256sum | awk '{ print $1 }')"
-if [[ "$model_sha256" != "$EXPECTED_MODEL_SHA256" ]]; then
-    echo "Unexpected smart replacement model SHA-256: $model_sha256" >&2
-    exit 1
-fi
-if [[ "$vocab_sha256" != "$EXPECTED_VOCAB_SHA256" ]]; then
-    echo "Unexpected smart replacement vocabulary SHA-256: $vocab_sha256" >&2
     exit 1
 fi
 if unzip -Z1 "$STANDARD_APK" | grep '^lib/[^/]*/libonnxruntime.*\.so$' > /dev/null; then
     echo "Standard APK contains ONNX Runtime native libraries" >&2
     exit 1
 fi
-for abi in $EXPECTED_ABIS; do
-    if ! unzip -Z1 "$SMART_APK" | grep "^lib/${abi}/libonnxruntime.*\\.so$" > /dev/null; then
-        echo "Smart APK is missing ONNX Runtime native library for $abi" >&2
-        exit 1
-    fi
-done
-standard_size="$(stat -c '%s' "$STANDARD_APK")"
-smart_size="$(stat -c '%s' "$SMART_APK")"
-smart_delta=$((smart_size - standard_size))
-if (( smart_delta > MAX_SMART_APK_DELTA_BYTES )); then
-    echo "Smart APK exceeds the 100 MiB size delta: $smart_delta bytes" >&2
-    exit 1
-fi
-if (( smart_delta > WARN_SMART_APK_DELTA_BYTES )); then
-    echo "Warning: Smart APK exceeds the 50 MiB target delta: $smart_delta bytes (official ORT; reduced runtime deferred)" >&2
-fi
 
-printf 'Verified standard and smart APKs: package=%s versionCode=%s ABIs=%s\n' \
+verify_smart_apk \
+    "$SMART_ARM64_APK" \
+    "arm64-v8a" \
     "$standard_package" \
     "$standard_version_code" \
-    "$standard_abis"
+    "$standard_version_name" \
+    "$standard_signer" \
+    "$standard_size"
+verify_smart_apk \
+    "$SMART_X86_64_APK" \
+    "x86_64" \
+    "$standard_package" \
+    "$standard_version_code" \
+    "$standard_version_name" \
+    "$standard_signer" \
+    "$standard_size"
+
+printf 'Verified standard universal and per-ABI smart APKs: package=%s versionCode=%s\n' \
+    "$standard_package" \
+    "$standard_version_code"

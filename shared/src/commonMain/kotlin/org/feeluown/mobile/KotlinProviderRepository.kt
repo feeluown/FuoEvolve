@@ -1,9 +1,11 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -695,8 +697,10 @@ internal suspend fun searchReplacementCandidatesByProvider(
                 queries.map { query ->
                     async {
                         try {
-                            withTimeoutOrNull(REPLACEMENT_PROVIDER_SEARCH_TIMEOUT_MS) {
-                                search(providerId, query)
+                            withContext(Dispatchers.Default) {
+                                withTimeoutOrNull(REPLACEMENT_PROVIDER_SEARCH_TIMEOUT_MS) {
+                                    search(providerId, query)
+                                }
                             }.orEmpty()
                         } catch (cancelled: CancellationException) {
                             throw cancelled

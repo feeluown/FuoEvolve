@@ -22,7 +22,7 @@ Android is the primary supported platform. iOS builds are available for experime
 
 | Channel | Link | Notes |
 | --- | --- | --- |
-| Stable | [Latest GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | Signed multi-ABI Android APK for `arm64-v8a` and `x86_64`. |
+| Stable | [Latest GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | Signed standard multi-ABI APK, plus per-ABI smart APKs for `arm64-v8a` and `x86_64`. |
 | F-Droid | [Official self-hosted repository](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | Keeps the latest stable releases and updates automatically after GitHub Releases. |
 | Canary | [Latest master Android build](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster) | Signed release APK built from the latest successful `master` workflow. |
 
