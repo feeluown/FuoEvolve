@@ -198,10 +198,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
                     )
                 }
             }
-            .sortedWith(
-                compareByDescending<ReplacementCandidate> { it.autoEligible }
-                    .thenByDescending { it.score },
-            )
+            .sortedByDescending { candidate -> candidate.score }
             .take(MAX_REPLACEMENT_CANDIDATES)
     }
 

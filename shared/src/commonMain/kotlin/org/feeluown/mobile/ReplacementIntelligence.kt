@@ -201,27 +201,7 @@ internal suspend fun rankReplacementCandidatesWithFallback(
             strategy = strategy.wireName,
         )
     }
-    if (modelRanked.none { it.autoEligible }) {
-        return legacy.asLegacyFallback(
-            reason = "端侧模型置信度不足，已使用传统匹配",
-            wireStrategy = "legacy_low_confidence",
-        )
-    }
-    val sortedModelRanked = modelRanked.sortedWith(
-        compareByDescending<ReplacementCandidate> { it.autoEligible }
-            .thenByDescending { it.score },
-    )
-    val eligible = sortedModelRanked.filter { it.autoEligible }
-    if (
-        eligible.size > 1 &&
-        eligible[0].score - eligible[1].score < request.strictness.minimumModelMargin
-    ) {
-        return legacy.asLegacyFallback(
-            reason = "端侧模型候选差距不足，已使用传统匹配",
-            wireStrategy = "legacy_low_confidence",
-        )
-    }
-    return sortedModelRanked
+    return modelRanked.sortedByDescending { it.score }
 }
 
 interface ReplacementPreferenceAwareRanker {
@@ -328,13 +308,6 @@ internal val SmartReplacementStrictness.identityThreshold: Double
         SmartReplacementStrictness.Relaxed -> 0.55
         SmartReplacementStrictness.Balanced -> 0.68
         SmartReplacementStrictness.Strict -> 0.80
-    }
-
-private val SmartReplacementStrictness.minimumModelMargin: Double
-    get() = when (this) {
-        SmartReplacementStrictness.Relaxed -> 0.02
-        SmartReplacementStrictness.Balanced -> 0.05
-        SmartReplacementStrictness.Strict -> 0.08
     }
 
 val SmartReplacementStrictness.legacyMinScore: Double

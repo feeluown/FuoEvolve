@@ -201,18 +201,19 @@ class ReplacementIntelligenceTest {
     }
 
     @Test
-    fun lowConfidenceForEveryCandidateFallsBackToLegacy() = runTest {
+    fun lowConfidenceKeepsModelRankingButIsNotAutoEligible() = runTest {
         val ranked = rankReplacementCandidatesWithFallback(
             request = rankingRequest(),
             ranker = modelRanker(confidence = 0.4),
         )
 
-        assertEquals("qqmusic:high", ranked.first().track.id)
-        assertTrue(ranked.all { it.rankingStrategy == ReplacementRankingStrategy.LegacyFallback })
+        assertEquals("qqmusic:low", ranked.first().track.id)
+        assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
+        assertTrue(ranked.none { it.autoEligible })
     }
 
     @Test
-    fun narrowTopCandidateMarginFallsBackToLegacy() = runTest {
+    fun closeTopCandidateScoresKeepTheHighestModelResult() = runTest {
         val ranked = rankReplacementCandidatesWithFallback(
             request = rankingRequest(),
             ranker = object : ReplacementRanker {
@@ -227,8 +228,9 @@ class ReplacementIntelligenceTest {
             },
         )
 
-        assertEquals("qqmusic:high", ranked.first().track.id)
-        assertTrue(ranked.all { it.rankingStrategy == ReplacementRankingStrategy.LegacyFallback })
+        assertEquals("qqmusic:low", ranked.first().track.id)
+        assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
+        assertTrue(ranked.first().autoEligible)
     }
 
     @Test

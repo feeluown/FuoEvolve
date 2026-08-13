@@ -2329,10 +2329,7 @@ class FuoPlayerController(
                     replacementCandidateState = ReplacementCandidateState(
                         trackId = trackId,
                         candidates = candidates
-                            .sortedWith(
-                                compareByDescending<ReplacementCandidate> { candidate -> candidate.autoEligible }
-                                    .thenByDescending { candidate -> candidate.score },
-                            )
+                            .sortedByDescending { candidate -> candidate.score }
                             .distinctBy { candidate -> candidate.track.id },
                     )
                 }

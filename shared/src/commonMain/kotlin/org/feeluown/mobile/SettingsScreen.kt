@@ -1165,7 +1165,7 @@ fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
                 }
             }
             Text(
-                text = "身份门槛始终生效；严格度只改变自动选择阈值",
+                text = "身份门槛始终生效；严格度只决定自动换源的最低分，打分后取最高分",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
