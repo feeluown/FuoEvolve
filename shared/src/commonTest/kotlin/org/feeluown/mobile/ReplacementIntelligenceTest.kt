@@ -334,9 +334,14 @@ class ReplacementIntelligenceTest {
             id = "qqmusic:official",
             title = "Song 官方完整版",
         )
+        val lossless = track(
+            id = "qqmusic:lossless",
+            title = "Song 无损",
+        )
 
         assertEquals(0.0, replacementSystemPreferenceAdjustment(original, plain))
         assertTrue(replacementSystemPreferenceAdjustment(original, official) > 0.0)
+        assertTrue(replacementSystemPreferenceAdjustment(original, lossless) > 0.0)
         assertEquals(
             0.0,
             replacementSystemPreferenceAdjustment(
@@ -344,6 +349,89 @@ class ReplacementIntelligenceTest {
                 official,
             ),
         )
+    }
+
+    @Test
+    fun identitySignalsScoreTitleArtistDurationAndAlbum() {
+        val original = track("netease:origin", title = "晴天", durationMs = 200_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val close = track("qqmusic:close", title = "晴天", durationMs = 198_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val far = track("qqmusic:far", title = "另一首歌", durationMs = 320_000).copy(
+            artists = "路人甲",
+            album = "合集",
+        )
+
+        val closeSignals = replacementIdentitySignals(original, close)
+        val farSignals = replacementIdentitySignals(original, far)
+
+        assertEquals(1.0, closeSignals.titleScore)
+        assertEquals(1.0, closeSignals.artistScore)
+        assertEquals(1.0, closeSignals.albumScore)
+        assertTrue(closeSignals.durationScore > 0.9)
+        assertTrue(closeSignals.lexicalScore > farSignals.lexicalScore)
+        assertEquals(
+            listOf("歌名相近 · 歌手相近 · 时长接近 · 专辑相近"),
+            closeSignals.reasonLabels(),
+        )
+        assertTrue(blendOnDeviceReplacementScore(0.8, closeSignals) > blendOnDeviceReplacementScore(0.8, farSignals))
+    }
+
+    @Test
+    fun onDeviceRankingBlendsLexicalIdentityWithoutChangingLegacyOrder() = runTest {
+        val original = track("netease:origin", title = "晴天", durationMs = 200_000).copy(
+            artists = "周杰伦",
+            album = "叶惠美",
+        )
+        val close = ReplacementCandidate(
+            track = track("qqmusic:close", title = "晴天", durationMs = 198_000).copy(
+                artists = "周杰伦",
+                album = "叶惠美",
+            ),
+            score = 0.60,
+        )
+        val far = ReplacementCandidate(
+            track = track("qqmusic:far", title = "另一首歌", durationMs = 320_000).copy(
+                artists = "路人甲",
+                album = "合集",
+            ),
+            score = 0.90,
+        )
+        val request = ReplacementRankingRequest(
+            original = original,
+            candidates = listOf(far, close),
+            mode = ReplacementRankingMode.OnDevice,
+            strictness = SmartReplacementStrictness.Balanced,
+            modelTier = ReplacementModelTier.Lite,
+        )
+        val evenSemanticRanker = object : ReplacementRanker {
+            override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
+                request.candidates.map { candidate ->
+                    candidate.copy(
+                        score = 0.80,
+                        modelScore = 0.80,
+                        sameSongConfidence = 0.80,
+                    )
+                }
+        }
+
+        val onDevice = rankReplacementCandidatesWithFallback(request, evenSemanticRanker)
+        val legacy = rankReplacementCandidatesWithFallback(
+            request.copy(mode = ReplacementRankingMode.Legacy),
+            evenSemanticRanker,
+        )
+
+        assertEquals("qqmusic:close", onDevice.first().track.id)
+        assertEquals(0.80, onDevice.first().modelScore)
+        assertEquals(0.80, onDevice.first().sameSongConfidence)
+        assertTrue(onDevice.first().score > onDevice.last().score)
+        assertTrue(onDevice.first().reasons.any { "歌名相近" in it && "时长接近" in it })
+        assertEquals("qqmusic:far", legacy.first().track.id)
+        assertEquals(ReplacementRankingStrategy.LegacyRules, legacy.first().rankingStrategy)
     }
 
     private fun rankingRequest(): ReplacementRankingRequest = ReplacementRankingRequest(

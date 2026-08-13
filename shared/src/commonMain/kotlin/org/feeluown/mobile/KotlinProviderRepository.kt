@@ -614,32 +614,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
         if (candidate.source == BILIBILI_PROVIDER_ID) {
             return bilibiliReplacementScore(origin, candidate)
         }
-        val originTitle = normalizeReplacementText(origin.title)
-        val candidateTitle = normalizeReplacementText(candidate.title)
-        val titleScore = when {
-            originTitle == candidateTitle -> 1.0
-            originTitle.contains(candidateTitle) || candidateTitle.contains(originTitle) -> 0.8
-            else -> tokenSimilarity(originTitle, candidateTitle)
-        }
-        val originArtists = normalizeReplacementText(origin.artists)
-        val candidateArtists = normalizeReplacementText(candidate.artists)
-        val artistScore = when {
-            originArtists == candidateArtists -> 1.0
-            originArtists.contains(candidateArtists) || candidateArtists.contains(originArtists) -> 0.8
-            else -> tokenSimilarity(originArtists, candidateArtists)
-        }
-        val durationScore = if (origin.durationMs == null || candidate.durationMs == null) {
-            0.5
-        } else {
-            (1.0 - (kotlin.math.abs(origin.durationMs - candidate.durationMs).toDouble() / 30_000.0)).coerceIn(0.0, 1.0)
-        }
-        return titleScore * 0.55 + artistScore * 0.35 + durationScore * 0.10
-    }
-
-    private fun tokenSimilarity(left: String, right: String): Double {
-        if (left.isBlank() || right.isBlank()) return 0.0
-        val common = left.toSet().intersect(right.toSet()).size.toDouble()
-        return common / maxOf(left.toSet().size, right.toSet().size).toDouble()
+        return replacementIdentitySignals(origin, candidate).lexicalScore
     }
 
     private fun createProviders(http: ProviderHttpClient, credentials: ProviderCredentialStore): Map<String, KotlinMusicProvider> {
@@ -805,9 +780,6 @@ private fun applyReplacementDurationPenalty(score: Double, origin: MusicTrack, c
     }
     return score.coerceAtLeast(0.0)
 }
-
-private fun normalizeReplacementText(value: String): String =
-    value.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
 
 private fun replacementArtistMatchTexts(value: String): List<String> {
     var parts = listOf(value)
