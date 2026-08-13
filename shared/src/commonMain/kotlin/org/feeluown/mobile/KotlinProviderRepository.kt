@@ -124,7 +124,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
             minScore = smartReplacementMinScore,
             scoreOf = { candidate -> replacementScore(mediaTrack, candidate) },
         )
-        return ranked
+        return sortReplacementScoreTies(mediaTrack, ranked)
     }
 
     override suspend fun resolve(
