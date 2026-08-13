@@ -165,7 +165,6 @@ internal suspend fun rankReplacementCandidatesWithFallback(
             wireStrategy = "legacy_model_failure",
         )
     }
-    val preferenceLearner = (ranker as? ReplacementPreferenceAwareRanker)?.preferenceLearner
     val rankedById = ranked.associateBy { it.track.id }
     val effectiveTier = modelManager?.activeTier ?: request.modelTier
     val strategy = when (effectiveTier) {
@@ -174,34 +173,20 @@ internal suspend fun rankReplacementCandidatesWithFallback(
     }
     val modelRanked = request.candidates.map { base ->
         val model = rankedById.getValue(base.track.id)
-        val confidence = model.sameSongConfidence ?: 0.0
-        val versionCompatibility = base.versionCompatibility ?: 1.0
-        val semanticScore = (model.modelScore ?: model.score).coerceIn(0.0, 1.0)
-        val identity = replacementIdentitySignals(request.original, base.track)
-        val blendedScore = blendOnDeviceReplacementScore(semanticScore, identity)
-        val systemAdjustment = replacementSystemPreferenceAdjustment(request.original, base.track)
-        val userAdjustment = preferenceLearner
-            ?.adjustment(replacementPreferenceVector(request.original, base.track))
-            ?: 0.0
-        val personalizedScore = applyReplacementPreferenceAdjustment(
-            modelScore = blendedScore,
-            adjustment = systemAdjustment + userAdjustment,
-        )
+        val score = (model.modelScore ?: model.score).coerceIn(0.0, 1.0)
         model.copy(
             track = base.track,
-            score = personalizedScore * versionCompatibility,
+            score = score,
             legacyScore = base.legacyScore,
-            modelScore = semanticScore,
-            sameSongConfidence = confidence,
+            modelScore = score,
+            sameSongConfidence = score,
             versionKind = base.versionKind,
-            versionCompatibility = versionCompatibility,
-            autoEligible = base.autoEligible &&
-                model.autoEligible &&
-                confidence >= request.strictness.identityThreshold &&
-                versionCompatibility > 0.0,
+            versionCompatibility = base.versionCompatibility,
+            autoEligible = base.track.passesReplacementIdentityGate(request.original) &&
+                score >= request.strictness.identityThreshold,
             rankingStrategy = strategy,
             strategy = strategy.wireName,
-            reasons = (model.reasons + identity.reasonLabels()).distinct(),
+            reasons = model.reasons,
         )
     }
     return modelRanked.sortedByDescending { it.score }
@@ -209,26 +194,6 @@ internal suspend fun rankReplacementCandidatesWithFallback(
 
 interface ReplacementPreferenceAwareRanker {
     val preferenceLearner: ReplacementPreferenceLearner
-}
-
-internal fun applyReplacementPreferenceAdjustment(modelScore: Double, adjustment: Double): Double {
-    val safeScore = modelScore.coerceIn(0.001, 0.999)
-    val logit = kotlin.math.ln(safeScore / (1.0 - safeScore))
-    val adjustedLogit = (logit + adjustment).coerceIn(-35.0, 35.0)
-    return 1.0 / (1.0 + kotlin.math.exp(-adjustedLogit))
-}
-
-internal fun replacementSystemPreferenceAdjustment(
-    original: MusicTrack,
-    candidate: MusicTrack,
-): Double {
-    if (classifyReplacementVersion(original) != ReplacementVersionKind.StudioOriginal) return 0.0
-    val text = "${candidate.title} ${candidate.album}".lowercase()
-    var adjustment = 0.0
-    if (SYSTEM_OFFICIAL_HINTS.any(text::contains)) adjustment += 0.12
-    if (SYSTEM_COMPLETE_HINTS.any(text::contains)) adjustment += 0.08
-    if (SYSTEM_QUALITY_HINTS.any(text::contains)) adjustment += 0.08
-    return adjustment
 }
 
 internal data class ReplacementIdentitySignals(
@@ -253,17 +218,6 @@ internal fun replacementIdentitySignals(
     albumScore = replacementLexicalFieldScore(original.album, candidate.album),
 )
 
-internal fun blendOnDeviceReplacementScore(
-    semanticScore: Double,
-    identity: ReplacementIdentitySignals,
-): Double = (
-    semanticScore.coerceIn(0.0, 1.0) * ON_DEVICE_SEMANTIC_WEIGHT +
-        identity.titleScore * ON_DEVICE_TITLE_WEIGHT +
-        identity.artistScore * ON_DEVICE_ARTIST_WEIGHT +
-        identity.durationScore * ON_DEVICE_DURATION_WEIGHT +
-        identity.albumScore * ON_DEVICE_ALBUM_WEIGHT
-    ).coerceIn(0.0, 1.0)
-
 internal fun replacementLexicalFieldScore(original: String, candidate: String): Double {
     val originText = normalizeReplacementText(original)
     val candidateText = normalizeReplacementText(candidate)
@@ -283,16 +237,6 @@ internal fun replacementDurationScore(originalDurationMs: Long?, candidateDurati
 
 internal fun normalizeReplacementText(value: String): String =
     value.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
-
-internal fun ReplacementIdentitySignals.reasonLabels(): List<String> {
-    val parts = buildList {
-        if (titleScore >= 0.8) add("歌名相近")
-        if (artistScore >= 0.8) add("歌手相近")
-        if (durationScore >= 0.7) add("时长接近")
-        if (albumScore >= 0.8) add("专辑相近")
-    }
-    return if (parts.isEmpty()) emptyList() else listOf(parts.joinToString(" · "))
-}
 
 private fun replacementTokenSimilarity(left: String, right: String): Double {
     if (left.isBlank() || right.isBlank()) return 0.0
@@ -469,11 +413,3 @@ private val VERSION_CLIP_TOKENS = setOf("clip", "snippet", "medley", "preview")
 private const val LEGACY_TITLE_WEIGHT = 0.55
 private const val LEGACY_ARTIST_WEIGHT = 0.35
 private const val LEGACY_DURATION_WEIGHT = 0.10
-private const val ON_DEVICE_SEMANTIC_WEIGHT = 0.50
-private const val ON_DEVICE_TITLE_WEIGHT = 0.22
-private const val ON_DEVICE_ARTIST_WEIGHT = 0.16
-private const val ON_DEVICE_DURATION_WEIGHT = 0.08
-private const val ON_DEVICE_ALBUM_WEIGHT = 0.04
-private val SYSTEM_OFFICIAL_HINTS = listOf("官方", "official")
-private val SYSTEM_COMPLETE_HINTS = listOf("完整版", "full version", "complete")
-private val SYSTEM_QUALITY_HINTS = listOf("无损", "母带", "hires", "hi-res", "lossless")

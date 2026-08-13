@@ -132,9 +132,12 @@ internal class AndroidBgeEmbeddingEngine(
             append("；专辑：")
             append(it)
         }
-        durationMs?.takeIf { it > 0 }?.let {
+        durationMs?.takeIf { it > 0 }?.let { duration ->
+            val totalSeconds = duration / 1_000
             append("；时长：")
-            append(it / 1_000)
+            append(totalSeconds / 60)
+            append("分")
+            append(totalSeconds % 60)
             append("秒")
         }
     }

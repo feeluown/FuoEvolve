@@ -201,15 +201,72 @@ class ReplacementIntelligenceTest {
     }
 
     @Test
-    fun lowConfidenceKeepsModelRankingButIsNotAutoEligible() = runTest {
+    fun rankingScoreBelowStrictnessThresholdIsNotAutoEligible() = runTest {
         val ranked = rankReplacementCandidatesWithFallback(
             request = rankingRequest(),
-            ranker = modelRanker(confidence = 0.4),
+            ranker = object : ReplacementRanker {
+                override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
+                    request.candidates.map { candidate ->
+                        candidate.copy(
+                            score = 0.2,
+                            modelScore = 0.2,
+                            sameSongConfidence = 0.2,
+                        )
+                    }
+            },
         )
 
-        assertEquals("qqmusic:low", ranked.first().track.id)
         assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
         assertTrue(ranked.none { it.autoEligible })
+        assertTrue(ranked.all { it.score < SmartReplacementStrictness.Balanced.identityThreshold })
+    }
+
+    @Test
+    fun autoReplaceUsesTheSameDisplayedScoreAsTheCandidateList() = runTest {
+        val original = track("netease:origin", title = "秋分", durationMs = 200_000).copy(
+            artists = "音阙诗听",
+        )
+        val lexicalBoosted = ReplacementCandidate(
+            track = track("bilibili:lexical", title = "秋分", durationMs = 198_000).copy(
+                artists = "音阙诗听",
+            ),
+            score = 0.60,
+        )
+        val weakerLexical = ReplacementCandidate(
+            track = track("bilibili:weaker", title = "秋分", durationMs = 198_000).copy(
+                artists = "游戏人生超好玩",
+            ),
+            score = 0.60,
+        )
+        val ranked = rankReplacementCandidatesWithFallback(
+            request = ReplacementRankingRequest(
+                original = original,
+                candidates = listOf(weakerLexical, lexicalBoosted),
+                mode = ReplacementRankingMode.OnDevice,
+                strictness = SmartReplacementStrictness.Balanced,
+                modelTier = ReplacementModelTier.Lite,
+            ),
+            ranker = object : ReplacementRanker {
+                override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
+                    request.candidates.map { candidate ->
+                        val semantic = if (candidate.track.id == "bilibili:lexical") 0.50 else 0.80
+                        candidate.copy(
+                            score = semantic,
+                            modelScore = semantic,
+                            sameSongConfidence = semantic,
+                        )
+                    }
+            },
+        )
+
+        assertEquals("bilibili:weaker", ranked.first().track.id)
+        assertEquals(0.80, ranked.first().score)
+        assertEquals(0.80, ranked.first().modelScore)
+        assertEquals(0.80, ranked.first().sameSongConfidence)
+        assertTrue(ranked.first().autoEligible)
+        assertEquals("bilibili:lexical", ranked.last().track.id)
+        assertEquals(0.50, ranked.last().score)
+        assertFalse(ranked.last().autoEligible)
     }
 
     @Test
@@ -229,27 +286,46 @@ class ReplacementIntelligenceTest {
         )
 
         assertEquals("qqmusic:low", ranked.first().track.id)
+        assertEquals(0.74, ranked.first().score)
+        assertEquals(0.74, ranked.first().modelScore)
+        assertEquals(0.74, ranked.first().sameSongConfidence)
         assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
         assertTrue(ranked.first().autoEligible)
+        assertEquals(0.72, ranked.last().score)
+        assertTrue(ranked.last().autoEligible)
     }
 
     @Test
     fun modelCanRerankCandidatesButCannotBypassIdentityGate() = runTest {
-        val request = rankingRequest().let { original ->
-            original.copy(
-                candidates = original.candidates.mapIndexed { index, candidate ->
-                    candidate.copy(autoEligible = index == 0)
-                },
-            )
-        }
+        val original = track("netease:origin", durationMs = 200_000)
+        val close = ReplacementCandidate(track("qqmusic:close", durationMs = 198_000), score = 0.40)
+        val far = ReplacementCandidate(track("qqmusic:far", durationMs = 400_000), score = 0.40)
         val ranked = rankReplacementCandidatesWithFallback(
-            request = request,
-            ranker = modelRanker(confidence = 0.95),
+            request = ReplacementRankingRequest(
+                original = original,
+                candidates = listOf(far, close),
+                mode = ReplacementRankingMode.OnDevice,
+                strictness = SmartReplacementStrictness.Balanced,
+                modelTier = ReplacementModelTier.Lite,
+            ),
+            ranker = object : ReplacementRanker {
+                override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
+                    request.candidates.map { candidate ->
+                        val score = if (candidate.track.id == "qqmusic:far") 0.95 else 0.90
+                        candidate.copy(
+                            score = score,
+                            modelScore = score,
+                            sameSongConfidence = score,
+                        )
+                    }
+            },
         )
 
-        assertEquals("qqmusic:low", ranked.first().track.id)
-        assertTrue(ranked.first().autoEligible)
-        assertFalse(ranked.last().autoEligible)
+        assertEquals("qqmusic:far", ranked.first().track.id)
+        assertEquals(0.95, ranked.first().score)
+        assertFalse(ranked.first().autoEligible)
+        assertEquals("qqmusic:close", ranked.last().track.id)
+        assertTrue(ranked.last().autoEligible)
         assertEquals(ReplacementRankingStrategy.OnDeviceLite, ranked.first().rankingStrategy)
     }
 
@@ -327,31 +403,6 @@ class ReplacementIntelligenceTest {
     }
 
     @Test
-    fun studioOriginalSystemPolicyPrefersOfficialCompleteCandidates() {
-        val original = track("netease:origin")
-        val plain = track("qqmusic:plain")
-        val official = track(
-            id = "qqmusic:official",
-            title = "Song 官方完整版",
-        )
-        val lossless = track(
-            id = "qqmusic:lossless",
-            title = "Song 无损",
-        )
-
-        assertEquals(0.0, replacementSystemPreferenceAdjustment(original, plain))
-        assertTrue(replacementSystemPreferenceAdjustment(original, official) > 0.0)
-        assertTrue(replacementSystemPreferenceAdjustment(original, lossless) > 0.0)
-        assertEquals(
-            0.0,
-            replacementSystemPreferenceAdjustment(
-                original.copy(title = "Song Live"),
-                official,
-            ),
-        )
-    }
-
-    @Test
     fun identitySignalsScoreTitleArtistDurationAndAlbum() {
         val original = track("netease:origin", title = "晴天", durationMs = 200_000).copy(
             artists = "周杰伦",
@@ -374,15 +425,10 @@ class ReplacementIntelligenceTest {
         assertEquals(1.0, closeSignals.albumScore)
         assertTrue(closeSignals.durationScore > 0.9)
         assertTrue(closeSignals.lexicalScore > farSignals.lexicalScore)
-        assertEquals(
-            listOf("歌名相近 · 歌手相近 · 时长接近 · 专辑相近"),
-            closeSignals.reasonLabels(),
-        )
-        assertTrue(blendOnDeviceReplacementScore(0.8, closeSignals) > blendOnDeviceReplacementScore(0.8, farSignals))
     }
 
     @Test
-    fun onDeviceRankingBlendsLexicalIdentityWithoutChangingLegacyOrder() = runTest {
+    fun onDeviceRankingUsesModelScoreNotLexicalIdentity() = runTest {
         val original = track("netease:origin", title = "晴天", durationMs = 200_000).copy(
             artists = "周杰伦",
             album = "叶惠美",
@@ -395,7 +441,7 @@ class ReplacementIntelligenceTest {
             score = 0.60,
         )
         val far = ReplacementCandidate(
-            track = track("qqmusic:far", title = "另一首歌", durationMs = 320_000).copy(
+            track = track("qqmusic:far", title = "另一首歌", durationMs = 198_000).copy(
                 artists = "路人甲",
                 album = "合集",
             ),
@@ -408,28 +454,32 @@ class ReplacementIntelligenceTest {
             strictness = SmartReplacementStrictness.Balanced,
             modelTier = ReplacementModelTier.Lite,
         )
-        val evenSemanticRanker = object : ReplacementRanker {
+        val modelRanker = object : ReplacementRanker {
             override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
                 request.candidates.map { candidate ->
+                    val score = if (candidate.track.id == "qqmusic:close") 0.90 else 0.50
                     candidate.copy(
-                        score = 0.80,
-                        modelScore = 0.80,
-                        sameSongConfidence = 0.80,
+                        score = score,
+                        modelScore = score,
+                        sameSongConfidence = score,
                     )
                 }
         }
 
-        val onDevice = rankReplacementCandidatesWithFallback(request, evenSemanticRanker)
+        val onDevice = rankReplacementCandidatesWithFallback(request, modelRanker)
         val legacy = rankReplacementCandidatesWithFallback(
             request.copy(mode = ReplacementRankingMode.Legacy),
-            evenSemanticRanker,
+            modelRanker,
         )
 
         assertEquals("qqmusic:close", onDevice.first().track.id)
-        assertEquals(0.80, onDevice.first().modelScore)
-        assertEquals(0.80, onDevice.first().sameSongConfidence)
-        assertTrue(onDevice.first().score > onDevice.last().score)
-        assertTrue(onDevice.first().reasons.any { "歌名相近" in it && "时长接近" in it })
+        assertEquals(0.90, onDevice.first().score)
+        assertEquals(0.90, onDevice.first().modelScore)
+        assertEquals(0.90, onDevice.first().sameSongConfidence)
+        assertTrue(onDevice.first().autoEligible)
+        assertEquals(0.50, onDevice.last().score)
+        assertFalse(onDevice.last().autoEligible)
+        assertTrue(onDevice.none { candidate -> candidate.reasons.any { "歌名相近" in it } })
         assertEquals("qqmusic:far", legacy.first().track.id)
         assertEquals(ReplacementRankingStrategy.LegacyRules, legacy.first().rankingStrategy)
     }
@@ -444,18 +494,6 @@ class ReplacementIntelligenceTest {
         strictness = SmartReplacementStrictness.Balanced,
         modelTier = ReplacementModelTier.Lite,
     )
-
-    private fun modelRanker(confidence: Double): ReplacementRanker = object : ReplacementRanker {
-        override suspend fun rank(request: ReplacementRankingRequest): List<ReplacementCandidate> =
-            request.candidates.mapIndexed { index, candidate ->
-                candidate.copy(
-                    score = if (index == 0) 0.95 else 0.5,
-                    modelScore = if (index == 0) 0.95 else 0.5,
-                    sameSongConfidence = confidence,
-                    rankingStrategy = ReplacementRankingStrategy.OnDeviceLite,
-                )
-            }
-    }
 
     private fun track(
         id: String,
