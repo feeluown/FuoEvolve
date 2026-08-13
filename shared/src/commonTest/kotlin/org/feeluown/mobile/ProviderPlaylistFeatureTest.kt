@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.content.TextContent
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -976,7 +977,7 @@ class ProviderPlaylistFeatureTest {
     }
 
     @Test
-    fun smartReplacementDoesNotBlockOnOriginalLyricsFetch() = runTest {
+    fun smartReplacementDoesNotBlockOnOriginalLyricsFetch() = runBlocking {
         val lyricRequests = mutableListOf<String>()
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {

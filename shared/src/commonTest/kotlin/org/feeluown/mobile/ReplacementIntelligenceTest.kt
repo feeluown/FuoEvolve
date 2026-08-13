@@ -2,6 +2,8 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -13,17 +15,26 @@ class ReplacementIntelligenceTest {
     @Test
     fun providerSearchesUseBothQueriesAndIsolateSingleQueryFailure() = runTest {
         val calls = mutableListOf<String>()
+        val lock = Mutex()
         val result = searchReplacementCandidatesByProvider(
             providerIds = listOf("qqmusic", "bilibili"),
             queries = listOf("song artist", "song"),
             search = { providerId, query ->
-                calls += "$providerId:$query"
+                lock.withLock { calls += "$providerId:$query" }
                 if (providerId == "qqmusic" && query == "song artist") error("temporary failure")
                 listOf(track("$providerId:$query"))
             },
         )
 
-        assertEquals(4, calls.size)
+        assertEquals(
+            listOf(
+                "bilibili:song",
+                "bilibili:song artist",
+                "qqmusic:song",
+                "qqmusic:song artist",
+            ),
+            calls.sorted(),
+        )
         assertEquals(3, result.size)
         assertTrue(result.any { it.id == "qqmusic:song" })
         assertTrue(result.any { it.id == "bilibili:song artist" })
