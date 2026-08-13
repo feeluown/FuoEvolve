@@ -85,6 +85,10 @@ apk_abis() {
         paste -sd ' ' -
 }
 
+apk_entry_method() {
+    unzip -lv "$1" "$2" | awk -v target="$2" '$NF == target { print $2 }'
+}
+
 verify_smart_apk() {
     local apk="$1"
     local expected_abi="$2"
@@ -94,7 +98,7 @@ verify_smart_apk() {
     local standard_signer="$6"
     local standard_size="$7"
     local badging package version_code version_name signer abis label
-    local smart_models model_method model_sha256 vocab_sha256 smart_size smart_delta
+    local smart_models model_method native_lib native_method model_sha256 vocab_sha256 smart_size smart_delta
 
     badging="$(apk_badging "$apk")"
     package="$(badging_value "$badging" name)"
@@ -141,9 +145,15 @@ verify_smart_apk() {
         echo "Unexpected smart replacement model path: ${smart_models[0]}" >&2
         exit 1
     fi
-    model_method="$(unzip -lv "$apk" "${smart_models[0]}" | awk -v target="${smart_models[0]}" '$NF == target { print $2 }')"
-    if [[ "$model_method" != "Stored" ]]; then
-        echo "Smart APK ORT model must be stored without compression: ${smart_models[0]} ($model_method)" >&2
+    model_method="$(apk_entry_method "$apk" "${smart_models[0]}")"
+    if [[ -z "$model_method" || "$model_method" == "Stored" ]]; then
+        echo "Smart APK ORT model must be zip-compressed: ${smart_models[0]} ($model_method)" >&2
+        exit 1
+    fi
+    native_lib="lib/${expected_abi}/libonnxruntime.so"
+    native_method="$(apk_entry_method "$apk" "$native_lib")"
+    if [[ -z "$native_method" || "$native_method" == "Stored" ]]; then
+        echo "Smart APK ONNX Runtime library must be zip-compressed: $native_lib ($native_method)" >&2
         exit 1
     fi
     model_sha256="$(unzip -p "$apk" "$EXPECTED_MODEL_PATH" | sha256sum | awk '{ print $1 }')"

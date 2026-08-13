@@ -94,8 +94,13 @@ android {
         )
     }
 
-    androidResources {
-        noCompress += "ort"
+    packaging {
+        jniLibs {
+            // Compress .so in the APK and extract on install. Smaller than
+            // AGP's uncompressed mmap default; the replacement model is also
+            // copied out of assets before ORT loads it.
+            useLegacyPackaging = true
+        }
     }
 
     buildFeatures {
