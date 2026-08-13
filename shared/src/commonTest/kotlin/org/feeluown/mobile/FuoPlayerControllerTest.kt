@@ -652,6 +652,55 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun smartBuildDefaultsOnWhileStandardBuildKeepsUnsetPreferenceForUpgrade() = runTest {
+        val standardSettings = FakeSettingsStore()
+        val standardScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val standardController = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsRepository = standardSettings,
+                scope = standardScope,
+            )
+            advanceUntilIdle()
+
+            assertEquals(ReplacementRankingMode.Legacy, standardController.replacementRankingMode)
+            standardController.onLyricFontSizeChange(LyricFontSize.Large)
+            advanceUntilIdle()
+            assertNull(standardSettings.saved.replacementRankingMode)
+        } finally {
+            standardScope.cancel()
+        }
+
+        val smartSettings = FakeSettingsStore()
+        val smartScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val smartController = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsRepository = smartSettings,
+                replacementIntelligenceCapability = ReplacementIntelligenceCapability(
+                    modelIncluded = true,
+                    onDeviceAvailable = true,
+                ),
+                scope = smartScope,
+            )
+            advanceUntilIdle()
+
+            assertEquals(ReplacementRankingMode.OnDevice, smartController.replacementRankingMode)
+            smartController.onLyricFontSizeChange(LyricFontSize.Large)
+            advanceUntilIdle()
+            assertEquals(ReplacementRankingMode.OnDevice, smartSettings.saved.replacementRankingMode)
+        } finally {
+            smartScope.cancel()
+        }
+    }
+
+    @Test
     fun smartReplacementUsesConfiguredMinScore() = runTest {
         val provider = FakeProviderRepository(listOf(providerTrack("provider:1", "First")))
         val engine = FakePlaybackEngine()
@@ -675,7 +724,8 @@ class FuoPlayerControllerTest {
             controller.playFromSearch(0)
             advanceUntilIdle()
 
-            assertEquals(0.75, provider.lastSmartReplacementMinScore)
+            assertEquals(0.70, provider.lastSmartReplacementMinScore)
+            assertEquals(SmartReplacementStrictness.Strict, controller.smartReplacementStrictness)
         } finally {
             controllerScope.cancel()
         }
@@ -744,7 +794,8 @@ class FuoPlayerControllerTest {
             assertEquals(track.id, request?.track?.id)
             assertEquals(UnavailablePlaybackPolicy.SmartReplace, request?.unavailablePolicy)
             assertEquals(setOf("qqmusic", "bilibili"), request?.smartReplacementProviderIds)
-            assertEquals(0.75, request?.smartReplacementMinScore)
+            assertEquals(0.70, request?.smartReplacementMinScore)
+            assertEquals(SmartReplacementStrictness.Strict, request?.smartReplacementStrictness)
             assertEquals(true, request?.smartReplacementUseOriginalMetadata)
             assertEquals(true, request?.smartReplacementUseOriginalLyrics)
         } finally {
@@ -836,6 +887,98 @@ class FuoPlayerControllerTest {
             controller.playFromSearch(0)
             advanceUntilIdle()
             assertEquals(candidate.id, engine.lastTrack?.replacementId)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun manualReplacementLearnsOnlyAfterPlayingAndUsesPreviousAutomaticSourceAsNegative() = runTest {
+        val origin = providerTrack("netease:1", "First")
+        val automatic = providerTrack("bilibili:auto", "First Live").copy(
+            source = "bilibili",
+            providerName = "哔哩哔哩",
+        )
+        val selected = providerTrack("qqmusic:selected", "First").copy(
+            source = "qqmusic",
+            providerName = "QQ 音乐",
+        )
+        val candidate = ReplacementCandidate(selected, 0.91)
+        val currentAutomaticTrack = origin.copy(
+            isSmartReplacement = true,
+            originalId = origin.id,
+            originalTitle = origin.title,
+            originalArtists = origin.artists,
+            originalAlbum = origin.album,
+            originalSource = origin.source,
+            replacementId = automatic.id,
+            replacementTitle = automatic.title,
+            replacementArtists = automatic.artists,
+            replacementAlbum = automatic.album,
+            replacementSource = automatic.source,
+            replacementProviderName = automatic.providerName,
+            replacementStrategy = "title_artist_duration",
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(origin),
+            replacementCandidates = listOf(candidate),
+            resolveHandler = { track, _, _, _, _, _ ->
+                PlaybackPayload(
+                    url = "https://example.com/selected.mp3",
+                    title = track.originalTitle ?: track.title,
+                    artists = track.originalArtists ?: track.artists,
+                    album = track.originalAlbum ?: track.album,
+                    source = track.originalSource ?: track.source,
+                    isSmartReplacement = track.isSmartReplacement,
+                    originalId = track.originalId,
+                    replacementId = track.replacementId,
+                    replacementTitle = track.replacementTitle,
+                    replacementArtists = track.replacementArtists,
+                    replacementAlbum = track.replacementAlbum,
+                    replacementSource = track.replacementSource,
+                    replacementProviderName = track.replacementProviderName,
+                    replacementScore = track.replacementScore,
+                )
+            },
+        )
+        val engine = FakeDelayedPlaybackEngine()
+        val learning = ReplacementLearningRepository()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                settingsRepository = FakeSettingsStore(
+                    AppSettings(
+                        enabledProviderIds = setOf("netease", "qqmusic", "bilibili"),
+                        smartReplacementProviderIds = setOf("qqmusic", "bilibili"),
+                        replacementRankingMode = ReplacementRankingMode.OnDevice,
+                    ),
+                ),
+                replacementIntelligenceCapability = ReplacementIntelligenceCapability(
+                    modelIncluded = true,
+                    onDeviceAvailable = true,
+                ),
+                replacementLearningRepository = learning,
+                scope = controllerScope,
+            )
+            advanceUntilIdle()
+            engine.emitPlaying(currentAutomaticTrack)
+            advanceUntilIdle()
+
+            controller.selectReplacementCandidate(currentAutomaticTrack, candidate)
+            advanceUntilIdle()
+
+            assertEquals(0, learning.state.value.updateCount)
+            assertNull(learning.exactReplacementKey(origin.id))
+
+            engine.emitPlaying(engine.lastTrack ?: error("selected track was not prepared"))
+            advanceUntilIdle()
+
+            assertEquals(1, learning.state.value.updateCount)
+            assertEquals(selected.id, learning.exactReplacementKey(origin.id))
         } finally {
             controllerScope.cancel()
         }
@@ -5014,6 +5157,43 @@ class FuoPlayerControllerTest {
             seekPositions += positionMs
             mutableState.value = mutableState.value.copy(positionMs = positionMs)
         }
+    }
+
+    private class FakeDelayedPlaybackEngine : PlaybackEngine {
+        private val mutableState = MutableStateFlow(PlaybackState())
+        override val state = mutableState
+        var lastTrack: MusicTrack? = null
+
+        override fun prepareLoading(track: MusicTrack) {
+            lastTrack = track
+            mutableState.value = PlaybackState(
+                status = PlayerStatus.Loading,
+                currentTrack = track,
+            )
+        }
+
+        override fun play(track: MusicTrack, payload: PlaybackPayload) {
+            lastTrack = track
+            mutableState.value = PlaybackState(
+                status = PlayerStatus.Loading,
+                currentTrack = track,
+            )
+        }
+
+        fun emitPlaying(track: MusicTrack) {
+            mutableState.value = PlaybackState(
+                status = PlayerStatus.Playing,
+                currentTrack = track,
+            )
+        }
+
+        override fun pause() = Unit
+
+        override fun resume() = Unit
+
+        override fun stop() = Unit
+
+        override fun seekTo(positionMs: Long) = Unit
     }
 
     private class FakeInternalResolverPlaybackEngine : PlaybackEngine {

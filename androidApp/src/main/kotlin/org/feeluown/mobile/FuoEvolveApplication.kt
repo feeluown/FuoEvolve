@@ -15,11 +15,24 @@ import kotlinx.coroutines.launch
 class FuoEvolveApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    internal val replacementLearningRepository: ReplacementLearningRepository by lazy {
+        ReplacementLearningRepository(AndroidReplacementLearningStore(applicationContext))
+    }
+
+    internal val replacementIntelligence: AndroidReplacementIntelligence by lazy {
+        createAndroidReplacementIntelligence(
+            context = applicationContext,
+            learner = replacementLearningRepository,
+        )
+    }
+
     internal val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
             credentials = AndroidProviderCredentialStore(applicationContext),
             persistentCache = AndroidProviderCacheStore(applicationContext),
             isCellularConnection = ::isCellularConnection,
+            replacementRanker = replacementIntelligence.ranker,
+            replacementModelManager = replacementIntelligence.modelManager,
         )
     }
 
@@ -88,6 +101,8 @@ class FuoEvolveApplication : Application() {
             resourceCacheRepository = resourceCacheRepository,
             debugLogRepository = debugLogRepository,
             audioRecognitionRepository = audioRecognitionRepository,
+            replacementIntelligenceCapability = replacementIntelligence.capability,
+            replacementLearningRepository = replacementLearningRepository,
             oauthDeviceCodeAssistant = AndroidOAuthDeviceCodeAssistant(applicationContext),
             scope = appScope,
         ).also { controller ->
@@ -144,6 +159,7 @@ class FuoEvolveApplication : Application() {
     override fun onTerminate() {
         FuoPlaybackService.transportControls = null
         appScope.cancel()
+        runCatching { replacementIntelligence.close() }
         super.onTerminate()
     }
 }

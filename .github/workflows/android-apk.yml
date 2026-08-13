@@ -13,6 +13,8 @@ name: Android APK
       - "gradle/**"
       - "gradlew"
       - "gradlew.bat"
+      - "scripts/build-onnxruntime-mobile.sh"
+      - "scripts/verify-android-flavor-apks.sh"
       - ".github/workflows/android-apk.yml"
   pull_request:
     paths:
@@ -24,6 +26,8 @@ name: Android APK
       - "gradle/**"
       - "gradlew"
       - "gradlew.bat"
+      - "scripts/build-onnxruntime-mobile.sh"
+      - "scripts/verify-android-flavor-apks.sh"
       - ".github/workflows/android-apk.yml"
 
 concurrency:
@@ -70,7 +74,7 @@ jobs:
           use_oidc: true
 
   build-release-apks:
-    name: Build signed multi-ABI release APK
+    name: Build signed standard and smart release APKs
     runs-on: ubuntu-latest
     environment: android-apk
     timeout-minutes: 45
@@ -111,29 +115,53 @@ jobs:
           mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
           printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
-      - name: Build signed release APK
-        run: ./gradlew :androidApp:assembleRelease
+      - name: Build signed release APKs
+        run: ./gradlew :androidApp:assembleStandardRelease :androidApp:assembleSmartRelease
 
-      - name: Prepare signed release APK artifact
+      - name: Prepare signed release APK artifacts
         id: artifact
         env:
-          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
+          STANDARD_APK_GLOB: androidApp/build/outputs/apk/standard/release/*.apk
+          SMART_APK_GLOB: androidApp/build/outputs/apk/smart/release/*.apk
         run: |
           mkdir -p build/artifacts
-          mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
-          if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
-            printf '%s\n' "${apks[@]}"
+          mapfile -t standard_apks < <(compgen -G "$STANDARD_APK_GLOB" || true)
+          mapfile -t smart_apks < <(compgen -G "$SMART_APK_GLOB" || true)
+          if [ "${#standard_apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one standard release APK, found ${#standard_apks[@]}"
+            printf '%s\n' "${standard_apks[@]}"
             exit 1
           fi
-          artifact_path="build/artifacts/fuo-evolve-release-multi-abi-signed-${GITHUB_SHA}.apk"
-          cp "${apks[0]}" "$artifact_path"
-          echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
+          if [ "${#smart_apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one smart release APK, found ${#smart_apks[@]}"
+            printf '%s\n' "${smart_apks[@]}"
+            exit 1
+          fi
+          standard_path="build/artifacts/fuo-evolve-release-multi-abi-signed-${GITHUB_SHA}.apk"
+          smart_path="build/artifacts/fuo-evolve-release-smart-multi-abi-signed-${GITHUB_SHA}.apk"
+          cp "${standard_apks[0]}" "$standard_path"
+          cp "${smart_apks[0]}" "$smart_path"
+          echo "standard_path=$standard_path" >> "$GITHUB_OUTPUT"
+          echo "smart_path=$smart_path" >> "$GITHUB_OUTPUT"
 
-      - name: Upload signed release APK
+      - name: Verify release APK identities and flavor isolation
+        env:
+          STANDARD_APK: ${{ steps.artifact.outputs.standard_path }}
+          SMART_APK: ${{ steps.artifact.outputs.smart_path }}
+        run: bash scripts/verify-android-flavor-apks.sh "$STANDARD_APK" "$SMART_APK"
+
+      - name: Upload signed standard release APK
         uses: actions/upload-artifact@v7
         with:
           name: fuo-evolve-release-multi-abi-signed-${{ github.sha }}
-          path: ${{ steps.artifact.outputs.path }}
+          path: ${{ steps.artifact.outputs.standard_path }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload signed smart release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuo-evolve-release-smart-multi-abi-signed-${{ github.sha }}
+          path: ${{ steps.artifact.outputs.smart_path }}
           archive: false
           if-no-files-found: error

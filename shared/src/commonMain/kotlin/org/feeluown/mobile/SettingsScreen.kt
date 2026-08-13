@@ -59,7 +59,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -981,22 +980,9 @@ fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
 fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
     val enabled = controller.unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace
     val providers = controller.orderedProviders()
-    val presets = listOf(
-        "宽松" to 0.45,
-        "平衡" to DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-        "严格" to 0.70,
-    )
-    fun isPresetScore(score: Double): Boolean = presets.any { (_, presetScore) ->
-        kotlin.math.abs(score - presetScore) < 0.001
-    }
-    var customScoreExpanded by remember {
-        mutableStateOf(!isPresetScore(controller.smartReplacementMinScore))
-    }
-    LaunchedEffect(controller.smartReplacementMinScore) {
-        if (!isPresetScore(controller.smartReplacementMinScore)) {
-            customScoreExpanded = true
-        }
-    }
+    val capability = controller.replacementIntelligenceCapability
+    val onDeviceEnabled = controller.replacementRankingMode == ReplacementRankingMode.OnDevice &&
+        capability.onDeviceAvailable
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1007,7 +993,7 @@ fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "智能替换",
+                text = "智能换源",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1020,6 +1006,90 @@ fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (capability.modelIncluded) {
+                FuoSettingRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "端侧智能评分",
+                    supportingText = if (capability.onDeviceAvailable) {
+                        "在手机本地理解歌曲身份和版本；异常时自动回退传统规则"
+                    } else {
+                        capability.reason ?: "端侧模型当前不可用，将使用传统规则"
+                    },
+                    enabled = enabled && capability.onDeviceAvailable && !controller.isLoading,
+                    onClick = {
+                        controller.onReplacementRankingModeChange(
+                            if (onDeviceEnabled) ReplacementRankingMode.Legacy else ReplacementRankingMode.OnDevice,
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = onDeviceEnabled,
+                            enabled = enabled && capability.onDeviceAvailable && !controller.isLoading,
+                            onCheckedChange = { checked ->
+                                controller.onReplacementRankingModeChange(
+                                    if (checked) ReplacementRankingMode.OnDevice else ReplacementRankingMode.Legacy,
+                                )
+                            },
+                        )
+                    },
+                )
+                Text(
+                    text = "评分模型",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ReplacementModelTier.entries.forEach { tier ->
+                        val available = tier == ReplacementModelTier.Lite
+                        FilterChip(
+                            selected = controller.replacementModelTier == tier,
+                            enabled = enabled && onDeviceEnabled && available && !controller.isLoading,
+                            onClick = { controller.onReplacementModelTierChange(tier) },
+                            label = {
+                                Text(
+                                    when (tier) {
+                                        ReplacementModelTier.Lite -> "轻量模型"
+                                        ReplacementModelTier.Enhanced -> "增强模型（待下载）"
+                                    },
+                                )
+                            },
+                            colors = settingsFilterChipColors(),
+                        )
+                    }
+                }
+                Text(
+                    text = "智能版已内置轻量模型。增强模型下载入口仅在兼容运行时就绪后开放。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FuoSettingRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "根据我的换源选择优化",
+                    supportingText = "仅在本机学习音源和版本偏好，不上传数据",
+                    enabled = enabled && onDeviceEnabled && !controller.isLoading,
+                    onClick = {
+                        controller.onReplacementGeneralizedLearningEnabledChange(
+                            !controller.replacementGeneralizedLearningEnabled,
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = controller.replacementGeneralizedLearningEnabled,
+                            enabled = enabled && onDeviceEnabled && !controller.isLoading,
+                            onCheckedChange = controller::onReplacementGeneralizedLearningEnabledChange,
+                        )
+                    },
+                )
+            } else {
+                Text(
+                    text = capability.reason ?: "当前安装包未包含端侧模型，使用传统规则评分",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 text = "替换音源",
                 style = MaterialTheme.typography.bodyMedium,
@@ -1074,59 +1144,36 @@ fun SmartReplacementSettingsPanel(controller: FuoPlayerController) {
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                presets.forEach { (label, score) ->
+                SmartReplacementStrictness.entries.forEach { strictness ->
                     FilterChip(
-                        selected = !customScoreExpanded &&
-                            kotlin.math.abs(controller.smartReplacementMinScore - score) < 0.001,
+                        selected = controller.smartReplacementStrictness == strictness,
                         enabled = enabled && !controller.isLoading,
                         onClick = {
-                            customScoreExpanded = false
-                            controller.onSmartReplacementMinScoreChange(score)
+                            controller.onSmartReplacementStrictnessChange(strictness)
                         },
-                        label = { Text(label) },
+                        label = {
+                            Text(
+                                when (strictness) {
+                                    SmartReplacementStrictness.Relaxed -> "宽松"
+                                    SmartReplacementStrictness.Balanced -> "均衡"
+                                    SmartReplacementStrictness.Strict -> "严格"
+                                },
+                            )
+                        },
                         colors = settingsFilterChipColors(),
                     )
                 }
-                FilterChip(
-                    selected = customScoreExpanded,
-                    enabled = enabled && !controller.isLoading,
-                    onClick = { customScoreExpanded = true },
-                    label = { Text("自定义") },
-                    colors = settingsFilterChipColors(),
-                )
             }
-            if (customScoreExpanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "最低匹配分",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = formatSmartReplacementScore(controller.smartReplacementMinScore),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Slider(
-                        value = controller.smartReplacementMinScore.toFloat(),
-                        onValueChange = {
-                            controller.onSmartReplacementMinScoreChange(roundSmartReplacementScore(it.toDouble()))
-                        },
-                        valueRange = 0f..1f,
-                        steps = 19,
-                        enabled = enabled && !controller.isLoading,
-                    )
-                    Text(
-                        text = "分数越高匹配越严格",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            Text(
+                text = "身份门槛始终生效；严格度只改变自动选择阈值",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                enabled = !controller.isLoading,
+                onClick = controller::resetReplacementLearning,
+            ) {
+                Text("重置换源学习记录")
             }
         }
     }

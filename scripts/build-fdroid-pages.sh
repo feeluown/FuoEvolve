@@ -103,14 +103,17 @@ mapfile -t release_tags < <(
 
 downloaded=0
 for tag in "${release_tags[@]}"; do
+    safe_tag="${tag//\//-}"
+    expected_asset="fuo-evolve-${safe_tag}-android-signed.apk"
     asset_name="$(
         gh release view "$tag" \
             --repo "$REPOSITORY" \
             --json assets \
-            --jq '[.assets[].name | select(endswith("-android-signed.apk"))][0] // ""'
+            --jq '.assets[].name' |
+            awk -v expected="$expected_asset" '$0 == expected { print }'
     )"
     if [[ -z "$asset_name" ]]; then
-        echo "Skipping $tag: no multi-ABI signed APK"
+        echo "Skipping $tag: no standard signed APK named $expected_asset"
         continue
     fi
 
@@ -125,7 +128,7 @@ for tag in "${release_tags[@]}"; do
 done
 
 if (( downloaded == 0 )); then
-    echo "No multi-ABI release APKs were downloaded" >&2
+    echo "No standard release APKs were downloaded" >&2
     exit 1
 fi
 
@@ -142,6 +145,10 @@ for apk in "$WORK_DIR"/repo/*.apk; do
     fi
     if [[ "$signer" != "$EXPECTED_SIGNER_SHA256" ]]; then
         echo "Unexpected APK signer in $apk: $signer" >&2
+        exit 1
+    fi
+    if unzip -Z1 "$apk" | grep '^assets/smart_replacement/' > /dev/null; then
+        echo "Smart replacement assets are not allowed in the F-Droid APK: $apk" >&2
         exit 1
     fi
     if [[ -n "${version_codes[$version_code]:-}" ]]; then

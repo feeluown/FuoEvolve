@@ -117,8 +117,10 @@ Requirements:
 Build and install the Android debug app:
 
 ```bash
-./gradlew :androidApp:assembleDebug
-./gradlew :androidApp:installDebug
+./gradlew :androidApp:assembleStandardDebug
+./gradlew :androidApp:assembleSmartDebug
+./gradlew :androidApp:installStandardDebug
+./gradlew :androidApp:installSmartDebug
 ```
 
 Run shared tests and Android lint:

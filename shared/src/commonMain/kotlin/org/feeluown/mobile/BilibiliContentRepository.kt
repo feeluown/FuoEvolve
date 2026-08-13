@@ -189,11 +189,15 @@ fun createFuoProviderRepository(
     credentials: ProviderCredentialStore,
     persistentCache: ProviderPersistentCache? = null,
     isCellularConnection: () -> Boolean = { false },
+    replacementRanker: ReplacementRanker = LegacyReplacementRanker,
+    replacementModelManager: ReplacementModelManager? = null,
 ): ProviderMusicRepository {
     val delegate = createKotlinProviderRepository(
         credentials = credentials,
         persistentCache = persistentCache,
         isCellularConnection = isCellularConnection,
+        replacementRanker = replacementRanker,
+        replacementModelManager = replacementModelManager,
     )
     val qqmusicHttp = ProviderHttpClient(persistentCache = persistentCache)
     val qqmusic = QQMusicContentProvider(

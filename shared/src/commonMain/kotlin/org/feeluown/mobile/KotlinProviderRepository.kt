@@ -1,5 +1,10 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.feeluown.mobile.provider.bilibili.BilibiliProvider
@@ -30,6 +35,8 @@ class KotlinProviderRepository : ProviderMusicRepository {
     private val credentials: ProviderCredentialStore
     private val isCellularConnection: () -> Boolean
     private val providerMap: Map<String, KotlinMusicProvider>
+    private val replacementRanker: ReplacementRanker
+    private val replacementModelManager: ReplacementModelManager?
     private var enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS
     private var initialized = false
     private var wifiAudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY
@@ -40,16 +47,22 @@ class KotlinProviderRepository : ProviderMusicRepository {
         credentials = InMemoryProviderCredentialStore()
         isCellularConnection = { false }
         providerMap = createProviders(http, credentials)
+        replacementRanker = LegacyReplacementRanker
+        replacementModelManager = null
     }
 
     internal constructor(
         http: ProviderHttpClient,
         credentials: ProviderCredentialStore,
         isCellularConnection: () -> Boolean = { false },
+        replacementRanker: ReplacementRanker = LegacyReplacementRanker,
+        replacementModelManager: ReplacementModelManager? = null,
     ) {
         this.http = http
         this.credentials = credentials
         this.isCellularConnection = isCellularConnection
+        this.replacementRanker = replacementRanker
+        this.replacementModelManager = replacementModelManager
         providerMap = createProviders(http, credentials)
     }
 
@@ -111,20 +124,83 @@ class KotlinProviderRepository : ProviderMusicRepository {
         track: MusicTrack,
         smartReplacementProviderIds: Set<String>,
         smartReplacementMinScore: Double,
+    ): List<ReplacementCandidate> = replacementCandidates(
+        track = track,
+        smartReplacementProviderIds = smartReplacementProviderIds,
+        smartReplacementMinScore = smartReplacementMinScore,
+        replacementRankingMode = ReplacementRankingMode.Legacy,
+        smartReplacementStrictness = SmartReplacementStrictness.Balanced,
+        replacementModelTier = ReplacementModelTier.Lite,
+    )
+
+    override suspend fun replacementCandidates(
+        track: MusicTrack,
+        smartReplacementProviderIds: Set<String>,
+        smartReplacementMinScore: Double,
+        replacementRankingMode: ReplacementRankingMode,
+        smartReplacementStrictness: SmartReplacementStrictness,
+        replacementModelTier: ReplacementModelTier,
     ): List<ReplacementCandidate> {
         initialize()
         val mediaTrack = track.asOriginalMediaTrack()
         val originalProviderId = mediaTrack.source.ifBlank {
             splitResourceId(mediaTrack.providerId ?: mediaTrack.id).first
         }
-        val candidates = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
-            .flatMap { provider -> provider.search("${mediaTrack.title} ${mediaTrack.artists}").tracks }
-        val ranked = rankReplacementCandidates(
-            candidates = candidates,
-            minScore = smartReplacementMinScore,
-            scoreOf = { candidate -> replacementScore(mediaTrack, candidate) },
+        val providers = selectedProvidersForReplacement(smartReplacementProviderIds, originalProviderId)
+        val providerById = providers.associateBy { it.id }
+        val queries = replacementSearchQueries(mediaTrack)
+        val candidates = searchReplacementCandidatesByProvider(
+            providerIds = providers.map { it.id },
+            queries = queries,
+            search = { providerId, query -> providerById.getValue(providerId).search(query).tracks },
+        )
+        val legacyCandidates = replacementRankingPool(candidates.map { candidate ->
+            val versionKind = classifyReplacementVersion(candidate)
+            val versionCompatibility = replacementVersionCompatibility(
+                original = classifyReplacementVersion(mediaTrack),
+                candidate = versionKind,
+            )
+            val legacyScore = replacementScore(mediaTrack, candidate) * versionCompatibility
+            val identityEligible = candidate.passesReplacementIdentityGate(mediaTrack) &&
+                legacyScore >= MIN_REPLACEMENT_HARD_IDENTITY_SCORE
+            ReplacementCandidate(
+                track = candidate,
+                score = legacyScore,
+                legacyScore = legacyScore,
+                versionKind = versionKind,
+                versionCompatibility = versionCompatibility,
+                autoEligible = identityEligible && versionCompatibility > 0.0,
+                rankingStrategy = ReplacementRankingStrategy.LegacyRules,
+                reasons = if (identityEligible) emptyList() else listOf("未通过歌曲身份规则，仅可手动选择"),
+            )
+        })
+        val ranked = rankReplacementCandidatesWithFallback(
+            request = ReplacementRankingRequest(
+                original = mediaTrack,
+                candidates = legacyCandidates,
+                mode = replacementRankingMode,
+                strictness = smartReplacementStrictness,
+                modelTier = replacementModelTier,
+            ),
+            ranker = replacementRanker,
+            modelManager = replacementModelManager,
         )
         return ranked
+            .map { candidate ->
+                if (candidate.rankingStrategy.isOnDevice) {
+                    candidate
+                } else {
+                    candidate.copy(
+                        autoEligible = candidate.autoEligible &&
+                            candidate.score >= smartReplacementMinScore,
+                    )
+                }
+            }
+            .sortedWith(
+                compareByDescending<ReplacementCandidate> { it.autoEligible }
+                    .thenByDescending { it.score },
+            )
+            .take(MAX_REPLACEMENT_CANDIDATES)
     }
 
     override suspend fun resolve(
@@ -134,6 +210,28 @@ class KotlinProviderRepository : ProviderMusicRepository {
         smartReplacementMinScore: Double,
         smartReplacementUseOriginalMetadata: Boolean,
         smartReplacementUseOriginalLyrics: Boolean,
+    ): PlaybackPayload = resolve(
+        track = track,
+        unavailablePolicy = unavailablePolicy,
+        smartReplacementProviderIds = smartReplacementProviderIds,
+        smartReplacementMinScore = smartReplacementMinScore,
+        smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
+        smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
+        replacementRankingMode = ReplacementRankingMode.Legacy,
+        smartReplacementStrictness = SmartReplacementStrictness.Balanced,
+        replacementModelTier = ReplacementModelTier.Lite,
+    )
+
+    override suspend fun resolve(
+        track: MusicTrack,
+        unavailablePolicy: UnavailablePlaybackPolicy,
+        smartReplacementProviderIds: Set<String>,
+        smartReplacementMinScore: Double,
+        smartReplacementUseOriginalMetadata: Boolean,
+        smartReplacementUseOriginalLyrics: Boolean,
+        replacementRankingMode: ReplacementRankingMode,
+        smartReplacementStrictness: SmartReplacementStrictness,
+        replacementModelTier: ReplacementModelTier,
     ): PlaybackPayload {
         initialize()
         val quality = if (isCellularConnection()) {
@@ -168,6 +266,9 @@ class KotlinProviderRepository : ProviderMusicRepository {
             track = mediaTrack,
             smartReplacementProviderIds = smartReplacementProviderIds,
             smartReplacementMinScore = smartReplacementMinScore,
+            replacementRankingMode = replacementRankingMode,
+            smartReplacementStrictness = smartReplacementStrictness,
+            replacementModelTier = replacementModelTier,
         ).filterNot { candidate -> candidate.track.id == failedKnownReplacementId }
         val selected = selectRankedReplacementCandidate(
             candidates = candidates,
@@ -420,7 +521,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
 
     private fun selectedProvidersForReplacement(providerIds: Set<String>, originalProviderId: String): List<KotlinMusicProvider> {
         val ids = if (providerIds.isEmpty()) enabledProviderIds else providerIds
-        return ids.filter { it != originalProviderId }.mapNotNull { providerMap[it] }
+        return providerMap.values.filter { provider -> provider.id in ids && provider.id != originalProviderId }
     }
 
     private fun MusicTrack.asOriginalMediaTrack(): MusicTrack {
@@ -565,11 +666,87 @@ internal fun rankReplacementCandidates(
         .distinctBy { candidate -> candidate.track.id }
 }
 
+internal fun replacementRankingPool(
+    candidates: List<ReplacementCandidate>,
+): List<ReplacementCandidate> {
+    val deduplicated = candidates.distinctBy { candidate -> candidate.track.id }
+    val sourceAnchors = deduplicated
+        .groupBy { candidate -> candidate.track.source }
+        .values
+        .flatMap { sourceCandidates ->
+            sourceCandidates
+                .sortedByDescending { candidate -> candidate.legacyScore }
+                .take(REPLACEMENT_SOURCE_ANCHOR_COUNT)
+        }
+    return (sourceAnchors + deduplicated.sortedByDescending { candidate -> candidate.legacyScore })
+        .distinctBy { candidate -> candidate.track.id }
+        .take(MAX_REPLACEMENT_CANDIDATES)
+        .sortedByDescending { candidate -> candidate.legacyScore }
+}
+
+internal suspend fun searchReplacementCandidatesByProvider(
+    providerIds: List<String>,
+    queries: List<String>,
+    search: suspend (providerId: String, query: String) -> List<MusicTrack>,
+): List<MusicTrack> = supervisorScope {
+    providerIds.map { providerId ->
+        async {
+            supervisorScope {
+                queries.map { query ->
+                    async {
+                        try {
+                            withTimeoutOrNull(REPLACEMENT_PROVIDER_SEARCH_TIMEOUT_MS) {
+                                search(providerId, query)
+                            }.orEmpty()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    }
+                }.awaitAll()
+                    .flatten()
+                    .distinctBy { candidate -> candidate.id }
+                    .take(REPLACEMENT_CANDIDATES_PER_PROVIDER)
+            }
+        }
+    }.awaitAll()
+        .flatten()
+        .distinctBy { candidate -> candidate.id }
+}
+
+internal fun replacementSearchQueries(track: MusicTrack): List<String> {
+    val original = "${track.title} ${track.artists}".normalizeReplacementQueryWhitespace()
+    val normalizedTitle = track.title
+        .replace(REPLACEMENT_QUERY_BRACKETED_TEXT, " ")
+        .replace(REPLACEMENT_QUERY_FEAT_SUFFIX, " ")
+        .normalizeReplacementQueryWhitespace()
+    val normalizedArtists = track.artists
+        .replace(REPLACEMENT_QUERY_FEAT_SUFFIX, " ")
+        .normalizeReplacementQueryWhitespace()
+    val normalized = "$normalizedTitle $normalizedArtists".normalizeReplacementQueryWhitespace()
+    return listOf(original, normalized)
+        .filter { it.isNotBlank() }
+        .distinct()
+}
+
+private fun String.normalizeReplacementQueryWhitespace(): String =
+    trim().replace(Regex("\\s+"), " ")
+
+private const val REPLACEMENT_PROVIDER_SEARCH_TIMEOUT_MS = 8_000L
+private const val REPLACEMENT_SOURCE_ANCHOR_COUNT = 2
+private const val MIN_REPLACEMENT_HARD_IDENTITY_SCORE = 0.25
+private val REPLACEMENT_QUERY_BRACKETED_TEXT = Regex("[\\(（\\[【][^\\)）\\]】]*[\\)）\\]】]")
+private val REPLACEMENT_QUERY_FEAT_SUFFIX = Regex(
+    pattern = "(?i)(?:\\s|^)(?:feat\\.?|ft\\.?|featuring)\\s+.*$",
+)
+
 internal suspend fun <T> selectRankedReplacementCandidate(
     candidates: List<ReplacementCandidate>,
     resolve: suspend (MusicTrack) -> T?,
 ): Triple<MusicTrack, Double, T>? {
     for (candidate in candidates) {
+        if (!candidate.autoEligible) continue
         val resolved = resolve(candidate.track) ?: continue
         return Triple(candidate.track, candidate.score, resolved)
     }
@@ -654,8 +831,12 @@ fun createKotlinProviderRepository(
     credentials: ProviderCredentialStore,
     persistentCache: ProviderPersistentCache? = null,
     isCellularConnection: () -> Boolean = { false },
+    replacementRanker: ReplacementRanker = LegacyReplacementRanker,
+    replacementModelManager: ReplacementModelManager? = null,
 ): KotlinProviderRepository = KotlinProviderRepository(
     http = ProviderHttpClient(persistentCache = persistentCache),
     credentials = credentials,
     isCellularConnection = isCellularConnection,
+    replacementRanker = replacementRanker,
+    replacementModelManager = replacementModelManager,
 )

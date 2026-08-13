@@ -460,6 +460,9 @@ class FuoPlaybackService : MediaSessionService() {
                     request.smartReplacementMinScore,
                     request.smartReplacementUseOriginalMetadata,
                     request.smartReplacementUseOriginalLyrics,
+                    request.replacementRankingMode,
+                    request.smartReplacementStrictness,
+                    request.replacementModelTier,
                 )
             }
     }

@@ -30,24 +30,48 @@ private fun PlaybackRequest.toJsonObject(): JSONObject = JSONObject()
     .put("unavailable_policy", unavailablePolicy.name)
     .put("replacement_provider_ids", JSONArray(smartReplacementProviderIds.toList()))
     .put("replacement_min_score", smartReplacementMinScore)
+    .put("replacement_ranking_mode", replacementRankingMode.name)
+    .put("replacement_strictness", smartReplacementStrictness.name)
+    .put("replacement_model_tier", replacementModelTier.name)
     .put("use_original_metadata", true)
     .put("use_original_lyrics", true)
     .put("resolve_only_selected_replacement", resolveOnlySelectedReplacement)
 
-private fun JSONObject.toPlaybackRequest(): PlaybackRequest = PlaybackRequest(
-    track = getJSONObject("track").toMusicTrack(),
-    resolveTrack = getJSONObject("resolve_track").toMusicTrack(),
-    requestedPartIndex = optInt("requested_part_index", -1).takeIf { it >= 0 },
-    unavailablePolicy = optString("unavailable_policy")
-        .let { value -> runCatching { UnavailablePlaybackPolicy.valueOf(value) }.getOrDefault(DEFAULT_UNAVAILABLE_PLAYBACK_POLICY) },
-    smartReplacementProviderIds = optJSONArray("replacement_provider_ids")
-        ?.let { ids -> buildSet { for (index in 0 until ids.length()) add(ids.getString(index)) } }
-        .orEmpty(),
-    smartReplacementMinScore = optDouble("replacement_min_score", DEFAULT_SMART_REPLACEMENT_MIN_SCORE),
-    smartReplacementUseOriginalMetadata = true,
-    smartReplacementUseOriginalLyrics = true,
-    resolveOnlySelectedReplacement = optBoolean("resolve_only_selected_replacement", false),
-)
+private fun JSONObject.toPlaybackRequest(): PlaybackRequest {
+    val legacyMinScore = optDouble(
+        "replacement_min_score",
+        DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    ).coerceIn(0.0, 1.0)
+    val strictness = optString("replacement_strictness")
+        .takeIf { it.isNotBlank() }
+        ?.let { value -> runCatching { SmartReplacementStrictness.valueOf(value) }.getOrNull() }
+        ?: smartReplacementStrictnessForLegacyScore(legacyMinScore)
+    return PlaybackRequest(
+        track = getJSONObject("track").toMusicTrack(),
+        resolveTrack = getJSONObject("resolve_track").toMusicTrack(),
+        requestedPartIndex = optInt("requested_part_index", -1).takeIf { it >= 0 },
+        unavailablePolicy = optString("unavailable_policy")
+            .let { value -> runCatching { UnavailablePlaybackPolicy.valueOf(value) }.getOrDefault(DEFAULT_UNAVAILABLE_PLAYBACK_POLICY) },
+        smartReplacementProviderIds = optJSONArray("replacement_provider_ids")
+            ?.let { ids -> buildSet { for (index in 0 until ids.length()) add(ids.getString(index)) } }
+            .orEmpty(),
+        smartReplacementMinScore = strictness.legacyMinScore,
+        replacementRankingMode = optString("replacement_ranking_mode")
+            .let { value ->
+                runCatching { ReplacementRankingMode.valueOf(value) }
+                    .getOrDefault(ReplacementRankingMode.Legacy)
+            },
+        smartReplacementStrictness = strictness,
+        replacementModelTier = optString("replacement_model_tier")
+            .let { value ->
+                runCatching { ReplacementModelTier.valueOf(value) }
+                    .getOrDefault(ReplacementModelTier.Lite)
+            },
+        smartReplacementUseOriginalMetadata = true,
+        smartReplacementUseOriginalLyrics = true,
+        resolveOnlySelectedReplacement = optBoolean("resolve_only_selected_replacement", false),
+    )
+}
 
 internal fun MusicTrack.toJsonObject(): JSONObject = JSONObject()
     .put("id", id)

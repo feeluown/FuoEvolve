@@ -109,6 +109,10 @@ data class AppSettings(
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
     val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    val replacementRankingMode: ReplacementRankingMode? = null,
+    val replacementModelTier: ReplacementModelTier = ReplacementModelTier.Lite,
+    val smartReplacementStrictness: SmartReplacementStrictness? = null,
+    val replacementGeneralizedLearningEnabled: Boolean = true,
     val smartReplacementSelections: Map<String, SmartReplacementSelection> = emptyMap(),
     val pauseOnOtherAppPlayback: Boolean = DEFAULT_PAUSE_ON_OTHER_APP_PLAYBACK,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
@@ -245,6 +249,16 @@ data class MusicTrack(
 data class ReplacementCandidate(
     val track: MusicTrack,
     val score: Double,
+    val legacyScore: Double = score,
+    val modelScore: Double? = null,
+    val sameSongConfidence: Double? = null,
+    val versionKind: ReplacementVersionKind = ReplacementVersionKind.Unknown,
+    val versionCompatibility: Double? = null,
+    val autoEligible: Boolean = true,
+    val rankingStrategy: ReplacementRankingStrategy = ReplacementRankingStrategy.LegacyRules,
+    val modelVersion: String? = null,
+    val reasons: List<String> = emptyList(),
+    val strategy: String = "legacy",
 )
 
 data class ReplacementCandidateState(
@@ -304,6 +318,9 @@ data class PlaybackRequest(
     val unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
     val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    val replacementRankingMode: ReplacementRankingMode = ReplacementRankingMode.Legacy,
+    val smartReplacementStrictness: SmartReplacementStrictness = SmartReplacementStrictness.Balanced,
+    val replacementModelTier: ReplacementModelTier = ReplacementModelTier.Lite,
     val smartReplacementUseOriginalMetadata: Boolean = true,
     val smartReplacementUseOriginalLyrics: Boolean = true,
     val resolveOnlySelectedReplacement: Boolean = false,
@@ -812,6 +829,18 @@ interface ProviderMusicRepository {
         smartReplacementProviderIds: Set<String> = emptySet(),
         smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
     ): List<ReplacementCandidate> = emptyList()
+    suspend fun replacementCandidates(
+        track: MusicTrack,
+        smartReplacementProviderIds: Set<String>,
+        smartReplacementMinScore: Double,
+        replacementRankingMode: ReplacementRankingMode,
+        smartReplacementStrictness: SmartReplacementStrictness,
+        replacementModelTier: ReplacementModelTier,
+    ): List<ReplacementCandidate> = replacementCandidates(
+        track = track,
+        smartReplacementProviderIds = smartReplacementProviderIds,
+        smartReplacementMinScore = smartReplacementMinScore,
+    )
     suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
@@ -820,6 +849,24 @@ interface ProviderMusicRepository {
         smartReplacementUseOriginalMetadata: Boolean = true,
         smartReplacementUseOriginalLyrics: Boolean = true,
     ): PlaybackPayload
+    suspend fun resolve(
+        track: MusicTrack,
+        unavailablePolicy: UnavailablePlaybackPolicy,
+        smartReplacementProviderIds: Set<String>,
+        smartReplacementMinScore: Double,
+        smartReplacementUseOriginalMetadata: Boolean,
+        smartReplacementUseOriginalLyrics: Boolean,
+        replacementRankingMode: ReplacementRankingMode,
+        smartReplacementStrictness: SmartReplacementStrictness,
+        replacementModelTier: ReplacementModelTier,
+    ): PlaybackPayload = resolve(
+        track = track,
+        unavailablePolicy = unavailablePolicy,
+        smartReplacementProviderIds = smartReplacementProviderIds,
+        smartReplacementMinScore = smartReplacementMinScore,
+        smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
+        smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
+    )
     suspend fun resolveSelectedReplacement(
         track: MusicTrack,
         smartReplacementUseOriginalMetadata: Boolean = true,

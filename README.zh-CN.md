@@ -117,8 +117,10 @@ FuoEvolve 使用 Kotlin Multiplatform 和 Compose Multiplatform 共享大部分�
 构建并安装 Android Debug 版本：
 
 ```bash
-./gradlew :androidApp:assembleDebug
-./gradlew :androidApp:installDebug
+./gradlew :androidApp:assembleStandardDebug
+./gradlew :androidApp:assembleSmartDebug
+./gradlew :androidApp:installStandardDebug
+./gradlew :androidApp:installSmartDebug
 ```
 
 运行共享测试和 Android lint：

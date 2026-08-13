@@ -6,6 +6,10 @@ name: Android Release
       - "*"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Run shared tests
@@ -32,7 +36,7 @@ jobs:
         run: ./gradlew :shared:allTests
 
   build-release-apks:
-    name: Build signed multi-ABI release APK
+    name: Build signed standard and smart release APKs
     if: github.event_name == 'push'
     needs: test
     runs-on: ubuntu-latest
@@ -77,30 +81,55 @@ jobs:
           mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
           printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
 
-      - name: Build signed release APK
-        run: ./gradlew :androidApp:assembleRelease
+      - name: Build signed release APKs
+        run: ./gradlew :androidApp:assembleStandardRelease :androidApp:assembleSmartRelease
 
-      - name: Prepare release APK asset
+      - name: Prepare release APK assets
         id: asset
         env:
-          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
+          STANDARD_APK_GLOB: androidApp/build/outputs/apk/standard/release/*.apk
+          SMART_APK_GLOB: androidApp/build/outputs/apk/smart/release/*.apk
         run: |
           mkdir -p build/artifacts
           tag="${GITHUB_REF_NAME//\//-}"
-          mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
-          if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
-            printf '%s\n' "${apks[@]}"
+          mapfile -t standard_apks < <(compgen -G "$STANDARD_APK_GLOB" || true)
+          mapfile -t smart_apks < <(compgen -G "$SMART_APK_GLOB" || true)
+          if [ "${#standard_apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one standard release APK, found ${#standard_apks[@]}"
+            printf '%s\n' "${standard_apks[@]}"
             exit 1
           fi
-          asset_path="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
-          cp "${apks[0]}" "$asset_path"
-          echo "path=$asset_path" >> "$GITHUB_OUTPUT"
+          if [ "${#smart_apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one smart release APK, found ${#smart_apks[@]}"
+            printf '%s\n' "${smart_apks[@]}"
+            exit 1
+          fi
+          standard_path="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
+          smart_path="build/artifacts/fuo-evolve-${tag}-android-smart-signed.apk"
+          cp "${standard_apks[0]}" "$standard_path"
+          cp "${smart_apks[0]}" "$smart_path"
+          echo "standard_path=$standard_path" >> "$GITHUB_OUTPUT"
+          echo "smart_path=$smart_path" >> "$GITHUB_OUTPUT"
 
-      - name: Upload release APK asset
+      - name: Verify release APK identities and flavor isolation
+        env:
+          STANDARD_APK: ${{ steps.asset.outputs.standard_path }}
+          SMART_APK: ${{ steps.asset.outputs.smart_path }}
+        run: bash scripts/verify-android-flavor-apks.sh "$STANDARD_APK" "$SMART_APK"
+
+      - name: Upload standard release APK asset
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ steps.asset.outputs.path }}
+          name: android-standard-release-apk
+          path: ${{ steps.asset.outputs.standard_path }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload smart release APK asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-smart-release-apk
+          path: ${{ steps.asset.outputs.smart_path }}
           archive: false
           if-no-files-found: error
 
@@ -118,21 +147,24 @@ jobs:
       - name: Download release APK assets
         uses: actions/download-artifact@v8
         with:
-          pattern: fuo-evolve-*-android-signed.apk
+          pattern: android-*-release-apk
           path: build/artifacts
           merge-multiple: true
 
       - name: Verify release APK assets
         run: |
           tag="${GITHUB_REF_NAME//\//-}"
-          asset="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
-          if [ ! -f "$asset" ]; then
-            echo "::error::Missing release APK asset: $asset"
-            exit 1
-          fi
+          standard_asset="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
+          smart_asset="build/artifacts/fuo-evolve-${tag}-android-smart-signed.apk"
+          for asset in "$standard_asset" "$smart_asset"; do
+            if [ ! -f "$asset" ]; then
+              echo "::error::Missing release APK asset: $asset"
+              exit 1
+            fi
+          done
           mapfile -t apks < <(find build/artifacts -maxdepth 1 -type f -name '*.apk' -print)
-          if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one release APK asset, found ${#apks[@]}"
+          if [ "${#apks[@]}" -ne 2 ]; then
+            echo "::error::Expected exactly two release APK assets, found ${#apks[@]}"
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
@@ -177,6 +209,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Build F-Droid repository and Pages site
         run: |

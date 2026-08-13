@@ -866,8 +866,27 @@ fun ReplacementInfoDialog(
                                                 style = MaterialTheme.typography.bodySmall,
                                             )
                                             Text(
-                                                text = "${sourceLabel(candidate.track, null)} · 匹配度 ${formatSmartReplacementScore(candidate.score)}",
+                                                text = buildString {
+                                                    append(sourceLabel(candidate.track, null))
+                                                    append(" · 推荐 ")
+                                                    append(formatSmartReplacementScore(candidate.score))
+                                                    append(" · ")
+                                                    append(candidate.versionKind.displayLabel)
+                                                },
                                                 maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                            Text(
+                                                text = buildString {
+                                                    append(candidate.rankingStrategy.displayLabel)
+                                                    candidate.reasons.lastOrNull()?.takeIf { it.isNotBlank() }?.let { reason ->
+                                                        append(" · ")
+                                                        append(reason)
+                                                    }
+                                                },
+                                                maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 style = MaterialTheme.typography.labelSmall,

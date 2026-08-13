@@ -32,6 +32,7 @@ private data class PendingManualReplacementSwitch(
     val previousTrack: MusicTrack?,
     val originalTrackId: String,
     val selection: SmartReplacementSelection,
+    val learningFeedback: ReplacementSelectionFeedback,
 )
 
 class FuoPlayerController(
@@ -49,6 +50,12 @@ class FuoPlayerController(
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val audioRecognitionRepository: AudioRecognitionRepository = UnsupportedAudioRecognitionRepository,
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant = NoOpOAuthDeviceCodeAssistant,
+    private val replacementLearningRepository: ReplacementLearningRepository = ReplacementLearningRepository(),
+    val replacementIntelligenceCapability: ReplacementIntelligenceCapability = ReplacementIntelligenceCapability(
+        modelIncluded = false,
+        onDeviceAvailable = false,
+        reason = "当前平台未提供端侧模型",
+    ),
     private val scope: CoroutineScope,
 ) {
     private val providerState = ProviderControllerState()
@@ -275,6 +282,14 @@ class FuoPlayerController(
         private set
     var smartReplacementMinScore by mutableStateOf(DEFAULT_SMART_REPLACEMENT_MIN_SCORE)
         private set
+    var replacementRankingMode by mutableStateOf(ReplacementRankingMode.Legacy)
+        private set
+    var replacementModelTier by mutableStateOf(ReplacementModelTier.Lite)
+        private set
+    var smartReplacementStrictness by mutableStateOf(SmartReplacementStrictness.Balanced)
+        private set
+    var replacementGeneralizedLearningEnabled by mutableStateOf(true)
+        private set
     var replacementCandidateState by mutableStateOf(ReplacementCandidateState())
         private set
     var lyricFontSize by mutableStateOf(LyricFontSize.Small)
@@ -343,6 +358,7 @@ class FuoPlayerController(
     private var autoAdvanceEligibleTrackId: String? = null
     private var lastRecoveredPlaybackErrorKey: String? = null
     private var playRequestSerial: Long = 0
+    private var replacementRankingModeWasExplicitlySet = false
     private var smartReplacementSelections: Map<String, SmartReplacementSelection> = emptyMap()
     private var replacementCandidatesJob: Job? = null
     private var pendingManualReplacementSwitch: PendingManualReplacementSwitch? = null
@@ -377,6 +393,7 @@ class FuoPlayerController(
             val loadedSettings = runCatching { settingsRepository.awaitSettings() }
             loadedSettings.getOrNull()?.let {
                 applySettings(it)
+                runCatching { replacementLearningRepository.initialize(it.smartReplacementSelections) }
                 downloadRepository.updateParallelism(downloadParallelism)
             }
             isSettingsLoaded = true
@@ -1554,9 +1571,47 @@ class FuoPlayerController(
         persistSettings()
     }
 
-    fun onSmartReplacementMinScoreChange(value: Double) {
-        smartReplacementMinScore = value.coerceIn(0.0, 1.0)
+    fun onReplacementRankingModeChange(value: ReplacementRankingMode) {
+        replacementRankingModeWasExplicitlySet = true
+        replacementRankingMode = if (
+            value == ReplacementRankingMode.OnDevice &&
+            !replacementIntelligenceCapability.onDeviceAvailable
+        ) {
+            ReplacementRankingMode.Legacy
+        } else {
+            value
+        }
+        syncReplacementGeneralizedLearningState()
         persistSettings()
+    }
+
+    fun onSmartReplacementStrictnessChange(value: SmartReplacementStrictness) {
+        smartReplacementStrictness = value
+        smartReplacementMinScore = value.legacyMinScore
+        persistSettings()
+    }
+
+    fun onReplacementModelTierChange(value: ReplacementModelTier) {
+        replacementModelTier = value
+        persistSettings()
+    }
+
+    fun onReplacementGeneralizedLearningEnabledChange(value: Boolean) {
+        replacementGeneralizedLearningEnabled = value
+        syncReplacementGeneralizedLearningState()
+        persistSettings()
+    }
+
+    fun resetReplacementLearning() {
+        scope.launch {
+            runCatching { replacementLearningRepository.reset() }
+                .onSuccess {
+                    smartReplacementSelections = emptyMap()
+                    persistSettings()
+                    message = "换源学习记录已重置"
+                }
+                .onFailure(::setError)
+        }
     }
 
     fun onLyricFontSizeChange(value: LyricFontSize) {
@@ -2264,6 +2319,9 @@ class FuoPlayerController(
                         track = originalTrack,
                         smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
                         smartReplacementMinScore = smartReplacementMinScore,
+                        replacementRankingMode = effectiveReplacementRankingMode(),
+                        smartReplacementStrictness = smartReplacementStrictness,
+                        replacementModelTier = replacementModelTier,
                     )
                 }
             }.onSuccess { candidates ->
@@ -2271,7 +2329,10 @@ class FuoPlayerController(
                     replacementCandidateState = ReplacementCandidateState(
                         trackId = trackId,
                         candidates = candidates
-                            .sortedByDescending { candidate -> candidate.score }
+                            .sortedWith(
+                                compareByDescending<ReplacementCandidate> { candidate -> candidate.autoEligible }
+                                    .thenByDescending { candidate -> candidate.score },
+                            )
                             .distinctBy { candidate -> candidate.track.id },
                     )
                 }
@@ -2292,11 +2353,24 @@ class FuoPlayerController(
         val originalTrack = track.originalDetailTrack()
         val selection = candidate.toSmartReplacementSelection()
         val selectedTrack = originalTrack.withReplacementSelection(selection)
+        val previousAutomaticTrack = previousTrack
+            .takeIf {
+                it.isSmartReplacement &&
+                    it.replacementId != selection.replacementId &&
+                    it.replacementStrategy != "user_selected"
+            }
+            ?.replacementDetailTrack()
         replacementCandidateState = replacementCandidateState.copy(isLoading = false)
         startPlayback(
             track = selectedTrack,
             manualSelection = selection,
             rollbackTrack = previousTrack,
+            manualLearningFeedback = replacementSelectionFeedback(
+                original = originalTrack,
+                selected = candidate.track,
+                previousAutomatic = previousAutomaticTrack,
+                exactSelection = selection,
+            ),
         )
     }
 
@@ -3761,15 +3835,19 @@ class FuoPlayerController(
         downloadQueueFeedback = "已加入下载队列：${track.title}"
         scope.launch {
             runCatching {
+                val resolvedTrack = track.withRememberedReplacement()
                 val payload = providerRepository.resolve(
-                    track,
+                    resolvedTrack,
                     unavailablePlaybackPolicy,
                     selectedSmartReplacementProviderIds(),
                     smartReplacementMinScore,
                     true,
                     true,
+                    effectiveReplacementRankingMode(),
+                    smartReplacementStrictness,
+                    replacementModelTier,
                 )
-                downloadRepository.download(track, payload)
+                downloadRepository.download(resolvedTrack, payload)
             }
                 .onFailure { setError(it) }
         }
@@ -4189,6 +4267,7 @@ class FuoPlayerController(
         requestedPartIndex: Int? = null,
         manualSelection: SmartReplacementSelection? = null,
         rollbackTrack: MusicTrack? = null,
+        manualLearningFeedback: ReplacementSelectionFeedback? = null,
         messageAfterStart: String? = null,
         suppressPlaybackRecovery: Boolean = false,
     ) {
@@ -4200,11 +4279,15 @@ class FuoPlayerController(
             track.withRememberedReplacement().preferDownloaded()
         }
         pendingManualReplacementSwitch = manualSelection?.let { selection ->
+            val feedback = requireNotNull(manualLearningFeedback) {
+                "manual replacement selection requires learning feedback"
+            }
             PendingManualReplacementSwitch(
                 requestSerial = requestSerial,
                 previousTrack = rollbackTrack,
                 originalTrackId = playbackTrack.originalId ?: playbackTrack.id,
                 selection = selection,
+                learningFeedback = feedback,
             )
         }
         val isPlaybackPartRequest = requestedPartIndex != null && playbackParts.isNotEmpty()
@@ -4254,6 +4337,9 @@ class FuoPlayerController(
                                 smartReplacementMinScore,
                                 true,
                                 true,
+                                effectiveReplacementRankingMode(),
+                                smartReplacementStrictness,
+                                replacementModelTier,
                             )
                     }
                     if (requestSerial != playRequestSerial) return@playRequest
@@ -4373,6 +4459,9 @@ class FuoPlayerController(
                             unavailablePolicy = unavailablePlaybackPolicy,
                             smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
                             smartReplacementMinScore = smartReplacementMinScore,
+                            replacementRankingMode = effectiveReplacementRankingMode(),
+                            smartReplacementStrictness = smartReplacementStrictness,
+                            replacementModelTier = replacementModelTier,
                             smartReplacementUseOriginalMetadata = true,
                             smartReplacementUseOriginalLyrics = true,
                             resolveOnlySelectedReplacement = manualSelection != null,
@@ -4389,6 +4478,9 @@ class FuoPlayerController(
                                     unavailablePolicy = unavailablePlaybackPolicy,
                                     smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
                                     smartReplacementMinScore = smartReplacementMinScore,
+                                    replacementRankingMode = effectiveReplacementRankingMode(),
+                                    smartReplacementStrictness = smartReplacementStrictness,
+                                    replacementModelTier = replacementModelTier,
                                     smartReplacementUseOriginalMetadata = true,
                                     smartReplacementUseOriginalLyrics = true,
                                 ),
@@ -4615,7 +4707,9 @@ class FuoPlayerController(
 
     private fun MusicTrack.withRememberedReplacement(): MusicTrack {
         val originalTrack = originalDetailTrack()
-        val selection = smartReplacementSelections[originalTrack.id] ?: return this
+        val selection = smartReplacementSelections[originalTrack.id]
+            ?: replacementLearningRepository.exactSelection(originalTrack.id)
+            ?: return this
         val enabledReplacementProviderIds = selectedSmartReplacementProviderIds()
         if (selection.replacementSource !in enabledReplacementProviderIds) {
             return if (isSmartReplacement) originalTrack else this
@@ -4634,10 +4728,22 @@ class FuoPlayerController(
         ) {
             return
         }
-        smartReplacementSelections = smartReplacementSelections +
-            (pending.originalTrackId to pending.selection)
+        smartReplacementSelections = rememberExactReplacementMapping(
+            mappings = smartReplacementSelections,
+            originalKey = pending.originalTrackId,
+            replacement = pending.selection,
+        )
         pendingManualReplacementSwitch = null
         persistSettings()
+        scope.launch {
+            runCatching {
+                replacementLearningRepository.record(
+                    feedback = pending.learningFeedback,
+                    status = engineState.status,
+                    observedAtMillis = currentTimeMillis(),
+                )
+            }
+        }
     }
 
     private fun rollbackManualReplacement(requestSerial: Long, errorMessage: String?): Boolean {
@@ -4983,8 +5089,22 @@ class FuoPlayerController(
         cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
         unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
         smartReplacementProviderIds = settings.smartReplacementProviderIds
-        smartReplacementMinScore = settings.smartReplacementMinScore.coerceIn(0.0, 1.0)
-        smartReplacementSelections = settings.smartReplacementSelections
+        smartReplacementStrictness = settings.smartReplacementStrictness
+            ?: smartReplacementStrictnessForLegacyScore(
+                settings.smartReplacementMinScore.coerceIn(0.0, 1.0),
+            )
+        smartReplacementMinScore = smartReplacementStrictness.legacyMinScore
+        replacementRankingMode = settings.replacementRankingMode
+            ?: if (replacementIntelligenceCapability.onDeviceAvailable) {
+                ReplacementRankingMode.OnDevice
+            } else {
+                ReplacementRankingMode.Legacy
+            }
+        replacementRankingModeWasExplicitlySet = settings.replacementRankingMode != null
+        replacementModelTier = settings.replacementModelTier
+        replacementGeneralizedLearningEnabled = settings.replacementGeneralizedLearningEnabled
+        syncReplacementGeneralizedLearningState()
+        smartReplacementSelections = cappedExactReplacementMappings(settings.smartReplacementSelections)
         lyricFontSize = settings.lyricFontSize
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
@@ -5027,6 +5147,13 @@ class FuoPlayerController(
             unavailablePlaybackPolicy = unavailablePlaybackPolicy,
             smartReplacementProviderIds = smartReplacementProviderIds,
             smartReplacementMinScore = smartReplacementMinScore,
+            replacementRankingMode = replacementRankingMode.takeIf {
+                replacementRankingModeWasExplicitlySet ||
+                    replacementIntelligenceCapability.modelIncluded
+            },
+            replacementModelTier = replacementModelTier,
+            smartReplacementStrictness = smartReplacementStrictness,
+            replacementGeneralizedLearningEnabled = replacementGeneralizedLearningEnabled,
             smartReplacementSelections = smartReplacementSelections,
             lyricFontSize = lyricFontSize,
             themeMode = themeMode,
@@ -5058,6 +5185,23 @@ class FuoPlayerController(
         val availableEnabledIds = enabledProviderIds.intersect(availableProviders.map { it.providerId }.toSet())
             .ifEmpty { enabledProviderIds }
         return smartReplacementProviderIds.intersect(availableEnabledIds).ifEmpty { availableEnabledIds }
+    }
+
+    private fun effectiveReplacementRankingMode(): ReplacementRankingMode =
+        if (
+            replacementRankingMode == ReplacementRankingMode.OnDevice &&
+            replacementIntelligenceCapability.onDeviceAvailable
+        ) {
+            ReplacementRankingMode.OnDevice
+        } else {
+            ReplacementRankingMode.Legacy
+        }
+
+    private fun syncReplacementGeneralizedLearningState() {
+        replacementLearningRepository.setGeneralizedLearningEnabled(
+            replacementGeneralizedLearningEnabled &&
+                effectiveReplacementRankingMode() == ReplacementRankingMode.OnDevice,
+        )
     }
 
     private fun selectedProviderIdsFor(section: ProviderDisplaySection): Set<String> {

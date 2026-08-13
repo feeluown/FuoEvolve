@@ -50,6 +50,21 @@ android {
     namespace = "org.feeluown.mobile"
     compileSdk = 36
 
+    flavorDimensions += "intelligence"
+
+    productFlavors {
+        create("standard") {
+            dimension = "intelligence"
+            isDefault = true
+            buildConfigField("boolean", "ON_DEVICE_REPLACEMENT_MODEL_INCLUDED", "false")
+        }
+        create("smart") {
+            dimension = "intelligence"
+            versionNameSuffix = "-smart"
+            buildConfigField("boolean", "ON_DEVICE_REPLACEMENT_MODEL_INCLUDED", "true")
+        }
+    }
+
     defaultConfig {
         applicationId = "org.feeluown.mobile"
         minSdk = 24
@@ -64,6 +79,10 @@ android {
         getByName("main").assets.srcDir(
             rootProject.file("shared/src/commonMain/resources"),
         )
+    }
+
+    androidResources {
+        noCompress += "ort"
     }
 
     buildFeatures {
@@ -117,6 +136,7 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    add("smartImplementation", libs.onnxruntime.android)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.compose.material3.expressive)
@@ -130,4 +150,6 @@ dependencies {
     implementation(libs.jellyfin.media3.ffmpeg.decoder)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    testImplementation(kotlin("test"))
+    testImplementation(libs.json)
 }
