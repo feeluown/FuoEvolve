@@ -17,8 +17,7 @@ readonly EXPECTED_MODEL_PATH="assets/smart_replacement/fuo_replacement_lite_v1.o
 readonly EXPECTED_MODEL_SHA256="ccf14ca4aea30d29ad108a167d0c2ad1b521ab2ddac0e41038034167409ad382"
 readonly EXPECTED_VOCAB_PATH="assets/smart_replacement/vocab.txt"
 readonly EXPECTED_VOCAB_SHA256="45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
-readonly EXPECTED_STANDARD_LABEL="FuoEvolve"
-readonly EXPECTED_SMART_LABEL="FuoEvolve 智能版"
+readonly EXPECTED_LABEL="FuoEvolve"
 readonly WARN_SMART_APK_DELTA_BYTES=$((50 * 1024 * 1024))
 readonly MAX_SMART_APK_DELTA_BYTES=$((80 * 1024 * 1024))
 
@@ -125,7 +124,7 @@ verify_smart_apk() {
         echo "Unexpected smart APK ABI for $apk: $abis (expected $expected_abi)" >&2
         exit 1
     fi
-    if [[ "$label" != "$EXPECTED_SMART_LABEL" ]]; then
+    if [[ "$label" != "$EXPECTED_LABEL" ]]; then
         echo "Unexpected smart application label for $expected_abi: $label" >&2
         exit 1
     fi
@@ -201,7 +200,7 @@ if [[ "$standard_abis" != "$EXPECTED_STANDARD_ABIS" ]]; then
     echo "Unexpected standard APK ABIs: $standard_abis" >&2
     exit 1
 fi
-if [[ "$standard_label" != "$EXPECTED_STANDARD_LABEL" ]]; then
+if [[ "$standard_label" != "$EXPECTED_LABEL" ]]; then
     echo "Unexpected standard application label: $standard_label" >&2
     exit 1
 fi
