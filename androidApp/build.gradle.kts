@@ -77,7 +77,11 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            // Debug/install on a phone must stay fat. ABI splits are for release
+            // publishing so a device install task cannot deploy the x86_64 APK last.
+            isEnable = gradle.startParameter.taskNames.any { taskName ->
+                taskName.contains("Release", ignoreCase = true)
+            }
             reset()
             include("arm64-v8a", "x86_64")
             isUniversalApk = true
@@ -129,7 +133,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             if (hasFuoSigningConfig) {
                 signingConfig = signingConfigs.getByName("fuo")
             }

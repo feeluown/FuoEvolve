@@ -26,6 +26,8 @@ internal class AndroidBgeEmbeddingEngine(
         }
     }
     private val environment by lazy { OrtEnvironment.getEnvironment() }
+    private val sessionOptionsDelegate = lazy { createSessionOptions() }
+    private val sessionOptions by sessionOptionsDelegate
     private val sessionDelegate = lazy { createSession() }
     private val session by sessionDelegate
 
@@ -91,26 +93,34 @@ internal class AndroidBgeEmbeddingEngine(
 
     override fun close() {
         if (sessionDelegate.isInitialized()) {
-            session.close()
+            runCatching { session.close() }
+        }
+        if (sessionOptionsDelegate.isInitialized()) {
+            runCatching { sessionOptions.close() }
         }
     }
 
-    private fun createSession(): OrtSession {
-        val options = OrtSession.SessionOptions().apply {
+    private fun createSessionOptions(): OrtSession.SessionOptions =
+        OrtSession.SessionOptions().apply {
             setIntraOpNumThreads(MAX_INTRA_OP_THREADS)
             setInterOpNumThreads(1)
             setExecutionMode(OrtSession.SessionOptions.ExecutionMode.SEQUENTIAL)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         }
+
+    private fun createSession(): OrtSession {
         val modelFile = File(applicationContext.filesDir, MODEL_CACHE_FILE)
         if (!modelFile.exists() || modelFile.length() == 0L) {
+            val temporaryFile = File(applicationContext.filesDir, "$MODEL_CACHE_FILE.tmp")
             applicationContext.assets.open(MODEL_ASSET).use { input ->
-                modelFile.outputStream().use { output -> input.copyTo(output) }
+                temporaryFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (!temporaryFile.renameTo(modelFile)) {
+                temporaryFile.copyTo(modelFile, overwrite = true)
+                temporaryFile.delete()
             }
         }
-        return environment.createSession(modelFile.absolutePath, options).also {
-            options.close()
-        }
+        return environment.createSession(modelFile.absolutePath, sessionOptions)
     }
 
     private fun MusicTrack.toReplacementModelText(): String = buildString {

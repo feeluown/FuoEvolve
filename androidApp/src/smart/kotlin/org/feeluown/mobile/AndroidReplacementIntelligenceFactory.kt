@@ -9,14 +9,26 @@ internal fun createAndroidReplacementIntelligence(
     context: Context,
     learner: ReplacementLearningRepository,
 ): AndroidReplacementIntelligence {
-    val engine = AndroidBgeEmbeddingEngine(context)
-    val modelManager = AndroidReplacementModelManager(engine)
-    return AndroidReplacementIntelligence(
-        ranker = AndroidSemanticReplacementRanker(engine, learner, modelManager),
-        modelManager = modelManager,
-        capability = modelManager.capability,
-        closable = engine,
-    )
+    return try {
+        val engine = AndroidBgeEmbeddingEngine(context)
+        val modelManager = AndroidReplacementModelManager(engine)
+        AndroidReplacementIntelligence(
+            ranker = AndroidSemanticReplacementRanker(engine, learner, modelManager),
+            modelManager = modelManager,
+            capability = modelManager.capability,
+            closable = engine,
+        )
+    } catch (_: Throwable) {
+        AndroidReplacementIntelligence(
+            ranker = LegacyReplacementRanker,
+            modelManager = null,
+            capability = ReplacementIntelligenceCapability(
+                modelIncluded = BuildConfig.ON_DEVICE_REPLACEMENT_MODEL_INCLUDED,
+                onDeviceAvailable = false,
+                reason = "端侧模型不可用，已使用传统匹配",
+            ),
+        )
+    }
 }
 
 private class AndroidReplacementModelManager(
