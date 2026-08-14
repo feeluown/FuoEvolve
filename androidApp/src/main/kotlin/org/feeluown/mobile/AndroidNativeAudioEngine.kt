@@ -16,16 +16,26 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import kotlin.math.abs
 
 class AndroidNativeAudioEngine(
     private val context: Context,
     private val scope: CoroutineScope,
 ) : PlaybackEngine {
-    private val mutableState = MutableStateFlow(PlaybackState())
+    private val playbackResumeStore = AndroidPlaybackResumeStore(context)
+    private var restoredSession: AndroidPlaybackResumeSnapshot? = playbackResumeStore.load()
+    private val mutableState = MutableStateFlow(restoredSession?.toPlaybackState() ?: PlaybackState())
     private var rawAudioQuality: String? = null
     private var mediaController: MediaController? = null
     private var controllerConnecting = false
     private var pendingLockScreenLyrics: PendingLockScreenLyrics? = null
+    private var activePlan: PlaybackPlan? = restoredSession?.plan
+    private var pendingResumePositionMs: Long? = null
+    private var explicitStopRequested = false
+    private var startingPlayback = false
+    private var lastPersistedIdentity: String? = null
+    private var lastPersistedPositionMs: Long = restoredSession?.positionMs ?: 0L
+    private var restoredRepublishSerial = 0L
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
     override val resolvesResourcesInternally: Boolean = true
@@ -47,13 +57,45 @@ class AndroidNativeAudioEngine(
         }
         scope.launch {
             FuoPlaybackService.playbackState.collect { serviceState ->
+                if (serviceState.isEmptyIdleState() && !explicitStopRequested && !startingPlayback) {
+                    val session = restoredSession ?: playbackResumeStore.load()
+                    if (session != null) {
+                        restoredSession = session
+                        activePlan = session.plan
+                        publishRestoredState(session)
+                        return@collect
+                    }
+                }
+
+                if (!serviceState.isEmptyIdleState()) {
+                    startingPlayback = false
+                    if (serviceState.currentTrack != null) {
+                        restoredSession = null
+                    }
+                }
+
                 rawAudioQuality = serviceState.audioQuality
-                val audioFormatInfo = mutableState.value.audioFormatInfo
+                val currentState = mutableState.value
+                val audioFormatInfo = currentState.audioFormatInfo
+                val pendingPosition = pendingResumePositionMs
                 mutableState.value = serviceState.copy(
+                    positionMs = pendingPosition ?: serviceState.positionMs,
+                    playbackParts = if (pendingPosition != null && serviceState.playbackParts.isEmpty()) {
+                        currentState.playbackParts
+                    } else {
+                        serviceState.playbackParts
+                    },
+                    currentPartIndex = if (pendingPosition != null && serviceState.currentPartIndex < 0) {
+                        currentState.currentPartIndex
+                    } else {
+                        serviceState.currentPartIndex
+                    },
                     audioQuality = normalizedAudioQualityLabel(rawAudioQuality, audioFormatInfo),
-                    audioDecoderInfo = mutableState.value.audioDecoderInfo,
+                    audioDecoderInfo = currentState.audioDecoderInfo,
                     audioFormatInfo = audioFormatInfo,
                 )
+                applyPendingResumeSeek()
+                persistPlaybackState()
                 applyPendingLockScreenLyrics()
             }
         }
@@ -67,6 +109,10 @@ class AndroidNativeAudioEngine(
 
     override fun prepareLoading(track: MusicTrack) {
         pendingLockScreenLyrics = null
+        pendingResumePositionMs = null
+        restoredSession = null
+        explicitStopRequested = false
+        startingPlayback = true
         rawAudioQuality = null
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
@@ -88,6 +134,13 @@ class AndroidNativeAudioEngine(
 
     override fun play(plan: PlaybackPlan) {
         val first = plan.requests.firstOrNull() ?: return
+        explicitStopRequested = false
+        startingPlayback = true
+        restoredSession = null
+        pendingResumePositionMs = null
+        activePlan = plan
+        lastPersistedIdentity = null
+        lastPersistedPositionMs = 0L
         rawAudioQuality = null
         mutableState.value = mutableState.value.copy(
             status = PlayerStatus.Loading,
@@ -102,8 +155,10 @@ class AndroidNativeAudioEngine(
             playbackGeneration = plan.generation,
             errorMessage = null,
         )
+        persistPlaybackState(forceSession = true)
         runCatching { FuoPlaybackService.play(context, plan.toJson()) }
             .onFailure { throwable ->
+                startingPlayback = false
                 Log.e(TAG, "start playback service failed trackId=${first.track.id}", throwable)
                 mutableState.value = mutableState.value.copy(
                     status = PlayerStatus.Error,
@@ -118,16 +173,64 @@ class AndroidNativeAudioEngine(
         mediaController?.pause()
         FuoPlaybackService.pause(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
+        persistPlaybackState(forcePosition = true)
     }
 
     override fun resume() {
-        mediaController?.play()
+        explicitStopRequested = false
+        val controller = mediaController
+        val canResumeLiveSession = controller?.currentMediaItem != null &&
+            controller.playbackState != Player.STATE_IDLE
+        if (canResumeLiveSession) {
+            controller.play()
+            FuoPlaybackService.resume(context)
+            mutableState.value = mutableState.value.copy(status = PlayerStatus.Playing)
+            return
+        }
+
+        val session = restoredSession ?: playbackResumeStore.load()
+        val resumePlan = session?.resumePlan()
+        if (session != null && resumePlan != null) {
+            activePlan = resumePlan
+            restoredSession = session
+            pendingResumePositionMs = session.positionMs.coerceAtLeast(0L)
+            startingPlayback = true
+            lastPersistedIdentity = null
+            lastPersistedPositionMs = session.positionMs
+            mutableState.value = session.toPlaybackState().copy(
+                status = PlayerStatus.Loading,
+                playbackGeneration = resumePlan.generation,
+            )
+            persistPlaybackState(forceSession = true)
+            runCatching { FuoPlaybackService.play(context, resumePlan.toJson()) }
+                .onFailure { throwable ->
+                    startingPlayback = false
+                    Log.e(TAG, "restore playback service failed trackId=${session.currentTrack.id}", throwable)
+                    mutableState.value = session.toPlaybackState().copy(
+                        status = PlayerStatus.Error,
+                        errorMessage = throwable.message ?: "无法恢复播放进度",
+                    )
+                    return
+                }
+            connectController()
+            return
+        }
+
+        controller?.play()
         FuoPlaybackService.resume(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Playing)
     }
 
     override fun stop() {
         pendingLockScreenLyrics = null
+        pendingResumePositionMs = null
+        restoredSession = null
+        activePlan = null
+        explicitStopRequested = true
+        startingPlayback = false
+        lastPersistedIdentity = null
+        lastPersistedPositionMs = 0L
+        playbackResumeStore.clear()
         rawAudioQuality = null
         clearCurrentLockScreenLyrics()
         mediaController?.stop()
@@ -140,8 +243,17 @@ class AndroidNativeAudioEngine(
         val normalizedPosition = positionMs.coerceAtLeast(0).let { position ->
             duration.takeIf { it > 0 }?.let(position::coerceAtMost) ?: position
         }
+        pendingResumePositionMs = null
         mediaController?.seekTo(normalizedPosition)
         mutableState.value = mutableState.value.copy(positionMs = normalizedPosition)
+        persistPlaybackState(forcePosition = true)
+    }
+
+    internal fun republishRestoredState() {
+        val session = restoredSession ?: return
+        if (explicitStopRequested || startingPlayback) return
+        restoredRepublishSerial += 1L
+        publishRestoredState(session, forceGeneration = true)
     }
 
     /**
@@ -172,6 +284,7 @@ class AndroidNativeAudioEngine(
                 runCatching { future.get() }
                     .onSuccess { controller ->
                         mediaController = controller
+                        applyPendingResumeSeek()
                         applyPendingLockScreenLyrics()
                     }
                     .onFailure { throwable ->
@@ -184,6 +297,70 @@ class AndroidNativeAudioEngine(
             },
             ContextCompat.getMainExecutor(context),
         )
+    }
+
+    private fun publishRestoredState(
+        session: AndroidPlaybackResumeSnapshot,
+        forceGeneration: Boolean = false,
+    ) {
+        val restoredState = session.toPlaybackState()
+        val audioFormatInfo = mutableState.value.audioFormatInfo
+        mutableState.value = restoredState.copy(
+            playbackGeneration = if (forceGeneration) {
+                restoredState.playbackGeneration + restoredRepublishSerial
+            } else {
+                restoredState.playbackGeneration
+            },
+            audioDecoderInfo = mutableState.value.audioDecoderInfo,
+            audioFormatInfo = audioFormatInfo,
+            audioQuality = normalizedAudioQualityLabel(rawAudioQuality, audioFormatInfo),
+        )
+    }
+
+    private fun applyPendingResumeSeek() {
+        val position = pendingResumePositionMs ?: return
+        val controller = mediaController ?: return
+        val currentItem = controller.currentMediaItem ?: return
+        val trackId = mutableState.value.currentTrack?.id ?: restoredSession?.currentTrack?.id
+        if (trackId != null && !currentItem.matchesTrack(trackId)) return
+        controller.seekTo(position)
+        pendingResumePositionMs = null
+        mutableState.value = mutableState.value.copy(positionMs = position)
+        persistPlaybackState(forcePosition = true)
+    }
+
+    private fun persistPlaybackState(
+        forceSession: Boolean = false,
+        forcePosition: Boolean = false,
+    ) {
+        val plan = activePlan ?: return
+        val state = mutableState.value
+        val track = state.currentTrack ?: return
+        if (state.status !in RESTORABLE_STATUSES) return
+
+        val identity = buildString {
+            append(plan.generation)
+            append('|')
+            append(track.id)
+            append('|')
+            append(state.currentPartIndex)
+            append('|')
+            state.playbackParts.forEach { part ->
+                append(part.id)
+                append(',')
+            }
+        }
+        if (forceSession || identity != lastPersistedIdentity) {
+            playbackResumeStore.saveSession(plan, state)
+            lastPersistedIdentity = identity
+            lastPersistedPositionMs = state.positionMs
+            return
+        }
+
+        if (forcePosition || abs(state.positionMs - lastPersistedPositionMs) >= POSITION_PERSIST_INTERVAL_MS) {
+            playbackResumeStore.savePosition(state.positionMs, state.durationMs)
+            lastPersistedPositionMs = state.positionMs
+        }
     }
 
     private fun applyPendingLockScreenLyrics() {
@@ -271,6 +448,7 @@ class AndroidNativeAudioEngine(
             .toString()
 
     private fun updatePosition() {
+        applyPendingResumeSeek()
         val controller = mediaController ?: return
         if (controller.playbackState == Player.STATE_IDLE) return
         val currentState = mutableState.value
@@ -288,6 +466,7 @@ class AndroidNativeAudioEngine(
             bufferedMs = controller.bufferedPosition.coerceAtLeast(0),
             lyrics = currentState.lyrics ?: sessionLyrics,
         )
+        persistPlaybackState()
     }
 
     private fun MediaItem.toMusicTrack(): MusicTrack? {
@@ -328,6 +507,9 @@ class AndroidNativeAudioEngine(
         )
     }
 
+    private fun PlaybackState.isEmptyIdleState(): Boolean =
+        status == PlayerStatus.Idle && currentTrack == null
+
     private data class PendingLockScreenLyrics(
         val trackId: String,
         val lyrics: String,
@@ -336,5 +518,7 @@ class AndroidNativeAudioEngine(
     private companion object {
         private const val TAG = "FuoAudioEngine"
         private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
+        private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
+        private val RESTORABLE_STATUSES = setOf(PlayerStatus.Loading, PlayerStatus.Playing, PlayerStatus.Paused)
     }
 }
