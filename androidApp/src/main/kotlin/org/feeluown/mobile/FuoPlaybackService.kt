@@ -108,6 +108,14 @@ class FuoPlaybackService : MediaSessionService() {
                         publishPlaybackState()
                     }
 
+                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                        publishPlaybackState()
+                    }
+
+                    override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                        publishPlaybackState()
+                    }
+
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         publishPlaybackState()
                     }
@@ -576,10 +584,14 @@ class FuoPlaybackService : MediaSessionService() {
         val status = when {
             currentPlayer.playbackState == Player.STATE_ENDED && hasPendingOrLoadingRequest() -> PlayerStatus.Loading
             currentPlayer.playbackState == Player.STATE_ENDED -> PlayerStatus.Ended
-            currentPlayer.playbackState == Player.STATE_BUFFERING -> PlayerStatus.Loading
             currentPlayer.isPlaying -> PlayerStatus.Playing
-            currentPlayer.playbackState == Player.STATE_READY -> PlayerStatus.Paused
-            else -> PlayerStatus.Loading
+            currentPlayer.playbackState == Player.STATE_BUFFERING &&
+                currentPlayer.playWhenReady &&
+                currentPlayer.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE -> PlayerStatus.Loading
+            currentPlayer.playbackState == Player.STATE_READY ||
+                currentPlayer.playbackState == Player.STATE_BUFFERING ||
+                currentPlayer.currentMediaItem != null -> PlayerStatus.Paused
+            else -> PlayerStatus.Idle
         }
         mutablePlaybackState.value = PlaybackState(
             status = status,
