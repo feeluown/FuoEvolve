@@ -129,6 +129,19 @@ class FuoEvolveApplication : Application() {
                         }
                     }
             }
+            appScope.launch {
+                snapshotFlow {
+                    controller.playbackState.let { state ->
+                        state.queue.map { it.id } to state.queueIndex
+                    }
+                }
+                    .distinctUntilChanged()
+                    .collect { (queueIds, _) ->
+                        if (queueIds.isNotEmpty()) {
+                            playbackEngine.republishRestoredState()
+                        }
+                    }
+            }
         }
     }
 
