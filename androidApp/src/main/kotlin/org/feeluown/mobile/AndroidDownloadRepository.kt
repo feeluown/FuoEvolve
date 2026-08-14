@@ -8,18 +8,18 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,8 +28,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
-import java.net.URL
 import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.coroutines.coroutineContext
 
 class AndroidDownloadRepository(
@@ -39,6 +39,7 @@ class AndroidDownloadRepository(
 ) : DownloadRepository {
     private val records = linkedMapOf<String, DownloadRecord>()
     private val taskRecords = linkedMapOf<String, DownloadTask>()
+    private val resumeMetadata = linkedMapOf<String, DownloadResumeMetadata>()
     private val mutableStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
     private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -55,6 +56,7 @@ class AndroidDownloadRepository(
         withContext(Dispatchers.IO) {
             records.clear()
             taskRecords.clear()
+            resumeMetadata.clear()
             val file = indexFile()
             if (file.exists()) {
                 val array = JSONArray(file.readText())
@@ -78,8 +80,12 @@ class AndroidDownloadRepository(
                 records.values.forEach { record ->
                     taskRecords[record.trackId] = record.toCompletedTask()
                 }
-                saveTasks()
             }
+            loadResumeMetadata()
+            reconcileStorage()
+            saveRecords()
+            saveTasks()
+            saveResumeMetadata()
             publishStates()
             publishTasks()
             schedule()
@@ -142,11 +148,13 @@ class AndroidDownloadRepository(
             taskConnections.remove(taskId)?.disconnect()
             taskJobs.remove(taskId)?.cancel()
             val task = taskRecords.remove(taskId) ?: return
-            temporaryFile(task.id).delete()
+            deleteTemporaryFiles(task.id)
+            resumeMetadata.remove(task.id)
             val record = records.remove(task.id)
             if (deleteFile) record?.uri?.let(::deleteUri)
             saveRecords()
             saveTasks()
+            saveResumeMetadata()
             publishTasks()
             publishStates()
         }
@@ -165,9 +173,13 @@ class AndroidDownloadRepository(
                     runCatching { File(requireNotNull(Uri.parse(uri).path)).delete() }
                 }
             }
+            val taskKey = recordKey ?: key
+            taskRecords.remove(taskKey)
+            resumeMetadata.remove(taskKey)
+            deleteTemporaryFiles(taskKey)
             saveRecords()
-            taskRecords.remove(recordKey ?: key)
             saveTasks()
+            saveResumeMetadata()
             publishTasks()
             publishStates()
         }
@@ -224,11 +236,13 @@ class AndroidDownloadRepository(
             )
             taskMutex.withLock {
                 records[task.id] = record
+                resumeMetadata.remove(task.id)
                 updateTask(taskRecords.getValue(task.id).copy(
                     status = DownloadTaskStatus.Completed, completedUri = finalUri.toString(), downloadedBytes = bytes,
                     totalBytes = bytes, failureMessage = null, updatedAt = System.currentTimeMillis(),
                 ))
                 saveRecords()
+                saveResumeMetadata()
             }
             tempFile.delete()
         } catch (cancelled: CancellationException) {
@@ -258,12 +272,34 @@ class AndroidDownloadRepository(
             coroutineContext.ensureActive()
             payload.headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
             val existing = targetFile.length()
-            if (existing > 0) connection.setRequestProperty("Range", "bytes=$existing-")
+            val resourceKey = resumeResourceKey(payload.url)
+            val storedResume = taskMutex.withLock { resumeMetadata[taskId] }
+            val canResume = existing > 0L && storedResume?.resourceKey == resourceKey
+            if (canResume) {
+                connection.setRequestProperty("Range", "bytes=$existing-")
+                (storedResume?.etag ?: storedResume?.lastModified)?.let { validator ->
+                    connection.setRequestProperty("If-Range", validator)
+                }
+            }
             val responseCode = httpConnection?.responseCode
-            val append = existing > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL
+            val append = canResume && responseCode == HttpURLConnection.HTTP_PARTIAL
             val start = if (append) existing else 0L
             val total = connection.contentLengthLong.takeIf { it > 0 }?.plus(start)
+            val nextResume = DownloadResumeMetadata(
+                resourceKey = resourceKey,
+                etag = httpConnection?.getHeaderField("ETag")?.takeIf { it.isNotBlank() }
+                    ?: storedResume?.etag.takeIf { append },
+                lastModified = httpConnection?.getHeaderField("Last-Modified")?.takeIf { it.isNotBlank() }
+                    ?: storedResume?.lastModified.takeIf { append },
+            )
+            taskMutex.withLock {
+                resumeMetadata[taskId] = nextResume
+                saveResumeMetadata()
+            }
+
             var written = start
+            var lastPublishedAt = 0L
+            var lastPersistedAt = 0L
             connection.getInputStream().use { input ->
                 FileOutputStream(targetFile, append).use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -274,13 +310,32 @@ class AndroidDownloadRepository(
                         output.write(buffer, 0, read)
                         written += read
                         if (total != null) {
-                            val progress = (written.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                            scope.launch { taskMutex.withLock {
-                                taskRecords[taskId]?.let { updateTask(it.copy(downloadedBytes = written, totalBytes = total, updatedAt = System.currentTimeMillis())) }
-                            } }
+                            val now = System.currentTimeMillis()
+                            val publish = now - lastPublishedAt >= DownloadCheckpointPolicy.progressPublishIntervalMs
+                            val persist = now - lastPersistedAt >= DownloadCheckpointPolicy.persistenceIntervalMs
+                            if (publish || persist) {
+                                checkpointProgress(
+                                    taskId = taskId,
+                                    downloadedBytes = written,
+                                    totalBytes = total,
+                                    publish = publish,
+                                    persist = persist,
+                                )
+                                if (publish) lastPublishedAt = now
+                                if (persist) lastPersistedAt = now
+                            }
                         }
                     }
                 }
+            }
+            if (total != null) {
+                checkpointProgress(
+                    taskId = taskId,
+                    downloadedBytes = written,
+                    totalBytes = total,
+                    publish = true,
+                    persist = true,
+                )
             }
             return written
         } catch (throwable: Throwable) {
@@ -289,6 +344,29 @@ class AndroidDownloadRepository(
         } finally {
             taskMutex.withLock { taskConnections.remove(taskId) }
             httpConnection?.disconnect()
+        }
+    }
+
+    private suspend fun checkpointProgress(
+        taskId: String,
+        downloadedBytes: Long,
+        totalBytes: Long,
+        publish: Boolean,
+        persist: Boolean,
+    ) {
+        taskMutex.withLock {
+            val task = taskRecords[taskId] ?: return@withLock
+            if (task.status != DownloadTaskStatus.Downloading) return@withLock
+            taskRecords[taskId] = task.copy(
+                downloadedBytes = downloadedBytes,
+                totalBytes = totalBytes,
+                updatedAt = System.currentTimeMillis(),
+            )
+            if (persist) saveTasks()
+            if (publish) {
+                publishTasks()
+                publishStates()
+            }
         }
     }
 
@@ -423,11 +501,25 @@ class AndroidDownloadRepository(
 
     private fun indexFile(): File = File(context.filesDir, "downloads.json")
     private fun taskIndexFile(): File = File(context.filesDir, "download_tasks.json")
+    private fun resumeIndexFile(): File = File(context.filesDir, "download_resume.json")
 
     private fun temporaryFile(taskId: String, extension: String = "part"): File {
         val directory = File(context.filesDir, "download_parts")
         if (!directory.exists()) directory.mkdirs()
-        return File(directory, "${taskId.hashCode().toUInt().toString(16)}.$extension.part")
+        return File(directory, "${temporaryFilePrefix(taskId)}.$extension.part")
+    }
+
+    private fun temporaryFilePrefix(taskId: String): String = taskId.hashCode().toUInt().toString(16)
+
+    private fun deleteTemporaryFiles(taskId: String) {
+        val directory = File(context.filesDir, "download_parts")
+        if (!directory.isDirectory) return
+        val prefix = "${temporaryFilePrefix(taskId)}."
+        directory.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith(prefix) && file.name.endsWith(".part")) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     private fun deleteUri(uri: String) {
@@ -440,6 +532,112 @@ class AndroidDownloadRepository(
         taskRecords.values.forEach { array.put(it.toJson()) }
         taskIndexFile().writeText(array.toString())
     }
+
+    private fun loadResumeMetadata() {
+        val file = resumeIndexFile()
+        if (!file.isFile) return
+        runCatching {
+            val array = JSONArray(file.readText())
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                val taskId = item.optString("taskId").takeIf { it.isNotBlank() } ?: continue
+                val resourceKey = item.optString("resourceKey").takeIf { it.isNotBlank() } ?: continue
+                resumeMetadata[taskId] = DownloadResumeMetadata(
+                    resourceKey = resourceKey,
+                    etag = item.optString("etag").takeIf { it.isNotBlank() },
+                    lastModified = item.optString("lastModified").takeIf { it.isNotBlank() },
+                )
+            }
+        }.onFailure { throwable ->
+            Log.w(TAG, "load download resume metadata failed", throwable)
+        }
+    }
+
+    private fun saveResumeMetadata() {
+        val array = JSONArray()
+        resumeMetadata.forEach { (taskId, metadata) ->
+            array.put(
+                JSONObject()
+                    .put("taskId", taskId)
+                    .put("resourceKey", metadata.resourceKey)
+                    .put("etag", metadata.etag ?: "")
+                    .put("lastModified", metadata.lastModified ?: ""),
+            )
+        }
+        resumeIndexFile().writeText(array.toString())
+    }
+
+    private fun reconcileStorage() {
+        val now = System.currentTimeMillis()
+        val invalidCompletedIds = taskRecords.values
+            .filter { task ->
+                task.status == DownloadTaskStatus.Completed &&
+                    task.completedUri?.takeIf { it.isNotBlank() }?.let(::downloadedUriExists) != true
+            }
+            .map { it.id }
+            .toSet()
+        invalidCompletedIds.forEach { taskId ->
+            val task = taskRecords[taskId] ?: return@forEach
+            records.remove(taskId)
+            resumeMetadata.remove(taskId)
+            taskRecords[taskId] = task.copy(
+                status = DownloadTaskStatus.Failed,
+                downloadedBytes = 0L,
+                totalBytes = null,
+                completedUri = null,
+                failureMessage = "下载文件不存在，请重试",
+                updatedAt = now,
+            )
+        }
+
+        records.entries.toList().forEach { (taskId, record) ->
+            if (!downloadedUriExists(record.uri)) {
+                records.remove(taskId)
+                resumeMetadata.remove(taskId)
+                taskRecords[taskId]?.let { task ->
+                    taskRecords[taskId] = task.copy(
+                        status = DownloadTaskStatus.Failed,
+                        downloadedBytes = 0L,
+                        totalBytes = null,
+                        completedUri = null,
+                        failureMessage = "下载文件不存在，请重试",
+                        updatedAt = now,
+                    )
+                }
+            } else if (taskId !in taskRecords) {
+                taskRecords[taskId] = record.toCompletedTask()
+            }
+        }
+
+        val activePrefixes = taskRecords.values
+            .filter { it.status != DownloadTaskStatus.Completed }
+            .mapTo(hashSetOf()) { temporaryFilePrefix(it.id) }
+        val partsDirectory = File(context.filesDir, "download_parts")
+        partsDirectory.listFiles()?.forEach { file ->
+            if (!file.isFile || !file.name.endsWith(".part")) return@forEach
+            val prefix = file.name.substringBefore('.')
+            if (prefix !in activePrefixes) runCatching { file.delete() }
+        }
+    }
+
+    private fun downloadedUriExists(uriString: String): Boolean {
+        val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return false
+        return when (uri.scheme) {
+            "file" -> uri.path?.let(::File)?.isFile == true
+            "content" -> runCatching {
+                context.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.MediaColumns._ID),
+            null,
+            null,
+            null,
+        )?.use { cursor -> cursor.moveToFirst() } ?: false
+            }.getOrDefault(false)
+            else -> false
+        }
+    }
+
+    private fun resumeResourceKey(url: String): String = url.substringBefore('?').substringBefore('#')
 
     private fun JSONObject.toRecord(): DownloadRecord = DownloadRecord(
         trackId = getString("trackId"),

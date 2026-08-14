@@ -30,18 +30,40 @@ class FuoEvolveApplication : Application() {
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     }
 
-    private val localRepository: AndroidLocalMusicRepository by lazy {
-        AndroidLocalMusicRepository(applicationContext)
+    private val offlineAssetStore: AndroidOfflineAssetStore by lazy {
+        AndroidOfflineAssetStore(applicationContext)
+    }
+
+    private val indexedLocalRepository: LocalMusicRepository by lazy {
+        AndroidIndexedLocalMusicRepository(
+            context = applicationContext,
+            assetStore = offlineAssetStore,
+        )
+    }
+
+    private val localRepository: LocalMusicRepository by lazy {
+        AndroidCoalescingLocalMusicRepository(
+            delegate = indexedLocalRepository,
+            assetStore = offlineAssetStore,
+        )
     }
 
     private val localPlaylistRepository: AndroidLocalPlaylistRepository by lazy {
         AndroidLocalPlaylistRepository(applicationContext)
     }
 
-    private val downloadRepository: AndroidDownloadRepository by lazy {
+    private val rawDownloadRepository: AndroidDownloadRepository by lazy {
         AndroidDownloadRepository(applicationContext, providerRepository) { tasks ->
             FuoDownloadService.update(applicationContext, tasks)
         }
+    }
+
+    private val downloadRepository: DownloadRepository by lazy {
+        AndroidOfflineAwareDownloadRepository(
+            delegate = rawDownloadRepository,
+            assetStore = offlineAssetStore,
+            scope = appScope,
+        )
     }
 
     private val playbackEngine: AndroidNativeAudioEngine by lazy {

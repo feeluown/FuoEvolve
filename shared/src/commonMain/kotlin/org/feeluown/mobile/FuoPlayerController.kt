@@ -52,6 +52,9 @@ class FuoPlayerController(
     private val scope: CoroutineScope,
 ) {
     private val providerState = ProviderControllerState()
+    private val localMusicState = LocalMusicControllerState()
+    private val downloadState = DownloadControllerState()
+    private val settingsUiState = SettingsControllerState()
 
     var isSettingsLoaded by mutableStateOf(false)
         private set
@@ -183,7 +186,7 @@ class FuoPlayerController(
         private set
     var artistTargets by mutableStateOf<List<TrackArtistTarget>>(emptyList())
         private set
-    var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
+    var localTracks by localMusicState::tracks
         private set
     var query by mutableStateOf("")
         private set
@@ -209,17 +212,17 @@ class FuoPlayerController(
         private set
     var playlistFilter by mutableStateOf(PlaylistFilter.All)
         private set
-    var localMusicViewMode by mutableStateOf(LocalMusicViewMode.All)
+    var localMusicViewMode by localMusicState::viewMode
         private set
-    var localMusicDirectories by mutableStateOf<List<LocalMusicDirectory>>(emptyList())
+    var localMusicDirectories by localMusicState::directories
         private set
-    var selectedLocalMusicDirectoryId by mutableStateOf<String?>(null)
+    var selectedLocalMusicDirectoryId by localMusicState::selectedDirectoryId
         private set
-    var selectedLocalMusicCollection by mutableStateOf<LocalMusicCollectionSelection?>(null)
+    var selectedLocalMusicCollection by localMusicState::selectedCollection
         private set
-    var excludedLocalMusicDirectoryIds by mutableStateOf<Set<String>>(emptySet())
+    var excludedLocalMusicDirectoryIds by localMusicState::excludedDirectoryIds
         private set
-    var localMusicMinDurationSeconds by mutableStateOf(DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS)
+    var localMusicMinDurationSeconds by localMusicState::minDurationSeconds
         private set
     val isSearchOpen: Boolean
         get() = navigator.contains(AppRoute.Search)
@@ -247,59 +250,59 @@ class FuoPlayerController(
     fun showMessage(text: String) {
         message = text
     }
-    var downloadStates by mutableStateOf<Map<String, DownloadState>>(emptyMap())
+    var downloadStates by downloadState::states
         private set
-    var downloadTasks by mutableStateOf<List<DownloadTask>>(emptyList())
+    var downloadTasks by downloadState::tasks
         private set
-    var downloadQueueFeedback by mutableStateOf<String?>(null)
+    var downloadQueueFeedback by downloadState::queueFeedback
         private set
     var playbackState by mutableStateOf(PlaybackState())
         private set
     var trackChangeDirection by mutableStateOf(TrackChangeDirection.Next)
         private set
-    var cacheUsage by mutableStateOf(CacheUsage())
+    var cacheUsage by settingsUiState::cacheUsage
         private set
-    var audioCacheLimitMb by mutableStateOf(DEFAULT_AUDIO_CACHE_LIMIT_MB)
+    var audioCacheLimitMb by settingsUiState::audioCacheLimitMb
         private set
-    var imageCacheLimitMb by mutableStateOf(DEFAULT_IMAGE_CACHE_LIMIT_MB)
+    var imageCacheLimitMb by settingsUiState::imageCacheLimitMb
         private set
-    var downloadParallelism by mutableStateOf(DEFAULT_DOWNLOAD_PARALLELISM)
+    var downloadParallelism by downloadState::parallelism
         private set
-    var wifiAudioQualityPolicy by mutableStateOf(DEFAULT_WIFI_AUDIO_QUALITY_POLICY)
+    var wifiAudioQualityPolicy by settingsUiState::wifiAudioQualityPolicy
         private set
-    var cellularAudioQualityPolicy by mutableStateOf(DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY)
+    var cellularAudioQualityPolicy by settingsUiState::cellularAudioQualityPolicy
         private set
-    var unavailablePlaybackPolicy by mutableStateOf(DEFAULT_UNAVAILABLE_PLAYBACK_POLICY)
+    var unavailablePlaybackPolicy by settingsUiState::unavailablePlaybackPolicy
         private set
-    var smartReplacementProviderIds by mutableStateOf<Set<String>>(emptySet())
+    var smartReplacementProviderIds by settingsUiState::smartReplacementProviderIds
         private set
-    var smartReplacementMinScore by mutableStateOf(DEFAULT_SMART_REPLACEMENT_MIN_SCORE)
+    var smartReplacementMinScore by settingsUiState::smartReplacementMinScore
         private set
     var replacementCandidateState by mutableStateOf(ReplacementCandidateState())
         private set
-    var lyricFontSize by mutableStateOf(LyricFontSize.Small)
+    var lyricFontSize by settingsUiState::lyricFontSize
         private set
-    var themeMode by mutableStateOf(ThemeMode.System)
+    var themeMode by settingsUiState::themeMode
         private set
-    var themeColorScheme by mutableStateOf(ThemeColorScheme.Dynamic)
+    var themeColorScheme by settingsUiState::themeColorScheme
         private set
-    var dynamicCoverColorEnabled by mutableStateOf(false)
+    var dynamicCoverColorEnabled by settingsUiState::dynamicCoverColorEnabled
         private set
-    var pauseOnOtherAppPlayback by mutableStateOf(DEFAULT_PAUSE_ON_OTHER_APP_PLAYBACK)
+    var pauseOnOtherAppPlayback by settingsUiState::pauseOnOtherAppPlayback
         private set
-    var debugLogLines by mutableStateOf<List<String>>(emptyList())
+    var debugLogLines by settingsUiState::debugLogLines
         private set
-    var debugLogLevelFilters by mutableStateOf(DEFAULT_DEBUG_LOG_LEVEL_FILTERS)
+    var debugLogLevelFilters by settingsUiState::debugLogLevelFilters
         private set
-    var debugLogError by mutableStateOf<String?>(null)
+    var debugLogError by settingsUiState::debugLogError
         private set
-    var localMetadataEditorTrack by mutableStateOf<MusicTrack?>(null)
+    var localMetadataEditorTrack by localMusicState::metadataEditorTrack
         private set
-    var selectedLocalMetadataProviderId by mutableStateOf<String?>(null)
+    var selectedLocalMetadataProviderId by localMusicState::selectedMetadataProviderId
         private set
-    var localMetadataSearchResults by mutableStateOf<List<MusicTrack>>(emptyList())
+    var localMetadataSearchResults by localMusicState::metadataSearchResults
         private set
-    var localMetadataSearchMessage by mutableStateOf<String?>(null)
+    var localMetadataSearchMessage by localMusicState::metadataSearchMessage
         private set
     val isDebugLogViewerAvailable: Boolean
         get() = debugLogRepository.isAvailable
@@ -355,13 +358,23 @@ class FuoPlayerController(
     private var minePlaylistRefreshSerial: Long = 0
     private var mineContentRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
-    private var observedCompletedDownloadTaskIds = emptySet<String>()
-    private var pendingLocalMusicMediaRefresh: Job? = null
     private var audioRecognitionJob: Job? = null
     private var audioRecognitionSerial: Long = 0
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
     private val settingsUpdates = Channel<AppSettings>(capacity = Channel.UNLIMITED)
+    private val offlineLibraryCoordinator = OfflineLibraryControllerCoordinator(
+        scope = scope,
+        downloadRepository = downloadRepository,
+        localRepository = localRepository,
+        onDownloadStates = { downloadStates = it },
+        onDownloadTasks = { downloadTasks = it },
+        hasLocalMusicPermission = { hasLocalMusicPermission },
+        shouldShowLocalMusicLoading = { homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic },
+        refreshLocalMusic = { forceRefresh, showLoading ->
+            refreshLocalMusic(forceRefresh = forceRefresh, showLoading = showLoading)
+        },
+    )
 
     init {
         scope.launch {
@@ -416,25 +429,7 @@ class FuoPlayerController(
                 }
             }
         }
-        scope.launch {
-            downloadRepository.states.collect {
-                downloadStates = it
-            }
-        }
-        scope.launch {
-            downloadRepository.tasks.collect {
-                downloadTasks = it
-                val completedIds = it.filter { task -> task.status == DownloadTaskStatus.Completed }.map { task -> task.id }.toSet()
-                val newlyCompleted = completedIds - observedCompletedDownloadTaskIds
-                observedCompletedDownloadTaskIds = completedIds
-                if (newlyCompleted.isNotEmpty() && hasLocalMusicPermission) {
-                    refreshLocalMusic(
-                        forceRefresh = true,
-                        showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic,
-                    )
-                }
-            }
-        }
+        offlineLibraryCoordinator.start()
         scope.launch {
             resourceCacheRepository.usage.collect {
                 cacheUsage = it
@@ -497,18 +492,6 @@ class FuoPlayerController(
                         suppressPlaybackRecoveryRequestSerial = null
                     }
                     commitManualReplacementIfReady(engineState)
-                }
-            }
-        }
-        scope.launch {
-            localRepository.mediaChangeEvents.collect {
-                pendingLocalMusicMediaRefresh?.cancel()
-                pendingLocalMusicMediaRefresh = launch {
-                    delay(750)
-                    if (hasLocalMusicPermission && localRepository.isDatabaseReady()) {
-                        val showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic
-                        refreshLocalMusic(forceRefresh = true, showLoading = showLoading)
-                    }
                 }
             }
         }
