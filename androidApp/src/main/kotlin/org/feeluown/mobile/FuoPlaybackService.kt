@@ -58,6 +58,7 @@ class FuoPlaybackService : MediaSessionService() {
     private var preloadingGeneration: Long? = null
     private val preparedItems = mutableMapOf<String, PreparedPlayback>()
     private var activePlayback: PreparedPlayback? = null
+    private var activePlaybackHasReachedReady = false
     private var pendingPreloadError: String? = null
     @Volatile
     private var activeGeneration: Long = 0L
@@ -99,12 +100,16 @@ class FuoPlaybackService : MediaSessionService() {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         val prepared = mediaItem?.mediaId?.let(preparedItems::get) ?: return
                         activePlayback = prepared
+                        activePlaybackHasReachedReady = player.playbackState == Player.STATE_READY
                         enqueueRemainingParts(prepared)
                         publishPlaybackState()
                         preloadNext()
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY) {
+                            activePlaybackHasReachedReady = true
+                        }
                         publishPlaybackState()
                     }
 
@@ -247,6 +252,7 @@ class FuoPlaybackService : MediaSessionService() {
         }
         preparedItems.clear()
         activePlayback = null
+        activePlaybackHasReachedReady = false
         pendingPreloadError = null
         activeGeneration = plan.generation
         mutableAudioFormatInfo.value = null
@@ -588,9 +594,9 @@ class FuoPlaybackService : MediaSessionService() {
             currentPlayer.playbackState == Player.STATE_BUFFERING &&
                 currentPlayer.playWhenReady &&
                 currentPlayer.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE -> PlayerStatus.Loading
-            currentPlayer.playbackState == Player.STATE_READY ||
-                currentPlayer.playbackState == Player.STATE_BUFFERING ||
-                currentPlayer.currentMediaItem != null -> PlayerStatus.Paused
+            currentPlayer.playbackState == Player.STATE_READY -> PlayerStatus.Paused
+            currentPlayer.playbackState == Player.STATE_BUFFERING && activePlaybackHasReachedReady -> PlayerStatus.Paused
+            currentPlayer.playbackState == Player.STATE_BUFFERING -> PlayerStatus.Loading
             else -> PlayerStatus.Idle
         }
         mutablePlaybackState.value = PlaybackState(
