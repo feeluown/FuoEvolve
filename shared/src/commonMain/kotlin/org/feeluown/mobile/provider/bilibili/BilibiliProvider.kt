@@ -534,6 +534,24 @@ class BilibiliProvider(
         ).copy(providerTags = parseSearchTags(item.stringOrNull("tag")))
     }
 
+    private fun kotlinx.serialization.json.JsonObject.toFavoritePlaylist(
+        isCollection: Boolean = false,
+    ): ProviderPlaylist? {
+        val rawIdentifier = stringOrNull("id") ?: stringOrNull("media_id") ?: return null
+        val identifier = if (isCollection) "$COLLECTION_PREFIX$rawIdentifier" else rawIdentifier
+        val title = stringOrNull("title") ?: return null
+        val ownerMid = stringOrNull("mid") ?: obj("upper")?.stringOrNull("mid")
+        return playlist(
+            identifier = identifier,
+            title = title,
+            coverUrl = normalizeCover(stringOrNull("cover")),
+            description = string("intro"),
+            playCount = obj("cnt_info")?.long("play"),
+            trackCount = int("media_count"),
+            providerUrl = ownerMid?.let { "https://space.bilibili.com/$it/favlist?fid=$rawIdentifier" },
+        )
+    }
+
     private fun credentialsArePresent(credentials: org.feeluown.mobile.provider.core.ProviderCredentials): Boolean =
         credentials.cookies.isNotEmpty() ||
             !credentials.cookieHeader.isNullOrBlank() ||
