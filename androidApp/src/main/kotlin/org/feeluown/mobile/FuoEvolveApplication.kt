@@ -62,6 +62,10 @@ class FuoEvolveApplication : Application() {
         AndroidPlaybackQueueStore(applicationContext)
     }
 
+    private val playbackResumeStore: AndroidPlaybackResumeStore by lazy {
+        AndroidPlaybackResumeStore(applicationContext)
+    }
+
     private val resourceCacheRepository: AndroidResourceCacheRepository by lazy {
         AndroidResourceCacheRepository(applicationContext)
     }
@@ -132,13 +136,37 @@ class FuoEvolveApplication : Application() {
             appScope.launch {
                 snapshotFlow {
                     controller.playbackState.let { state ->
-                        state.queue.map { it.id } to state.queueIndex
+                        Triple(
+                            state.currentTrack?.id,
+                            state.status,
+                            state.queue.map { it.id } to state.queueIndex,
+                        )
                     }
                 }
                     .distinctUntilChanged()
-                    .collect { (queueIds, _) ->
-                        if (queueIds.isNotEmpty()) {
-                            playbackEngine.republishRestoredState()
+                    .collect { (_, status, _) ->
+                        // Queue restoration can briefly replace a valid restored currentTrack with
+                        // null. Re-publish the Android resume snapshot for that transition too, not
+                        // only when a non-empty queue appears, so the mini player remains visible.
+                        playbackEngine.republishRestoredState()
+
+                        if (status == PlayerStatus.Playing || status == PlayerStatus.Paused) {
+                            val state = controller.playbackState
+                            if (state.currentTrack != null && state.queue.isNotEmpty()) {
+                                // This is a last-resort checkpoint for an abrupt process kill. The
+                                // regular controller queue snapshot remains authoritative whenever
+                                // it is present and decodable.
+                                playbackQueueStore.saveEmergency(
+                                    PlaybackQueueSnapshot(
+                                        mainQueue = state.queue,
+                                        queueIndex = 0,
+                                        shuffleEnabled = controller.isShuffleEnabled,
+                                        repeatMode = controller.repeatMode,
+                                        isFmQueue = controller.isFmQueueActive,
+                                    ),
+                                )
+                                playbackResumeStore.flush()
+                            }
                         }
                     }
             }
