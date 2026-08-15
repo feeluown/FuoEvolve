@@ -31,6 +31,7 @@ class AndroidNativeAudioEngine(
     private var pendingLockScreenLyrics: PendingLockScreenLyrics? = null
     private var activePlan: PlaybackPlan? = restoredSession?.plan
     private var pendingResumePositionMs: Long? = null
+    private var preparedRestoredSession: AndroidPlaybackResumeSnapshot? = null
     private var explicitStopRequested = false
     private var startingPlayback = false
     private var lastPersistedIdentity: String? = null
@@ -71,6 +72,7 @@ class AndroidNativeAudioEngine(
                     startingPlayback = false
                     if (serviceState.currentTrack != null) {
                         restoredSession = null
+                        preparedRestoredSession = null
                     }
                 }
 
@@ -110,6 +112,29 @@ class AndroidNativeAudioEngine(
     override fun prepareLoading(track: MusicTrack) {
         pendingLockScreenLyrics = null
         pendingResumePositionMs = null
+
+        // FuoPlayerController can briefly still expose Idle after process recreation even though
+        // this engine has already restored the same track as Paused. MiniPlayer becomes visible
+        // from the restored queue during that window, and its play button would otherwise call
+        // startPlayback(), clearing the saved position before resume() gets a chance to use it.
+        // Preserve the resumable session here and let play(plan) turn that stale restart into the
+        // same resume path used by FullPlayer.
+        val session = restoredSession ?: playbackResumeStore.load()
+        val shouldResumeRestoredSession = mutableState.value.status == PlayerStatus.Paused &&
+            session?.currentTrack?.id == track.id &&
+            session.resumePlan() != null
+        if (shouldResumeRestoredSession && session != null) {
+            preparedRestoredSession = session
+            restoredSession = session
+            activePlan = session.plan
+            explicitStopRequested = false
+            startingPlayback = false
+            connectController()
+            Log.d(TAG, "preserving restored session for prepared trackId=${track.id}")
+            return
+        }
+
+        preparedRestoredSession = null
         restoredSession = null
         explicitStopRequested = false
         startingPlayback = true
@@ -134,6 +159,20 @@ class AndroidNativeAudioEngine(
 
     override fun play(plan: PlaybackPlan) {
         val first = plan.requests.firstOrNull() ?: return
+        val preparedSession = preparedRestoredSession
+        if (preparedSession != null && preparedSession.currentTrack.id == first.track.id) {
+            preparedRestoredSession = null
+            restoredSession = preparedSession
+            activePlan = preparedSession.plan
+            Log.d(
+                TAG,
+                "converting stale restart to restored resume trackId=${first.track.id} positionMs=${preparedSession.positionMs}",
+            )
+            resume()
+            return
+        }
+
+        preparedRestoredSession = null
         explicitStopRequested = false
         startingPlayback = true
         restoredSession = null
@@ -178,6 +217,7 @@ class AndroidNativeAudioEngine(
 
     override fun resume() {
         explicitStopRequested = false
+        preparedRestoredSession = null
         val controller = mediaController
         val canResumeLiveSession = controller?.currentMediaItem != null &&
             controller.playbackState != Player.STATE_IDLE
@@ -224,6 +264,7 @@ class AndroidNativeAudioEngine(
     override fun stop() {
         pendingLockScreenLyrics = null
         pendingResumePositionMs = null
+        preparedRestoredSession = null
         restoredSession = null
         activePlan = null
         explicitStopRequested = true
