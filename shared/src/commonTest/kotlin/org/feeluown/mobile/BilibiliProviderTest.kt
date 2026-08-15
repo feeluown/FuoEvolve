@@ -15,6 +15,30 @@ import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 
 class BilibiliProviderTest {
     @Test
+    fun searchPreservesBilibiliVideoTags() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        assertEquals("/x/web-interface/search/type", request.url.encodedPath)
+                        assertEquals("video", request.url.parameters["search_type"])
+                        assertEquals("ハルジオン YOASOBI", request.url.parameters["keyword"])
+                        respond(
+                            """{"code":0,"data":{"result":[{"bvid":"BVcover","title":"ハルジオン / YOASOBI","author":"七海Nana7mi","duration":"3:17","tag":"YOASOBI, ハルジオン,翻唱"}]}}""",
+                        )
+                    }
+                }
+            },
+        )
+        val provider = BilibiliProvider(client, InMemoryProviderCredentialStore())
+
+        val track = provider.search("ハルジオン YOASOBI").tracks.single()
+
+        assertEquals(listOf("YOASOBI", "ハルジオン", "翻唱"), track.providerTags)
+        client.close()
+    }
+
+    @Test
     fun resolveSelectsBilibiliAudioQualityAndPreservesPlayableParts() = runTest {
         val playUrlRequests = mutableListOf<Pair<String, String?>>()
         val client = ProviderHttpClient(
