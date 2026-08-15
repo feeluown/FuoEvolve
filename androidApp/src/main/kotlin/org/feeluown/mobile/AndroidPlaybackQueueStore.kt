@@ -20,7 +20,10 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
             ?.let { raw -> runCatching { PlaybackQueueCodec.decode(raw) }.getOrNull() }
             ?: PlaybackQueueSnapshot()
         val restoredSession = playbackResumeStore.load()
-        val snapshot = persistedSnapshot.reconcileRestoredSession(restoredSession)
+        val snapshot = persistedSnapshot.reconcileRestoredPlayback(
+            plan = restoredSession?.plan,
+            currentTrack = restoredSession?.currentTrack,
+        )
         latestSnapshot = snapshot
         loadCompleted = true
         snapshot
@@ -50,41 +53,6 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
     fun flushLatest() {
         if (!loadCompleted) return
         latestSnapshot?.let(::writeSnapshot)
-    }
-
-    /**
-     * A playing Up Next item is removed from PlaybackQueueSnapshot.upNextQueue before playback
-     * starts, while AndroidPlaybackResumeStore still knows which item is active. Re-inserting it
-     * temporarily lets FuoPlayerController.synchronizePlaybackTrack identify it as Up Next after
-     * process recreation instead of replacing the current main-queue entry with that track.
-     *
-     * The second branch is a best-effort migration for a queue that was already overwritten by the
-     * old startup race: the resume plan contains the current item plus the controller's look-ahead
-     * window, so at least that playable window can be recovered instead of showing an empty queue.
-     */
-    private fun PlaybackQueueSnapshot.reconcileRestoredSession(
-        session: AndroidPlaybackResumeSnapshot?,
-    ): PlaybackQueueSnapshot {
-        session ?: return this
-        val restoredTrack = session.currentTrack
-        val knownTrackIds = (mainQueue + upNextQueue).mapTo(mutableSetOf()) { it.id }
-        if (restoredTrack.id in knownTrackIds) return this
-
-        if (mainQueue.isEmpty() && upNextQueue.isEmpty()) {
-            val recoveredQueue = session.plan.requests
-                .map { it.track }
-                .distinctBy { it.id }
-                .ifEmpty { listOf(restoredTrack) }
-            val restoredIndex = recoveredQueue.indexOfFirst { it.id == restoredTrack.id }
-                .takeIf { it >= 0 }
-                ?: 0
-            return copy(
-                mainQueue = recoveredQueue,
-                queueIndex = restoredIndex,
-            )
-        }
-
-        return copy(upNextQueue = listOf(restoredTrack) + upNextQueue)
     }
 
     private fun writeSnapshot(snapshot: PlaybackQueueSnapshot) {
