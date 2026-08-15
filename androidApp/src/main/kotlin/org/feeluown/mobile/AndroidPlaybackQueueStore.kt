@@ -7,45 +7,44 @@ import kotlinx.coroutines.withContext
 class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
     private val preferences = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    @Volatile
+    private var latestSnapshot: PlaybackQueueSnapshot? = null
+
     override suspend fun load(): PlaybackQueueSnapshot = withContext(Dispatchers.IO) {
-        val primaryRaw = preferences.getString(KEY_QUEUE_SNAPSHOT, null)
-        if (primaryRaw != null) {
-            return@withContext runCatching { PlaybackQueueCodec.decode(primaryRaw) }
-                .getOrElse { loadEmergencySnapshot() }
-        }
-        loadEmergencySnapshot()
+        preferences.getString(KEY_QUEUE_SNAPSHOT, null)
+            ?.let { raw -> runCatching { PlaybackQueueCodec.decode(raw) }.getOrNull() }
+            ?.also { latestSnapshot = it }
+            ?: PlaybackQueueSnapshot()
     }
 
     override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+        // FuoPlayerController launches save from its main-immediate scope. Capture the complete
+        // snapshot before the first suspension so a later pause can synchronously flush exactly
+        // this queue even if the asynchronous IO write has not finished yet.
+        latestSnapshot = snapshot
         withContext(Dispatchers.IO) {
-            // Queue writes are relatively infrequent and must survive a process being killed
-            // immediately after playback is paused. commit() makes the disk write durable before
-            // this coroutine completes instead of leaving it queued behind SharedPreferences.apply().
-            preferences.edit()
-                .putString(KEY_QUEUE_SNAPSHOT, PlaybackQueueCodec.encode(snapshot))
-                .commit()
+            writeSnapshot(snapshot)
         }
     }
 
     /**
-     * Stores a compact, last-resort queue checkpoint synchronously. This is only used if the
-     * normal queue snapshot was never written or cannot be decoded after an abrupt process kill.
+     * Durably writes the most recent complete controller queue snapshot. This is intentionally
+     * synchronous and is only used at important playback lifecycle boundaries (playing/paused),
+     * where surviving an abrupt process kill is more important than deferring a small preference
+     * write.
      */
-    fun saveEmergency(snapshot: PlaybackQueueSnapshot) {
-        preferences.edit()
-            .putString(KEY_EMERGENCY_QUEUE_SNAPSHOT, PlaybackQueueCodec.encode(snapshot))
-            .commit()
+    fun flushLatest() {
+        latestSnapshot?.let(::writeSnapshot)
     }
 
-    private fun loadEmergencySnapshot(): PlaybackQueueSnapshot {
-        return preferences.getString(KEY_EMERGENCY_QUEUE_SNAPSHOT, null)
-            ?.let { raw -> runCatching { PlaybackQueueCodec.decode(raw) }.getOrNull() }
-            ?: PlaybackQueueSnapshot()
+    private fun writeSnapshot(snapshot: PlaybackQueueSnapshot) {
+        preferences.edit()
+            .putString(KEY_QUEUE_SNAPSHOT, PlaybackQueueCodec.encode(snapshot))
+            .commit()
     }
 
     private companion object {
         private const val PREFS_NAME = "fuo_playback_queue"
         private const val KEY_QUEUE_SNAPSHOT = "queue_snapshot"
-        private const val KEY_EMERGENCY_QUEUE_SNAPSHOT = "emergency_queue_snapshot"
     }
 }
