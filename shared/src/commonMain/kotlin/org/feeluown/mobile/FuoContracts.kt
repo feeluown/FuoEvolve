@@ -240,6 +240,7 @@ data class MusicTrack(
     val albumItemId: String? = null,
     val artistItems: List<ProviderMediaItem> = emptyList(),
     val providerUrl: String? = null,
+    val providerTags: List<String> = emptyList(),
 )
 
 data class ReplacementCandidate(
