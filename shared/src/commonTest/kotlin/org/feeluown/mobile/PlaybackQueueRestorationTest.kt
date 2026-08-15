@@ -73,7 +73,7 @@ class PlaybackQueueRestorationTest {
 
     private fun plan(vararg tracks: MusicTrack): PlaybackPlan = PlaybackPlan(
         generation = 1,
-        requests = tracks.map(::PlaybackRequest),
+        requests = tracks.map { PlaybackRequest(it) },
     )
 
     private fun track(id: String): MusicTrack = MusicTrack(
