@@ -4,10 +4,11 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class KotlinProviderRepositoryReplacementTest {
     @Test
-    fun bilibiliScoreMatchesTitleArtistAndBonusKeywords() {
+    fun bilibiliScoreStillMatchesTitleArtistAndQualityKeywords() {
         val origin = track(
             source = "netease",
             title = "Night Song",
@@ -19,27 +20,36 @@ class KotlinProviderRepositoryReplacementTest {
             artists = "Uploader",
         )
 
-        assertEquals(0.70, bilibiliReplacementScore(origin, candidate), 0.0001)
+        assertEquals(0.69, bilibiliReplacementScore(origin, candidate), 0.0001)
     }
 
     @Test
-    fun bilibiliScoreMatchesArtistMetadataWhenUploaderTitleOmitsArtist() {
+    fun bilibiliScoreRewardsUploaderArtistMatchMoreThanTitleMention() {
         val origin = track(
             source = "netease",
             title = "人间芳菲",
             artists = "音阙诗听",
         )
-        val candidate = track(
+        val officialUploader = track(
             source = "bilibili",
             title = "人间芳菲",
             artists = "音阙诗听",
         )
+        val titleMentionOnly = track(
+            source = "bilibili",
+            title = "音阙诗听 人间芳菲",
+            artists = "Uploader",
+        )
 
-        assertEquals(0.60, bilibiliReplacementScore(origin, candidate), 0.0001)
+        assertEquals(0.85, bilibiliReplacementScore(origin, officialUploader), 0.0001)
+        assertTrue(
+            bilibiliReplacementScore(origin, officialUploader) >
+                bilibiliReplacementScore(origin, titleMentionOnly),
+        )
     }
 
     @Test
-    fun bilibiliScorePenalizesCoverKeywords() {
+    fun bilibiliScorePenalizesCoverVersionConflict() {
         val origin = track(
             source = "netease",
             title = "晴天",
@@ -51,11 +61,11 @@ class KotlinProviderRepositoryReplacementTest {
             artists = "Uploader",
         )
 
-        assertEquals(0.40, bilibiliReplacementScore(origin, candidate), 0.0001)
+        assertEquals(0.42, bilibiliReplacementScore(origin, candidate), 0.0001)
     }
 
     @Test
-    fun bilibiliScoreKeepsOriginalKeywordVersions() {
+    fun bilibiliScoreKeepsMatchingRemixVersion() {
         val origin = track(
             source = "netease",
             title = "晴天 Remix",
@@ -67,11 +77,11 @@ class KotlinProviderRepositoryReplacementTest {
             artists = "Uploader",
         )
 
-        assertEquals(0.60, bilibiliReplacementScore(origin, candidate), 0.0001)
+        assertEquals(0.67, bilibiliReplacementScore(origin, candidate), 0.0001)
     }
 
     @Test
-    fun bilibiliScoreAppliesRelativeDurationPenalty() {
+    fun bilibiliScoreTreatsDurationAsSupportingEvidence() {
         val origin = track(
             source = "netease",
             title = "Night Song",
@@ -85,7 +95,62 @@ class KotlinProviderRepositoryReplacementTest {
             durationMs = 300_000,
         )
 
-        assertEquals(0.55, bilibiliReplacementScore(origin, candidate), 0.0001)
+        assertEquals(0.64, bilibiliReplacementScore(origin, candidate), 0.0001)
+    }
+
+    @Test
+    fun bilibiliScorePrefersYoasobiOfficialVideoOverTitleOnlyCover() {
+        val origin = track(
+            source = "netease",
+            title = "ハルジオン",
+            artists = "YOASOBI",
+            durationMs = 198_000,
+        )
+        val official = track(
+            source = "bilibili",
+            title = "YOASOBI ハルジオン(Halzion) Official Music Video",
+            artists = "Ayase-YOASOBI",
+            durationMs = 203_000,
+        )
+        val cover = track(
+            source = "bilibili",
+            title = "【七海】ハルジオン／春紫菀 【YOASOBI】（人声增强）",
+            artists = "七海Nana7mi",
+            durationMs = 197_000,
+        )
+
+        assertEquals(0.965, bilibiliReplacementScore(origin, official), 0.0001)
+        assertEquals(0.72, bilibiliReplacementScore(origin, cover), 0.0001)
+        assertTrue(bilibiliReplacementScore(origin, official) > bilibiliReplacementScore(origin, cover))
+    }
+
+    @Test
+    fun bilibiliScorePreservesCoverOriginVersion() {
+        val origin = track(
+            source = "netease",
+            title = "ハルジオン (Cover)",
+            artists = "Aimer",
+            durationMs = 198_000,
+        )
+        val matchingCover = track(
+            source = "bilibili",
+            title = "Aimer ハルジオン 歌ってみた",
+            artists = "Aimer Official",
+            durationMs = 199_000,
+        )
+        val originalArtistOfficial = track(
+            source = "bilibili",
+            title = "YOASOBI ハルジオン Official Music Video",
+            artists = "Ayase-YOASOBI",
+            durationMs = 203_000,
+        )
+
+        assertEquals(0.87, bilibiliReplacementScore(origin, matchingCover), 0.0001)
+        assertEquals(0.415, bilibiliReplacementScore(origin, originalArtistOfficial), 0.0001)
+        assertTrue(
+            bilibiliReplacementScore(origin, matchingCover) >
+                bilibiliReplacementScore(origin, originalArtistOfficial),
+        )
     }
 
     @Test
