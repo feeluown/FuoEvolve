@@ -589,43 +589,130 @@ internal suspend fun <T> selectReplacementCandidate(
 }
 
 internal fun bilibiliReplacementScore(origin: MusicTrack, candidate: MusicTrack): Double {
-    val originTitle = normalizeReplacementText(origin.title)
-    val candidateTitle = normalizeReplacementText(candidate.title)
-    val candidateArtists = normalizeReplacementText(candidate.artists)
+    val originTitle = normalizeReplacementTitle(origin.title)
+    val candidateTitle = normalizeReplacementTitle(candidate.title)
     if (originTitle.isBlank() || candidateTitle.isBlank()) return 0.0
 
-    var score = 0.0
-    if (originTitle in candidateTitle) {
-        score += 0.40
+    var score = when {
+        originTitle == candidateTitle -> BILIBILI_TITLE_EXACT_SCORE
+        originTitle in candidateTitle || candidateTitle in originTitle -> BILIBILI_TITLE_CONTAINS_SCORE
+        else -> BILIBILI_TITLE_EXACT_SCORE * replacementTextSimilarity(originTitle, candidateTitle)
     }
-    if (
-        replacementArtistMatchTexts(origin.artists).any { artist ->
-            artist in candidateTitle || artist in candidateArtists
+
+    val originArtists = replacementArtistMatchTexts(origin.artists)
+    val candidateUploader = normalizeReplacementText(candidate.artists)
+    val candidateRawTitle = normalizeReplacementText(candidate.title)
+    val uploaderMatchesArtist = originArtists.any { artist -> replacementArtistMatches(artist, candidateUploader) }
+    val titleMentionsArtist = originArtists.any { artist -> replacementArtistMatches(artist, candidateRawTitle) }
+    score += when {
+        uploaderMatchesArtist -> BILIBILI_UPLOADER_ARTIST_SCORE
+        titleMentionsArtist -> BILIBILI_TITLE_ARTIST_SCORE
+        else -> 0.0
+    }
+
+    val originVersions = replacementVersionKinds("${origin.title} ${origin.album}")
+    val candidateVersions = replacementVersionKinds(candidate.title)
+    score += BILIBILI_VERSION_SCORE * replacementVersionCompatibility(
+        originVersions = originVersions,
+        candidateVersions = candidateVersions,
+        uploaderMatchesArtist = uploaderMatchesArtist,
+    )
+    if (hasReplacementVersionConflict(originVersions, candidateVersions, uploaderMatchesArtist)) {
+        score -= BILIBILI_VERSION_CONFLICT_PENALTY
+    }
+
+    if (uploaderMatchesArtist) {
+        score += when {
+            BILIBILI_OFFICIAL_MEDIA_KEYWORDS.any { keyword -> keyword in candidateRawTitle } ->
+                BILIBILI_OFFICIAL_MEDIA_SCORE
+            "musicvideo" in candidateRawTitle || "mv" in candidateRawTitle ->
+                BILIBILI_MV_SCORE
+            else -> 0.0
         }
-    ) {
-        score += 0.20
     }
-    if (BILIBILI_REPLACEMENT_BONUS_KEYWORDS.any { keyword -> keyword in candidateTitle }) {
-        score += 0.10
+    if (BILIBILI_QUALITY_KEYWORDS.any { keyword -> keyword in candidateRawTitle }) {
+        score += BILIBILI_QUALITY_SCORE
     }
-    if (
-        BILIBILI_REPLACEMENT_PENALTY_KEYWORDS.none { keyword -> keyword in originTitle } &&
-        BILIBILI_REPLACEMENT_PENALTY_KEYWORDS.any { keyword -> keyword in candidateTitle }
-    ) {
-        score -= 0.20
-    }
-    return applyReplacementDurationPenalty(score, origin, candidate)
+
+    score += replacementDurationScore(origin.durationMs, candidate.durationMs)
+    return score.coerceIn(0.0, 1.0)
 }
 
-private fun applyReplacementDurationPenalty(score: Double, origin: MusicTrack, candidate: MusicTrack): Double {
-    val originDuration = origin.durationMs
-    val candidateDuration = candidate.durationMs
-    if (originDuration != null && originDuration > 0 && candidateDuration != null && candidateDuration > 0) {
-        val diffRatio = kotlin.math.abs(originDuration - candidateDuration).toDouble() / originDuration.toDouble()
-        return (score - minOf(diffRatio * MAX_REPLACEMENT_DURATION_PENALTY, MAX_REPLACEMENT_DURATION_PENALTY))
-            .coerceAtLeast(0.0)
+private enum class ReplacementVersionKind {
+    COVER,
+    REMIX,
+    LIVE,
+    INSTRUMENTAL,
+}
+
+private fun normalizeReplacementTitle(value: String): String {
+    var title = value
+    REPLACEMENT_TITLE_DECORATION_PATTERNS.forEach { pattern ->
+        title = pattern.replace(title, " ")
     }
-    return score.coerceAtLeast(0.0)
+    return normalizeReplacementText(title)
+}
+
+private fun replacementVersionKinds(value: String): Set<ReplacementVersionKind> = buildSet {
+    if (REPLACEMENT_COVER_PATTERNS.any { pattern -> pattern.containsMatchIn(value) }) {
+        add(ReplacementVersionKind.COVER)
+    }
+    if (REPLACEMENT_REMIX_PATTERNS.any { pattern -> pattern.containsMatchIn(value) }) {
+        add(ReplacementVersionKind.REMIX)
+    }
+    if (REPLACEMENT_LIVE_PATTERNS.any { pattern -> pattern.containsMatchIn(value) }) {
+        add(ReplacementVersionKind.LIVE)
+    }
+    if (REPLACEMENT_INSTRUMENTAL_PATTERNS.any { pattern -> pattern.containsMatchIn(value) }) {
+        add(ReplacementVersionKind.INSTRUMENTAL)
+    }
+}
+
+private fun replacementVersionCompatibility(
+    originVersions: Set<ReplacementVersionKind>,
+    candidateVersions: Set<ReplacementVersionKind>,
+    uploaderMatchesArtist: Boolean,
+): Double = when {
+    originVersions == candidateVersions -> 1.0
+    originVersions.isEmpty() && candidateVersions.isNotEmpty() -> if (uploaderMatchesArtist) 0.5 else 0.0
+    originVersions.isNotEmpty() && candidateVersions.isEmpty() -> 0.5
+    originVersions.intersect(candidateVersions).isNotEmpty() -> 0.6
+    else -> 0.0
+}
+
+private fun hasReplacementVersionConflict(
+    originVersions: Set<ReplacementVersionKind>,
+    candidateVersions: Set<ReplacementVersionKind>,
+    uploaderMatchesArtist: Boolean,
+): Boolean = when {
+    originVersions.isNotEmpty() && candidateVersions.isNotEmpty() ->
+        originVersions.intersect(candidateVersions).isEmpty()
+    originVersions.isEmpty() && candidateVersions.isNotEmpty() -> !uploaderMatchesArtist
+    originVersions.isNotEmpty() && candidateVersions.isEmpty() -> !uploaderMatchesArtist
+    else -> false
+}
+
+private fun replacementDurationScore(originDurationMs: Long?, candidateDurationMs: Long?): Double {
+    val originDuration = originDurationMs?.takeIf { it > 0 } ?: return BILIBILI_UNKNOWN_DURATION_SCORE
+    val candidateDuration = candidateDurationMs?.takeIf { it > 0 } ?: return BILIBILI_UNKNOWN_DURATION_SCORE
+    return when (kotlin.math.abs(originDuration - candidateDuration)) {
+        in 0L..3_000L -> 0.10
+        in 3_001L..8_000L -> 0.095
+        in 8_001L..15_000L -> 0.08
+        in 15_001L..30_000L -> 0.04
+        else -> 0.0
+    }
+}
+
+private fun replacementTextSimilarity(left: String, right: String): Double {
+    if (left.isBlank() || right.isBlank()) return 0.0
+    val common = left.toSet().intersect(right.toSet()).size.toDouble()
+    return common / maxOf(left.toSet().size, right.toSet().size).toDouble()
+}
+
+private fun replacementArtistMatches(artist: String, value: String): Boolean {
+    if (artist.length < 2 || value.length < 2) return false
+    return artist in value || value in artist
 }
 
 private fun normalizeReplacementText(value: String): String =
@@ -645,10 +732,56 @@ private fun replacementArtistMatchTexts(value: String): List<String> {
 private const val NETEASE_PROVIDER_ID = "netease"
 private const val NETEASE_LEGACY_TOP_ARTISTS_FEATURE_ID = "netease_top_artists"
 private const val BILIBILI_PROVIDER_ID = "bilibili"
-private val BILIBILI_REPLACEMENT_BONUS_KEYWORDS = listOf("mv", "hires")
-private val BILIBILI_REPLACEMENT_PENALTY_KEYWORDS = listOf("cover", "翻唱", "remix")
+private const val BILIBILI_TITLE_EXACT_SCORE = 0.45
+private const val BILIBILI_TITLE_CONTAINS_SCORE = 0.42
+private const val BILIBILI_UPLOADER_ARTIST_SCORE = 0.25
+private const val BILIBILI_TITLE_ARTIST_SCORE = 0.10
+private const val BILIBILI_VERSION_SCORE = 0.10
+private const val BILIBILI_VERSION_CONFLICT_PENALTY = 0.15
+private const val BILIBILI_OFFICIAL_MEDIA_SCORE = 0.10
+private const val BILIBILI_MV_SCORE = 0.05
+private const val BILIBILI_QUALITY_SCORE = 0.02
+private const val BILIBILI_UNKNOWN_DURATION_SCORE = 0.05
+private val BILIBILI_OFFICIAL_MEDIA_KEYWORDS = listOf("officialmusicvideo", "officialvideo", "officialmv")
+private val BILIBILI_QUALITY_KEYWORDS = listOf("hires")
+private val REPLACEMENT_COVER_PATTERNS = listOf(
+    Regex("\\bcover\\b", RegexOption.IGNORE_CASE),
+    Regex("翻唱"),
+    Regex("歌ってみた"),
+    Regex("弾いてみた"),
+)
+private val REPLACEMENT_REMIX_PATTERNS = listOf(
+    Regex("\\bremix\\b", RegexOption.IGNORE_CASE),
+    Regex("重混"),
+)
+private val REPLACEMENT_LIVE_PATTERNS = listOf(
+    Regex("\\blive\\b", RegexOption.IGNORE_CASE),
+    Regex("现场"),
+    Regex("現場"),
+    Regex("ライブ"),
+)
+private val REPLACEMENT_INSTRUMENTAL_PATTERNS = listOf(
+    Regex("\\binstrumental\\b", RegexOption.IGNORE_CASE),
+    Regex("\\boff[ -]?vocal\\b", RegexOption.IGNORE_CASE),
+    Regex("\\bkaraoke\\b", RegexOption.IGNORE_CASE),
+    Regex("伴奏"),
+    Regex("纯音乐"),
+    Regex("純音樂"),
+)
+private val REPLACEMENT_MEDIA_DECORATION_PATTERNS = listOf(
+    Regex("\\bofficial[ -]?(?:music[ -]?)?video\\b", RegexOption.IGNORE_CASE),
+    Regex("\\bofficial[ -]?mv\\b", RegexOption.IGNORE_CASE),
+    Regex("\\bmusic[ -]?video\\b", RegexOption.IGNORE_CASE),
+    Regex("\\bmv\\b", RegexOption.IGNORE_CASE),
+    Regex("\\bhi[ -]?res\\b", RegexOption.IGNORE_CASE),
+)
+private val REPLACEMENT_TITLE_DECORATION_PATTERNS =
+    REPLACEMENT_COVER_PATTERNS +
+        REPLACEMENT_REMIX_PATTERNS +
+        REPLACEMENT_LIVE_PATTERNS +
+        REPLACEMENT_INSTRUMENTAL_PATTERNS +
+        REPLACEMENT_MEDIA_DECORATION_PATTERNS
 private val REPLACEMENT_ARTIST_SEPARATORS = listOf(" / ", "/", "、", ",", "，", ";", "；", "&", "+", "＋")
-private const val MAX_REPLACEMENT_DURATION_PENALTY = 0.30
 
 fun createKotlinProviderRepository(
     credentials: ProviderCredentialStore,
