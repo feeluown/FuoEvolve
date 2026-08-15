@@ -1169,6 +1169,24 @@ fun PlayerDisplaySettingsPanel(controller: FuoPlayerController) {
                     }
                 }
             }
+            if (controller.isStatusBarLyricsAvailable) {
+                FuoSettingRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "开启状态栏歌词",
+                    supportingText = "通过词幕在系统状态栏显示当前歌词",
+                    enabled = !controller.isLoading,
+                    onClick = {
+                        controller.onStatusBarLyricsEnabledChange(!controller.statusBarLyricsEnabled)
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = controller.statusBarLyricsEnabled,
+                            enabled = !controller.isLoading,
+                            onCheckedChange = controller::onStatusBarLyricsEnabledChange,
+                        )
+                    },
+                )
+            }
             Text(
                 text = "外观模式",
                 style = MaterialTheme.typography.bodyMedium,

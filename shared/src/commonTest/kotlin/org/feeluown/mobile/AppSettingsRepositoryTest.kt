@@ -112,8 +112,29 @@ class AppSettingsRepositoryTest {
 
         assertTrue(settings.onboardingCompleted)
         assertFalse(settings.dynamicCoverColorEnabled)
+        assertFalse(settings.statusBarLyricsEnabled)
         assertTrue(settings.pauseOnOtherAppPlayback)
         assertTrue(settings.smartReplacementSelections.isEmpty())
+    }
+
+    @Test
+    fun statusBarLyricsSettingDefaultsOffAndRoundTrips() = runTest {
+        val dataStore = FakePreferencesDataStore()
+        val first = DataStoreAppSettingsRepository(
+            dataStore = dataStore,
+            legacyLoader = null,
+            scope = backgroundScope,
+        )
+
+        assertFalse(first.awaitSettings().statusBarLyricsEnabled)
+        first.update { it.copy(statusBarLyricsEnabled = true) }
+
+        val restored = DataStoreAppSettingsRepository(
+            dataStore = dataStore,
+            legacyLoader = null,
+            scope = backgroundScope,
+        ).awaitSettings()
+        assertTrue(restored.statusBarLyricsEnabled)
     }
 
     @Test

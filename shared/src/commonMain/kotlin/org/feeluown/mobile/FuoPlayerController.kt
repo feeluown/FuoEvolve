@@ -282,6 +282,10 @@ class FuoPlayerController(
         private set
     var lyricFontSize by settingsUiState::lyricFontSize
         private set
+    var statusBarLyricsEnabled by mutableStateOf(false)
+        private set
+    var isStatusBarLyricsAvailable by mutableStateOf(false)
+        private set
     var themeMode by settingsUiState::themeMode
         private set
     var themeColorScheme by settingsUiState::themeColorScheme
@@ -1545,6 +1549,15 @@ class FuoPlayerController(
     fun onLyricFontSizeChange(value: LyricFontSize) {
         lyricFontSize = value
         persistSettings()
+    }
+
+    fun onStatusBarLyricsEnabledChange(value: Boolean) {
+        statusBarLyricsEnabled = value
+        persistSettings()
+    }
+
+    fun updateStatusBarLyricsAvailability(value: Boolean) {
+        isStatusBarLyricsAvailable = value
     }
 
     fun onThemeModeChange(value: ThemeMode) {
@@ -4969,6 +4982,7 @@ class FuoPlayerController(
         smartReplacementMinScore = settings.smartReplacementMinScore.coerceIn(0.0, 1.0)
         smartReplacementSelections = settings.smartReplacementSelections
         lyricFontSize = settings.lyricFontSize
+        statusBarLyricsEnabled = settings.statusBarLyricsEnabled
         themeMode = settings.themeMode
         themeColorScheme = settings.themeColorScheme
         dynamicCoverColorEnabled = settings.dynamicCoverColorEnabled
@@ -5012,6 +5026,7 @@ class FuoPlayerController(
             smartReplacementMinScore = smartReplacementMinScore,
             smartReplacementSelections = smartReplacementSelections,
             lyricFontSize = lyricFontSize,
+            statusBarLyricsEnabled = statusBarLyricsEnabled,
             themeMode = themeMode,
             themeColorScheme = themeColorScheme,
             dynamicCoverColorEnabled = dynamicCoverColorEnabled,

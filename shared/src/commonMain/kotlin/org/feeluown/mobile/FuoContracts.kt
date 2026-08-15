@@ -112,6 +112,7 @@ data class AppSettings(
     val smartReplacementSelections: Map<String, SmartReplacementSelection> = emptyMap(),
     val pauseOnOtherAppPlayback: Boolean = DEFAULT_PAUSE_ON_OTHER_APP_PLAYBACK,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
+    val statusBarLyricsEnabled: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
     val dynamicCoverColorEnabled: Boolean = false,

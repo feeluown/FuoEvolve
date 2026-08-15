@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 
 class FuoEvolveApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
 
     internal val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
@@ -117,6 +118,12 @@ class FuoEvolveApplication : Application() {
             oauthDeviceCodeAssistant = AndroidOAuthDeviceCodeAssistant(applicationContext),
             scope = appScope,
         ).also { controller ->
+            controller.updateStatusBarLyricsAvailability(isLyriconInstalled(applicationContext))
+            lyriconLyricsPublisher = LyriconLyricsPublisher(
+                context = applicationContext,
+                controller = controller,
+                scope = appScope,
+            ).also(LyriconLyricsPublisher::start)
             FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
                 override fun toggle() {
                     controller.toggle()
@@ -198,6 +205,8 @@ class FuoEvolveApplication : Application() {
 
     override fun onTerminate() {
         FuoPlaybackService.transportControls = null
+        lyriconLyricsPublisher?.close()
+        lyriconLyricsPublisher = null
         appScope.cancel()
         super.onTerminate()
     }
