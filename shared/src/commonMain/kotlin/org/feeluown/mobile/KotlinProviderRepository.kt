@@ -611,7 +611,9 @@ internal fun bilibiliReplacementScore(origin: MusicTrack, candidate: MusicTrack)
     }
 
     val originVersions = replacementVersionKinds("${origin.title} ${origin.album}")
-    val candidateVersions = replacementVersionKinds(candidate.title)
+    val candidateTitleVersions = replacementVersionKinds(candidate.title)
+    val candidateTagVersions = replacementVersionKinds(candidate.providerTags.joinToString(" "))
+    val candidateVersions = candidateTitleVersions.ifEmpty { candidateTagVersions }
     score += BILIBILI_VERSION_SCORE * replacementVersionCompatibility(
         originVersions = originVersions,
         candidateVersions = candidateVersions,
