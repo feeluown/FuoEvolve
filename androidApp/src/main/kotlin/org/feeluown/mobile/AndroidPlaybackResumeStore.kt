@@ -98,8 +98,22 @@ internal class AndroidPlaybackResumeStore(context: Context) {
             .apply()
     }
 
+    /**
+     * Forces pending apply() writes for the current resumable session to disk. A changing serial
+     * guarantees SharedPreferences performs a disk write even when all playback values are already
+     * present in memory. Call this at lifecycle boundaries such as pause before the process can be
+     * killed.
+     */
+    fun flush() {
+        if (!preferences.contains(KEY_PLAN)) return
+        val nextSerial = preferences.getLong(KEY_FLUSH_SERIAL, 0L) + 1L
+        preferences.edit()
+            .putLong(KEY_FLUSH_SERIAL, nextSerial)
+            .commit()
+    }
+
     fun clear() {
-        preferences.edit().clear().apply()
+        preferences.edit().clear().commit()
     }
 
     private fun encodeParts(parts: List<PlaybackPart>): String = JSONArray().apply {
@@ -139,6 +153,7 @@ internal class AndroidPlaybackResumeStore(context: Context) {
         private const val KEY_DURATION_MS = "duration_ms"
         private const val KEY_PARTS = "parts"
         private const val KEY_PART_INDEX = "part_index"
+        private const val KEY_FLUSH_SERIAL = "flush_serial"
     }
 }
 
