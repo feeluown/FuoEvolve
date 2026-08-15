@@ -99,7 +99,7 @@ class KotlinProviderRepositoryReplacementTest {
     }
 
     @Test
-    fun bilibiliScorePrefersYoasobiOfficialVideoOverTitleOnlyCover() {
+    fun bilibiliScorePrefersYoasobiOfficialVideoOverTaggedCover() {
         val origin = track(
             source = "netease",
             title = "ハルジオン",
@@ -117,11 +117,35 @@ class KotlinProviderRepositoryReplacementTest {
             title = "【七海】ハルジオン／春紫菀 【YOASOBI】（人声增强）",
             artists = "七海Nana7mi",
             durationMs = 197_000,
+            providerTags = listOf("YOASOBI", "ハルジオン", "翻唱"),
         )
 
         assertEquals(0.965, bilibiliReplacementScore(origin, official), 0.0001)
-        assertEquals(0.72, bilibiliReplacementScore(origin, cover), 0.0001)
+        assertEquals(0.47, bilibiliReplacementScore(origin, cover), 0.0001)
         assertTrue(bilibiliReplacementScore(origin, official) > bilibiliReplacementScore(origin, cover))
+    }
+
+    @Test
+    fun bilibiliScoreUsesTitleVersionBeforeConflictingTags() {
+        val origin = track(
+            source = "netease",
+            title = "Night Song Live",
+            artists = "Alice",
+            durationMs = 200_000,
+        )
+        val candidate = track(
+            source = "bilibili",
+            title = "Alice Night Song Live",
+            artists = "Alice Official",
+            durationMs = 201_000,
+        )
+        val candidateWithNoisyTags = candidate.copy(providerTags = listOf("翻唱", "音乐"))
+
+        assertEquals(
+            bilibiliReplacementScore(origin, candidate),
+            bilibiliReplacementScore(origin, candidateWithNoisyTags),
+            0.0001,
+        )
     }
 
     @Test
@@ -241,6 +265,7 @@ class KotlinProviderRepositoryReplacementTest {
         artists: String,
         durationMs: Long? = null,
         id: String = "$source:$title",
+        providerTags: List<String> = emptyList(),
     ): MusicTrack = MusicTrack(
         id = id,
         title = title,
@@ -250,5 +275,6 @@ class KotlinProviderRepositoryReplacementTest {
         sourceType = TrackSourceType.Provider,
         durationMs = durationMs,
         providerId = id,
+        providerTags = providerTags,
     )
 }
