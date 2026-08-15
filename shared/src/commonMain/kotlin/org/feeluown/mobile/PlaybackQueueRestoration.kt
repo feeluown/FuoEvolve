@@ -13,7 +13,7 @@ package org.feeluown.mobile
  * playback plan is the best remaining source of truth, so recover the current item and its ordered
  * look-ahead window.
  */
-internal fun PlaybackQueueSnapshot.reconcileRestoredPlayback(
+fun PlaybackQueueSnapshot.reconcileRestoredPlayback(
     plan: PlaybackPlan?,
     currentTrack: MusicTrack?,
 ): PlaybackQueueSnapshot {
