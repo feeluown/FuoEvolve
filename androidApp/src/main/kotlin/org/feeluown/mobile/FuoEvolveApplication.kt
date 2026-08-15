@@ -144,29 +144,21 @@ class FuoEvolveApplication : Application() {
                     }
                 }
                     .distinctUntilChanged()
-                    .collect { (_, status, _) ->
+                    .collect { (trackId, status, _) ->
                         // Queue restoration can briefly replace a valid restored currentTrack with
                         // null. Re-publish the Android resume snapshot for that transition too, not
                         // only when a non-empty queue appears, so the mini player remains visible.
                         playbackEngine.republishRestoredState()
 
-                        if (status == PlayerStatus.Playing || status == PlayerStatus.Paused) {
-                            val state = controller.playbackState
-                            if (state.currentTrack != null && state.queue.isNotEmpty()) {
-                                // This is a last-resort checkpoint for an abrupt process kill. The
-                                // regular controller queue snapshot remains authoritative whenever
-                                // it is present and decodable.
-                                playbackQueueStore.saveEmergency(
-                                    PlaybackQueueSnapshot(
-                                        mainQueue = state.queue,
-                                        queueIndex = 0,
-                                        shuffleEnabled = controller.isShuffleEnabled,
-                                        repeatMode = controller.repeatMode,
-                                        isFmQueue = controller.isFmQueueActive,
-                                    ),
-                                )
-                                playbackResumeStore.flush()
-                            }
+                        if (
+                            trackId != null &&
+                            (status == PlayerStatus.Playing || status == PlayerStatus.Paused)
+                        ) {
+                            // The store captured the controller's complete queue before its async IO
+                            // suspension. Flush that exact snapshot rather than reconstructing from
+                            // the UI display queue, which would lose already-played items.
+                            playbackQueueStore.flushLatest()
+                            playbackResumeStore.flush()
                         }
                     }
             }
