@@ -1,0 +1,790 @@
+name: Apply playback restore fix
+
+"on":
+  push:
+    branches:
+      - agent/restore-playback-state
+    paths:
+      - ".github/workflows/agent-restore-playback-state.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply playback state restoration fix
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          def replace_once(path, old, new):
+              path = Path(path)
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one match in {path}, found {count}: {old[:80]!r}")
+              path.write_text(text.replace(old, new, 1))
+
+          contracts = "shared/src/commonMain/kotlin/org/feeluown/mobile/FuoContracts.kt"
+          controller = "shared/src/commonMain/kotlin/org/feeluown/mobile/FuoPlayerController.kt"
+          android_queue = "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidPlaybackQueueStore.kt"
+          android_engine = "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidNativeAudioEngine.kt"
+          ios_queue = "shared/src/iosMain/kotlin/org/feeluown/mobile/IosPlaybackQueueStore.kt"
+          tests = "shared/src/commonTest/kotlin/org/feeluown/mobile/FuoPlayerControllerTest.kt"
+
+          replace_once(
+              contracts,
+              '''data class PlaybackQueueSnapshot(
+              val mainQueue: List<MusicTrack> = emptyList(),
+              val originalMainQueue: List<MusicTrack> = emptyList(),
+              val upNextQueue: List<MusicTrack> = emptyList(),
+              val queueIndex: Int = -1,
+              val shuffleEnabled: Boolean = false,
+              val repeatMode: RepeatMode = RepeatMode.QUEUE,
+              val isFmQueue: Boolean = false,
+              val shuffleBeforeFm: Boolean? = null,
+          )
+
+          interface PlaybackQueueStore {
+              suspend fun load(): PlaybackQueueSnapshot
+              suspend fun save(snapshot: PlaybackQueueSnapshot)
+          }
+          ''',
+              '''data class PlaybackQueueSnapshot(
+              val mainQueue: List<MusicTrack> = emptyList(),
+              val originalMainQueue: List<MusicTrack> = emptyList(),
+              val upNextQueue: List<MusicTrack> = emptyList(),
+              val queueIndex: Int = -1,
+              val shuffleEnabled: Boolean = false,
+              val repeatMode: RepeatMode = RepeatMode.QUEUE,
+              val isFmQueue: Boolean = false,
+              val shuffleBeforeFm: Boolean? = null,
+              val currentUpNextTrack: MusicTrack? = null,
+              val currentIsUpNext: Boolean = false,
+              val queueFeature: ProviderFeature? = null,
+              val queuePlaylistId: String? = null,
+          )
+
+          interface PlaybackQueueStore {
+              suspend fun load(): PlaybackQueueSnapshot
+              fun stage(snapshot: PlaybackQueueSnapshot) = Unit
+              suspend fun save(snapshot: PlaybackQueueSnapshot)
+              fun flush() = Unit
+          }
+          ''',
+          )
+
+          replace_once(
+              contracts,
+              '''object PlaybackQueueCodec {
+              private const val CURRENT_VERSION = "v2"
+
+              fun encode(snapshot: PlaybackQueueSnapshot): String {
+                  return buildList {
+                      add(CURRENT_VERSION)
+                      add(
+                          listOf(
+                              snapshot.queueIndex.toString(),
+                              snapshot.shuffleEnabled.toString(),
+                              snapshot.repeatMode.name,
+                              snapshot.isFmQueue.toString(),
+                              snapshot.shuffleBeforeFm?.toString().orEmpty(),
+                          ).joinToString("\\t")
+                      )
+                      addTracks("main", snapshot.mainQueue)
+                      addTracks("original", snapshot.originalMainQueue)
+                      addTracks("upNext", snapshot.upNextQueue)
+                  }.joinToString("\\n")
+              }
+
+              fun decode(raw: String): PlaybackQueueSnapshot {
+                  val lines = raw.lineSequence().filter { it.isNotBlank() }.toList()
+                  if (lines.isEmpty()) return PlaybackQueueSnapshot()
+
+                  val version = lines.first()
+                  val flags = lines.getOrNull(1)?.split("\\t") ?: return PlaybackQueueSnapshot()
+
+                  // 根据版本解析 repeatMode
+                  val repeatMode = when (version) {
+                      "v1" -> {
+                          val boolValue = flags.getOrNull(2)?.toBooleanStrictOrNull() ?: true
+                          if (boolValue) RepeatMode.QUEUE else RepeatMode.OFF
+                      }
+                      CURRENT_VERSION -> {
+                          runCatching { RepeatMode.valueOf(flags.getOrNull(2) ?: "QUEUE") }
+                              .getOrDefault(RepeatMode.QUEUE)
+                      }
+                      else -> RepeatMode.QUEUE
+                  }
+
+                  val tracksBySection = lines.drop(2)
+                      .mapNotNull { line ->
+                          val fields = line.split("\\t")
+                          if (fields.size < 2 || fields[0] != "track") return@mapNotNull null
+                          decodeTrack(fields.drop(2))?.let { track -> fields[1] to track }
+                      }
+                      .groupBy({ it.first }, { it.second })
+                  return PlaybackQueueSnapshot(
+                      mainQueue = tracksBySection["main"].orEmpty(),
+                      originalMainQueue = tracksBySection["original"].orEmpty(),
+                      upNextQueue = tracksBySection["upNext"].orEmpty(),
+                      queueIndex = flags.getOrNull(0)?.toIntOrNull() ?: -1,
+                      shuffleEnabled = flags.getOrNull(1)?.toBooleanStrictOrNull() ?: false,
+                      repeatMode = repeatMode,
+                      isFmQueue = flags.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
+                      shuffleBeforeFm = flags.getOrNull(4)?.takeIf { it.isNotBlank() }?.toBooleanStrictOrNull(),
+                  )
+              }
+          ''',
+              '''object PlaybackQueueCodec {
+              private const val CURRENT_VERSION = "v3"
+
+              fun encode(snapshot: PlaybackQueueSnapshot): String {
+                  val feature = snapshot.queueFeature
+                  return buildList {
+                      add(CURRENT_VERSION)
+                      add(
+                          listOf(
+                              snapshot.queueIndex.toString(),
+                              snapshot.shuffleEnabled.toString(),
+                              snapshot.repeatMode.name,
+                              snapshot.isFmQueue.toString(),
+                              snapshot.shuffleBeforeFm?.toString().orEmpty(),
+                              snapshot.currentIsUpNext.toString(),
+                              snapshot.queuePlaylistId.orEmpty(),
+                              feature?.id.orEmpty(),
+                              feature?.providerId.orEmpty(),
+                              feature?.providerName.orEmpty(),
+                              feature?.title.orEmpty(),
+                              feature?.category?.name.orEmpty(),
+                              feature?.contentType?.name.orEmpty(),
+                              feature?.requiresLogin?.toString().orEmpty(),
+                          ).map(::escape).joinToString("\\t")
+                      )
+                      addTracks("main", snapshot.mainQueue)
+                      addTracks("original", snapshot.originalMainQueue)
+                      addTracks("upNext", snapshot.upNextQueue)
+                      addTracks("currentUpNext", listOfNotNull(snapshot.currentUpNextTrack))
+                  }.joinToString("\\n")
+              }
+
+              fun decode(raw: String): PlaybackQueueSnapshot {
+                  val lines = raw.lineSequence().filter { it.isNotBlank() }.toList()
+                  if (lines.isEmpty()) return PlaybackQueueSnapshot()
+
+                  val version = lines.first()
+                  val flags = lines.getOrNull(1)?.split("\\t")?.map(::unescape)
+                      ?: return PlaybackQueueSnapshot()
+
+                  // v1 stored repeat as a boolean; v2 and newer store the enum name.
+                  val repeatMode = when (version) {
+                      "v1" -> {
+                          val boolValue = flags.getOrNull(2)?.toBooleanStrictOrNull() ?: true
+                          if (boolValue) RepeatMode.QUEUE else RepeatMode.OFF
+                      }
+                      "v2", CURRENT_VERSION -> {
+                          runCatching { RepeatMode.valueOf(flags.getOrNull(2) ?: "QUEUE") }
+                              .getOrDefault(RepeatMode.QUEUE)
+                      }
+                      else -> RepeatMode.QUEUE
+                  }
+
+                  val queueFeature = if (version == CURRENT_VERSION) {
+                      runCatching {
+                          val id = flags.getOrNull(7)?.takeIf { it.isNotBlank() } ?: return@runCatching null
+                          ProviderFeature(
+                              id = id,
+                              providerId = flags.getOrNull(8).orEmpty(),
+                              providerName = flags.getOrNull(9).orEmpty(),
+                              title = flags.getOrNull(10).orEmpty(),
+                              category = ProviderFeatureCategory.valueOf(flags.getOrNull(11).orEmpty()),
+                              contentType = ProviderContentType.valueOf(flags.getOrNull(12).orEmpty()),
+                              requiresLogin = flags.getOrNull(13)?.toBooleanStrictOrNull() ?: false,
+                          )
+                      }.getOrNull()
+                  } else {
+                      null
+                  }
+
+                  val tracksBySection = lines.drop(2)
+                      .mapNotNull { line ->
+                          val fields = line.split("\\t")
+                          if (fields.size < 2 || fields[0] != "track") return@mapNotNull null
+                          decodeTrack(fields.drop(2))?.let { track -> fields[1] to track }
+                      }
+                      .groupBy({ it.first }, { it.second })
+                  return PlaybackQueueSnapshot(
+                      mainQueue = tracksBySection["main"].orEmpty(),
+                      originalMainQueue = tracksBySection["original"].orEmpty(),
+                      upNextQueue = tracksBySection["upNext"].orEmpty(),
+                      queueIndex = flags.getOrNull(0)?.toIntOrNull() ?: -1,
+                      shuffleEnabled = flags.getOrNull(1)?.toBooleanStrictOrNull() ?: false,
+                      repeatMode = repeatMode,
+                      isFmQueue = flags.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
+                      shuffleBeforeFm = flags.getOrNull(4)?.takeIf { it.isNotBlank() }?.toBooleanStrictOrNull(),
+                      currentUpNextTrack = tracksBySection["currentUpNext"]?.firstOrNull(),
+                      currentIsUpNext = if (version == CURRENT_VERSION) {
+                          flags.getOrNull(5)?.toBooleanStrictOrNull() ?: false
+                      } else {
+                          false
+                      },
+                      queueFeature = queueFeature,
+                      queuePlaylistId = if (version == CURRENT_VERSION) flags.getOrNull(6)?.ifBlank { null } else null,
+                  )
+              }
+          ''',
+          )
+
+          replace_once(
+              contracts,
+              '''    fun stop()
+              fun seekTo(positionMs: Long)
+          }
+          ''',
+              '''    fun stop()
+              fun seekTo(positionMs: Long)
+              fun flushState() = Unit
+          }
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''    private var currentUpNextTrack: MusicTrack? = null
+              private var currentIsUpNext: Boolean = false
+              private var queueFeature: ProviderFeature? = null
+          ''',
+              '''    private var currentUpNextTrack: MusicTrack? = null
+              private var currentIsUpNext: Boolean = false
+              private var isPlaybackQueueLoaded: Boolean = false
+              private var queueFeature: ProviderFeature? = null
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''            runCatching { playbackQueueStore.load() }
+                  .onSuccess { restorePlaybackQueue(it) }
+              updateLocalMusicScanSettings()
+          ''',
+              '''            runCatching { playbackQueueStore.load() }
+                  .onSuccess { restorePlaybackQueue(it) }
+              isPlaybackQueueLoaded = true
+              updateLocalMusicScanSettings()
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''    fun onAppBackgrounded() {
+              if (isRecognitionInProgress()) {
+                  cancelRecognition()
+              }
+          }
+          ''',
+              '''    fun onAppBackgrounded() {
+              if (isRecognitionInProgress()) {
+                  cancelRecognition()
+              }
+              playbackQueueStore.flush()
+              playbackEngine.flushState()
+          }
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''            PlayerStatus.Playing -> playbackEngine.pause()
+          ''',
+              '''            PlayerStatus.Playing -> {
+                  playbackEngine.pause()
+                  persistPlaybackQueue()
+                  playbackQueueStore.flush()
+                  playbackEngine.flushState()
+              }
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''    private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
+              mainQueue = snapshot.mainQueue
+              originalMainQueue = snapshot.originalMainQueue
+              upNextQueue = snapshot.upNextQueue
+              mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
+              shuffleEnabled = snapshot.shuffleEnabled
+              _repeatMode = snapshot.repeatMode
+              isFmQueue = snapshot.isFmQueue
+              shuffleBeforeFm = snapshot.shuffleBeforeFm
+              currentUpNextTrack = null
+              currentIsUpNext = false
+              playbackParts = emptyList()
+              currentPartIndex = -1
+              playbackState = playbackState.copy(
+                  currentTrack = mainQueue.getOrNull(mainQueueIndex),
+                  queue = displayQueue(),
+                  queueIndex = displayQueueIndex(),
+                  playbackParts = playbackParts,
+                  currentPartIndex = currentPartIndex,
+              )
+          }
+          ''',
+              '''    private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
+              mainQueue = snapshot.mainQueue
+              originalMainQueue = snapshot.originalMainQueue
+              upNextQueue = snapshot.upNextQueue
+              mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
+              shuffleEnabled = snapshot.shuffleEnabled
+              _repeatMode = snapshot.repeatMode
+              isFmQueue = snapshot.isFmQueue
+              shuffleBeforeFm = snapshot.shuffleBeforeFm
+              queueFeature = snapshot.queueFeature
+              queuePlaylistId = snapshot.queuePlaylistId
+              currentUpNextTrack = snapshot.currentUpNextTrack
+              currentIsUpNext = snapshot.currentIsUpNext && currentUpNextTrack != null
+
+              // The platform engine may restore its resumable session before settings and the queue
+              // finish loading. Keep that authoritative current item, position and part state instead
+              // of replacing them with a partially restored controller queue.
+              val restoredEngineState = playbackState
+              val restoredEngineTrack = restoredEngineState.currentTrack
+              if (restoredEngineTrack != null) {
+                  if (currentQueueTrack()?.id != restoredEngineTrack.id) {
+                      val mainIndex = mainQueue.indexOfFirst { it.id == restoredEngineTrack.id }
+                      val upNextIndex = upNextQueue.indexOfFirst { it.id == restoredEngineTrack.id }
+                      when {
+                          mainIndex >= 0 -> {
+                              mainQueueIndex = mainIndex
+                              currentUpNextTrack = null
+                              currentIsUpNext = false
+                          }
+                          upNextIndex >= 0 -> {
+                              currentUpNextTrack = upNextQueue[upNextIndex]
+                              upNextQueue = upNextQueue.filterIndexed { index, _ -> index != upNextIndex }
+                              currentIsUpNext = true
+                          }
+                          else -> {
+                              // v1/v2 queue snapshots could not represent a currently playing
+                              // up-next item because it had already been removed from upNextQueue.
+                              currentUpNextTrack = restoredEngineTrack
+                              currentIsUpNext = true
+                          }
+                      }
+                  }
+                  if (currentQueueTrack()?.id == restoredEngineTrack.id) {
+                      updateCurrentTrack(restoredEngineTrack)
+                  }
+              }
+
+              playbackParts = restoredEngineState.playbackParts
+              currentPartIndex = restoredEngineState.currentPartIndex
+              playbackState = restoredEngineState.copy(
+                  currentTrack = currentQueueTrack() ?: restoredEngineTrack,
+                  queue = displayQueue(),
+                  queueIndex = displayQueueIndex(),
+                  playbackParts = playbackParts,
+                  currentPartIndex = currentPartIndex,
+              )
+          }
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''    private fun persistPlaybackQueue() {
+              val snapshot = PlaybackQueueSnapshot(
+          ''',
+              '''    private fun persistPlaybackQueue() {
+              if (!isPlaybackQueueLoaded) return
+              val snapshot = PlaybackQueueSnapshot(
+          ''',
+          )
+
+          replace_once(
+              controller,
+              '''            isFmQueue = isFmQueue,
+              shuffleBeforeFm = shuffleBeforeFm,
+          )
+          scope.launch {
+              playbackQueueStore.save(snapshot)
+          }
+          ''',
+              '''            isFmQueue = isFmQueue,
+              shuffleBeforeFm = shuffleBeforeFm,
+              currentUpNextTrack = currentUpNextTrack,
+              currentIsUpNext = currentIsUpNext,
+              queueFeature = queueFeature,
+              queuePlaylistId = queuePlaylistId,
+          )
+          playbackQueueStore.stage(snapshot)
+          scope.launch {
+              playbackQueueStore.save(snapshot)
+          }
+          ''',
+          )
+
+          replace_once(
+              android_queue,
+              '''    override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+              // FuoPlayerController launches save from its main-immediate scope. Capture the complete
+              // snapshot before the first suspension so a later pause can synchronously flush exactly
+              // this queue even if the asynchronous IO write has not finished yet.
+              latestSnapshot = snapshot
+              withContext(Dispatchers.IO) {
+                  writeSnapshot(snapshot)
+              }
+          }
+          ''',
+              '''    override fun stage(snapshot: PlaybackQueueSnapshot) {
+              latestSnapshot = snapshot
+          }
+
+          override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+              stage(snapshot)
+              withContext(Dispatchers.IO) {
+                  writeSnapshot(snapshot)
+              }
+          }
+          ''',
+          )
+
+          replace_once(
+              android_queue,
+              '''    fun flushLatest() {
+              latestSnapshot?.let(::writeSnapshot)
+          }
+          ''',
+              '''    override fun flush() {
+              latestSnapshot?.let(::writeSnapshot)
+          }
+
+          fun flushLatest() = flush()
+          ''',
+          )
+
+          replace_once(
+              ios_queue,
+              '''class IosPlaybackQueueStore : PlaybackQueueStore {
+              private val defaults = NSUserDefaults.standardUserDefaults
+          ''',
+              '''class IosPlaybackQueueStore : PlaybackQueueStore {
+              private val defaults = NSUserDefaults.standardUserDefaults
+              private var latestSnapshot: PlaybackQueueSnapshot? = null
+          ''',
+          )
+
+          replace_once(
+              ios_queue,
+              '''    override suspend fun load(): PlaybackQueueSnapshot = withContext(Dispatchers.Default) {
+              defaults.stringForKey(KEY_QUEUE_SNAPSHOT)
+                  ?.takeIf { it.isNotBlank() }
+                  ?.let { raw -> runCatching { PlaybackQueueCodec.decode(raw) }.getOrNull() }
+                  ?: PlaybackQueueSnapshot()
+          }
+
+          override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+              withContext(Dispatchers.Default) {
+                  defaults.setObject(PlaybackQueueCodec.encode(snapshot), KEY_QUEUE_SNAPSHOT)
+                  defaults.synchronize()
+              }
+          }
+          ''',
+              '''    override suspend fun load(): PlaybackQueueSnapshot = withContext(Dispatchers.Default) {
+              (defaults.stringForKey(KEY_QUEUE_SNAPSHOT)
+                  ?.takeIf { it.isNotBlank() }
+                  ?.let { raw -> runCatching { PlaybackQueueCodec.decode(raw) }.getOrNull() }
+                  ?: PlaybackQueueSnapshot())
+                  .also { latestSnapshot = it }
+          }
+
+          override fun stage(snapshot: PlaybackQueueSnapshot) {
+              latestSnapshot = snapshot
+          }
+
+          override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+              stage(snapshot)
+              withContext(Dispatchers.Default) {
+                  writeSnapshot(snapshot)
+              }
+          }
+
+          override fun flush() {
+              latestSnapshot?.let(::writeSnapshot)
+          }
+
+          private fun writeSnapshot(snapshot: PlaybackQueueSnapshot) {
+              defaults.setObject(PlaybackQueueCodec.encode(snapshot), KEY_QUEUE_SNAPSHOT)
+              defaults.synchronize()
+          }
+          ''',
+          )
+
+          replace_once(
+              android_engine,
+              '''    override fun pause() {
+              mediaController?.pause()
+              FuoPlaybackService.pause(context)
+              mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
+              persistPlaybackState(forcePosition = true)
+          }
+          ''',
+              '''    override fun pause() {
+              mediaController?.pause()
+              FuoPlaybackService.pause(context)
+              mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
+              persistPlaybackState(forcePosition = true)
+              playbackResumeStore.flush()
+          }
+          ''',
+          )
+
+          replace_once(
+              android_engine,
+              '''        persistPlaybackState(forcePosition = true)
+          }
+
+          internal fun republishRestoredState() {
+          ''',
+              '''        persistPlaybackState(forcePosition = true)
+          }
+
+          override fun flushState() {
+              persistPlaybackState(forcePosition = true)
+              playbackResumeStore.flush()
+          }
+
+          internal fun republishRestoredState() {
+          ''',
+          )
+
+          replace_once(
+              tests,
+              '''    @Test
+              fun restoredQueueToggleStartsCurrentTrackFromBeginning() = runTest {
+          ''',
+              '''    @Test
+              fun delayedQueueRestorePreservesCompletePausedPlaybackState() = runTest {
+                  val first = providerTrack("provider:1", "First")
+                  val second = providerTrack("provider:2", "Second")
+                  val inserted = providerTrack("provider:3", "Inserted")
+                  val pending = providerTrack("provider:4", "Pending")
+                  val partOne = PlaybackPart("provider:3:1", "Part 1", 60_000)
+                  val partTwo = PlaybackPart("provider:3:2", "Part 2", 90_000)
+                  val queueStore = DelayedPlaybackQueueStore(
+                      PlaybackQueueSnapshot(
+                          mainQueue = listOf(first, second),
+                          originalMainQueue = listOf(first, second),
+                          upNextQueue = listOf(pending),
+                          queueIndex = 0,
+                          shuffleEnabled = true,
+                          repeatMode = RepeatMode.SINGLE,
+                          currentUpNextTrack = inserted,
+                          currentIsUpNext = true,
+                      ),
+                  )
+                  val engine = FakePlaybackEngine().apply {
+                      emitState(
+                          PlaybackState(
+                              status = PlayerStatus.Paused,
+                              currentTrack = inserted,
+                              positionMs = 42_000,
+                              durationMs = 150_000,
+                              lyrics = "[00:00.00]restored",
+                              playbackParts = listOf(partOne, partTwo),
+                              currentPartIndex = 1,
+                          ),
+                      )
+                  }
+                  val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+                  try {
+                      val controller = FuoPlayerController(
+                          providerRepository = FakeProviderRepository(listOf(first, second, inserted, pending)),
+                          localRepository = FakeLocalMusicRepository(),
+                          downloadRepository = FakeDownloadRepository(emptyMap()),
+                          playbackEngine = engine,
+                          playbackQueueStore = queueStore,
+                          scope = controllerScope,
+                      )
+
+                      runCurrent()
+                      assertEquals(0, queueStore.saveCount)
+                      queueStore.allowLoad.complete(Unit)
+                      advanceUntilIdle()
+
+                      assertEquals(PlayerStatus.Paused, controller.playbackState.status)
+                      assertEquals("provider:3", controller.playbackState.currentTrack?.id)
+                      assertEquals(42_000, controller.playbackState.positionMs)
+                      assertEquals(150_000, controller.playbackState.durationMs)
+                      assertEquals(listOf(partOne, partTwo), controller.playbackState.playbackParts)
+                      assertEquals(1, controller.playbackState.currentPartIndex)
+                      assertEquals(
+                          listOf("provider:3", "provider:4", "provider:2"),
+                          controller.playbackState.queue.map { it.id },
+                      )
+                      assertTrue(controller.isShuffleEnabled)
+                      assertEquals(RepeatMode.SINGLE, controller.repeatMode)
+                      assertEquals(0, queueStore.saveCount)
+                      assertNull(engine.lastTrack)
+                  } finally {
+                      controllerScope.cancel()
+                  }
+              }
+
+              @Test
+              fun restoredQueueToggleStartsCurrentTrackFromBeginning() = runTest {
+          ''',
+          )
+
+          replace_once(
+              tests,
+              '''    private class FakePlaybackQueueStore(initial: PlaybackQueueSnapshot = PlaybackQueueSnapshot()) : PlaybackQueueStore {
+              var saved = initial
+                  private set
+
+              override suspend fun load(): PlaybackQueueSnapshot = saved
+
+              override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+                  saved = snapshot
+              }
+          }
+          ''',
+              '''    private class FakePlaybackQueueStore(initial: PlaybackQueueSnapshot = PlaybackQueueSnapshot()) : PlaybackQueueStore {
+              var saved = initial
+                  private set
+              var staged = initial
+                  private set
+              var flushCount = 0
+                  private set
+
+              override suspend fun load(): PlaybackQueueSnapshot = saved
+
+              override fun stage(snapshot: PlaybackQueueSnapshot) {
+                  staged = snapshot
+              }
+
+              override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+                  saved = snapshot
+              }
+
+              override fun flush() {
+                  flushCount += 1
+              }
+          }
+
+          private class DelayedPlaybackQueueStore(initial: PlaybackQueueSnapshot) : PlaybackQueueStore {
+              val allowLoad = CompletableDeferred<Unit>()
+              private var snapshot = initial
+              var saveCount = 0
+                  private set
+
+              override suspend fun load(): PlaybackQueueSnapshot {
+                  allowLoad.await()
+                  return snapshot
+              }
+
+              override suspend fun save(snapshot: PlaybackQueueSnapshot) {
+                  saveCount += 1
+                  this.snapshot = snapshot
+              }
+          }
+          ''',
+          )
+
+          codec_test = Path("shared/src/commonTest/kotlin/org/feeluown/mobile/PlaybackQueueCodecTest.kt")
+          codec_test.write_text('''package org.feeluown.mobile
+
+          import kotlin.test.Test
+          import kotlin.test.assertEquals
+          import kotlin.test.assertFalse
+          import kotlin.test.assertNull
+          import kotlin.test.assertTrue
+
+          class PlaybackQueueCodecTest {
+              @Test
+              fun v3RoundTripPreservesCompleteQueueState() {
+                  val feature = ProviderFeature(
+                      id = "daily\\tqueue",
+                      providerId = "netease",
+                      providerName = "网易云音乐",
+                      title = "每日\\n推荐",
+                      category = ProviderFeatureCategory.Recommend,
+                      contentType = ProviderContentType.Songs,
+                      requiresLogin = true,
+                  )
+                  val snapshot = PlaybackQueueSnapshot(
+                      mainQueue = listOf(track("main:1"), track("main:2")),
+                      originalMainQueue = listOf(track("main:2"), track("main:1")),
+                      upNextQueue = listOf(track("next:2")),
+                      queueIndex = 0,
+                      shuffleEnabled = true,
+                      repeatMode = RepeatMode.SINGLE,
+                      isFmQueue = false,
+                      shuffleBeforeFm = true,
+                      currentUpNextTrack = track("next:1"),
+                      currentIsUpNext = true,
+                      queueFeature = feature,
+                      queuePlaylistId = "playlist\\t42",
+                  )
+
+                  val decoded = PlaybackQueueCodec.decode(PlaybackQueueCodec.encode(snapshot))
+
+                  assertEquals(snapshot, decoded)
+              }
+
+              @Test
+              fun v2DecodeKeepsShuffleAndRepeatMode() {
+                  val decoded = PlaybackQueueCodec.decode("v2\\n0\\ttrue\\tSINGLE\\tfalse\\t")
+
+                  assertTrue(decoded.shuffleEnabled)
+                  assertEquals(RepeatMode.SINGLE, decoded.repeatMode)
+                  assertFalse(decoded.currentIsUpNext)
+                  assertNull(decoded.currentUpNextTrack)
+                  assertNull(decoded.queueFeature)
+                  assertNull(decoded.queuePlaylistId)
+              }
+
+              private fun track(id: String) = MusicTrack(
+                  id = id,
+                  title = "Title $id",
+                  artists = "Artist",
+                  album = "Album",
+                  source = "netease",
+                  sourceType = TrackSourceType.Provider,
+                  providerId = id,
+                  providerName = "网易云音乐",
+              )
+          }
+          '''.replace("          ", ""))
+          PY
+
+      - name: Run shared tests
+        run: ./gradlew :shared:allTests
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          rm .github/workflows/agent-restore-playback-state.yml
+          git config user.name "openai-agent"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shared androidApp .github/workflows/agent-restore-playback-state.yml
+          git commit -m "Restore complete playback state after process restart"
+          git push origin HEAD:agent/restore-playback-state
