@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -55,6 +56,10 @@ private enum class SettingsPage {
 @Composable
 fun SettingsScreenV2(
     controller: FuoPlayerController,
+    themePaletteStyle: ThemePaletteStyle,
+    onThemePaletteStyleChange: (ThemePaletteStyle) -> Unit,
+    themeColorSpec: ThemeColorSpec,
+    onThemeColorSpecChange: (ThemeColorSpec) -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     appVersionInfo: String?,
@@ -131,6 +136,10 @@ fun SettingsScreenV2(
             page == SettingsPage.Theme -> {
                 ThemeSettingsContent(
                     controller = controller,
+                    themePaletteStyle = themePaletteStyle,
+                    onThemePaletteStyleChange = onThemePaletteStyleChange,
+                    themeColorSpec = themeColorSpec,
+                    onThemeColorSpecChange = onThemeColorSpecChange,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues),
@@ -310,6 +319,10 @@ private fun PlayerDisplaySettingsPanelV2(controller: FuoPlayerController) {
 @Composable
 private fun ThemeSettingsContent(
     controller: FuoPlayerController,
+    themePaletteStyle: ThemePaletteStyle,
+    onThemePaletteStyleChange: (ThemePaletteStyle) -> Unit,
+    themeColorSpec: ThemeColorSpec,
+    onThemeColorSpecChange: (ThemeColorSpec) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val darkTheme = resolvedDarkTheme(controller.themeMode, isSystemInDarkTheme())
@@ -344,10 +357,39 @@ private fun ThemeSettingsContent(
                     modifier = Modifier
                         .size(18.dp)
                         .clip(CircleShape)
-                        .background(themePreviewColor(scheme, darkTheme)),
+                        .background(
+                            themePreviewColor(
+                                themeColorScheme = scheme,
+                                darkTheme = darkTheme,
+                                paletteStyle = themePaletteStyle,
+                                colorSpec = themeColorSpec,
+                            ),
+                        ),
                 )
             },
             onSelect = controller::onThemeColorSchemeChange,
+        )
+        ThemeSelectorCard(
+            title = "调色板风格",
+            supportingText = "用于推导 Material 3 调色板的色调算法",
+            value = themePaletteStyle.label,
+            icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = null) },
+            options = ThemePaletteStyle.entries,
+            selected = themePaletteStyle,
+            optionLabel = ThemePaletteStyle::label,
+            enabled = !controller.isLoading,
+            onSelect = onThemePaletteStyleChange,
+        )
+        ThemeSelectorCard(
+            title = "色彩规范",
+            supportingText = "Material 3 色彩规范版本",
+            value = themeColorSpec.label,
+            icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
+            options = ThemeColorSpec.entries,
+            selected = themeColorSpec,
+            optionLabel = ThemeColorSpec::label,
+            enabled = !controller.isLoading,
+            onSelect = onThemeColorSpecChange,
         )
         ThemeSwitchCard(
             title = "封面动态取色",
