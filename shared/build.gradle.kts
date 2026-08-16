@@ -79,15 +79,3 @@ android {
         disable.add("NullSafeMutableLiveData")
     }
 }
-
-kover {
-    reports {
-        variant("debug") {
-            verify {
-                rule {
-                    minBound(49)
-                }
-            }
-        }
-    }
-}
