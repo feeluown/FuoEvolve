@@ -81,6 +81,29 @@ enum class ThemeColorScheme(
 }
 
 @Serializable
+enum class ThemePaletteStyle(
+    val label: String,
+) {
+    TonalSpot("Tonal Spot"),
+    Neutral("Neutral"),
+    Vibrant("Vibrant"),
+    Expressive("Expressive"),
+    Rainbow("Rainbow"),
+    FruitSalad("FruitSalad"),
+    Monochrome("Monochrome"),
+    Fidelity("Fidelity"),
+    Content("Content"),
+}
+
+@Serializable
+enum class ThemeColorSpec(
+    val label: String,
+) {
+    Material3_2021("Material 3 (2021)"),
+    Expressive_2025("Expressive (2025)"),
+}
+
+@Serializable
 data class AppSettings(
     val onboardingCompleted: Boolean = false,
     val homeSection: HomeSection = HomeSection.Recommend,
@@ -115,6 +138,8 @@ data class AppSettings(
     val statusBarLyricsEnabled: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
+    val themePaletteStyle: ThemePaletteStyle = ThemePaletteStyle.Expressive,
+    val themeColorSpec: ThemeColorSpec = ThemeColorSpec.Expressive_2025,
     val dynamicCoverColorEnabled: Boolean = false,
     val playlistPlaybackStatsVersion: Int = 0,
     val playlistPlaybackStats: Map<String, PlaylistPlaybackStat> = emptyMap(),
@@ -977,6 +1002,8 @@ interface AppSettingsRepository {
     val state: StateFlow<SettingsState>
     suspend fun awaitSettings(): AppSettings
     suspend fun update(transform: (AppSettings) -> AppSettings)
+    suspend fun updateThemePaletteStyle(value: ThemePaletteStyle)
+    suspend fun updateThemeColorSpec(value: ThemeColorSpec)
 }
 
 class InMemoryAppSettingsRepository(
@@ -988,9 +1015,30 @@ class InMemoryAppSettingsRepository(
     override suspend fun awaitSettings(): AppSettings = mutableState.value.settings
 
     override suspend fun update(transform: (AppSettings) -> AppSettings) {
+        val current = mutableState.value.settings
+        val transformed = transform(current)
         mutableState.value = SettingsState(
             isLoaded = true,
-            settings = transform(mutableState.value.settings),
+            settings = transformed.copy(
+                themePaletteStyle = current.themePaletteStyle,
+                themeColorSpec = current.themeColorSpec,
+            ),
+        )
+    }
+
+    override suspend fun updateThemePaletteStyle(value: ThemePaletteStyle) {
+        val current = mutableState.value.settings
+        mutableState.value = SettingsState(
+            isLoaded = true,
+            settings = current.copy(themePaletteStyle = value),
+        )
+    }
+
+    override suspend fun updateThemeColorSpec(value: ThemeColorSpec) {
+        val current = mutableState.value.settings
+        mutableState.value = SettingsState(
+            isLoaded = true,
+            settings = current.copy(themeColorSpec = value),
         )
     }
 }
