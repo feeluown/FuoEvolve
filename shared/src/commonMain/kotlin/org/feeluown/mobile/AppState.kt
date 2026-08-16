@@ -103,6 +103,8 @@ data class AppUiState(
 sealed interface AppIntent {
     data object NavigateBack : AppIntent
     data class UpdateSettings(val transform: (AppSettings) -> AppSettings) : AppIntent
+    data class UpdateThemePaletteStyle(val value: ThemePaletteStyle) : AppIntent
+    data class UpdateThemeColorSpec(val value: ThemeColorSpec) : AppIntent
 }
 
 /** 应用壳层 ViewModel：组合设置、登录会话和导航三个全局单一事实源。 */
@@ -133,6 +135,12 @@ class FuoAppViewModel(
             AppIntent.NavigateBack -> controller.navigateBack()
             is AppIntent.UpdateSettings -> viewModelScope.launch {
                 settingsRepository.update(intent.transform)
+            }
+            is AppIntent.UpdateThemePaletteStyle -> viewModelScope.launch {
+                settingsRepository.updateThemePaletteStyle(intent.value)
+            }
+            is AppIntent.UpdateThemeColorSpec -> viewModelScope.launch {
+                settingsRepository.updateThemeColorSpec(intent.value)
             }
         }
     }
