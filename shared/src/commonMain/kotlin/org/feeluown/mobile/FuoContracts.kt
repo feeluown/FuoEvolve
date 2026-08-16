@@ -1002,8 +1002,12 @@ interface AppSettingsRepository {
     val state: StateFlow<SettingsState>
     suspend fun awaitSettings(): AppSettings
     suspend fun update(transform: (AppSettings) -> AppSettings)
-    suspend fun updateThemePaletteStyle(value: ThemePaletteStyle)
-    suspend fun updateThemeColorSpec(value: ThemeColorSpec)
+    suspend fun updateThemePaletteStyle(value: ThemePaletteStyle) {
+        update { settings -> settings.copy(themePaletteStyle = value) }
+    }
+    suspend fun updateThemeColorSpec(value: ThemeColorSpec) {
+        update { settings -> settings.copy(themeColorSpec = value) }
+    }
 }
 
 class InMemoryAppSettingsRepository(
