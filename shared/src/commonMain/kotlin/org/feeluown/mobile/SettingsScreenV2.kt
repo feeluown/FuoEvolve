@@ -28,9 +28,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -46,6 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 
+private enum class SettingsPage {
+    Main,
+    Theme,
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreenV2(
@@ -53,7 +58,6 @@ fun SettingsScreenV2(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     appVersionInfo: String?,
-    onOpenThemeSettings: () -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportYtmusicOAuthFile: (() -> Unit)? = null,
     onStartYtmusicOAuth: (() -> Unit)? = null,
@@ -61,25 +65,35 @@ fun SettingsScreenV2(
     val loginProviderId = controller.settingsLoginProviderId
     val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
     val layoutInfo = LocalAppLayoutInfo.current
+    var page by remember { mutableStateOf(SettingsPage.Main) }
 
     LaunchedEffect(loginProviderId, controller.providers) {
         if (loginProviderId != null && loginProvider == null) {
             controller.closeSettingsProviderLogin()
         }
+        if (loginProviderId != null) {
+            page = SettingsPage.Main
+        }
+    }
+
+    val title = when {
+        loginProvider != null -> loginProvider.providerName
+        page == SettingsPage.Theme -> "主题设置"
+        else -> "设置"
     }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(loginProvider?.providerName ?: "设置") },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(
                         onClick = {
-                            if (loginProvider != null) {
-                                controller.closeSettingsProviderLogin()
-                            } else {
-                                controller.closeSettings()
+                            when {
+                                loginProvider != null -> controller.closeSettingsProviderLogin()
+                                page == SettingsPage.Theme -> page = SettingsPage.Main
+                                else -> controller.closeSettings()
                             }
                         },
                     ) {
@@ -114,6 +128,15 @@ fun SettingsScreenV2(
                 }
             }
 
+            page == SettingsPage.Theme -> {
+                ThemeSettingsContent(
+                    controller = controller,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                )
+            }
+
             layoutInfo.useWideLayout -> {
                 val wideScrollState = rememberScrollState()
                 Row(
@@ -144,7 +167,7 @@ fun SettingsScreenV2(
                     ) {
                         ThemeSettingsEntryPanel(
                             controller = controller,
-                            onClick = onOpenThemeSettings,
+                            onClick = { page = SettingsPage.Theme },
                         )
                         PlayerDisplaySettingsPanelV2(controller)
                         LocalMusicScanSettingsPanel(controller)
@@ -178,7 +201,7 @@ fun SettingsScreenV2(
                     SmartReplacementSettingsPanel(controller)
                     ThemeSettingsEntryPanel(
                         controller = controller,
-                        onClick = onOpenThemeSettings,
+                        onClick = { page = SettingsPage.Theme },
                     )
                     PlayerDisplaySettingsPanelV2(controller)
                     LocalMusicScanSettingsPanel(controller)
@@ -191,37 +214,6 @@ fun SettingsScreenV2(
                 }
             }
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ThemeSettingsScreen(
-    controller: FuoPlayerController,
-    onBack: () -> Unit,
-) {
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("主题设置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
-        },
-    ) { paddingValues ->
-        ThemeSettingsContent(
-            controller = controller,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-        )
     }
 }
 
