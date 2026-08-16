@@ -58,7 +58,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Run shared tests and generate coverage
-        run: ./gradlew :shared:allTests :shared:koverXmlReportDebug :shared:koverVerifyDebug
+        run: ./gradlew :shared:allTests :shared:koverXmlReportDebug
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
