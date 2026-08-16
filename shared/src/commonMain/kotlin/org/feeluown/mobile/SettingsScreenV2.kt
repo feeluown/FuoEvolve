@@ -682,7 +682,7 @@ private fun DownloadSettingsPanelV2(controller: FuoPlayerController) {
             value = controller.downloadParallelism.toString(),
             options = (1..5).toList(),
             selected = controller.downloadParallelism,
-            optionLabel = Int::toString,
+            optionLabel = { it.toString() },
             enabled = !controller.isLoading,
             onSelect = controller::onDownloadParallelismChange,
         )
