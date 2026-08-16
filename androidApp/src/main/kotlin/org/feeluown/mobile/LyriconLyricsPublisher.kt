@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 internal const val LYRICON_PACKAGE_NAME = "io.github.proify.lyricon"
 
@@ -33,6 +34,10 @@ internal class LyriconLyricsPublisher(
     private var provider: LyriconProvider? = null
     private var lastTrackKey: String? = null
     private var lastPayload: StatusBarLyricsPayload? = null
+    private var lastPublishedStatus: PlayerStatus? = null
+    private var lastObservedPositionMs: Long? = null
+    private var lastObservedRealtimeMs: Long = 0L
+    private var lastObservedStatus: PlayerStatus? = null
 
     private val connectionListener = object : ConnectionListener {
         override fun onConnected(provider: LyriconProvider) {
@@ -101,8 +106,13 @@ internal class LyriconLyricsPublisher(
 
         val activeProvider = ensureProvider() ?: return
         val trackKey = listOf(track.source, track.id, track.title, track.artists).joinToString("\u0000")
+        val nowRealtimeMs = SystemClock.elapsedRealtime()
+        val songChanged = trackKey != lastTrackKey || payload != lastPayload
+        val positionDiscontinuity = songChanged || isPositionDiscontinuity(snapshot, nowRealtimeMs)
+        val playbackStateChanged = snapshot.status != lastPublishedStatus
+
         runCatching {
-            if (trackKey != lastTrackKey || payload != lastPayload) {
+            if (songChanged) {
                 when (payload) {
                     StatusBarLyricsPayload.Empty -> Unit
                     is StatusBarLyricsPayload.Text -> activeProvider.player.sendText(payload.text)
@@ -116,11 +126,13 @@ internal class LyriconLyricsPublisher(
                                 LyriconRichLyricLine(
                                     begin = line.beginMs,
                                     end = line.endMs,
+                                    duration = line.endMs - line.beginMs,
                                     text = line.text,
                                     words = line.words?.map { word ->
                                         LyriconLyricWord(
                                             begin = word.beginMs,
                                             end = word.endMs,
+                                            duration = word.endMs - word.beginMs,
                                             text = word.text,
                                         )
                                     },
@@ -135,25 +147,48 @@ internal class LyriconLyricsPublisher(
                 lastPayload = payload
             }
 
-            // Lyricon's setPosition() writes through an optional SharedMemory bridge. If that
-            // bridge cannot be mapped on a device, the call can succeed without advancing the
-            // central player's position, leaving the generated title placeholder visible forever.
-            // PlaybackState synchronization goes through Binder and lets Lyricon advance the
-            // position from elapsedRealtime, while also preserving the state for autoSync.
-            activeProvider.player.setPlaybackState(snapshot.toAndroidPlaybackState())
+            // Lyricon has two distinct position paths. PlaybackState supplies a monotonic anchor
+            // from which the central service advances position at its own update rate; seekTo()
+            // explicitly tells subscribers that playback jumped. Re-sending a fresh PlaybackState
+            // for every coarse FuoEvolve position poll can repeatedly re-anchor lyric progress and
+            // makes word-synced lyrics appear stuck. Keep the anchor stable during ordinary playback
+            // and only replace it when the song/state changes or a real discontinuity is observed.
+            if (positionDiscontinuity) {
+                activeProvider.player.seekTo(snapshot.positionMs.coerceAtLeast(0L))
+            }
+            if (songChanged || playbackStateChanged || positionDiscontinuity) {
+                activeProvider.player.setPlaybackState(snapshot.toAndroidPlaybackState(nowRealtimeMs))
+                lastPublishedStatus = snapshot.status
+            }
         }.onFailure { throwable ->
             Log.w(TAG, "Failed to publish Lyricon state; playback is unaffected", throwable)
         }
+
+        lastObservedPositionMs = snapshot.positionMs.coerceAtLeast(0L)
+        lastObservedRealtimeMs = nowRealtimeMs
+        lastObservedStatus = snapshot.status
     }
 
-    private fun Snapshot.toAndroidPlaybackState(): AndroidPlaybackState {
+    private fun isPositionDiscontinuity(snapshot: Snapshot, nowRealtimeMs: Long): Boolean {
+        val previousPositionMs = lastObservedPositionMs ?: return true
+        val previousStatus = lastObservedStatus ?: return true
+        val elapsedMs = (nowRealtimeMs - lastObservedRealtimeMs).coerceAtLeast(0L)
+        val expectedPositionMs = if (previousStatus == PlayerStatus.Playing) {
+            previousPositionMs + elapsedMs
+        } else {
+            previousPositionMs
+        }
+        return abs(snapshot.positionMs.coerceAtLeast(0L) - expectedPositionMs) > POSITION_DISCONTINUITY_THRESHOLD_MS
+    }
+
+    private fun Snapshot.toAndroidPlaybackState(updateRealtimeMs: Long): AndroidPlaybackState {
         val isPlaying = status == PlayerStatus.Playing
         return AndroidPlaybackState.Builder()
             .setState(
                 if (isPlaying) AndroidPlaybackState.STATE_PLAYING else AndroidPlaybackState.STATE_PAUSED,
                 positionMs.coerceAtLeast(0L),
                 if (isPlaying) 1f else 0f,
-                SystemClock.elapsedRealtime(),
+                updateRealtimeMs,
             )
             .build()
     }
@@ -199,6 +234,10 @@ internal class LyriconLyricsPublisher(
         provider = null
         lastTrackKey = null
         lastPayload = null
+        lastPublishedStatus = null
+        lastObservedPositionMs = null
+        lastObservedRealtimeMs = 0L
+        lastObservedStatus = null
     }
 
     private data class Snapshot(
@@ -212,5 +251,6 @@ internal class LyriconLyricsPublisher(
 
     private companion object {
         const val TAG = "LyriconLyricsPublisher"
+        const val POSITION_DISCONTINUITY_THRESHOLD_MS = 750L
     }
 }
