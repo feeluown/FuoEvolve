@@ -226,6 +226,8 @@ fun AppRoot(
     FuoTheme(
         themeMode = appUiState.settings.settings.themeMode,
         themeColorScheme = appUiState.settings.settings.themeColorScheme,
+        themePaletteStyle = appUiState.settings.settings.themePaletteStyle,
+        themeColorSpec = appUiState.settings.settings.themeColorSpec,
     ) {
         if (!controller.isSettingsLoaded) {
             AppInitializationLoadingScreen()
@@ -345,6 +347,14 @@ fun AppRoot(
                                             AppRoute.DownloadManager -> DownloadManagerScreen(controller)
                                             AppRoute.Settings -> SettingsScreenV2(
                                                 controller = controller,
+                                                themePaletteStyle = appUiState.settings.settings.themePaletteStyle,
+                                                onThemePaletteStyleChange = {
+                                                    appViewModel.dispatch(AppIntent.UpdateThemePaletteStyle(it))
+                                                },
+                                                themeColorSpec = appUiState.settings.settings.themeColorSpec,
+                                                onThemeColorSpecChange = {
+                                                    appViewModel.dispatch(AppIntent.UpdateThemeColorSpec(it))
+                                                },
                                                 onOpenProviderWebLogin = onOpenProviderWebLogin,
                                                 onLogoutProvider = onLogoutProvider,
                                                 appVersionInfo = appVersionInfo,
