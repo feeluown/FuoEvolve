@@ -62,6 +62,11 @@ class MainActivity : ComponentActivity() {
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val appViewModel = fuoApplication.appViewModel
             val controller = appViewModel.controller
+            remember {
+                AndroidPredictiveBackPreference.initialize(this@MainActivity)
+                Unit
+            }
+            val predictiveBackEnabled by AndroidPredictiveBackPreference.enabled
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
             ) { permissionResult ->
@@ -187,14 +192,23 @@ class MainActivity : ComponentActivity() {
                 pendingLocalPlaylistExport = null
             }
 
+            val controllerHandlesBack = controller.isFullPlayerOpen ||
+                controller.isVideoFullscreen ||
+                controller.settingsLoginProviderId != null ||
+                controller.selectedLocalMusicCollection != null ||
+                controller.selectedLocalMusicDirectoryId != null
+            val useLegacyPageBack = AndroidPredictiveBackPreference.isSupported &&
+                !predictiveBackEnabled &&
+                appUiState.backStack.size > 1 &&
+                appUiState.backStack.lastOrNull() != AppRoute.Settings
             BackHandler(
-                enabled = controller.isFullPlayerOpen ||
-                    controller.isVideoFullscreen ||
-                    controller.settingsLoginProviderId != null ||
-                    controller.selectedLocalMusicCollection != null ||
-                    controller.selectedLocalMusicDirectoryId != null,
+                enabled = controllerHandlesBack || useLegacyPageBack,
             ) {
-                controller.navigateBack()
+                if (controllerHandlesBack) {
+                    controller.navigateBack()
+                } else {
+                    appViewModel.dispatch(AppIntent.NavigateBack)
+                }
             }
 
             LaunchedEffect(Unit) {
