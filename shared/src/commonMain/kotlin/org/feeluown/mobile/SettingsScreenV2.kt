@@ -1,5 +1,12 @@
 package org.feeluown.mobile
 
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -99,6 +106,27 @@ private sealed interface SettingsRoute : NavKey {
     data class Provider(val providerId: String) : SettingsRoute
 }
 
+private fun settingsPageTransition(
+    initialOffsetX: (Int) -> Int,
+    targetOffsetX: (Int) -> Int,
+): ContentTransform = (
+    slideInHorizontally(
+        initialOffsetX = initialOffsetX,
+        animationSpec = tween(FuoMotion.pageTransitionMillis),
+    ) + fadeIn(animationSpec = tween(FuoMotion.pageFadeMillis))
+    ) togetherWith (
+    slideOutHorizontally(
+        targetOffsetX = targetOffsetX,
+        animationSpec = tween(FuoMotion.pageTransitionMillis),
+    ) + fadeOut(animationSpec = tween(FuoMotion.pageFadeMillis))
+    )
+
+private fun settingsForwardPageTransition(): ContentTransform =
+    settingsPageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+
+private fun settingsPopPageTransition(): ContentTransform =
+    settingsPageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreenV2(
@@ -144,6 +172,9 @@ fun SettingsScreenV2(
         backStack = backStack,
         modifier = Modifier.fillMaxSize(),
         onBack = ::pop,
+        transitionSpec = { settingsForwardPageTransition() },
+        popTransitionSpec = { settingsPopPageTransition() },
+        predictivePopTransitionSpec = { settingsPopPageTransition() },
         entryProvider = { route ->
             NavEntry(key = route) {
                 when (route) {
@@ -253,9 +284,7 @@ private fun SettingsMainPage(
                 LargeTopAppBar(
                     title = { Text("设置") },
                     navigationIcon = { SettingsBackButton(onBack) },
-                    colors = TopAppBarDefaults.largeTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
+                    colors = settingsTopAppBarColors(),
                 )
             }
         },
@@ -401,12 +430,6 @@ private fun SettingsOverview(
                 }
             }
         }
-        Text(
-            modifier = Modifier.padding(horizontal = FuoSpacing.md),
-            text = "设置会自动保存，并在支持的平台间保持一致的 Material 3 交互结构。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -966,21 +989,24 @@ private fun <T> SettingsChoiceRow(
     optionLeading: (@Composable (T) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        SettingsRow(
-            modifier = Modifier.fillMaxWidth(),
-            title = title,
-            supportingText = supportingText,
-            enabled = enabled,
-            onClick = { expanded = true },
-            leadingContent = leadingContent,
-            trailingContent = {
+    var displayedValue by remember(value) { mutableStateOf(value) }
+    var displayedSelected by remember(selected) { mutableStateOf(selected) }
+
+    SettingsRow(
+        modifier = Modifier.fillMaxWidth(),
+        title = title,
+        supportingText = supportingText,
+        enabled = enabled,
+        onClick = { expanded = true },
+        leadingContent = leadingContent,
+        trailingContent = {
+            Box {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
                 ) {
                     Text(
-                        text = value,
+                        text = displayedValue,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -992,49 +1018,51 @@ private fun <T> SettingsChoiceRow(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            },
-        )
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            options.forEach { option ->
-                val isSelected = option == selected
-                DropdownMenuItem(
-                    modifier = if (isSelected) {
-                        Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
-                    } else {
-                        Modifier
-                    },
-                    text = {
-                        Text(
-                            text = optionLabel(option),
-                            color = if (isSelected) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                ) {
+                    options.forEach { option ->
+                        val isSelected = option == displayedSelected
+                        DropdownMenuItem(
+                            modifier = if (isSelected) {
+                                Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
                             } else {
-                                MaterialTheme.colorScheme.onSurface
+                                Modifier
+                            },
+                            text = {
+                                Text(
+                                    text = optionLabel(option),
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            },
+                            leadingIcon = {
+                                when {
+                                    isSelected -> Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    )
+                                    optionLeading != null -> optionLeading(option)
+                                    else -> Spacer(Modifier.size(24.dp))
+                                }
+                            },
+                            onClick = {
+                                displayedSelected = option
+                                displayedValue = optionLabel(option)
+                                expanded = false
+                                onSelect(option)
                             },
                         )
-                    },
-                    leadingIcon = {
-                        when {
-                            isSelected -> Icon(
-                                Icons.Filled.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                            optionLeading != null -> optionLeading(option)
-                            else -> Spacer(Modifier.size(24.dp))
-                        }
-                    },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    },
-                )
+                    }
+                }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
