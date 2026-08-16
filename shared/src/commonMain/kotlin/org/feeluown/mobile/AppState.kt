@@ -47,6 +47,9 @@ sealed interface AppRoute : NavKey {
     data object Settings : AppRoute
 
     @Serializable
+    data object ThemeSettings : AppRoute
+
+    @Serializable
     data object DebugLogs : AppRoute
 
     @Serializable
@@ -102,6 +105,7 @@ data class AppUiState(
 
 sealed interface AppIntent {
     data object NavigateBack : AppIntent
+    data class Navigate(val route: AppRoute) : AppIntent
     data class UpdateSettings(val transform: (AppSettings) -> AppSettings) : AppIntent
 }
 
@@ -131,6 +135,7 @@ class FuoAppViewModel(
     fun dispatch(intent: AppIntent) {
         when (intent) {
             AppIntent.NavigateBack -> controller.navigateBack()
+            is AppIntent.Navigate -> navigator.navigate(intent.route)
             is AppIntent.UpdateSettings -> viewModelScope.launch {
                 settingsRepository.update(intent.transform)
             }
