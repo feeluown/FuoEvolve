@@ -48,6 +48,25 @@ class DataStoreAppSettingsRepository(
     override suspend fun awaitSettings(): AppSettings = ready.await()
 
     override suspend fun update(transform: (AppSettings) -> AppSettings) {
+        updateInternal(preserveThemeTuning = true, transform = transform)
+    }
+
+    override suspend fun updateThemePaletteStyle(value: ThemePaletteStyle) {
+        updateInternal(preserveThemeTuning = false) { current ->
+            current.copy(themePaletteStyle = value)
+        }
+    }
+
+    override suspend fun updateThemeColorSpec(value: ThemeColorSpec) {
+        updateInternal(preserveThemeTuning = false) { current ->
+            current.copy(themeColorSpec = value)
+        }
+    }
+
+    private suspend fun updateInternal(
+        preserveThemeTuning: Boolean,
+        transform: (AppSettings) -> AppSettings,
+    ) {
         ready.await()
         updateMutex.withLock {
             var updated = mutableState.value.settings
@@ -55,7 +74,15 @@ class DataStoreAppSettingsRepository(
                 val current = preferences[SETTINGS_JSON_KEY]
                     ?.let { raw -> runCatching { decodeSettings(raw) }.getOrNull() }
                     ?: mutableState.value.settings
-                updated = transform(current).withoutProviderCredentials()
+                val transformed = transform(current)
+                updated = if (preserveThemeTuning) {
+                    transformed.copy(
+                        themePaletteStyle = current.themePaletteStyle,
+                        themeColorSpec = current.themeColorSpec,
+                    )
+                } else {
+                    transformed
+                }.withoutProviderCredentials()
                 preferences[SETTINGS_JSON_KEY] = json.encodeToString(updated)
             }
             mutableState.value = SettingsState(isLoaded = true, settings = updated)
