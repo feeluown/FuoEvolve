@@ -228,8 +228,11 @@ class FuoPlayerController(
         get() = navigator.contains(AppRoute.Search)
     val isRecognitionOpen: Boolean
         get() = navigator.contains(AppRoute.AudioRecognition)
-    var recognitionUiState by mutableStateOf<RecognitionUiState>(RecognitionUiState.Idle)
-        private set
+    var recognitionUiState: RecognitionUiState
+        get() = audioRecognitionController.uiState
+        private set(value) {
+            audioRecognitionController.uiState = value
+        }
     var isFullPlayerOpen by mutableStateOf(false)
         private set
     var isVideoFullscreen by mutableStateOf(false)
@@ -309,7 +312,7 @@ class FuoPlayerController(
     var localMetadataSearchMessage by localMusicState::metadataSearchMessage
         private set
     val isDebugLogViewerAvailable: Boolean
-        get() = debugLogRepository.isAvailable
+        get() = debugLogController.isAvailable
     val isShuffleEnabled: Boolean
         get() = shuffleEnabled
     val repeatMode: RepeatMode
@@ -362,11 +365,32 @@ class FuoPlayerController(
     private var minePlaylistRefreshSerial: Long = 0
     private var mineContentRefreshSerial: Long = 0
     private var hasLocalMusicPermission: Boolean = false
-    private var audioRecognitionJob: Job? = null
-    private var audioRecognitionSerial: Long = 0
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
     private val settingsUpdates = Channel<AppSettings>(capacity = Channel.UNLIMITED)
+    private val audioRecognitionController = AudioRecognitionController(
+        repository = audioRecognitionRepository,
+        scope = scope,
+        isPlaybackActive = { playbackState.status == PlayerStatus.Playing },
+        pausePlayback = { playbackEngine.pause() },
+    )
+    private val resourceCacheController = ResourceCacheController(
+        repository = resourceCacheRepository,
+        state = settingsUiState,
+        scope = scope,
+        persistSettings = ::persistSettings,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val debugLogController = DebugLogController(
+        repository = debugLogRepository,
+        state = settingsUiState,
+        scope = scope,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
     private val offlineLibraryCoordinator = OfflineLibraryControllerCoordinator(
         scope = scope,
         downloadRepository = downloadRepository,
@@ -400,9 +424,9 @@ class FuoPlayerController(
             runCatching { playbackQueueStore.load() }
                 .onSuccess { restorePlaybackQueue(it) }
             updateLocalMusicScanSettings()
-            updateResourceCacheLimit()
+            resourceCacheController.updateLimit()
             updateAudioQualityPolicies()
-            resourceCacheRepository.refreshUsage()
+            resourceCacheController.refreshUsageNow()
             runCatching { providerRepository.availableProviders() }
                 .onSuccess { loadedProviders ->
                     availableProviders = loadedProviders.sortedProvidersByOrder()
@@ -434,11 +458,7 @@ class FuoPlayerController(
             }
         }
         offlineLibraryCoordinator.start()
-        scope.launch {
-            resourceCacheRepository.usage.collect {
-                cacheUsage = it
-            }
-        }
+        resourceCacheController.startUsageCollection()
         scope.launch {
             playbackEngine.state.collect { engineState ->
                 engineState.currentTrack?.let(::synchronizePlaybackTrack)
@@ -649,7 +669,7 @@ class FuoPlayerController(
     }
 
     fun openRecognition() {
-        recognitionUiState = RecognitionUiState.Idle
+        audioRecognitionController.reset()
         navigator.navigate(AppRoute.AudioRecognition)
     }
 
@@ -660,82 +680,29 @@ class FuoPlayerController(
     }
 
     fun startRecognition() {
-        if (audioRecognitionJob?.isActive == true) return
-        if (playbackState.status == PlayerStatus.Playing) {
-            playbackEngine.pause()
-        }
-        recognitionUiState = RecognitionUiState.Capturing(
-            capturedMs = 0,
-            windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
-        )
-        val recognitionSerial = ++audioRecognitionSerial
-        audioRecognitionJob = scope.launch {
-            runCatching {
-                audioRecognitionRepository.recognize { event ->
-                    if (recognitionSerial == audioRecognitionSerial) {
-                        handleAudioRecognitionEvent(event)
-                    }
-                }
-            }.onSuccess { songs ->
-                if (recognitionSerial == audioRecognitionSerial) {
-                    recognitionUiState = recognitionResultState(songs)
-                }
-            }.onFailure { throwable ->
-                if (
-                    recognitionSerial == audioRecognitionSerial &&
-                    throwable !is CancellationException &&
-                    recognitionUiState != RecognitionUiState.Cancelled &&
-                    recognitionUiState != RecognitionUiState.NoResult
-                ) {
-                    recognitionUiState = RecognitionUiState.Error(
-                        throwable.message ?: "听歌识曲失败",
-                    )
-                }
-            }
-            if (recognitionSerial == audioRecognitionSerial) {
-                audioRecognitionJob = null
-            }
-        }
+        audioRecognitionController.start()
     }
 
     fun cancelRecognition() {
-        audioRecognitionSerial += 1
-        audioRecognitionRepository.cancel()
-        audioRecognitionJob?.cancel()
-        audioRecognitionJob = null
-        recognitionUiState = RecognitionUiState.Cancelled
+        audioRecognitionController.cancel()
     }
 
     fun retryRecognition() {
-        cancelRecognition()
-        recognitionUiState = RecognitionUiState.Idle
-        startRecognition()
+        audioRecognitionController.retry()
     }
 
     fun closeRecognition() {
-        audioRecognitionSerial += 1
-        audioRecognitionRepository.cancel()
-        audioRecognitionJob?.cancel()
-        audioRecognitionJob = null
+        audioRecognitionController.close()
         navigator.pop(AppRoute.AudioRecognition)
-        recognitionUiState = RecognitionUiState.Idle
     }
 
     fun onRecognitionScreenDisposed() {
-        if (isRecognitionInProgress()) {
-            cancelRecognition()
-        }
+        audioRecognitionController.cancelIfInProgress()
     }
 
     fun onAppBackgrounded() {
-        if (isRecognitionInProgress()) {
-            cancelRecognition()
-        }
+        audioRecognitionController.cancelIfInProgress()
     }
-
-    private fun isRecognitionInProgress(): Boolean =
-        recognitionUiState is RecognitionUiState.Capturing ||
-            recognitionUiState == RecognitionUiState.Matching
 
     fun searchRecognizedSong(song: RecognizedSong) {
         query = buildList {
@@ -782,48 +749,6 @@ class FuoPlayerController(
                     message = "资源加载失败"
                 }
             isLoading = false
-        }
-    }
-
-    private fun handleAudioRecognitionEvent(event: AudioRecognitionEvent) {
-        recognitionUiState = when (event) {
-            is AudioRecognitionEvent.Capturing -> RecognitionUiState.Capturing(
-                capturedMs = event.capturedMs,
-                windowDurationMs = event.windowDurationMs,
-            )
-            is AudioRecognitionEvent.Matching -> RecognitionUiState.Matching
-            is AudioRecognitionEvent.NoMatch -> {
-                if (event.attempt >= AUDIO_RECOGNITION_MAX_ATTEMPTS) {
-                    stopRecognitionWithoutResult()
-                    RecognitionUiState.NoResult
-                } else {
-                    RecognitionUiState.Capturing(
-                        capturedMs = 0,
-                        windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
-                    )
-                }
-            }
-            is AudioRecognitionEvent.Success -> recognitionResultState(event.songs)
-            is AudioRecognitionEvent.Error -> RecognitionUiState.Error(event.message)
-            AudioRecognitionEvent.Cancelled -> RecognitionUiState.Cancelled
-        }
-    }
-
-    private fun stopRecognitionWithoutResult() {
-        audioRecognitionSerial += 1
-        audioRecognitionJob?.cancel()
-        audioRecognitionRepository.cancel()
-        audioRecognitionJob = null
-    }
-
-    private fun recognitionResultState(songs: List<RecognizedSong>): RecognitionUiState {
-        val distinctSongs = songs.distinctBy {
-            it.neteaseSongId ?: "${it.title}\u0000${it.artists.joinToString()}"
-        }
-        return if (distinctSongs.isEmpty()) {
-            RecognitionUiState.NoResult
-        } else {
-            RecognitionUiState.Success(distinctSongs)
         }
     }
 
@@ -929,7 +854,7 @@ class FuoPlayerController(
     }
 
     fun openDebugLogs() {
-        if (!debugLogRepository.isAvailable) return
+        if (!debugLogController.isAvailable) return
         navigator.navigate(AppRoute.DebugLogs)
         refreshDebugLogs()
     }
@@ -957,34 +882,15 @@ class FuoPlayerController(
     }
 
     fun refreshDebugLogs() {
-        if (!debugLogRepository.isAvailable) return
-        scope.launch {
-            isLoading = true
-            debugLogError = null
-            runCatching { debugLogRepository.logLines() }
-                .onSuccess { debugLogLines = it }
-                .onFailure { debugLogError = it.message ?: it::class.simpleName.orEmpty() }
-            isLoading = false
-        }
+        debugLogController.refresh()
     }
 
     fun onDebugLogLevelFilterChange(level: DebugLogLevel, selected: Boolean) {
-        debugLogLevelFilters = if (selected) {
-            debugLogLevelFilters + level
-        } else {
-            debugLogLevelFilters - level
-        }
+        debugLogController.onLevelFilterChange(level, selected)
     }
 
     fun exportDebugLogs(lines: List<String>) {
-        if (!debugLogRepository.isAvailable || lines.isEmpty()) return
-        scope.launch {
-            isLoading = true
-            runCatching { debugLogRepository.exportLogFile(lines) }
-                .onSuccess { message = it }
-                .onFailure { setError(it) }
-            isLoading = false
-        }
+        debugLogController.export(lines)
     }
 
     fun onProviderCookiesChange(providerId: String, value: String) {
@@ -1183,44 +1089,19 @@ class FuoPlayerController(
     }
 
     fun onAudioCacheLimitChange(value: Int) {
-        audioCacheLimitMb = value
-        persistSettings()
-        scope.launch {
-            updateResourceCacheLimit()
-            resourceCacheRepository.refreshUsage()
-        }
+        resourceCacheController.onAudioCacheLimitChange(value)
     }
 
     fun onImageCacheLimitChange(value: Int) {
-        imageCacheLimitMb = value
-        persistSettings()
-        scope.launch {
-            updateResourceCacheLimit()
-            resourceCacheRepository.refreshUsage()
-        }
+        resourceCacheController.onImageCacheLimitChange(value)
     }
 
     fun refreshResourceCacheUsage() {
-        scope.launch {
-            runCatching { resourceCacheRepository.refreshUsage() }
-                .onFailure { setError(it) }
-        }
+        resourceCacheController.refreshUsage()
     }
 
     fun clearResourceCache() {
-        scope.launch {
-            isLoading = true
-            message = "正在清空缓存"
-            runCatching {
-                resourceCacheRepository.clearAll()
-                resourceCacheRepository.refreshUsage()
-            }.onSuccess {
-                message = "缓存已清空"
-            }.onFailure {
-                setError(it)
-            }
-            isLoading = false
-        }
+        resourceCacheController.clear()
     }
 
     fun loginProviderWithCookies(providerId: String, cookiesJson: String) {
@@ -5039,15 +4920,6 @@ class FuoPlayerController(
     private fun ProviderPlaylist.playbackStatsKey(): String =
         "$providerId$PLAYLIST_STATS_KEY_SEPARATOR$id"
 
-    private suspend fun updateResourceCacheLimit() {
-        resourceCacheRepository.updateLimit(
-            CacheLimit(
-                audioMaxBytes = audioCacheLimitMb.mbToBytes(),
-                imageMaxBytes = imageCacheLimitMb.mbToBytes(),
-            ),
-        )
-    }
-
     private suspend fun updateAudioQualityPolicies() {
         providerRepository.updateAudioQualityPolicies(wifiAudioQualityPolicy, cellularAudioQualityPolicy)
     }
@@ -5234,7 +5106,6 @@ class FuoPlayerController(
     private fun String.isMediaNotFoundMessage(): Boolean =
         contains("media not found", ignoreCase = true) || contains("MediaNotFound", ignoreCase = true)
 
-    private fun Int.mbToBytes(): Long = this.toLong() * 1024L * 1024L
 }
 
 internal fun normalizedPlaylistPlaybackStats(settings: AppSettings): Map<String, PlaylistPlaybackStat> {
