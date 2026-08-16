@@ -504,10 +504,39 @@ private fun SettingsCategoryDetail(
             }
 
             SettingsCategory.Appearance -> {
-                ThemeSettingsEntryPanel(
-                    controller = controller,
-                    onClick = onOpenTheme,
-                )
+                SettingsGroup(title = "主题") {
+                    SettingsChoiceRow(
+                        title = "主题模式",
+                        supportingText = "选择浅色、深色或跟随系统",
+                        value = controller.themeMode.label,
+                        leadingContent = { Icon(Icons.Filled.DarkMode, contentDescription = null) },
+                        options = ThemeMode.entries,
+                        selected = controller.themeMode,
+                        optionLabel = ThemeMode::label,
+                        enabled = !controller.isLoading,
+                        onSelect = controller::onThemeModeChange,
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        title = "主题设置",
+                        supportingText = "${controller.themeColorScheme.label} · 调色板与色彩规范",
+                        leadingContent = {
+                            Icon(
+                                Icons.Filled.Palette,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        onClick = onOpenTheme,
+                    )
+                }
                 PlayerDisplaySettingsPanelV2(controller)
             }
 
@@ -543,34 +572,6 @@ private fun SettingsDetailColumn(
                 .padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
             content = content,
-        )
-    }
-}
-
-@Composable
-private fun ThemeSettingsEntryPanel(
-    controller: FuoPlayerController,
-    onClick: () -> Unit,
-) {
-    SettingsGroup(title = "主题") {
-        SettingsRow(
-            title = "主题设置",
-            supportingText = "${controller.themeMode.label} · ${controller.themeColorScheme.label}",
-            leadingContent = {
-                Icon(
-                    Icons.Filled.Palette,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-            trailingContent = {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-            onClick = onClick,
         )
     }
 }
@@ -780,19 +781,7 @@ private fun ThemeSettingsContent(
 ) {
     val darkTheme = resolvedDarkTheme(controller.themeMode, isSystemInDarkTheme())
     SettingsDetailColumn(modifier = modifier) {
-        SettingsGroup(title = "颜色与外观") {
-            SettingsChoiceRow(
-                title = "主题",
-                supportingText = "选择应用的主题模式",
-                value = controller.themeMode.label,
-                leadingContent = { Icon(Icons.Filled.DarkMode, contentDescription = null) },
-                options = ThemeMode.entries,
-                selected = controller.themeMode,
-                optionLabel = ThemeMode::label,
-                enabled = !controller.isLoading,
-                onSelect = controller::onThemeModeChange,
-            )
-            SettingsDivider()
+        SettingsGroup(title = "主题配色") {
             SettingsChoiceRow(
                 title = "强调色",
                 supportingText = "选择 Material 3 主题使用的配色种子",
