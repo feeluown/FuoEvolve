@@ -343,7 +343,7 @@ fun AppRoot(
                                             )
                                             AppRoute.DebugLogs -> DebugLogScreen(controller)
                                             AppRoute.DownloadManager -> DownloadManagerScreen(controller)
-                                            AppRoute.Settings -> SettingsScreen(
+                                            AppRoute.Settings -> SettingsScreenV2(
                                                 controller = controller,
                                                 onOpenProviderWebLogin = onOpenProviderWebLogin,
                                                 onLogoutProvider = onLogoutProvider,
