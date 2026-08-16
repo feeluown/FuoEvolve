@@ -43,19 +43,20 @@ fun FuoTheme(
     content: @Composable () -> Unit,
 ) {
     val darkTheme = resolvedDarkTheme(themeMode, isSystemInDarkTheme())
+    val colorScheme = fuoColorScheme(
+        themeColorScheme = themeColorScheme,
+        darkTheme = darkTheme,
+        paletteStyle = themePaletteStyle,
+        colorSpec = themeColorSpec,
+    )
     CompositionLocalProvider(
         LocalThemePaletteStyle provides themePaletteStyle,
         LocalThemeColorSpec provides themeColorSpec,
     ) {
-        FuoExpressiveTheme(
-            colorScheme = fuoColorScheme(
-                themeColorScheme = themeColorScheme,
-                darkTheme = darkTheme,
-                paletteStyle = themePaletteStyle,
-                colorSpec = themeColorSpec,
-            ),
-            content = content,
-        )
+        FuoExpressiveTheme(colorScheme = colorScheme) {
+            platformWindowSurfaceEffect(colorScheme.surface)
+            content()
+        }
     }
 }
 
@@ -235,6 +236,9 @@ private fun fuoColorScheme(
 
 @Composable
 internal expect fun platformDynamicColorScheme(darkTheme: Boolean): ColorScheme?
+
+@Composable
+internal expect fun platformWindowSurfaceEffect(surfaceColor: Color)
 
 @Composable
 internal fun themePreviewColor(
