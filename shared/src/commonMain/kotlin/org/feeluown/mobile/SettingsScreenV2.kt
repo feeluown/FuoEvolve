@@ -143,6 +143,7 @@ fun SettingsScreenV2(
     onStartYtmusicOAuth: (() -> Unit)? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
+    val predictiveBackPreference = rememberPredictiveBackPreference()
     var backStack by remember { mutableStateOf<List<SettingsRoute>>(listOf(SettingsRoute.Main)) }
     var wideSelection by remember { mutableStateOf(SettingsCategory.Sources) }
 
@@ -216,6 +217,7 @@ fun SettingsScreenV2(
                                 onThemePaletteStyleChange = onThemePaletteStyleChange,
                                 themeColorSpec = themeColorSpec,
                                 onThemeColorSpecChange = onThemeColorSpecChange,
+                                predictiveBackPreference = predictiveBackPreference,
                                 modifier = bodyModifier,
                             )
                         }
@@ -256,6 +258,10 @@ fun SettingsScreenV2(
                 }
             }
         },
+    )
+    PlatformLegacyBackHandler(
+        enabled = predictiveBackPreference.isSupported && !predictiveBackPreference.enabled,
+        onBack = ::pop,
     )
 }
 
@@ -777,6 +783,7 @@ private fun ThemeSettingsContent(
     onThemePaletteStyleChange: (ThemePaletteStyle) -> Unit,
     themeColorSpec: ThemeColorSpec,
     onThemeColorSpecChange: (ThemeColorSpec) -> Unit,
+    predictiveBackPreference: PredictiveBackPreference,
     modifier: Modifier = Modifier,
 ) {
     val darkTheme = resolvedDarkTheme(controller.themeMode, isSystemInDarkTheme())
@@ -832,6 +839,20 @@ private fun ThemeSettingsContent(
                 enabled = !controller.isLoading,
                 onSelect = onThemeColorSpecChange,
             )
+        }
+        if (predictiveBackPreference.isSupported) {
+            SettingsGroup(title = "导航") {
+                SettingsToggleRow(
+                    title = "预测性返回手势",
+                    supportingText = "返回手势过程中预览上一页",
+                    checked = predictiveBackPreference.enabled,
+                    enabled = !controller.isLoading,
+                    leadingContent = {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    },
+                    onCheckedChange = predictiveBackPreference.onEnabledChange,
+                )
+            }
         }
         SettingsGroup(title = "播放器") {
             SettingsToggleRow(
