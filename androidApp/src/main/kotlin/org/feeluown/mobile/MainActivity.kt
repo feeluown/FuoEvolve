@@ -273,6 +273,19 @@ class MainActivity : ComponentActivity() {
                 onShareLocalPlaylistFile = ::shareLocalPlaylistFile,
                 onShareText = ::shareText,
             )
+
+            BackHandler(
+                enabled = !controllerHandlesBack &&
+                    AndroidPredictiveBackPreference.isSupported &&
+                    !predictiveBackEnabled &&
+                    appUiState.backStack.lastOrNull() != AppRoute.Settings,
+            ) {
+                if (appUiState.backStack.size > 1) {
+                    appViewModel.dispatch(AppIntent.NavigateBack)
+                } else {
+                    finish()
+                }
+            }
         }
     }
 
