@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
 import android.content.Context
+import android.media.session.PlaybackState as AndroidPlaybackState
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.snapshotFlow
 import io.github.proify.lyricon.lyric.model.LyricWord as LyriconLyricWord
@@ -132,11 +134,28 @@ internal class LyriconLyricsPublisher(
                 lastTrackKey = trackKey
                 lastPayload = payload
             }
-            activeProvider.player.setPosition(snapshot.positionMs.coerceAtLeast(0L))
-            activeProvider.player.setPlaybackState(snapshot.status == PlayerStatus.Playing)
+
+            // Lyricon's setPosition() writes through an optional SharedMemory bridge. If that
+            // bridge cannot be mapped on a device, the call can succeed without advancing the
+            // central player's position, leaving the generated title placeholder visible forever.
+            // PlaybackState synchronization goes through Binder and lets Lyricon advance the
+            // position from elapsedRealtime, while also preserving the state for autoSync.
+            activeProvider.player.setPlaybackState(snapshot.toAndroidPlaybackState())
         }.onFailure { throwable ->
             Log.w(TAG, "Failed to publish Lyricon state; playback is unaffected", throwable)
         }
+    }
+
+    private fun Snapshot.toAndroidPlaybackState(): AndroidPlaybackState {
+        val isPlaying = status == PlayerStatus.Playing
+        return AndroidPlaybackState.Builder()
+            .setState(
+                if (isPlaying) AndroidPlaybackState.STATE_PLAYING else AndroidPlaybackState.STATE_PAUSED,
+                positionMs.coerceAtLeast(0L),
+                if (isPlaying) 1f else 0f,
+                SystemClock.elapsedRealtime(),
+            )
+            .build()
     }
 
     private fun ensureProvider(): LyriconProvider? {
