@@ -52,8 +52,11 @@ class FuoPlayerController(
     private val scope: CoroutineScope,
 ) {
     private val providerState = ProviderControllerState()
+    private val providerAuthState = ProviderAuthControllerState()
+    private val searchState = SearchControllerState()
     private val localMusicState = LocalMusicControllerState()
     private val downloadState = DownloadControllerState()
+    private val playlistState = PlaylistControllerState()
     private val settingsUiState = SettingsControllerState()
 
     var isSettingsLoaded by mutableStateOf(false)
@@ -68,21 +71,19 @@ class FuoPlayerController(
         private set
     var providerCapabilities by providerState::capabilities
         private set
-    var providerAuthStates by providerState::authStates
+    var providerAuthStates by providerAuthState::authStates
         private set
-    var providerAuthOperations by providerState::authOperations
+    var providerAuthOperations by providerAuthState::authOperations
         private set
-    var providerAuthErrors by providerState::authErrors
+    var providerAuthErrors by providerAuthState::authErrors
         private set
-    var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
+    var providerCookieInputs by providerAuthState::cookieInputs
         private set
-    var providerHeaderInputs by mutableStateOf<Map<String, ProviderHeaderInput>>(emptyMap())
+    var providerHeaderInputs by providerAuthState::headerInputs
     var playlistPlaybackStats by mutableStateOf<Map<String, PlaylistPlaybackStat>>(emptyMap())
         private set
-    var providerOAuthInputs by mutableStateOf<Map<String, ProviderOAuthInput>>(emptyMap())
-    var ytmusicOAuthFlow by mutableStateOf<YtMusicOAuthFlowUiState?>(null)
-        private set
-    private var ytmusicOAuthJob: Job? = null
+    var providerOAuthInputs by providerAuthState::oauthInputs
+    var ytmusicOAuthFlow by providerAuthState::ytmusicOAuthFlow
         private set
     var enabledProviderIds by mutableStateOf(DEFAULT_ENABLED_PROVIDER_IDS)
         private set
@@ -118,13 +119,13 @@ class FuoPlayerController(
         private set
     var selectedPlaylistError by mutableStateOf<String?>(null)
         private set
-    var localPlaylists by mutableStateOf<List<LocalPlaylist>>(emptyList())
+    var localPlaylists by playlistState::localPlaylists
         private set
-    var selectedLocalPlaylist by mutableStateOf<LocalPlaylist?>(null)
+    var selectedLocalPlaylist by playlistState::selectedLocalPlaylist
         private set
-    var selectedLocalPlaylistTracks by mutableStateOf<List<MusicTrack>>(emptyList())
+    var selectedLocalPlaylistTracks by playlistState::selectedLocalPlaylistTracks
         private set
-    var selectedLocalPlaylistError by mutableStateOf<String?>(null)
+    var selectedLocalPlaylistError by playlistState::selectedLocalPlaylistError
         private set
     var selectedFeature by mutableStateOf<ProviderFeature?>(null)
         private set
@@ -166,21 +167,21 @@ class FuoPlayerController(
         private set
     var selectedVideoError by mutableStateOf<String?>(null)
         private set
-    var playlistTargetTrack by mutableStateOf<MusicTrack?>(null)
+    var playlistTargetTrack by playlistState::playlistTargetTrack
         private set
-    var playlistTargetType by mutableStateOf(PlaylistTargetType.Provider)
+    var playlistTargetType by playlistState::playlistTargetType
         private set
-    var playlistTargetPickerShowSwitcher by mutableStateOf(true)
+    var playlistTargetPickerShowSwitcher by playlistState::playlistTargetPickerShowSwitcher
         private set
-    var playlistOperationTargets by mutableStateOf<List<ProviderPlaylist>>(emptyList())
+    var playlistOperationTargets by playlistState::playlistOperationTargets
         private set
-    var playlistOperationError by mutableStateOf<String?>(null)
+    var playlistOperationError by playlistState::playlistOperationError
         private set
-    var playlistOperationFeedback by mutableStateOf<String?>(null)
+    var playlistOperationFeedback by playlistState::playlistOperationFeedback
         private set
-    var localPlaylistOperationError by mutableStateOf<String?>(null)
+    var localPlaylistOperationError by playlistState::localPlaylistOperationError
         private set
-    var localPlaylistImportPreview by mutableStateOf<LocalPlaylistImportPreview?>(null)
+    var localPlaylistImportPreview by playlistState::localPlaylistImportPreview
         private set
     var artistTargetTrack by mutableStateOf<MusicTrack?>(null)
         private set
@@ -188,11 +189,11 @@ class FuoPlayerController(
         private set
     var localTracks by localMusicState::tracks
         private set
-    var query by mutableStateOf("")
+    var query by searchState::query
         private set
-    var searchScope by mutableStateOf(SearchScope.All)
+    var searchScope by searchState::searchScope
         private set
-    var selectedSearchProviderId by mutableStateOf<String?>(null)
+    var selectedSearchProviderId by searchState::selectedSearchProviderId
         private set
     var selectedSettingsProviderId by mutableStateOf<String?>(null)
         private set
@@ -200,11 +201,11 @@ class FuoPlayerController(
         private set
     var providerLoginMode by mutableStateOf(ProviderLoginMode.WebView)
         private set
-    var searchResults by mutableStateOf<List<MusicTrack>>(emptyList())
+    var searchResults by searchState::searchResults
         private set
-    var providerSearchResults by mutableStateOf(ProviderSearchResults())
+    var providerSearchResults by searchState::providerSearchResults
         private set
-    var providerSearchTab by mutableStateOf(ProviderSearchTab.Songs)
+    var providerSearchTab by searchState::providerSearchTab
         private set
     var homeSection by mutableStateOf(HomeSection.Recommend)
         private set
@@ -359,12 +360,6 @@ class FuoPlayerController(
     private var suppressPlaybackRecoveryRequestSerial: Long? = null
     private var lyricsLoadJob: Job? = null
     private var lyricsLoadedForTrackId: String? = null
-    private var localMusicRefreshSerial: Long = 0
-    private var recommendContentRefreshSerial: Long = 0
-    private var musicContentRefreshSerial: Long = 0
-    private var minePlaylistRefreshSerial: Long = 0
-    private var mineContentRefreshSerial: Long = 0
-    private var hasLocalMusicPermission: Boolean = false
     private var playbackParts: List<PlaybackPart> = emptyList()
     private var currentPartIndex: Int = -1
     private val settingsUpdates = Channel<AppSettings>(capacity = Channel.UNLIMITED)
@@ -391,17 +386,102 @@ class FuoPlayerController(
         setMessage = { message = it },
         onError = { setError(it) },
     )
-    private val offlineLibraryCoordinator = OfflineLibraryControllerCoordinator(
+    private val providerAuthController = ProviderAuthController(
+        providerRepository = providerRepository,
+        sessionRepository = providerSessionRepository,
+        oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
         scope = scope,
+        state = providerAuthState,
+        providerName = ::providerName,
+        persistSettings = ::persistSettings,
+        onSessionChanged = {
+            if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                refreshActiveMineProviderContent()
+            } else {
+                refreshHomeContent(homeSection)
+            }
+        },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val searchController = SearchController(
+        providerRepository = providerRepository,
+        localRepository = localRepository,
+        scope = scope,
+        state = searchState,
+        providerIdsForSearch = ::searchProviderIdsForSearch,
+        providerExists = { providerId -> providers.any { it.providerId == providerId } },
+        openSearch = { navigator.navigate(AppRoute.Search) },
+        persistSettings = ::persistSettings,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val localMusicController = LocalMusicController(
+        repository = localRepository,
+        providerRepository = providerRepository,
+        navigator = navigator,
+        scope = scope,
+        state = localMusicState,
+        providers = { providers },
+        selectedSearchProviderId = { selectedSearchProviderId },
+        isLocalMusicSectionActive = { homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic },
+        persistSettings = ::persistSettings,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+        onTrackUpdated = ::updateLocalTrackCopies,
+    )
+    private val downloadController = DownloadController(
+        providerRepository = providerRepository,
         downloadRepository = downloadRepository,
         localRepository = localRepository,
-        onDownloadStates = { downloadStates = it },
-        onDownloadTasks = { downloadTasks = it },
-        hasLocalMusicPermission = { hasLocalMusicPermission },
-        shouldShowLocalMusicLoading = { homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic },
-        refreshLocalMusic = { forceRefresh, showLoading ->
-            refreshLocalMusic(forceRefresh = forceRefresh, showLoading = showLoading)
+        localMusicController = localMusicController,
+        scope = scope,
+        state = downloadState,
+        unavailablePlaybackPolicy = { unavailablePlaybackPolicy },
+        smartReplacementProviderIds = ::selectedSmartReplacementProviderIds,
+        smartReplacementMinScore = { smartReplacementMinScore },
+        isLocalMusicSectionActive = { homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic },
+        persistSettings = ::persistSettings,
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val settingsController = SettingsController(
+        providerRepository = providerRepository,
+        state = settingsUiState,
+        scope = scope,
+        persistSettings = ::persistSettings,
+    )
+    private val localPlaylistController = LocalPlaylistController(
+        repository = localPlaylistRepository,
+        navigator = navigator,
+        scope = scope,
+        state = playlistState,
+        toMusicTracks = { playlist -> playlist.toMusicTracks() },
+        toLocalPlaylistTrack = { track -> track.toLocalPlaylistTrack() },
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val providerContentController = ProviderContentController(
+        providerRepository = providerRepository,
+        state = providerState,
+        localPlaylistController = localPlaylistController,
+        scope = scope,
+        mineSection = { mineSection },
+        selectedProviderIdsFor = ::selectedProviderIdsFor,
+        isProviderLoggedIn = ::isProviderLoggedIn,
+        refreshProviderCatalog = ::refreshProviderCatalog,
+        ensureLocalMusic = ::ensureLocalMusic,
+        sortSections = { sections -> sections.sortedSectionsByOrder() },
+        isDeferredHomeFeature = { feature -> feature.isDeferredHomeFeature() },
+        providerErrorMessage = { throwable, fallback, providerId ->
+            providerErrorMessage(throwable, fallback, providerId)
         },
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
     )
 
     init {
@@ -423,9 +503,9 @@ class FuoPlayerController(
             isSettingsLoaded = true
             runCatching { playbackQueueStore.load() }
                 .onSuccess { restorePlaybackQueue(it) }
-            updateLocalMusicScanSettings()
+            localMusicController.updateScanSettings()
             resourceCacheController.updateLimit()
-            updateAudioQualityPolicies()
+            settingsController.updateAudioQualityPoliciesNow()
             resourceCacheController.refreshUsageNow()
             runCatching { providerRepository.availableProviders() }
                 .onSuccess { loadedProviders ->
@@ -443,13 +523,7 @@ class FuoPlayerController(
                 setError(it)
             }
         }
-        scope.launch {
-            providerSessionRepository.state.collect { sessionState ->
-                providerAuthStates = sessionState.authStates
-                providerAuthOperations = sessionState.operations
-                providerAuthErrors = sessionState.errors
-            }
-        }
+        providerAuthController.start()
         scope.launch {
             settingsRepository.state.collect { settingsState ->
                 if (settingsState.isLoaded) {
@@ -457,7 +531,7 @@ class FuoPlayerController(
                 }
             }
         }
-        offlineLibraryCoordinator.start()
+        downloadController.start()
         resourceCacheController.startUsageCollection()
         scope.launch {
             playbackEngine.state.collect { engineState ->
@@ -521,26 +595,20 @@ class FuoPlayerController(
         }
     }
 
-    fun authStateFor(provider: ProviderInfo): ProviderAuthState {
-        return providerAuthStates[provider.providerId] ?: ProviderAuthState(
-            providerId = provider.providerId,
-            providerName = provider.providerName,
-            isLoggedIn = false,
-        )
-    }
+    fun authStateFor(provider: ProviderInfo): ProviderAuthState =
+        providerAuthController.authStateFor(provider)
 
-    fun isProviderAuthBusy(providerId: String): Boolean =
-        providerId in providerAuthOperations ||
-            (providerId == "ytmusic" && ytmusicOAuthJob?.isActive == true)
+    fun isProviderAuthBusy(providerId: String): Boolean = providerAuthController.isBusy(providerId)
 
-    fun providerAuthError(providerId: String): String? =
-        providerAuthErrors[providerId]
+    fun providerAuthError(providerId: String): String? = providerAuthController.authError(providerId)
 
-    fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
+    fun cookieInputFor(providerId: String): String = providerAuthController.cookieInput(providerId)
 
-    fun providerHeaderInputFor(providerId: String): ProviderHeaderInput = providerHeaderInputs[providerId] ?: ProviderHeaderInput()
+    fun providerHeaderInputFor(providerId: String): ProviderHeaderInput =
+        providerAuthController.headerInput(providerId)
 
-    fun providerOAuthInputFor(providerId: String): ProviderOAuthInput = providerOAuthInputs[providerId] ?: ProviderOAuthInput()
+    fun providerOAuthInputFor(providerId: String): ProviderOAuthInput =
+        providerAuthController.oauthInput(providerId)
 
     fun isProviderEnabled(providerId: String): Boolean = providerId in enabledProviderIds
 
@@ -560,105 +628,15 @@ class FuoPlayerController(
         }
     }
 
-    fun onLocalMusicPermissionChange(hasPermission: Boolean) {
-        val wasGranted = hasLocalMusicPermission
-        hasLocalMusicPermission = hasPermission
-        if (hasPermission && !wasGranted && homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic) {
-            ensureLocalMusic()
-        }
-    }
+    fun onLocalMusicPermissionChange(hasPermission: Boolean) =
+        localMusicController.onPermissionChange(hasPermission)
 
-    fun ensureLocalMusic() {
-        if (!hasLocalMusicPermission) return
-        refreshLocalMusic(forceRefresh = false, showLoading = true)
-    }
+    fun ensureLocalMusic() = localMusicController.ensure()
 
-    fun refreshLocalMusic() {
-        if (!hasLocalMusicPermission) {
-            message = "允许访问音频后可加载本地音乐"
-            return
-        }
-        refreshLocalMusic(forceRefresh = true, showLoading = true)
-    }
+    fun refreshLocalMusic() = localMusicController.refresh()
 
-    private fun refreshLocalMusic(forceRefresh: Boolean, showLoading: Boolean) {
-        val refreshSerial = ++localMusicRefreshSerial
-        scope.launch {
-            if (showLoading) {
-                isLoading = true
-                message = if (forceRefresh) "正在刷新本地音乐库" else "正在加载本地音乐"
-            }
-            val result = runCatching {
-                updateLocalMusicScanSettings()
-                val databaseReady = localRepository.isDatabaseReady()
-                val databaseStale = databaseReady && localRepository.isDatabaseStale()
-                val shouldRefresh = forceRefresh || !databaseReady || databaseStale
-                if (showLoading) {
-                    message = when {
-                        !databaseReady -> "正在建立本地音乐库"
-                        shouldRefresh -> "正在更新本地音乐库"
-                        else -> "正在加载本地音乐"
-                    }
-                }
-                val tracks = if (shouldRefresh) {
-                    localRepository.refreshDatabase()
-                } else {
-                    localRepository.tracks()
-                }
-                tracks to localRepository.directories()
-            }
-            if (refreshSerial == localMusicRefreshSerial) {
-                result
-                    .onSuccess { (tracks, directories) ->
-                        localTracks = tracks
-                        localMusicDirectories = directories
-                        if (selectedLocalMusicDirectoryId != null &&
-                            directories.none { it.id == selectedLocalMusicDirectoryId }
-                        ) {
-                            closeLocalMusicCollection()
-                        }
-                        if (showLoading) {
-                            message = if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首"
-                        }
-                    }
-                    .onFailure {
-                        if (showLoading) {
-                            setError(it)
-                        }
-                    }
-            }
-            if (showLoading) isLoading = false
-        }
-    }
-
-    private fun reloadLocalMusic() {
-        if (!hasLocalMusicPermission) return
-        val refreshSerial = ++localMusicRefreshSerial
-        scope.launch {
-            isLoading = true
-            message = "正在更新本地音乐筛选"
-            val result = runCatching {
-                updateLocalMusicScanSettings()
-                val tracks = localRepository.tracks()
-                tracks to localRepository.directories()
-            }
-            if (refreshSerial == localMusicRefreshSerial) {
-                result
-                    .onSuccess { (tracks, directories) ->
-                        localTracks = tracks
-                        localMusicDirectories = directories
-                        if (selectedLocalMusicDirectoryId != null &&
-                            directories.none { it.id == selectedLocalMusicDirectoryId }
-                        ) {
-                            closeLocalMusicCollection()
-                        }
-                        message = if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首"
-                    }
-                    .onFailure { setError(it) }
-            }
-            isLoading = false
-        }
-    }
+    private fun refreshLocalMusic(forceRefresh: Boolean, showLoading: Boolean) =
+        localMusicController.refresh(forceRefresh, showLoading)
 
     fun openSearch() {
         navigator.navigate(AppRoute.Search)
@@ -704,17 +682,7 @@ class FuoPlayerController(
         audioRecognitionController.cancelIfInProgress()
     }
 
-    fun searchRecognizedSong(song: RecognizedSong) {
-        query = buildList {
-            song.title.trim().takeIf { it.isNotBlank() }?.let(::add)
-            song.artists.joinToString(" / ").trim().takeIf { it.isNotBlank() }?.let(::add)
-        }.joinToString(" ")
-        searchScope = SearchScope.All
-        selectedSearchProviderId = null
-        providerSearchTab = ProviderSearchTab.Songs
-        navigator.navigate(AppRoute.Search)
-        search()
-    }
+    fun searchRecognizedSong(song: RecognizedSong) = searchController.searchRecognizedSong(song)
 
     fun canOpenRecognizedNeteaseDetail(song: RecognizedSong): Boolean =
         "netease" in enabledProviderIds && !song.neteaseSongId.isNullOrBlank()
@@ -871,15 +839,10 @@ class FuoPlayerController(
         navigator.pop(AppRoute.DownloadManager)
     }
 
-    fun dismissDownloadQueueFeedback(feedback: String) {
-        if (downloadQueueFeedback == feedback) downloadQueueFeedback = null
-    }
+    fun dismissDownloadQueueFeedback(feedback: String) =
+        downloadController.dismissQueueFeedback(feedback)
 
-    fun onDownloadParallelismChange(value: Int) {
-        downloadParallelism = value.coerceIn(1, 5)
-        persistSettings()
-        scope.launch { downloadRepository.updateParallelism(downloadParallelism) }
-    }
+    fun onDownloadParallelismChange(value: Int) = downloadController.onParallelismChange(value)
 
     fun refreshDebugLogs() {
         debugLogController.refresh()
@@ -893,29 +856,20 @@ class FuoPlayerController(
         debugLogController.export(lines)
     }
 
-    fun onProviderCookiesChange(providerId: String, value: String) {
-        providerCookieInputs = providerCookieInputs + (providerId to value)
-    }
+    fun onProviderCookiesChange(providerId: String, value: String) =
+        providerAuthController.onCookiesChange(providerId, value)
 
-    fun onProviderHeaderAuthorizationChange(providerId: String, value: String) {
-        val input = providerHeaderInputFor(providerId).copy(authorization = value)
-        providerHeaderInputs = providerHeaderInputs + (providerId to input)
-    }
+    fun onProviderHeaderAuthorizationChange(providerId: String, value: String) =
+        providerAuthController.onHeaderAuthorizationChange(providerId, value)
 
-    fun onProviderHeaderCookieChange(providerId: String, value: String) {
-        val input = providerHeaderInputFor(providerId).copy(cookie = value)
-        providerHeaderInputs = providerHeaderInputs + (providerId to input)
-    }
+    fun onProviderHeaderCookieChange(providerId: String, value: String) =
+        providerAuthController.onHeaderCookieChange(providerId, value)
 
-    fun onProviderOAuthClientIdChange(providerId: String, value: String) {
-        val input = providerOAuthInputFor(providerId).copy(clientId = value)
-        providerOAuthInputs = providerOAuthInputs + (providerId to input)
-    }
+    fun onProviderOAuthClientIdChange(providerId: String, value: String) =
+        providerAuthController.onOAuthClientIdChange(providerId, value)
 
-    fun onProviderOAuthClientSecretChange(providerId: String, value: String) {
-        val input = providerOAuthInputFor(providerId).copy(clientSecret = value)
-        providerOAuthInputs = providerOAuthInputs + (providerId to input)
-    }
+    fun onProviderOAuthClientSecretChange(providerId: String, value: String) =
+        providerAuthController.onOAuthClientSecretChange(providerId, value)
 
     fun onSettingsProviderChange(providerId: String) {
         selectedSettingsProviderId = providerId
@@ -1104,308 +1058,43 @@ class FuoPlayerController(
         resourceCacheController.clear()
     }
 
-    fun loginProviderWithCookies(providerId: String, cookiesJson: String) {
-        val cookies = cookiesJson.trim()
-        val providerName = providerName(providerId)
-        if (cookies.isEmpty()) {
-            message = "请输入 $providerName cookies"
-            return
-        }
-        scope.launch {
-            message = "正在登录 $providerName"
-            runCatching { providerSessionRepository.loginWithCookies(providerId, cookies) }
-                .onSuccess {
-                    providerCookieInputs = providerCookieInputs - providerId
-                    persistSettings()
-                    message = if (it.isLoggedIn) {
-                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
-                    } else {
-                        "${it.providerName} 未登录"
-                    }
-                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                        refreshActiveMineProviderContent()
-                    } else {
-                        refreshHomeContent(homeSection)
-                    }
-                }
-                .onFailure { setError(it) }
-        }
-    }
+    fun loginProviderWithCookies(providerId: String, cookiesJson: String) =
+        providerAuthController.loginWithCookies(providerId, cookiesJson)
 
-    fun loginProviderWithHeaders(providerId: String) {
-        val input = providerHeaderInputFor(providerId)
-        val authorization = input.authorization.trim()
-        val cookie = input.cookie.trim()
-        val providerName = providerName(providerId)
-        if (authorization.isEmpty() || cookie.isEmpty()) {
-            message = "请输入 $providerName Authorization 和 Cookie"
-            return
-        }
-        scope.launch {
-            message = "正在登录 $providerName"
-            runCatching { providerSessionRepository.loginWithHeaders(providerId, authorization, cookie) }
-                .onSuccess {
-                    persistSettings()
-                    message = if (it.isLoggedIn) {
-                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
-                    } else {
-                        "${it.providerName} 未登录"
-                    }
-                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                        refreshActiveMineProviderContent()
-                    } else {
-                        refreshHomeContent(homeSection)
-                    }
-                }
-                .onFailure { setError(it) }
-        }
-    }
+    fun loginProviderWithHeaders(providerId: String) = providerAuthController.loginWithHeaders(providerId)
 
-    fun loginYtmusicWithHeaderFile(headerFileJson: String) {
-        if (headerFileJson.isBlank()) {
-            message = "无法读取 ytmusic_header.json"
-            return
-        }
-        val providerName = providerName("ytmusic")
-        scope.launch {
-            message = "正在登录 $providerName"
-            runCatching { providerSessionRepository.loginWithYtmusicHeaderFile(headerFileJson) }
-                .onSuccess {
-                    message = if (it.isLoggedIn) {
-                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
-                    } else {
-                        "${it.providerName} 未登录"
-                    }
-                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                        refreshActiveMineProviderContent()
-                    } else {
-                        refreshHomeContent(homeSection)
-                    }
-                }
-                .onFailure { setError(it) }
-        }
-    }
+    fun loginYtmusicWithHeaderFile(headerFileJson: String) =
+        providerAuthController.loginYtmusicWithHeaderFile(headerFileJson)
 
-    fun startYtmusicTvOAuthLogin() {
-        val input = providerOAuthInputFor("ytmusic")
-        val clientId = input.clientId.trim()
-        val clientSecret = input.clientSecret.trim()
-        val providerName = providerName("ytmusic")
-        if (clientId.isEmpty() || clientSecret.isEmpty()) {
-            message = "请输入 $providerName 的 client_id 和 client_secret"
-            return
-        }
-        cancelYtmusicTvOAuthLogin()
-        ytmusicOAuthJob = scope.launch {
-            message = "正在获取 Google 授权码"
-            runCatching {
-                val deviceAuth = providerRepository.beginYtmusicOAuth(clientId, clientSecret)
-                ytmusicOAuthFlow = YtMusicOAuthFlowUiState(
-                    userCode = deviceAuth.userCode,
-                    verificationUrl = deviceAuth.verificationUrl,
-                    verificationUrlWithCode = deviceAuth.verificationUrlWithCode,
-                    statusMessage = "请在浏览器中输入下方验证码完成授权",
-                    browserOpened = false,
-                )
-                oauthDeviceCodeAssistant.showUserCodeNotification(deviceAuth.userCode)
-                message = "验证码 ${deviceAuth.userCode}（已发送通知，可点击复制）"
-                val token = withTimeout(deviceAuth.expiresInSeconds.coerceAtLeast(1) * 1_000L) {
-                    var intervalSeconds = deviceAuth.intervalSeconds.coerceAtLeast(1)
-                    while (true) {
-                        delay(intervalSeconds * 1_000L)
-                        when (
-                            val result = providerRepository.pollYtmusicOAuth(
-                                deviceCode = deviceAuth.deviceCode,
-                                clientId = clientId,
-                                clientSecret = clientSecret,
-                            )
-                        ) {
-                            is org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Authorized ->
-                                return@withTimeout result.token
-                            org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Pending -> {
-                                ytmusicOAuthFlow = ytmusicOAuthFlow?.copy(statusMessage = "等待授权中…")
-                            }
-                            org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.SlowDown -> {
-                                intervalSeconds += 5
-                                ytmusicOAuthFlow = ytmusicOAuthFlow?.copy(statusMessage = "轮询过快，已放慢…")
-                            }
-                            is org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Denied ->
-                                error(result.message)
-                        }
-                    }
-                    @Suppress("UNREACHABLE_CODE")
-                    error("unreachable")
-                }
-                providerSessionRepository.loginWithYtmusicOAuth(
-                    accessToken = token.accessToken,
-                    refreshToken = token.refreshToken,
-                    expiresAtMillis = token.expiresAtEpochSeconds * 1_000,
-                    scope = token.scope,
-                    clientId = clientId,
-                    clientSecret = clientSecret,
-                )
-            }.onSuccess {
-                clearYtmusicOAuthUi()
-                message = if (it.isLoggedIn) {
-                    "${it.providerName} 已通过 Google OAuth 登录"
-                } else {
-                    "${it.providerName} 未登录"
-                }
-                if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                    refreshActiveMineProviderContent()
-                } else {
-                    refreshHomeContent(homeSection)
-                }
-            }.onFailure { error ->
-                if (error is TimeoutCancellationException) {
-                    clearYtmusicOAuthUi()
-                    message = "Google OAuth 授权超时，请重试"
-                    return@launch
-                }
-                if (error is CancellationException) {
-                    clearYtmusicOAuthUi()
-                    message = "已取消 Google OAuth 登录"
-                    return@launch
-                }
-                clearYtmusicOAuthUi()
-                setError(error)
-            }
-            ytmusicOAuthJob = null
-        }
-    }
+    fun startYtmusicTvOAuthLogin() = providerAuthController.startYtmusicTvOAuthLogin()
 
-    fun markYtmusicOAuthBrowserOpened() {
-        ytmusicOAuthFlow = ytmusicOAuthFlow?.copy(
-            browserOpened = true,
-            statusMessage = "请在浏览器中输入验证码完成授权",
-        )
-    }
+    fun markYtmusicOAuthBrowserOpened() = providerAuthController.markYtmusicOAuthBrowserOpened()
 
-    fun copyYtmusicOAuthUserCode() {
-        val userCode = ytmusicOAuthFlow?.userCode?.takeIf { it.isNotBlank() } ?: return
-        oauthDeviceCodeAssistant.copyUserCode(userCode)
-        message = "验证码已复制：$userCode"
-    }
+    fun copyYtmusicOAuthUserCode() = providerAuthController.copyYtmusicOAuthUserCode()
 
-    fun cancelYtmusicTvOAuthLogin() {
-        ytmusicOAuthJob?.cancel()
-        ytmusicOAuthJob = null
-        clearYtmusicOAuthUi()
-    }
+    fun cancelYtmusicTvOAuthLogin() = providerAuthController.cancelYtmusicTvOAuthLogin()
 
-    private fun clearYtmusicOAuthUi() {
-        ytmusicOAuthFlow = null
-        oauthDeviceCodeAssistant.clearUserCodeNotification()
-    }
+    fun loginYtmusicWithOAuthJson(oauthJson: String) =
+        providerAuthController.loginYtmusicWithOAuthJson(oauthJson)
 
-    fun loginYtmusicWithOAuthJson(oauthJson: String) {
-        val input = providerOAuthInputFor("ytmusic")
-        val clientId = input.clientId.trim()
-        val clientSecret = input.clientSecret.trim()
-        if (oauthJson.isBlank()) {
-            message = "无法读取 oauth.json"
-            return
-        }
-        if (clientId.isEmpty() || clientSecret.isEmpty()) {
-            message = "导入 oauth.json 前请填写或导入 client_id 和 client_secret"
-            return
-        }
-        val providerName = providerName("ytmusic")
-        cancelYtmusicTvOAuthLogin()
-        scope.launch {
-            message = "正在登录 $providerName"
-            runCatching {
-                providerSessionRepository.loginWithYtmusicOAuthJson(oauthJson, clientId, clientSecret)
-            }.onSuccess {
-                message = if (it.isLoggedIn) {
-                    "${it.providerName} 已通过 oauth.json 登录"
-                } else {
-                    "${it.providerName} 未登录"
-                }
-                if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                    refreshActiveMineProviderContent()
-                } else {
-                    refreshHomeContent(homeSection)
-                }
-            }.onFailure { setError(it) }
-        }
-    }
+    fun importYtmusicOAuthRelatedJson(json: String) =
+        providerAuthController.importYtmusicOAuthRelatedJson(json)
 
-    /**
-     * Imports either a Google Cloud `client_secret_*.json` (fills client_id/secret)
-     * or a ytmusicapi `oauth.json` (logs in with tokens; client credentials must already be set).
-     */
-    fun importYtmusicOAuthRelatedJson(json: String) {
-        val trimmed = json.trim()
-        if (trimmed.isBlank()) {
-            message = "无法读取 JSON 文件"
-            return
-        }
-        val oauth = org.feeluown.mobile.provider.ytmusic.YtMusicOAuth
-        when {
-            oauth.looksLikeClientSecretJson(trimmed) -> {
-                runCatching { oauth.parseClientSecretJson(trimmed) }
-                    .onSuccess { credentials ->
-                        providerOAuthInputs = providerOAuthInputs + (
-                            "ytmusic" to ProviderOAuthInput(
-                                clientId = credentials.clientId,
-                                clientSecret = credentials.clientSecret,
-                            )
-                        )
-                        message = "已导入 Google OAuth client_id / client_secret"
-                    }
-                    .onFailure { setError(it) }
-            }
-            oauth.looksLikeOauthTokenJson(trimmed) -> loginYtmusicWithOAuthJson(trimmed)
-            else -> {
-                message = "无法识别的 JSON：请导入 Google client_secret.json 或 ytmusicapi oauth.json"
-            }
-        }
-    }
+    fun logoutProvider(providerId: String) = providerAuthController.logout(providerId)
 
-    fun logoutProvider(providerId: String) {
-        val providerName = providerName(providerId)
-        scope.launch {
-            message = "正在退出 $providerName"
-            runCatching { providerSessionRepository.logout(providerId) }
-                .onSuccess {
-                    providerCookieInputs = providerCookieInputs - providerId
-                    providerHeaderInputs = providerHeaderInputs - providerId
-                    providerOAuthInputs = providerOAuthInputs - providerId
-                    cancelYtmusicTvOAuthLogin()
-                    persistSettings()
-                    message = "${it.providerName} 已退出登录"
-                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
-                        refreshActiveMineProviderContent()
-                    } else {
-                        refreshHomeContent(homeSection)
-                    }
-                }
-                .onFailure { setError(it) }
-        }
-    }
+    fun onWifiAudioQualityPolicyChange(value: AudioQualityPolicy) =
+        settingsController.onWifiAudioQualityPolicyChange(value)
 
-    fun onWifiAudioQualityPolicyChange(value: AudioQualityPolicy) {
-        wifiAudioQualityPolicy = value
-        persistSettings()
-        scope.launch { updateAudioQualityPolicies() }
-    }
-
-    fun onCellularAudioQualityPolicyChange(value: AudioQualityPolicy) {
-        cellularAudioQualityPolicy = value
-        persistSettings()
-        scope.launch { updateAudioQualityPolicies() }
-    }
+    fun onCellularAudioQualityPolicyChange(value: AudioQualityPolicy) =
+        settingsController.onCellularAudioQualityPolicyChange(value)
 
     fun onUnavailablePlaybackPolicyChange(value: UnavailablePlaybackPolicy) {
         unavailablePlaybackPolicy = value
         persistSettings()
     }
 
-    fun onPauseOnOtherAppPlaybackChange(value: Boolean) {
-        pauseOnOtherAppPlayback = value
-        persistSettings()
-    }
+    fun onPauseOnOtherAppPlaybackChange(value: Boolean) =
+        settingsController.onPauseOnOtherAppPlaybackChange(value)
 
     fun onSmartReplacementProviderEnabledChange(providerId: String, enabled: Boolean) {
         val current = selectedSmartReplacementProviderIds().toMutableSet()
@@ -1427,10 +1116,8 @@ class FuoPlayerController(
         persistSettings()
     }
 
-    fun onLyricFontSizeChange(value: LyricFontSize) {
-        lyricFontSize = value
-        persistSettings()
-    }
+    fun onLyricFontSizeChange(value: LyricFontSize) =
+        settingsController.onLyricFontSizeChange(value)
 
     fun onStatusBarLyricsEnabledChange(value: Boolean) {
         statusBarLyricsEnabled = value
@@ -1441,44 +1128,21 @@ class FuoPlayerController(
         isStatusBarLyricsAvailable = value
     }
 
-    fun onThemeModeChange(value: ThemeMode) {
-        themeMode = value
-        persistSettings()
-    }
+    fun onThemeModeChange(value: ThemeMode) = settingsController.onThemeModeChange(value)
 
-    fun onThemeColorSchemeChange(value: ThemeColorScheme) {
-        themeColorScheme = value
-        persistSettings()
-    }
+    fun onThemeColorSchemeChange(value: ThemeColorScheme) =
+        settingsController.onThemeColorSchemeChange(value)
 
-    fun onDynamicCoverColorEnabledChange(value: Boolean) {
-        dynamicCoverColorEnabled = value
-        persistSettings()
-    }
+    fun onDynamicCoverColorEnabledChange(value: Boolean) =
+        settingsController.onDynamicCoverColorEnabledChange(value)
 
-    fun onQueryChange(value: String) {
-        query = value
-    }
+    fun onQueryChange(value: String) = searchController.onQueryChange(value)
 
-    fun onSearchScopeChange(value: SearchScope) {
-        searchScope = value
-        if (value != SearchScope.Provider) {
-            selectedSearchProviderId = null
-        }
-        persistSettings()
-        if (query.isNotBlank()) search()
-    }
+    fun onSearchScopeChange(value: SearchScope) = searchController.onScopeChange(value)
 
-    fun onSearchProviderChange(providerId: String) {
-        searchScope = SearchScope.Provider
-        selectedSearchProviderId = providerId
-        persistSettings()
-        if (query.isNotBlank()) search()
-    }
+    fun onSearchProviderChange(providerId: String) = searchController.onProviderChange(providerId)
 
-    fun onProviderSearchTabChange(value: ProviderSearchTab) {
-        providerSearchTab = value
-    }
+    fun onProviderSearchTabChange(value: ProviderSearchTab) = searchController.onProviderTabChange(value)
 
     fun onHomeSectionChange(value: HomeSection) {
         homeSection = value
@@ -1512,538 +1176,77 @@ class FuoPlayerController(
         persistSettings()
     }
 
-    fun refreshLocalPlaylists() {
-        scope.launch {
-            refreshLocalPlaylistsInternal(showMessage = true)
-        }
-    }
+    fun refreshLocalPlaylists() = localPlaylistController.refresh()
 
     private suspend fun refreshLocalPlaylistsInternal(showMessage: Boolean) {
-        if (showMessage) {
-            isLoading = true
-            message = "正在加载本地歌单"
-        }
-        runCatching { localPlaylistRepository.list() }
-            .onSuccess { loaded ->
-                localPlaylists = loaded
-                selectedLocalPlaylist?.let { selected ->
-                    val updated = loaded.firstOrNull { it.id == selected.id }
-                    if (updated == null) {
-                        closeLocalPlaylist()
-                    } else {
-                        selectedLocalPlaylist = updated
-                        selectedLocalPlaylistTracks = updated.toMusicTracks()
-                    }
-                }
-                if (showMessage) {
-                    message = if (loaded.isEmpty()) "暂无本地歌单" else "本地歌单 ${loaded.size} 个"
-                }
-            }
-            .onFailure { if (showMessage) setError(it) }
-        if (showMessage) isLoading = false
+        localPlaylistController.refreshInternal(showMessage)
     }
 
-    fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
-        localMusicViewMode = value
-        closeLocalMusicCollection()
-        persistSettings()
-    }
+    fun onLocalMusicViewModeChange(value: LocalMusicViewMode) =
+        localMusicController.onViewModeChange(value)
 
-    fun openLocalMusicDirectory(directoryId: String) {
-        if (isLocalMusicDirectoryExcluded(directoryId, excludedLocalMusicDirectoryIds)) return
-        if (localMusicDirectories.none { it.id == directoryId }) return
-        navigator.navigate(AppRoute.LocalMusicCollection)
-        selectedLocalMusicCollection = LocalMusicCollectionSelection(LocalMusicViewMode.All, directoryId)
-        selectedLocalMusicDirectoryId = directoryId
-    }
+    fun openLocalMusicDirectory(directoryId: String) = localMusicController.openDirectory(directoryId)
 
-    fun openLocalMusicCollection(mode: LocalMusicViewMode, key: String) {
-        if (key.isBlank()) return
-        if (mode == LocalMusicViewMode.All) {
-            openLocalMusicDirectory(key)
-            return
-        }
-        navigator.navigate(AppRoute.LocalMusicCollection)
-        selectedLocalMusicDirectoryId = null
-        selectedLocalMusicCollection = LocalMusicCollectionSelection(mode, key)
-    }
+    fun openLocalMusicCollection(mode: LocalMusicViewMode, key: String) =
+        localMusicController.openCollection(mode, key)
 
-    fun closeLocalMusicCollection() {
-        navigator.pop(AppRoute.LocalMusicCollection)
-        selectedLocalMusicDirectoryId = null
-        selectedLocalMusicCollection = null
-    }
+    fun closeLocalMusicCollection() = localMusicController.closeCollection()
 
-    fun closeLocalMusicDirectory() {
-        closeLocalMusicCollection()
-    }
+    fun closeLocalMusicDirectory() = localMusicController.closeCollection()
 
-    fun onLocalMusicDirectoryEnabledChange(directoryId: String, enabled: Boolean) {
-        val canonicalDirectoryId = canonicalLocalMusicDirectoryId(directoryId) ?: directoryId
-        val normalizedExcludedIds = excludedLocalMusicDirectoryIds.mapNotNull {
-            canonicalLocalMusicDirectoryId(it)
-        }.toSet()
-        excludedLocalMusicDirectoryIds = if (enabled) {
-            normalizedExcludedIds - canonicalDirectoryId
-        } else {
-            normalizedExcludedIds + canonicalDirectoryId
-        }
-        if (!enabled && selectedLocalMusicDirectoryId == directoryId) {
-            closeLocalMusicCollection()
-        }
-        persistSettings()
-        reloadLocalMusic()
-    }
+    fun onLocalMusicDirectoryEnabledChange(directoryId: String, enabled: Boolean) =
+        localMusicController.onDirectoryEnabledChange(directoryId, enabled)
 
-    fun onLocalMusicMinDurationChange(value: Int) {
-        localMusicMinDurationSeconds = value
-        persistSettings()
-        reloadLocalMusic()
-    }
+    fun onLocalMusicMinDurationChange(value: Int) = localMusicController.onMinDurationChange(value)
 
-    fun openLocalMetadataEditor(track: MusicTrack) {
-        if (track.sourceType == TrackSourceType.Provider) return
-        localMetadataEditorTrack = track
-        localMetadataSearchResults = emptyList()
-        localMetadataSearchMessage = null
-        selectedLocalMetadataProviderId = selectedLocalMetadataProviderId
-            ?.takeIf { providerId -> providers.any { it.providerId == providerId } }
-            ?: selectedSearchProviderId?.takeIf { providerId -> providers.any { it.providerId == providerId } }
-            ?: providers.firstOrNull()?.providerId
-    }
+    fun openLocalMetadataEditor(track: MusicTrack) = localMusicController.openMetadataEditor(track)
 
-    fun closeLocalMetadataEditor() {
-        localMetadataEditorTrack = null
-        localMetadataSearchResults = emptyList()
-        localMetadataSearchMessage = null
-    }
+    fun closeLocalMetadataEditor() = localMusicController.closeMetadataEditor()
 
-    fun onLocalMetadataProviderChange(providerId: String) {
-        selectedLocalMetadataProviderId = providerId
-    }
+    fun onLocalMetadataProviderChange(providerId: String) =
+        localMusicController.onMetadataProviderChange(providerId)
 
-    fun saveLocalMetadata(track: MusicTrack, title: String, artists: String, album: String) {
-        val metadata = LocalTrackMetadata(
-            title = title.trim().ifBlank { track.title },
-            artists = artists.trim(),
-            album = album.trim(),
-        )
-        scope.launch {
-            isLoading = true
-            message = "正在保存元信息"
-            runCatching {
-                localRepository.updateMetadata(track, metadata)
-                updateLocalMusicScanSettings()
-                localRepository.refreshDatabase()
-            }.onSuccess {
-                localTracks = it
-                updateLocalTrackCopies(track.id, it.firstOrNull { item -> item.id == track.id } ?: track.copy(
-                    title = metadata.title,
-                    artists = metadata.artists,
-                    album = metadata.album,
-                ))
-                localMetadataEditorTrack = localTracks.firstOrNull { item -> item.id == track.id }
-                    ?: localMetadataEditorTrack
-                message = "已保存元信息：${metadata.title}"
-            }.onFailure {
-                setError(it)
-            }
-            isLoading = false
-        }
-    }
+    fun saveLocalMetadata(track: MusicTrack, title: String, artists: String, album: String) =
+        localMusicController.saveMetadata(track, title, artists, album)
 
-    fun searchLocalMetadata(title: String, artists: String, album: String) {
-        val providerId = selectedLocalMetadataProviderId ?: providers.firstOrNull()?.providerId
-        if (providerId == null) {
-            localMetadataSearchMessage = "没有可用音源"
-            return
-        }
-        val keyword = listOf(title, artists, album)
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .joinToString(" ")
-        if (keyword.isBlank()) {
-            localMetadataSearchMessage = "请输入可搜索的信息"
-            return
-        }
-        selectedLocalMetadataProviderId = providerId
-        scope.launch {
-            isLoading = true
-            localMetadataSearchMessage = "正在搜索元信息"
-            runCatching {
-                withTimeout(25_000) {
-                    providerRepository.search(keyword, providerId)
-                }
-            }.onSuccess {
-                localMetadataSearchResults = it
-                localMetadataSearchMessage = if (it.isEmpty()) "没有搜索结果" else "搜索到 ${it.size} 首"
-            }.onFailure {
-                localMetadataSearchMessage = it.message ?: it::class.simpleName.orEmpty()
-                setError(it)
-            }
-            isLoading = false
-        }
-    }
+    fun searchLocalMetadata(title: String, artists: String, album: String) =
+        localMusicController.searchMetadata(title, artists, album)
 
-    fun applyProviderMetadata(track: MusicTrack, providerTrack: MusicTrack) {
-        saveLocalMetadata(track, providerTrack.title, providerTrack.artists, providerTrack.album)
-    }
+    fun applyProviderMetadata(track: MusicTrack, providerTrack: MusicTrack) =
+        localMusicController.applyProviderMetadata(track, providerTrack)
 
-    fun downloadLocalLyrics(track: MusicTrack, providerTrack: MusicTrack) {
-        scope.launch {
-            isLoading = true
-            message = "正在下载歌词"
-            runCatching {
-                withTimeout(25_000) {
-                    providerRepository.lyrics(
-                        providerTrack.copy(providerId = providerTrack.providerId ?: providerTrack.id),
-                    )
-                }
-            }.onSuccess { lyricsText ->
-                val lyrics = lyricsText?.takeIf { it.isNotBlank() }
-                if (lyrics == null) {
-                    message = "未获取到歌词"
-                    localMetadataSearchMessage = "未获取到歌词"
-                } else {
-                        runCatching {
-                            localRepository.saveLyrics(track, lyrics)
-                            updateLocalMusicScanSettings()
-                            localRepository.refreshDatabase()
-                        }.onSuccess {
-                        localTracks = it
-                        val updatedTrack = it.firstOrNull { item -> item.id == track.id } ?: track.copy(lyrics = lyrics)
-                        updateLocalTrackCopies(track.id, updatedTrack)
-                        localMetadataEditorTrack = updatedTrack
-                        message = "已保存歌词：${track.title}"
-                        localMetadataSearchMessage = "歌词已保存"
-                    }.onFailure {
-                        setError(it)
-                    }
-                }
-            }.onFailure {
-                localMetadataSearchMessage = it.message ?: it::class.simpleName.orEmpty()
-                setError(it)
-            }
-            isLoading = false
-        }
-    }
+    fun downloadLocalLyrics(track: MusicTrack, providerTrack: MusicTrack) =
+        localMusicController.downloadLyrics(track, providerTrack)
 
-    fun search() {
-        val keyword = query.trim()
-        if (keyword.isEmpty()) {
-            searchResults = emptyList()
-            providerSearchResults = ProviderSearchResults()
-            message = "请输入关键词"
-            return
-        }
-        scope.launch {
-            isLoading = true
-            message = "正在搜索：$keyword"
-            runCatching {
-                withTimeout(25_000) {
-                    when (searchScope) {
-                        SearchScope.Local -> {
-                            val local = localRepository.search(keyword)
-                            providerSearchResults = ProviderSearchResults()
-                            local
-                        }
-                        SearchScope.Provider -> {
-                            val provider = providerRepository.searchAll(keyword, selectedSearchProviderId)
-                            providerSearchResults = provider
-                            provider.tracks
-                        }
-                        SearchScope.All -> {
-                            val local = localRepository.search(keyword)
-                            val provider = searchProviderIdsForSearch().map { providerId ->
-                                providerRepository.searchAll(keyword, providerId)
-                            }.mergeSearchResults()
-                            providerSearchResults = provider
-                            mergeResults(local, provider.tracks)
-                        }
-                    }
-                }
-            }.onSuccess {
-                searchResults = it
-                val total = when (searchScope) {
-                    SearchScope.Local -> it.size
-                    SearchScope.Provider,
-                    SearchScope.All -> providerSearchResults.totalCount() + if (searchScope == SearchScope.All) {
-                        localOnlyCount(it, providerSearchResults.tracks)
-                    } else {
-                        0
-                    }
-                }
-                message = when {
-                    total == 0 && providerSearchResults.errorMessage != null -> providerSearchResults.errorMessage.orEmpty()
-                    total == 0 -> "没有搜索结果"
-                    else -> "搜索到 $total 项"
-                }
-            }.onFailure {
-                setError(it)
-            }
-            isLoading = false
-        }
-    }
+    fun search() = searchController.search()
 
-    private fun searchTrackText(text: String, providerId: String?) {
-        val keyword = text.trim()
-        if (keyword.isBlank()) {
-            message = "没有可搜索的信息"
-            return
-        }
-        query = keyword
-        if (providerId != null && providers.any { it.providerId == providerId }) {
-            searchScope = SearchScope.Provider
-            selectedSearchProviderId = providerId
-        }
-        navigator.navigate(AppRoute.Search)
-        search()
-    }
+    private fun searchTrackText(text: String, providerId: String?) =
+        searchController.searchText(text, providerId)
 
-    fun refreshHomeContent(section: HomeSection = homeSection) {
-        refreshHomeContent(section, refreshCatalog = true)
-    }
+    fun refreshHomeContent(section: HomeSection = homeSection) =
+        providerContentController.refreshHomeContent(section)
 
-    private fun refreshHomeContent(section: HomeSection, refreshCatalog: Boolean) {
-        if (section == HomeSection.Mine) {
-            refreshActiveMineSection(refreshCatalog)
-            return
-        }
-        val refreshSerial = when (section) {
-            HomeSection.Recommend -> ++recommendContentRefreshSerial
-            HomeSection.Music -> ++musicContentRefreshSerial
-            HomeSection.Mine -> error("mine section is loaded separately")
-        }
-        fun isCurrentRefresh(): Boolean = when (section) {
-            HomeSection.Recommend -> refreshSerial == recommendContentRefreshSerial
-            HomeSection.Music -> refreshSerial == musicContentRefreshSerial
-            HomeSection.Mine -> false
-        }
-        scope.launch {
-            if (isCurrentRefresh()) isLoading = true
-            val title = if (section == HomeSection.Recommend) "推荐" else "探索"
-            if (isCurrentRefresh()) message = "正在加载$title"
-            val result = runCatching {
-                if (refreshCatalog) refreshProviderCatalog()
-                val category = when (section) {
-                    HomeSection.Recommend -> ProviderFeatureCategory.Recommend
-                    HomeSection.Music -> ProviderFeatureCategory.Music
-                    HomeSection.Mine -> error("mine section is loaded separately")
-                }
-                val displaySection = if (section == HomeSection.Recommend) {
-                    ProviderDisplaySection.Recommend
-                } else {
-                    ProviderDisplaySection.Explore
-                }
-                val currentSections = if (section == HomeSection.Recommend) recommendSections else musicSections
-                loadProviderSectionsIncrementally(
-                    category = category,
-                    includeFeature = { it.providerId in selectedProviderIdsFor(displaySection) },
-                    currentSections = currentSections,
-                    deferFeature = { it.isDeferredHomeFeature() },
-                ) { sections ->
-                    if (isCurrentRefresh()) {
-                        if (section == HomeSection.Recommend) {
-                            recommendSections = sections
-                        } else {
-                            musicSections = sections
-                        }
-                    }
-                }
-            }
-            if (isCurrentRefresh()) {
-                result
-                    .onSuccess { sections ->
-                        message = if (sections.isEmpty()) "$title 暂无内容" else "$title 已更新"
-                    }
-                    .onFailure { setError(it) }
-                isLoading = false
-            }
-        }
-    }
+    private fun refreshHomeContent(section: HomeSection, refreshCatalog: Boolean) =
+        providerContentController.refreshHomeContent(section, refreshCatalog)
 
-    fun refreshMinePlaylistContent() {
-        refreshMinePlaylistContent(refreshCatalog = true)
-    }
+    fun refreshMinePlaylistContent() = providerContentController.refreshMinePlaylistContent()
 
-    private fun refreshMinePlaylistContent(refreshCatalog: Boolean) {
-        val refreshSerial = ++minePlaylistRefreshSerial
-        fun isCurrentRefresh(): Boolean = refreshSerial == minePlaylistRefreshSerial
-        scope.launch {
-            if (isCurrentRefresh()) {
-                isLoading = true
-                message = "正在加载我的歌单"
-            }
-            val result = runCatching {
-                if (refreshCatalog) refreshProviderCatalog()
-                val userPlaylistsDeferred = async {
-                    loadProviderSectionsIncrementally(
-                        category = ProviderFeatureCategory.MinePlaylists,
-                        includeFeature = ::isMineProviderFeature,
-                        currentSections = minePlaylistSections,
-                    ) { sections ->
-                        if (isCurrentRefresh()) minePlaylistSections = sections
-                    }
-                }
-                val favoritePlaylistsDeferred = async {
-                    loadProviderSectionsIncrementally(
-                        category = ProviderFeatureCategory.MineFavoritePlaylists,
-                        includeFeature = ::isMineProviderFeature,
-                        currentSections = mineFavoritePlaylistSections,
-                    ) { sections ->
-                        if (isCurrentRefresh()) mineFavoritePlaylistSections = sections
-                    }
-                }
-                val localDeferred = async {
-                    runCatching { localPlaylistRepository.list() }.also { localResult ->
-                        if (isCurrentRefresh()) {
-                            localResult.onSuccess { localPlaylists = it }
-                        }
-                    }
-                }
-                val userPlaylists = userPlaylistsDeferred.await()
-                val favoritePlaylists = favoritePlaylistsDeferred.await()
-                val local = localDeferred.await().getOrThrow()
-                Triple(userPlaylists, favoritePlaylists, local)
-            }
-            if (isCurrentRefresh()) {
-                result
-                    .onSuccess {
-                        message = if (it.first.isEmpty() && it.second.isEmpty() && it.third.isEmpty()) {
-                            "歌单暂无内容"
-                        } else {
-                            "歌单已更新"
-                        }
-                    }
-                    .onFailure { setError(it) }
-                isLoading = false
-            }
-        }
-    }
+    private fun refreshMinePlaylistContent(refreshCatalog: Boolean) =
+        providerContentController.refreshMinePlaylistContent(refreshCatalog)
 
-    fun refreshMineContent() {
-        refreshMineContent(refreshCatalog = true)
-    }
+    fun refreshMineContent() = providerContentController.refreshMineContent()
 
-    private fun refreshMineContent(refreshCatalog: Boolean) {
-        val refreshSerial = ++mineContentRefreshSerial
-        fun isCurrentRefresh(): Boolean = refreshSerial == mineContentRefreshSerial
-        scope.launch {
-            if (isCurrentRefresh()) {
-                isLoading = true
-                message = "正在加载我的内容"
-            }
-            val result = runCatching {
-                if (refreshCatalog) refreshProviderCatalog()
-                loadProviderSectionsIncrementally(
-                    category = ProviderFeatureCategory.Mine,
-                    includeFeature = ::isMineProviderFeature,
-                    currentSections = mineSections,
-                ) { sections ->
-                    if (isCurrentRefresh()) mineSections = sections
-                }
-            }
-            if (isCurrentRefresh()) {
-                result
-                    .onSuccess { sections ->
-                        message = if (sections.isEmpty()) "我的内容暂无内容" else "我的内容已更新"
-                    }
-                    .onFailure { setError(it) }
-                isLoading = false
-            }
-        }
-    }
+    private fun refreshMineContent(refreshCatalog: Boolean) =
+        providerContentController.refreshMineContent(refreshCatalog)
 
-    private suspend fun loadProviderSectionsIncrementally(
-        category: ProviderFeatureCategory,
-        includeFeature: (ProviderFeature) -> Boolean = { true },
-        currentSections: List<ProviderContentSection> = emptyList(),
-        deferFeature: (ProviderFeature) -> Boolean = { false },
-        onUpdate: (List<ProviderContentSection>) -> Unit,
-    ): List<ProviderContentSection> {
-        val features = providerFeatures.filter { it.category == category && includeFeature(it) }
-        val featureIds = features.mapTo(mutableSetOf()) { it.id }
-        var sections = currentSections
-            .filter { it.feature.id in featureIds }
-            .sortedSectionsByOrder()
-        val loadingFeatures = mutableListOf<ProviderFeature>()
-        features.forEach { feature ->
-            val immediateSection = when {
-                feature.requiresLogin && !isProviderLoggedIn(feature.providerId) ->
-                    ProviderContentSection(feature, isLoginRequired = true)
-                deferFeature(feature) -> ProviderContentSection(feature)
-                else -> null
-            }
-            if (immediateSection != null) {
-                sections = sections.mergeLoadedSection(immediateSection)
-            } else {
-                loadingFeatures += feature
-            }
-        }
-        onUpdate(sections)
-        if (loadingFeatures.isEmpty()) return sections
+    private fun refreshActiveMineSectionIfNeeded() =
+        providerContentController.refreshActiveMineSectionIfNeeded()
 
-        val updates = Channel<ProviderContentSection>(capacity = Channel.UNLIMITED)
-        loadingFeatures.forEach { feature ->
-            scope.launch {
-                val loaded = runCatching {
-                    withTimeout(30_000) {
-                        providerRepository.loadFeaturePage(feature, offset = 0)
-                    }
-                }.getOrElse { throwable ->
-                    ProviderContentSection(
-                        feature = feature,
-                        errorMessage = providerErrorMessage(throwable, "加载失败", feature.providerId),
-                    )
-                }
-                updates.send(loaded)
-            }
-        }
-        repeat(loadingFeatures.size) {
-            sections = sections.mergeLoadedSection(updates.receive())
-            onUpdate(sections)
-        }
-        updates.close()
-        return sections
-    }
+    private fun refreshActiveMineSection(refreshCatalog: Boolean = true) =
+        providerContentController.refreshActiveMineSection(refreshCatalog)
 
-    private fun List<ProviderContentSection>.mergeLoadedSection(
-        section: ProviderContentSection,
-    ): List<ProviderContentSection> =
-        (filterNot { it.feature.id == section.feature.id } + section).sortedSectionsByOrder()
-
-    private fun refreshActiveMineSectionIfNeeded() {
-        when (mineSection) {
-            MineSection.Playlists -> if (minePlaylistSections.isEmpty() && mineFavoritePlaylistSections.isEmpty()) {
-                refreshMinePlaylistContent()
-            }
-            MineSection.Songs,
-            MineSection.Artists,
-            MineSection.Albums -> if (mineSections.isEmpty()) refreshMineContent()
-            MineSection.LocalMusic -> ensureLocalMusic()
-        }
-    }
-
-    private fun refreshActiveMineSection(refreshCatalog: Boolean = true) {
-        when (mineSection) {
-            MineSection.Playlists -> refreshMinePlaylistContent(refreshCatalog)
-            MineSection.Songs,
-            MineSection.Artists,
-            MineSection.Albums -> refreshMineContent(refreshCatalog)
-            MineSection.LocalMusic -> ensureLocalMusic()
-        }
-    }
-
-    private fun refreshActiveMineProviderContent() {
-        when (mineSection) {
-            MineSection.Playlists -> refreshMinePlaylistContent()
-            MineSection.Songs,
-            MineSection.Artists,
-            MineSection.Albums -> refreshMineContent()
-            MineSection.LocalMusic -> Unit
-        }
-    }
+    private fun refreshActiveMineProviderContent() =
+        providerContentController.refreshActiveMineProviderContent()
 
     fun openFeature(feature: ProviderFeature) {
         navigator.navigate(AppRoute.Feature)
@@ -2448,9 +1651,8 @@ class FuoPlayerController(
             providerCapabilities[providerId]?.canAddSongToPlaylist == true
     }
 
-    fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean {
-        return track.isProviderBacked() && track.toLocalPlaylistTrack() != null
-    }
+    fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean =
+        localPlaylistController.canAddTrack(track)
 
     fun canAddTrackToPlaylist(track: MusicTrack): Boolean {
         return canAddTrackToProviderPlaylist(track) || canAddTrackToLocalPlaylist(track)
@@ -2475,84 +1677,19 @@ class FuoPlayerController(
         }
     }
 
-    fun openLocalPlaylistTargetPicker(track: MusicTrack) {
-        if (!canAddTrackToLocalPlaylist(track)) return
-        playlistTargetTrack = track
-        playlistTargetType = PlaylistTargetType.Local
-        playlistTargetPickerShowSwitcher = false
-        playlistOperationTargets = emptyList()
-        playlistOperationError = null
-        localPlaylistOperationError = if (localPlaylists.isEmpty()) "请先新建本地歌单" else null
-    }
+    fun openLocalPlaylistTargetPicker(track: MusicTrack) =
+        localPlaylistController.openTargetPicker(track)
 
-    fun closeLocalPlaylistTargetPicker() {
-        closePlaylistTargetPicker()
-    }
+    fun closeLocalPlaylistTargetPicker() = localPlaylistController.closeTargetPicker()
 
-    fun createLocalPlaylist(title: String) {
-        val normalizedTitle = title.trim()
-        if (normalizedTitle.isBlank()) return
-        scope.launch {
-            isLoading = true
-            message = "正在新建本地歌单"
-            runCatching { localPlaylistRepository.create(normalizedTitle) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        result.playlist?.let { localPlaylists = localPlaylists + it }
-                        localPlaylistOperationError = null
-                        message = result.message
-                    } else {
-                        message = result.message.ifBlank { "新建本地歌单失败" }
-                    }
-                }
-                .onFailure(::setError)
-            isLoading = false
-        }
-    }
+    fun createLocalPlaylist(title: String) = localPlaylistController.create(title)
 
-    fun addTrackToLocalPlaylist(playlist: LocalPlaylist) {
-        val track = playlistTargetTrack ?: return
-        val localTrack = track.toLocalPlaylistTrack() ?: return
-        scope.launch {
-            isLoading = true
-            message = "正在添加到本地歌单"
-            runCatching { localPlaylistRepository.addTrack(playlist, localTrack) }
-                .onSuccess { result ->
-                    message = result.message.ifBlank { if (result.success) "已添加到：${playlist.title}" else "添加失败" }
-                    localPlaylistOperationError = result.message.takeUnless { result.success }
-                    playlistOperationFeedback = message
-                    if (result.success) {
-                        result.playlist?.let { updated ->
-                            localPlaylists = localPlaylists.map { if (it.id == updated.id) updated else it }
-                            if (selectedLocalPlaylist?.id == updated.id) {
-                                selectedLocalPlaylist = updated
-                                selectedLocalPlaylistTracks = updated.toMusicTracks()
-                            }
-                        }
-                    }
-                    closeLocalPlaylistTargetPicker()
-                }
-                .onFailure {
-                    localPlaylistOperationError = it.message ?: "添加失败"
-                    setError(it)
-                }
-            isLoading = false
-        }
-    }
+    fun addTrackToLocalPlaylist(playlist: LocalPlaylist) =
+        localPlaylistController.addTargetTrackTo(playlist)
 
-    fun openLocalPlaylist(playlist: LocalPlaylist) {
-        navigator.navigate(AppRoute.LocalPlaylist)
-        selectedLocalPlaylist = playlist
-        selectedLocalPlaylistTracks = playlist.toMusicTracks()
-        selectedLocalPlaylistError = null
-    }
+    fun openLocalPlaylist(playlist: LocalPlaylist) = localPlaylistController.open(playlist)
 
-    fun closeLocalPlaylist() {
-        navigator.pop(AppRoute.LocalPlaylist)
-        selectedLocalPlaylist = null
-        selectedLocalPlaylistTracks = emptyList()
-        selectedLocalPlaylistError = null
-    }
+    fun closeLocalPlaylist() = localPlaylistController.close()
 
     fun playFromSelectedLocalPlaylist(index: Int) {
         val track = selectedLocalPlaylistTracks.getOrNull(index) ?: return
@@ -2564,113 +1701,30 @@ class FuoPlayerController(
         playFirst(selectedLocalPlaylistTracks, sourcePlaylistId = selectedLocalPlaylist?.id)
     }
 
-    fun canRemoveTrackFromSelectedLocalPlaylist(track: MusicTrack): Boolean {
-        val playlist = selectedLocalPlaylist ?: return false
-        val localTrack = track.toLocalPlaylistTrack() ?: return false
-        return playlist.tracks.any { it.uri == localTrack.uri }
-    }
+    fun canRemoveTrackFromSelectedLocalPlaylist(track: MusicTrack): Boolean =
+        localPlaylistController.canRemove(track)
 
-    fun removeTrackFromSelectedLocalPlaylist(track: MusicTrack) {
-        val playlist = selectedLocalPlaylist ?: return
-        val localTrack = track.toLocalPlaylistTrack() ?: return
-        if (!canRemoveTrackFromSelectedLocalPlaylist(track)) return
-        scope.launch {
-            isLoading = true
-            message = "正在从本地歌单移除"
-            runCatching { localPlaylistRepository.removeTrack(playlist, localTrack.uri) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        val updated = result.playlist ?: playlist.copy(
-                            tracks = playlist.tracks.filterNot { it.uri == localTrack.uri },
-                        )
-                        selectedLocalPlaylist = updated
-                        selectedLocalPlaylistTracks = updated.toMusicTracks()
-                        localPlaylists = localPlaylists.map { if (it.id == updated.id) updated else it }
-                        message = result.message.ifBlank { "已从本地歌单移除" }
-                        playlistOperationFeedback = message
-                    } else {
-                        selectedLocalPlaylistError = result.message.ifBlank { "移除失败" }
-                    }
-                }
-                .onFailure {
-                    selectedLocalPlaylistError = it.message ?: "移除失败"
-                    setError(it)
-                }
-            isLoading = false
-        }
-    }
+    fun removeTrackFromSelectedLocalPlaylist(track: MusicTrack) = localPlaylistController.remove(track)
 
-    fun canDeleteSelectedLocalPlaylist(): Boolean = selectedLocalPlaylist != null
+    fun canDeleteSelectedLocalPlaylist(): Boolean = localPlaylistController.canDeleteSelected()
 
-    fun deleteSelectedLocalPlaylist() {
-        val playlist = selectedLocalPlaylist ?: return
-        scope.launch {
-            isLoading = true
-            message = "正在删除本地歌单"
-            runCatching { localPlaylistRepository.delete(playlist) }
-                .onSuccess { result ->
-                    message = result.message.ifBlank { if (result.success) "歌单已删除" else "删除歌单失败" }
-                    if (result.success) {
-                        closeLocalPlaylist()
-                        localPlaylists = localPlaylists.filterNot { it.id == playlist.id }
-                    }
-                }
-                .onFailure(::setError)
-            isLoading = false
-        }
-    }
+    fun deleteSelectedLocalPlaylist() = localPlaylistController.deleteSelected()
 
-    fun prepareLocalPlaylistImport(fileName: String, content: String) {
-        val preview = LocalPlaylistFileCodec.decode(fileName, content)
-        localPlaylistImportPreview = preview
-        message = if (preview.skippedLineCount > 0) {
-            "已读取 ${preview.tracks.size} 首歌曲，跳过 ${preview.skippedLineCount} 行"
-        } else {
-            "请选择导入方式"
-        }
-    }
+    fun prepareLocalPlaylistImport(fileName: String, content: String) =
+        localPlaylistController.prepareImport(fileName, content)
 
-    fun existingLocalPlaylistForImport(preview: LocalPlaylistImportPreview): LocalPlaylist? {
-        return localPlaylists.firstOrNull { it.title.trim() == preview.title.trim() }
-    }
+    fun existingLocalPlaylistForImport(preview: LocalPlaylistImportPreview): LocalPlaylist? =
+        localPlaylistController.existingForImport(preview)
 
-    fun cancelLocalPlaylistImport() {
-        localPlaylistImportPreview = null
-    }
+    fun cancelLocalPlaylistImport() = localPlaylistController.cancelImport()
 
     fun importLocalPlaylist(
         mode: LocalPlaylistImportMode,
         replacePlaylistId: String? = null,
-    ) {
-        val preview = localPlaylistImportPreview ?: return
-        val replacePlaylist = replacePlaylistId?.let { id -> localPlaylists.firstOrNull { it.id == id } }
-        scope.launch {
-            isLoading = true
-            message = "正在导入本地歌单"
-            runCatching {
-                localPlaylistRepository.importPlaylist(preview, mode, replacePlaylist)
-            }.onSuccess { result ->
-                message = result.message.ifBlank { if (result.success) "歌单已导入" else "导入失败" }
-                if (result.success) {
-                    localPlaylistImportPreview = null
-                    refreshLocalPlaylistsInternal(showMessage = false)
-                }
-            }.onFailure(::setError)
-            isLoading = false
-        }
-    }
+    ) = localPlaylistController.importPlaylist(mode, replacePlaylistId)
 
-    fun exportSelectedLocalPlaylist(onReady: (LocalPlaylistFile) -> Unit) {
-        val playlist = selectedLocalPlaylist ?: return
-        scope.launch {
-            isLoading = true
-            message = "正在准备导出文件"
-            runCatching { localPlaylistRepository.export(playlist) }
-                .onSuccess(onReady)
-                .onFailure(::setError)
-            isLoading = false
-        }
-    }
+    fun exportSelectedLocalPlaylist(onReady: (LocalPlaylistFile) -> Unit) =
+        localPlaylistController.exportSelected(onReady)
 
     fun creatablePlaylistProviders(): List<ProviderInfo> = providers.filter { provider ->
         isProviderLoggedIn(provider.providerId) &&
@@ -3633,52 +2687,18 @@ class FuoPlayerController(
         persistPlaybackQueue()
     }
 
-    fun download(track: MusicTrack) {
-        if (track.sourceType != TrackSourceType.Provider) return
-        downloadQueueFeedback = "已加入下载队列：${track.title}"
-        scope.launch {
-            runCatching {
-                val payload = providerRepository.resolve(
-                    track,
-                    unavailablePlaybackPolicy,
-                    selectedSmartReplacementProviderIds(),
-                    smartReplacementMinScore,
-                    true,
-                    true,
-                )
-                downloadRepository.download(track, payload)
-            }
-                .onFailure { setError(it) }
-        }
-    }
+    fun download(track: MusicTrack) = downloadController.download(track)
 
-    fun pauseDownload(taskId: String) = runDownloadAction { downloadRepository.pause(taskId) }
-    fun resumeDownload(taskId: String) = runDownloadAction { downloadRepository.resume(taskId) }
-    fun retryDownload(taskId: String) = runDownloadAction { downloadRepository.retry(taskId) }
+    fun pauseDownload(taskId: String) = downloadController.pause(taskId)
 
-    fun deleteDownloadTask(taskId: String, deleteFile: Boolean) = runDownloadAction {
-        downloadRepository.deleteTask(taskId, deleteFile)
-    }
+    fun resumeDownload(taskId: String) = downloadController.resume(taskId)
 
-    fun deleteDownload(track: MusicTrack) {
-        scope.launch {
-            runCatching { downloadRepository.deleteDownloaded(track) }
-                .onSuccess {
-                    if (hasLocalMusicPermission) {
-                        refreshLocalMusic(forceRefresh = true, showLoading = homeSection == HomeSection.Mine && mineSection == MineSection.LocalMusic)
-                    }
-                    message = "已删除下载：${track.title}"
-                }
-                .onFailure { setError(it) }
-        }
-    }
+    fun retryDownload(taskId: String) = downloadController.retry(taskId)
 
-    private fun runDownloadAction(action: suspend () -> Unit) {
-        scope.launch {
-            runCatching { action() }
-                .onFailure { setError(it) }
-        }
-    }
+    fun deleteDownloadTask(taskId: String, deleteFile: Boolean) =
+        downloadController.deleteTask(taskId, deleteFile)
+
+    fun deleteDownload(track: MusicTrack) = downloadController.deleteDownloaded(track)
 
     fun openTrackArtist(track: MusicTrack) {
         openTrackArtist(track, loadDetailWhenMissing = true)
@@ -3818,7 +2838,7 @@ class FuoPlayerController(
         }
         val loadedProviders = providerRepository.providers().sortedProvidersByOrder()
         providers = loadedProviders
-        selectedLocalPlaylist?.let { selectedLocalPlaylistTracks = it.toMusicTracks() }
+        localPlaylistController.refreshTrackPresentation()
         val providerIds = loadedProviders.map { it.providerId }.toSet()
         if (selectedSettingsProviderId !in providerIds) {
             selectedSettingsProviderId = loadedProviders.firstOrNull()?.providerId
@@ -3902,28 +2922,14 @@ class FuoPlayerController(
         mineFavoritePlaylistSections = mineFavoritePlaylistSections.sortedSectionsByOrder()
     }
 
-    private fun refreshAllProviderAuthStates(refreshUserInfo: Boolean = false) {
-        scope.launch {
-            refreshProviderAuthStates(refreshUserInfo)
-        }
-    }
+    private fun refreshAllProviderAuthStates(refreshUserInfo: Boolean = false) =
+        providerAuthController.refreshAll(providers, refreshUserInfo)
 
-    private suspend fun refreshProviderAuthStates(refreshUserInfo: Boolean = false) {
-        providers.forEach { provider ->
-            runCatching {
-                if (refreshUserInfo) {
-                    providerSessionRepository.refresh(provider.providerId, refreshUserInfo = true)
-                } else {
-                    providerSessionRepository.refresh(provider.providerId)
-                }
-            }
-                .onFailure { setError(it) }
-        }
-    }
+    private suspend fun refreshProviderAuthStates(refreshUserInfo: Boolean = false) =
+        providerAuthController.refresh(providers, refreshUserInfo)
 
-    private fun isProviderLoggedIn(providerId: String): Boolean {
-        return providerSessionRepository.state.value.authStates[providerId]?.isLoggedIn == true
-    }
+    private fun isProviderLoggedIn(providerId: String): Boolean =
+        providerAuthController.isLoggedIn(providerId)
 
     private fun MusicTrack.toLocalPlaylistTrack(): LocalPlaylistTrack? {
         if (!isProviderBacked()) return null
@@ -4762,11 +3768,6 @@ class FuoPlayerController(
         shuffleEnabled = false
     }
 
-    private fun mergeResults(local: List<MusicTrack>, provider: List<MusicTrack>): List<MusicTrack> {
-        val seen = linkedSetOf<String>()
-        return (local + provider).filter { seen.add(it.id) }
-    }
-
     private fun providerName(providerId: String): String {
         return providers.firstOrNull { it.providerId == providerId }?.providerName
             ?: availableProviders.firstOrNull { it.providerId == providerId }?.providerName
@@ -4822,16 +3823,6 @@ class FuoPlayerController(
     )
 
     private fun ProviderContentSection?.orEmptyTracks(): List<MusicTrack> = this?.tracks.orEmpty()
-
-    private fun ProviderSearchResults.totalCount(): Int {
-        return tracks.size + playlists.size + artists.size + albums.size + videos.size
-    }
-
-    private fun localOnlyCount(allTracks: List<MusicTrack>, providerTracks: List<MusicTrack>): Int {
-        if (providerTracks.isEmpty()) return allTracks.size
-        val providerIds = providerTracks.map { it.id }.toSet()
-        return allTracks.count { it.id !in providerIds }
-    }
 
     private fun applySettings(settings: AppSettings) {
         onboardingCompleted = settings.onboardingCompleted
@@ -4920,10 +3911,6 @@ class FuoPlayerController(
     private fun ProviderPlaylist.playbackStatsKey(): String =
         "$providerId$PLAYLIST_STATS_KEY_SEPARATOR$id"
 
-    private suspend fun updateAudioQualityPolicies() {
-        providerRepository.updateAudioQualityPolicies(wifiAudioQualityPolicy, cellularAudioQualityPolicy)
-    }
-
     private fun selectedSmartReplacementProviderIds(): Set<String> {
         val availableEnabledIds = enabledProviderIds.intersect(availableProviders.map { it.providerId }.toSet())
             .ifEmpty { enabledProviderIds }
@@ -4964,32 +3951,9 @@ class FuoPlayerController(
         errorMessage = firstNotNullOfOrNull { it.errorMessage },
     )
 
-    private fun refreshLocalMusicDirectories() {
-        scope.launch {
-            runCatching {
-                updateLocalMusicScanSettings()
-                localRepository.directories()
-            }.onSuccess {
-                localMusicDirectories = it
-                if (selectedLocalMusicDirectoryId != null &&
-                    it.none { directory -> directory.id == selectedLocalMusicDirectoryId }
-                ) {
-                    closeLocalMusicCollection()
-                }
-            }.onFailure {
-                setError(it)
-            }
-        }
-    }
+    private fun refreshLocalMusicDirectories() = localMusicController.refreshDirectories()
 
-    private suspend fun updateLocalMusicScanSettings() {
-        localRepository.updateScanSettings(
-            LocalMusicScanSettings(
-                excludedDirectoryIds = excludedLocalMusicDirectoryIds,
-                minDurationSeconds = localMusicMinDurationSeconds,
-            )
-        )
-    }
+    private suspend fun updateLocalMusicScanSettings() = localMusicController.updateScanSettings()
 
     private fun setError(throwable: Throwable, providerId: String? = null) {
         message = providerErrorMessage(throwable, throwable::class.simpleName.orEmpty(), providerId)
