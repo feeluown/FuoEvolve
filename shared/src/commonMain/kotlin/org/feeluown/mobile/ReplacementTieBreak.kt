@@ -59,17 +59,7 @@ private fun replacementRecordingVersionRank(origin: MusicTrack, candidate: Music
 private fun replacementCollaborationCoverage(origin: MusicTrack, candidate: MusicTrack): Double {
     val originArtists = splitArtists(origin.artists)
     if (originArtists.size <= 1) return 1.0
-    val evidence = normalizeTieBreakText(
-        buildString {
-            append(candidate.title)
-            append(' ')
-            append(candidate.artists)
-            if (candidate.providerTags.isNotEmpty()) {
-                append(' ')
-                append(candidate.providerTags.joinToString(" "))
-            }
-        },
-    )
+    val evidence = normalizeTieBreakText("${candidate.title} ${candidate.artists}")
     if (evidence.isBlank()) return 0.0
     val matched = originArtists.count { artist ->
         artist.length >= 2 && artist in evidence
