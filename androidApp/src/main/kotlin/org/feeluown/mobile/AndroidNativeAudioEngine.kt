@@ -290,6 +290,10 @@ class AndroidNativeAudioEngine(
         persistPlaybackState(forcePosition = true)
     }
 
+    override fun setStopAfterCurrentTrack(enabled: Boolean) {
+        FuoPlaybackService.setStopAfterCurrentTrack(context, enabled)
+    }
+
     internal fun republishRestoredState() {
         val session = restoredSession ?: return
         if (explicitStopRequested || startingPlayback) return

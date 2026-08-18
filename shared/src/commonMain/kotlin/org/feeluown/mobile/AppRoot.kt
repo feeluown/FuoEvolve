@@ -247,6 +247,7 @@ fun AppRoot(
         val snackbarHostState = remember { SnackbarHostState() }
         val playlistOperationFeedback = controller.playlistOperationFeedback
         val downloadQueueFeedback = controller.downloadQueueFeedback
+        val playbackFeedback = controller.playbackFeedback
         LaunchedEffect(playlistOperationFeedback) {
             playlistOperationFeedback ?: return@LaunchedEffect
             snackbarHostState.showSnackbar(playlistOperationFeedback)
@@ -256,6 +257,11 @@ fun AppRoot(
             downloadQueueFeedback ?: return@LaunchedEffect
             snackbarHostState.showSnackbar(downloadQueueFeedback)
             controller.dismissDownloadQueueFeedback(downloadQueueFeedback)
+        }
+        LaunchedEffect(playbackFeedback) {
+            playbackFeedback ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(playbackFeedback)
+            controller.dismissPlaybackFeedback(playbackFeedback)
         }
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val layoutInfo = remember(maxWidth, maxHeight) {

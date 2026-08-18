@@ -60,6 +60,8 @@ class FuoPlaybackService : MediaSessionService() {
     private var activePlayback: PreparedPlayback? = null
     private var activePlaybackHasReachedReady = false
     private var pendingPreloadError: String? = null
+    private var stopAfterCurrentTrack = false
+    private var holdAtCurrentEnd = false
     @Volatile
     private var activeGeneration: Long = 0L
     private var itemSerial: Long = 0L
@@ -99,9 +101,13 @@ class FuoPlaybackService : MediaSessionService() {
                 player.addListener(object : Player.Listener {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         val prepared = mediaItem?.mediaId?.let(preparedItems::get) ?: return
+                        if (activePlayback?.mediaItem?.mediaId != prepared.mediaItem.mediaId) {
+                            holdAtCurrentEnd = false
+                        }
                         activePlayback = prepared
                         activePlaybackHasReachedReady = player.playbackState == Player.STATE_READY
                         enqueueRemainingParts(prepared)
+                        applyStopAfterCurrentTrackGate()
                         publishPlaybackState()
                         preloadNext()
                     }
@@ -208,7 +214,25 @@ class FuoPlaybackService : MediaSessionService() {
             }
             ACTION_PAUSE -> player?.pause()
             ACTION_RESUME -> player?.play()
+            ACTION_SET_STOP_AFTER_CURRENT -> {
+                val enabled = intent.getBooleanExtra(EXTRA_STOP_AFTER_CURRENT, false)
+                val wasEnabled = stopAfterCurrentTrack
+                if (enabled) {
+                    holdAtCurrentEnd = false
+                } else if (
+                    wasEnabled &&
+                    isAtCurrentPlaybackEnd() &&
+                    isFinalPlaybackPart(activePlayback)
+                ) {
+                    holdAtCurrentEnd = true
+                }
+                stopAfterCurrentTrack = enabled
+                applyStopAfterCurrentTrackGate()
+                publishPlaybackState()
+            }
             ACTION_STOP -> {
+                stopAfterCurrentTrack = false
+                holdAtCurrentEnd = false
                 player?.stop()
                 mutableAudioDecoderInfo.value = null
                 mutableAudioFormatInfo.value = null
@@ -254,6 +278,7 @@ class FuoPlaybackService : MediaSessionService() {
         activePlayback = null
         activePlaybackHasReachedReady = false
         pendingPreloadError = null
+        holdAtCurrentEnd = false
         activeGeneration = plan.generation
         mutableAudioFormatInfo.value = null
         mutablePlaybackState.value = PlaybackState(
@@ -272,6 +297,7 @@ class FuoPlaybackService : MediaSessionService() {
                     activePlayback = prepared
                     preparedItems[prepared.mediaItem.mediaId] = prepared
                     player?.run {
+                        applyStopAfterCurrentTrackGate()
                         setMediaSource(prepared.mediaSource)
                         prepare()
                         play()
@@ -294,6 +320,7 @@ class FuoPlaybackService : MediaSessionService() {
     }
 
     private fun preloadNext() {
+        if (shouldHoldAtCurrentEnd()) return
         val generation = activeGeneration
         val request = synchronized(pendingLock) {
             if (preloadingGeneration != null) {
@@ -313,7 +340,7 @@ class FuoPlaybackService : MediaSessionService() {
                     preparedItems[prepared.mediaItem.mediaId] = prepared
                     player?.run {
                         addMediaSource(prepared.mediaSource)
-                        if (playbackState == Player.STATE_ENDED) {
+                        if (playbackState == Player.STATE_ENDED && !shouldHoldAtCurrentEnd()) {
                             seekToNextMediaItem()
                             play()
                         }
@@ -571,7 +598,9 @@ class FuoPlaybackService : MediaSessionService() {
     private fun publishPlaybackState() {
         val prepared = activePlayback ?: return
         val currentPlayer = player ?: return
-        if (currentPlayer.playbackState == Player.STATE_ENDED && pendingPreloadError != null) {
+        val shouldHold = shouldHoldAtCurrentEnd()
+        val heldAtEnd = shouldHold && isAtCurrentPlaybackEnd()
+        if (currentPlayer.playbackState == Player.STATE_ENDED && pendingPreloadError != null && !shouldHold) {
             mutablePlaybackState.value = PlaybackState(
                 status = PlayerStatus.Error,
                 currentTrack = prepared.track,
@@ -588,8 +617,9 @@ class FuoPlaybackService : MediaSessionService() {
             return
         }
         val status = when {
-            currentPlayer.playbackState == Player.STATE_ENDED && hasPendingOrLoadingRequest() -> PlayerStatus.Loading
-            currentPlayer.playbackState == Player.STATE_ENDED -> PlayerStatus.Ended
+            (currentPlayer.playbackState == Player.STATE_ENDED || heldAtEnd) &&
+                hasPendingOrLoadingRequest() && !shouldHold -> PlayerStatus.Loading
+            currentPlayer.playbackState == Player.STATE_ENDED || heldAtEnd -> PlayerStatus.Ended
             currentPlayer.isPlaying -> PlayerStatus.Playing
             currentPlayer.playbackState == Player.STATE_BUFFERING &&
                 currentPlayer.playWhenReady &&
@@ -611,6 +641,29 @@ class FuoPlaybackService : MediaSessionService() {
             currentPartIndex = prepared.payload.currentPartIndex,
             playbackGeneration = activeGeneration,
         )
+    }
+
+    private fun applyStopAfterCurrentTrackGate() {
+        player?.setPauseAtEndOfMediaItems(
+            stopAfterCurrentTrack && isFinalPlaybackPart(activePlayback),
+        )
+    }
+
+    private fun shouldHoldAtCurrentEnd(): Boolean =
+        holdAtCurrentEnd || (stopAfterCurrentTrack && isFinalPlaybackPart(activePlayback))
+
+    private fun isAtCurrentPlaybackEnd(): Boolean {
+        val currentPlayer = player ?: return false
+        if (currentPlayer.playbackState == Player.STATE_ENDED) return true
+        val duration = currentPlayer.duration
+        return duration > 0L && currentPlayer.currentPosition >= duration
+    }
+
+    private fun isFinalPlaybackPart(prepared: PreparedPlayback?): Boolean {
+        val payload = prepared?.payload ?: return false
+        if (payload.parts.isEmpty()) return true
+        val partIndex = payload.currentPartIndex
+        return partIndex !in payload.parts.indices || partIndex >= payload.parts.lastIndex
     }
 
     private fun hasPendingOrLoadingRequest(): Boolean = synchronized(pendingLock) {
@@ -769,8 +822,10 @@ class FuoPlaybackService : MediaSessionService() {
         private const val ACTION_PLAY = "org.feeluown.mobile.action.PLAY"
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
         private const val ACTION_RESUME = "org.feeluown.mobile.action.RESUME"
+        private const val ACTION_SET_STOP_AFTER_CURRENT = "org.feeluown.mobile.action.SET_STOP_AFTER_CURRENT"
         private const val ACTION_STOP = "org.feeluown.mobile.action.STOP"
         private const val EXTRA_PLAN = "plan"
+        private const val EXTRA_STOP_AFTER_CURRENT = "stop_after_current"
         private const val PLAYBACK_RESOLVE_TIMEOUT_MS = 30_000L
         private const val TAG = "FuoPlaybackService"
         private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
@@ -816,6 +871,16 @@ class FuoPlaybackService : MediaSessionService() {
 
         fun resume(context: Context) {
             start(context, Intent(context, FuoPlaybackService::class.java).setAction(ACTION_RESUME))
+        }
+
+        fun setStopAfterCurrentTrack(context: Context, enabled: Boolean) {
+            start(
+                context,
+                Intent(context, FuoPlaybackService::class.java).apply {
+                    action = ACTION_SET_STOP_AFTER_CURRENT
+                    putExtra(EXTRA_STOP_AFTER_CURRENT, enabled)
+                },
+            )
         }
 
         fun stop(context: Context) {

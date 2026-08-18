@@ -39,11 +39,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RemoveCircleOutline
@@ -52,6 +56,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -71,6 +76,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
@@ -91,6 +97,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -314,8 +321,16 @@ private fun FullPlayerContent(controller: FuoPlayerController) {
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        IconButton(onClick = controller::toggleQueue) {
-                            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = controller::toggleQueue) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
+                            }
+                            currentTrack?.let { track ->
+                                NowPlayingTrackAction(controller = controller, track = track)
+                            }
                         }
                     }
                     BoxWithConstraints(
@@ -389,11 +404,7 @@ private fun FullPlayerContent(controller: FuoPlayerController) {
                                     shuffleEnabled = controller.isShuffleEnabled,
                                     shuffleAvailable = !controller.isFmQueueActive,
                                     onShuffle = controller::toggleShuffle,
-                                    extraAction = currentTrack?.let { track ->
-                                        {
-                                            NowPlayingTrackAction(controller = controller, track = track)
-                                        }
-                                    },
+                                    sleepTimerAction = { SleepTimerAction(controller) },
                                 )
                             }
                         }
@@ -428,8 +439,16 @@ private fun FullPlayerContent(controller: FuoPlayerController) {
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    IconButton(onClick = controller::toggleQueue) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = controller::toggleQueue) {
+                            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
+                        }
+                        currentTrack?.let { track ->
+                            NowPlayingTrackAction(controller = controller, track = track)
+                        }
                     }
                 }
                 PrimaryTabRow(selectedTabIndex = pagerState.currentPage.coerceIn(0, PlayerVisualTab.entries.lastIndex)) {
@@ -483,15 +502,380 @@ private fun FullPlayerContent(controller: FuoPlayerController) {
                     shuffleEnabled = controller.isShuffleEnabled,
                     shuffleAvailable = !controller.isFmQueueActive,
                     onShuffle = controller::toggleShuffle,
-                    extraAction = currentTrack?.let { track ->
-                        {
-                            NowPlayingTrackAction(controller = controller, track = track)
-                        }
-                    },
+                    sleepTimerAction = { SleepTimerAction(controller) },
                 )
             }
             QueueBottomSheet(controller)
         }
+    }
+}
+
+@Composable
+private fun SleepTimerAction(controller: FuoPlayerController) {
+    var showSheet by remember { mutableStateOf(false) }
+    val timerState = controller.sleepTimerState
+    val isActive = timerState.mode != SleepTimerMode.Off
+    val contentDescription = when (timerState.mode) {
+        SleepTimerMode.Off -> "睡眠定时"
+        SleepTimerMode.Duration -> "睡眠定时，剩余 ${formatSleepTimerRemaining(timerState.remainingMs ?: 0L)}"
+        SleepTimerMode.EndOfTrack -> "当前曲目结束后暂停"
+    }
+    Box {
+        RoundControlButton(
+            imageVector = Icons.Filled.Timer,
+            contentDescription = contentDescription,
+            onClick = { showSheet = true },
+            selected = isActive,
+        )
+        if (showSheet) {
+            SleepTimerBottomSheet(
+                controller = controller,
+                onDismiss = { showSheet = false },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SleepTimerBottomSheet(
+    controller: FuoPlayerController,
+    onDismiss: () -> Unit,
+) {
+    val timerState = controller.sleepTimerState
+    var showCustomDurationDialog by remember { mutableStateOf(false) }
+    var customMinutesText by remember { mutableStateOf("") }
+    val customMinutes = customMinutesText.toIntOrNull()
+    val customMinutesValid = customMinutes?.let {
+        it in SLEEP_TIMER_MIN_MINUTES..SLEEP_TIMER_MAX_MINUTES
+    } == true
+    val presetMinutes = SLEEP_TIMER_PRESET_MINUTES.filter { it <= 90 }
+    val firstPresetRow = presetMinutes.take(3)
+    val secondPresetRow = presetMinutes.drop(3)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "睡眠定时",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "选择自动暂停播放的时间",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (timerState.mode != SleepTimerMode.Off) {
+                SleepTimerActiveStatus(
+                    timerState = timerState,
+                    onExtend = if (timerState.mode == SleepTimerMode.Duration) {
+                        {
+                            controller.setSleepTimerDurationMinutes(
+                                sleepTimerExtendedMinutes(timerState.remainingMs ?: 0L, 5),
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    onClear = {
+                        controller.clearSleepTimer()
+                        onDismiss()
+                    },
+                )
+            }
+            SleepTimerSectionLabel("按时长")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                firstPresetRow.forEach { minutes ->
+                    SleepTimerPresetOption(
+                        minutes = minutes,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            controller.setSleepTimerDurationMinutes(minutes)
+                            onDismiss()
+                        },
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                secondPresetRow.forEach { minutes ->
+                    SleepTimerPresetOption(
+                        minutes = minutes,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            controller.setSleepTimerDurationMinutes(minutes)
+                            onDismiss()
+                        },
+                    )
+                }
+                SleepTimerCustomOption(
+                    modifier = Modifier.weight(1f),
+                    onClick = { showCustomDurationDialog = true },
+                )
+            }
+
+            SleepTimerSectionLabel("播放结束")
+            SleepTimerEndOfTrackOption(
+                selected = timerState.mode == SleepTimerMode.EndOfTrack,
+                onClick = {
+                    controller.setSleepTimerToEndOfTrack()
+                    onDismiss()
+                },
+            )
+        }
+    }
+
+    if (showCustomDurationDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomDurationDialog = false },
+            title = { Text("自定义睡眠定时") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = customMinutesText,
+                    onValueChange = { value ->
+                        customMinutesText = value.filter(Char::isDigit)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = customMinutesText.isNotBlank() && !customMinutesValid,
+                    label = { Text("时长（分钟）") },
+                    placeholder = { Text("例如 45") },
+                    supportingText = if (customMinutesText.isNotBlank() && !customMinutesValid) {
+                        {
+                            Text("请输入 $SLEEP_TIMER_MIN_MINUTES–$SLEEP_TIMER_MAX_MINUTES 分钟")
+                        }
+                    } else {
+                        null
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = customMinutesValid,
+                    onClick = {
+                        customMinutes?.let(controller::setSleepTimerDurationMinutes)
+                        showCustomDurationDialog = false
+                        onDismiss()
+                    },
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomDurationDialog = false }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SleepTimerActiveStatus(
+    timerState: SleepTimerState,
+    onExtend: (() -> Unit)?,
+    onClear: () -> Unit,
+) {
+    val isDuration = timerState.mode == SleepTimerMode.Duration
+    val canExtend = isDuration &&
+        (timerState.remainingMs ?: 0L) < SLEEP_TIMER_MAX_MINUTES * 60_000L
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (isDuration) Icons.Filled.Timer else Icons.Filled.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = if (isDuration) {
+                        "还有 ${formatSleepTimerRemaining(timerState.remainingMs ?: 0L)}"
+                    } else {
+                        "当前曲目结束后暂停"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (isDuration) {
+                        "时间到后自动暂停播放"
+                    } else {
+                        "播放完当前曲目的全部内容后暂停"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onExtend != null) {
+                TextButton(
+                    enabled = canExtend,
+                    onClick = onExtend,
+                ) {
+                    Text("+5 分钟")
+                }
+            }
+            TextButton(onClick = onClear) {
+                Text("关闭定时")
+            }
+        }
+        HorizontalDivider()
+    }
+}
+
+@Composable
+private fun SleepTimerSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun SleepTimerPresetOption(
+    minutes: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.AssistChip(
+        onClick = onClick,
+        modifier = modifier,
+        label = {
+            Text(
+                text = "$minutes 分钟",
+                maxLines = 1,
+            )
+        },
+    )
+}
+
+@Composable
+private fun SleepTimerCustomOption(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.AssistChip(
+        onClick = onClick,
+        modifier = modifier,
+        label = { Text("自定义", maxLines = 1) },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Filled.Edit,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        },
+    )
+}
+
+@Composable
+private fun SleepTimerEndOfTrackOption(
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.ListItem(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick),
+        colors = androidx.compose.material3.ListItemDefaults.colors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            },
+        ),
+        leadingContent = {
+            Icon(
+                imageVector = Icons.Filled.MusicNote,
+                contentDescription = null,
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+            )
+        },
+        headlineContent = {
+            Text(
+                text = "当前曲目结束后暂停",
+                fontWeight = FontWeight.Medium,
+            )
+        },
+        supportingContent = {
+            Text(
+                text = "包含当前曲目的全部多段内容",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        trailingContent = if (selected) {
+            {
+                Text(
+                    text = "已选",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        } else {
+            null
+        },
+    )
+}
+
+private fun sleepTimerExtendedMinutes(remainingMs: Long, extraMinutes: Int): Int {
+    val roundedRemainingMinutes = ((remainingMs.coerceAtLeast(0L) + 30_000L) / 60_000L)
+        .coerceAtLeast(1L)
+    return (roundedRemainingMinutes + extraMinutes)
+        .coerceAtMost(SLEEP_TIMER_MAX_MINUTES.toLong())
+        .toInt()
+}
+
+private fun formatSleepTimerRemaining(remainingMs: Long): String {
+    val totalSeconds = (remainingMs.coerceAtLeast(0L) + 999L) / 1_000L
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        minutes >= 60L -> "${minutes / 60L}小时${minutes % 60L}分"
+        minutes > 0L -> "${minutes}分${seconds}秒"
+        else -> "${seconds}秒"
     }
 }
 
@@ -524,7 +908,7 @@ fun NowPlayingTrackAction(controller: FuoPlayerController, track: MusicTrack) {
         },
         dislikedActionLabel = "不喜欢",
         onShare = sharePayload?.let { payload -> { onShare(payload) } },
-        roundButton = true,
+        roundButton = false,
     )
 }
 
@@ -1174,7 +1558,7 @@ fun PlayerControls(
     shuffleAvailable: Boolean = true,
     onShuffle: (() -> Unit)? = null,
     onRepeat: (() -> Unit)? = null,
-    extraAction: (@Composable () -> Unit)? = null,
+    sleepTimerAction: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.animateContentSize(animationSpec = tween(220)),
@@ -1214,12 +1598,14 @@ fun PlayerControls(
             size = 48.dp,
             iconSize = if (compact) 24.dp else 26.dp,
         )
-        when {
-            !compact && extraAction != null -> extraAction()
-            !compact && onRepeat != null -> RepeatModeTextButton(
-                repeatMode = repeatMode,
-                onRepeat = onRepeat,
-            )
+        if (!compact) {
+            sleepTimerAction?.invoke()
+            if (onRepeat != null) {
+                RepeatModeTextButton(
+                    repeatMode = repeatMode,
+                    onRepeat = onRepeat,
+                )
+            }
         }
     }
 }
@@ -1455,7 +1841,6 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                             positionMs = renderPositionMs,
                             style = activeStyle,
                             activeColor = MaterialTheme.colorScheme.primary,
-                            // Keep the unsung portion clearly muted so primary fill pops.
                             inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
                             modifier = Modifier.fillMaxWidth(),
                         )

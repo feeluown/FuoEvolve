@@ -1020,6 +1020,268 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun durationSleepTimerPausesAfterDeadlineEvenWhenPlaybackIsPaused() = runTest {
+        var nowMillis = 0L
+        val track = providerTrack("provider:1", "First")
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(listOf(track)),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+                nowMillis = { nowMillis },
+            )
+
+            advanceUntilIdle()
+            controller.playLocalTrack(track, listOf(track))
+            advanceUntilIdle()
+            controller.setSleepTimerDurationMinutes(1)
+            runCurrent()
+
+            assertEquals(SleepTimerMode.Duration, controller.sleepTimerState.mode)
+            assertEquals(60_000L, controller.sleepTimerState.remainingMs)
+            controller.toggle()
+            runCurrent()
+            val pauseCountWhilePaused = engine.pauseCount
+
+            nowMillis += 59_000L
+            advanceTimeBy(59_000L)
+            runCurrent()
+            assertEquals(SleepTimerMode.Duration, controller.sleepTimerState.mode)
+            assertEquals(1_000L, controller.sleepTimerState.remainingMs)
+
+            nowMillis += 1_000L
+            advanceTimeBy(1_000L)
+            runCurrent()
+
+            assertEquals(SleepTimerMode.Off, controller.sleepTimerState.mode)
+            assertEquals(PlayerStatus.Paused, engine.state.value.status)
+            assertEquals(pauseCountWhilePaused + 1, engine.pauseCount)
+            assertEquals("睡眠定时已结束，播放已暂停", controller.playbackFeedback)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun replacingOrClearingSleepTimerCancelsThePreviousTimer() = runTest {
+        var nowMillis = 0L
+        val track = providerTrack("provider:1", "First")
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(listOf(track)),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+                nowMillis = { nowMillis },
+            )
+
+            advanceUntilIdle()
+            controller.playLocalTrack(track, listOf(track))
+            advanceUntilIdle()
+            controller.setSleepTimerDurationMinutes(1)
+            runCurrent()
+            controller.setSleepTimerToEndOfTrack()
+            runCurrent()
+
+            nowMillis += 60_000L
+            advanceTimeBy(60_000L)
+            runCurrent()
+            assertEquals(SleepTimerMode.EndOfTrack, controller.sleepTimerState.mode)
+            assertEquals(0, engine.pauseCount)
+
+            controller.clearSleepTimer()
+            runCurrent()
+            nowMillis += 60_000L
+            advanceTimeBy(60_000L)
+            runCurrent()
+            assertEquals(SleepTimerMode.Off, controller.sleepTimerState.mode)
+            assertEquals(0, engine.pauseCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun durationSleepTimerSurvivesManualTrackChange() = runTest {
+        var nowMillis = 0L
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(tracks),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+                nowMillis = { nowMillis },
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.setSleepTimerDurationMinutes(1)
+            runCurrent()
+            controller.next()
+            runCurrent()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(SleepTimerMode.Duration, controller.sleepTimerState.mode)
+
+            nowMillis += 60_000L
+            advanceTimeBy(60_000L)
+            runCurrent()
+
+            assertEquals(SleepTimerMode.Off, controller.sleepTimerState.mode)
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(PlayerStatus.Paused, engine.state.value.status)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun endOfTrackSleepTimerTakesPriorityOverRepeatAndUpNext() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val upNext = providerTrack("provider:3", "Third")
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(tracks + upNext),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.toggleRepeat()
+            controller.addToUpNext(upNext)
+            controller.setSleepTimerToEndOfTrack()
+            runCurrent()
+            val firstTrackId = engine.lastTrack?.id
+
+            engine.emitEnded(engine.lastTrack ?: tracks.first())
+            advanceUntilIdle()
+
+            assertEquals(firstTrackId, engine.lastTrack?.id)
+            assertEquals(PlayerStatus.Ended, controller.playbackState.status)
+            assertEquals(SleepTimerMode.Off, controller.sleepTimerState.mode)
+            assertEquals("当前曲目已播放完，播放已暂停", controller.playbackFeedback)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun endOfTrackSleepTimerStopsAfterTheFinalMultipartPartAndResetsEngineFlag() = runTest {
+        val parent = providerTrack("bilibili:BV1xx", "Multi Part").copy(source = "bilibili")
+        val other = providerTrack("provider:2", "Second")
+        val parts = listOf(
+            PlaybackPart("bilibili:paged_BV1xx__1", "P1", 60_000),
+            PlaybackPart("bilibili:paged_BV1xx__2", "P2", 70_000),
+        )
+        val provider = FakeProviderRepository(
+            tracks = listOf(parent, other),
+            resolveHandler = { track, _, _, _, _, _ ->
+                val partIndex = parts.indexOfFirst { it.id == track.id }.takeIf { it >= 0 } ?: 0
+                PlaybackPayload(
+                    url = "https://example.com/${parts[partIndex].id}.m4s",
+                    title = parts[partIndex].title,
+                    artists = parent.artists,
+                    album = parent.album,
+                    source = parent.source,
+                    durationMs = parts[partIndex].durationMs,
+                    parts = parts,
+                    currentPartIndex = partIndex,
+                )
+            },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playLocalTrack(parent, listOf(parent, other))
+            advanceUntilIdle()
+            controller.setSleepTimerToEndOfTrack()
+            runCurrent()
+
+            engine.emitEnded(engine.lastTrack ?: parent)
+            advanceUntilIdle()
+            assertEquals(1, controller.playbackState.currentPartIndex)
+            assertEquals(SleepTimerMode.EndOfTrack, controller.sleepTimerState.mode)
+            assertEquals(true, engine.stopAfterCurrentTrackValues.last())
+
+            engine.emitEnded(engine.lastTrack ?: parent)
+            advanceUntilIdle()
+
+            assertEquals(PlayerStatus.Ended, controller.playbackState.status)
+            assertEquals(SleepTimerMode.Off, controller.sleepTimerState.mode)
+            assertEquals(false, engine.stopAfterCurrentTrackValues.last())
+            assertEquals("当前曲目已播放完，播放已暂停", controller.playbackFeedback)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun manualTrackChangeClearsEndOfTrackSleepTimer() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(tracks),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.playAllLocalTracks(tracks)
+            advanceUntilIdle()
+            controller.setSleepTimerToEndOfTrack()
+            runCurrent()
+            controller.next()
+            advanceUntilIdle()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(SleepTimerMode.Off, controller.sleepTimerState.mode)
+            assertEquals(false, engine.stopAfterCurrentTrackValues.last())
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun multiPartTrackPlaysPartsInOrderBeforeMainQueueNextWhenShuffleIsEnabled() = runTest {
         val parent = providerTrack("bilibili:BV1xx", "Multi Part").copy(
             source = "bilibili",
@@ -4955,7 +5217,9 @@ class FuoPlayerControllerTest {
         var lastTrack: MusicTrack? = null
         var lastPayload: PlaybackPayload? = null
         var resumeCount = 0
+        var pauseCount = 0
         val seekPositions = mutableListOf<Long>()
+        val stopAfterCurrentTrackValues = mutableListOf<Boolean>()
 
         override fun prepareLoading(track: MusicTrack) {
             mutableState.value = PlaybackState(
@@ -4998,6 +5262,7 @@ class FuoPlayerControllerTest {
         }
 
         override fun pause() {
+            pauseCount += 1
             mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
         }
 
@@ -5013,6 +5278,10 @@ class FuoPlayerControllerTest {
         override fun seekTo(positionMs: Long) {
             seekPositions += positionMs
             mutableState.value = mutableState.value.copy(positionMs = positionMs)
+        }
+
+        override fun setStopAfterCurrentTrack(enabled: Boolean) {
+            stopAfterCurrentTrackValues += enabled
         }
     }
 

@@ -196,6 +196,9 @@ val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
 const val DEFAULT_SMART_REPLACEMENT_MIN_SCORE = 0.55
 const val PROVIDER_PAGE_SIZE = 50
+const val SLEEP_TIMER_MIN_MINUTES = 1
+const val SLEEP_TIMER_MAX_MINUTES = 1_440
+val SLEEP_TIMER_PRESET_MINUTES = listOf(15, 30, 45, 60, 90, 120)
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
@@ -353,6 +356,19 @@ enum class PlayerStatus {
     Error,
     Ended,
 }
+
+enum class SleepTimerMode {
+    Off,
+    Duration,
+    EndOfTrack,
+}
+
+data class SleepTimerState(
+    val mode: SleepTimerMode = SleepTimerMode.Off,
+    val deadlineMs: Long? = null,
+    val targetTrackId: String? = null,
+    val remainingMs: Long? = null,
+)
 
 enum class TrackChangeDirection {
     Next,
@@ -990,6 +1006,7 @@ interface PlaybackEngine {
     fun resume()
     fun stop()
     fun seekTo(positionMs: Long)
+    fun setStopAfterCurrentTrack(enabled: Boolean) = Unit
 }
 
 data class SettingsState(

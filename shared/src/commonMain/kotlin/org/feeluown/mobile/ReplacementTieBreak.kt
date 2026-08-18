@@ -3,8 +3,15 @@ package org.feeluown.mobile
 import kotlin.math.abs
 
 /**
- * Refines only candidates that have exactly the same legacy replacement score.
- * It never changes the score itself or which candidates pass the configured threshold.
+ * Re-ranks candidates that already passed the configured replacement score threshold.
+ *
+ * Recording identity is treated as a structural signal before the legacy score:
+ * 1. Prefer the same recording/version (studio, live, remix, cover, etc.).
+ * 2. For multi-artist originals, prefer candidates that preserve the full artist lineup.
+ * 3. Within the same recording profile, keep the legacy score and metadata confidence order.
+ *
+ * This keeps uploader/official provenance useful without allowing it to override a clearly
+ * different recording, such as an official live or solo version replacing the studio duet.
  */
 internal fun sortReplacementScoreTies(
     origin: MusicTrack,
@@ -14,7 +21,13 @@ internal fun sortReplacementScoreTies(
     return ranked
         .withIndex()
         .sortedWith(
-            compareByDescending<IndexedValue<ReplacementCandidate>> { it.value.score }
+            compareByDescending<IndexedValue<ReplacementCandidate>> {
+                replacementRecordingVersionRank(origin, it.value.track)
+            }
+                .thenByDescending {
+                    replacementCollaborationCoverage(origin, it.value.track)
+                }
+                .thenByDescending { it.value.score }
                 .thenByDescending { replacementTieBreakConfidence(origin, it.value.track) }
                 .thenBy { it.index },
         )
@@ -27,6 +40,59 @@ internal fun replacementTieBreakConfidence(origin: MusicTrack, candidate: MusicT
     val albumScore = exactMetadataMatch(origin.album, candidate.album)
     val durationScore = durationCloseness(origin.durationMs, candidate.durationMs)
     return titleScore * 0.45 + artistScore * 0.30 + albumScore * 0.15 + durationScore * 0.10
+}
+
+private fun replacementRecordingVersionRank(origin: MusicTrack, candidate: MusicTrack): Int {
+    val originVersions = recordingVersionKinds("${origin.title} ${origin.album}")
+    val candidateVersions = recordingVersionKinds(
+        buildString {
+            append(candidate.title)
+            append(' ')
+            append(candidate.album)
+            if (candidate.providerTags.isNotEmpty()) {
+                append(' ')
+                append(candidate.providerTags.joinToString(" "))
+            }
+        },
+    )
+    return when {
+        originVersions == candidateVersions -> 3
+        originVersions.isEmpty() && candidateVersions.isNotEmpty() -> 0
+        originVersions.isNotEmpty() && candidateVersions.isEmpty() -> 1
+        originVersions.intersect(candidateVersions).isNotEmpty() -> 1
+        else -> 0
+    }
+}
+
+private fun replacementCollaborationCoverage(origin: MusicTrack, candidate: MusicTrack): Double {
+    val originArtists = splitArtists(origin.artists)
+    if (originArtists.size <= 1) return 1.0
+    val evidence = normalizeTieBreakText("${candidate.title} ${candidate.artists}")
+    if (evidence.isBlank()) return 0.0
+    val matched = originArtists.count { artist ->
+        artist.length >= 2 && artist in evidence
+    }
+    return matched.toDouble() / originArtists.size.toDouble()
+}
+
+private enum class RecordingVersionKind {
+    COVER,
+    REMIX,
+    LIVE,
+    INSTRUMENTAL,
+    ACOUSTIC,
+    DEMO,
+    SOLO,
+}
+
+private fun recordingVersionKinds(value: String): Set<RecordingVersionKind> = buildSet {
+    if (RECORDING_COVER_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.COVER)
+    if (RECORDING_REMIX_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.REMIX)
+    if (RECORDING_LIVE_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.LIVE)
+    if (RECORDING_INSTRUMENTAL_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.INSTRUMENTAL)
+    if (RECORDING_ACOUSTIC_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.ACOUSTIC)
+    if (RECORDING_DEMO_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.DEMO)
+    if (RECORDING_SOLO_PATTERNS.any { it.containsMatchIn(value) }) add(RecordingVersionKind.SOLO)
 }
 
 private fun orderedTextSimilarity(leftValue: String, rightValue: String): Double {
@@ -98,3 +164,44 @@ private fun levenshteinDistance(left: String, right: String): Int {
 
 private fun normalizeTieBreakText(value: String): String =
     value.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
+
+private val RECORDING_COVER_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])cover(?:$|[^a-z0-9])"),
+    Regex("翻唱"),
+    Regex("歌ってみた"),
+    Regex("弾いてみた"),
+)
+private val RECORDING_REMIX_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])remix(?:$|[^a-z0-9])"),
+    Regex("重混"),
+)
+private val RECORDING_LIVE_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])live(?:$|[^a-z0-9])"),
+    Regex("现场"),
+    Regex("現場"),
+    Regex("ライブ"),
+)
+private val RECORDING_INSTRUMENTAL_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])instrumental(?:$|[^a-z0-9])"),
+    Regex("(?i)(?:^|[^a-z0-9])off[ -]?vocal(?:$|[^a-z0-9])"),
+    Regex("(?i)(?:^|[^a-z0-9])karaoke(?:$|[^a-z0-9])"),
+    Regex("伴奏"),
+    Regex("纯音乐"),
+    Regex("純音樂"),
+)
+private val RECORDING_ACOUSTIC_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])acoustic(?:$|[^a-z0-9])"),
+    Regex("(?i)(?:^|[^a-z0-9])unplugged(?:$|[^a-z0-9])"),
+    Regex("不插电"),
+    Regex("不插電"),
+)
+private val RECORDING_DEMO_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])demo(?:$|[^a-z0-9])"),
+    Regex("小样"),
+    Regex("小樣"),
+)
+private val RECORDING_SOLO_PATTERNS = listOf(
+    Regex("(?i)(?:^|[^a-z0-9])solo(?:$|[^a-z0-9])"),
+    Regex("独唱"),
+    Regex("獨唱"),
+)
