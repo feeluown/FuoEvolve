@@ -137,6 +137,52 @@ class ReplacementTieBreakTest {
     }
 
     @Test
+    fun candidateAlbumVersionMarkerPreventsFalseStudioMatch() {
+        val original = track("netease", "Song", "Alice")
+        val albumMarkedLive = ReplacementCandidate(
+            track(
+                source = "ytmusic",
+                title = "Song",
+                artists = "Alice",
+                album = "Live at Arena",
+                id = "album-live",
+            ),
+            0.90,
+        )
+        val studio = ReplacementCandidate(
+            track("qqmusic", "Song", "Alice", id = "studio"),
+            0.80,
+        )
+
+        val sorted = sortReplacementScoreTies(original, listOf(albumMarkedLive, studio))
+
+        assertEquals("studio", sorted.first().track.id)
+    }
+
+    @Test
+    fun candidateTagsAreCombinedWithTitleVersionMarkers() {
+        val original = track("netease", "Song Live", "Alice")
+        val liveCover = ReplacementCandidate(
+            track(
+                source = "bilibili",
+                title = "Song LIVE",
+                artists = "Alice",
+                id = "live-cover",
+                providerTags = listOf("翻唱"),
+            ),
+            0.90,
+        )
+        val matchingLive = ReplacementCandidate(
+            track("bilibili", "Song LIVE", "Alice", id = "live"),
+            0.80,
+        )
+
+        val sorted = sortReplacementScoreTies(original, listOf(liveCover, matchingLive))
+
+        assertEquals("live", sorted.first().track.id)
+    }
+
+    @Test
     fun yoasobiOfficialOriginalStillBeatsTaggedCover() {
         val original = track(
             source = "netease",
