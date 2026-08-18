@@ -44,9 +44,17 @@ internal fun replacementTieBreakConfidence(origin: MusicTrack, candidate: MusicT
 
 private fun replacementRecordingVersionRank(origin: MusicTrack, candidate: MusicTrack): Int {
     val originVersions = recordingVersionKinds("${origin.title} ${origin.album}")
-    val candidateTitleVersions = recordingVersionKinds(candidate.title)
-    val candidateTagVersions = recordingVersionKinds(candidate.providerTags.joinToString(" "))
-    val candidateVersions = candidateTitleVersions.ifEmpty { candidateTagVersions }
+    val candidateVersions = recordingVersionKinds(
+        buildString {
+            append(candidate.title)
+            append(' ')
+            append(candidate.album)
+            if (candidate.providerTags.isNotEmpty()) {
+                append(' ')
+                append(candidate.providerTags.joinToString(" "))
+            }
+        },
+    )
     return when {
         originVersions == candidateVersions -> 3
         originVersions.isEmpty() && candidateVersions.isNotEmpty() -> 0
