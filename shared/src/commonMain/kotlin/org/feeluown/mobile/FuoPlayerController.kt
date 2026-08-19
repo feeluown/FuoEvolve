@@ -59,6 +59,8 @@ class FuoPlayerController(
     private val downloadState = DownloadControllerState()
     private val playlistState = PlaylistControllerState()
     private val settingsUiState = SettingsControllerState()
+    private val playbackQueueController = PlaybackQueueController()
+    private val playbackProviderRepository: ProviderPlaybackRepository = ProviderPlaybackRepositoryView(providerRepository)
 
     var isSettingsLoaded by mutableStateOf(false)
         private set
@@ -210,6 +212,8 @@ class FuoPlayerController(
         private set
     var providerSearchTab by searchState::providerSearchTab
         private set
+    val searchUiState
+        get() = searchController.uiState
     var homeSection by mutableStateOf(HomeSection.Recommend)
         private set
     var mineSection by mutableStateOf(MineSection.Playlists)
@@ -318,7 +322,7 @@ class FuoPlayerController(
         private set
     var localMetadataSearchResults by localMusicState::metadataSearchResults
         private set
-    var localMetadataSearchMessage by localMusicState::metadataSearchMessage
+    var localMetadataSearchMessage by localMusicState::localMetadataSearchMessage
         private set
     val isDebugLogViewerAvailable: Boolean
         get() = debugLogController.isAvailable
@@ -336,18 +340,18 @@ class FuoPlayerController(
             selectedLocalMusicDirectoryId != null ||
             navigator.backStack.value.size > 1
 
-    private var mainQueue: List<MusicTrack> = emptyList()
-    private var originalMainQueue: List<MusicTrack> = emptyList()
-    private var upNextQueue: List<MusicTrack> = emptyList()
-    private var mainQueueIndex: Int = -1
-    private var currentUpNextTrack: MusicTrack? = null
-    private var currentIsUpNext: Boolean = false
-    private var queueFeature: ProviderFeature? = null
-    private var queuePlaylistId: String? = null
-    private var shuffleEnabled: Boolean = false
-    private var _repeatMode: RepeatMode = RepeatMode.QUEUE
-    private var isFmQueue: Boolean = false
-    private var shuffleBeforeFm: Boolean? = null
+    private var mainQueue by playbackQueueController::mainQueue
+    private var originalMainQueue by playbackQueueController::originalMainQueue
+    private var upNextQueue by playbackQueueController::upNextQueue
+    private var mainQueueIndex by playbackQueueController::mainQueueIndex
+    private var currentUpNextTrack by playbackQueueController::currentUpNextTrack
+    private var currentIsUpNext by playbackQueueController::currentIsUpNext
+    private var queueFeature by playbackQueueController::queueFeature
+    private var queuePlaylistId by playbackQueueController::queuePlaylistId
+    private var shuffleEnabled by playbackQueueController::shuffleEnabled
+    private var _repeatMode by playbackQueueController::repeatMode
+    private var isFmQueue by playbackQueueController::isFmQueue
+    private var shuffleBeforeFm by playbackQueueController::shuffleBeforeFm
     private var appendQueueFeatureTask: Deferred<Int>? = null
     private var selectedFeatureTracksNextOffset = 0
     private var selectedFeatureLoadMoreJob: Job? = null
@@ -737,8 +741,7 @@ class FuoPlayerController(
         val songId = song.neteaseSongId?.takeIf { it.isNotBlank() } ?: return
         if ("netease" !in enabledProviderIds) return
         val trackId = "netease:$songId"
-        navigator.navigate(AppRoute.Track)
-        selectedTrack = MusicTrack(
+        val routeTrack = MusicTrack(
             id = trackId,
             title = song.title,
             artists = song.artists.joinToString(" / "),
@@ -749,6 +752,8 @@ class FuoPlayerController(
             providerId = trackId,
             providerName = "网易云音乐",
         )
+        navigator.navigate(AppRoute.TrackDetail(routeTrack.toNavigationTrack()))
+        selectedTrack = routeTrack
         selectedTrackError = null
         scope.launch {
             isLoading = true
@@ -763,6 +768,37 @@ class FuoPlayerController(
                     message = "资源加载失败"
                 }
             isLoading = false
+        }
+    }
+
+    fun activateRoute(route: AppRoute) {
+        when (route) {
+            is AppRoute.FeatureDetail -> {
+                val feature = route.feature.toProviderFeature()
+                if (selectedFeature?.id != feature.id) openFeature(feature)
+            }
+            is AppRoute.TrackDetail -> {
+                val track = route.track.toMusicTrack()
+                if (selectedTrack?.id != track.id) openTrackDetail(track)
+            }
+            is AppRoute.VideoDetail -> {
+                val video = route.video.toProviderVideo()
+                if (selectedVideo?.id != video.id) openVideo(video)
+            }
+            is AppRoute.PlaylistDetail -> {
+                val playlist = route.playlist.toProviderPlaylist()
+                if (selectedPlaylist?.id != playlist.id) {
+                    openPlaylist(
+                        playlist,
+                        route.category?.let { runCatching { ProviderFeatureCategory.valueOf(it) }.getOrNull() },
+                    )
+                }
+            }
+            is AppRoute.MediaItemDetail -> {
+                val item = route.item.toProviderMediaItem()
+                if (selectedMediaItem?.id != item.id) openMediaItem(item)
+            }
+            else -> Unit
         }
     }
 
@@ -839,6 +875,11 @@ class FuoPlayerController(
                     true
                 }
                 AppRoute.Home -> false
+                is AppRoute.FeatureDetail,
+                is AppRoute.TrackDetail,
+                is AppRoute.VideoDetail,
+                is AppRoute.PlaylistDetail,
+                is AppRoute.MediaItemDetail -> false
             }
         }
     }
@@ -1316,7 +1357,7 @@ class FuoPlayerController(
         providerContentController.refreshActiveMineProviderContent()
 
     fun openFeature(feature: ProviderFeature) {
-        navigator.navigate(AppRoute.Feature)
+        navigator.navigate(AppRoute.FeatureDetail(feature.toNavigationFeature()))
         selectedFeature = feature
         selectedFeatureContent = null
         selectedFeatureTracks = emptyList()
@@ -1375,7 +1416,7 @@ class FuoPlayerController(
 
     fun openTrackDetail(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
-        navigator.navigate(AppRoute.Track)
+        navigator.navigate(AppRoute.TrackDetail(track.toNavigationTrack()))
         selectedTrack = track
         selectedTrackError = null
         selectedTrackSimilar = emptyList()
@@ -1407,7 +1448,7 @@ class FuoPlayerController(
         replacementCandidatesJob = scope.launch {
             runCatching {
                 withTimeout(30_000) {
-                    providerRepository.replacementCandidates(
+                    playbackProviderRepository.replacementCandidates(
                         track = originalTrack,
                         smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
                         smartReplacementMinScore = smartReplacementMinScore,
@@ -1601,7 +1642,6 @@ class FuoPlayerController(
     }
 
     private suspend fun openSharedTrack(resource: ShareResourceRef) {
-        navigator.navigate(AppRoute.Track)
         val placeholder = MusicTrack(
             id = resource.toProviderTrackId(),
             title = resource.title,
@@ -1611,6 +1651,7 @@ class FuoPlayerController(
             sourceType = TrackSourceType.Provider,
             providerName = resource.providerName,
         )
+        navigator.navigate(AppRoute.TrackDetail(placeholder.toNavigationTrack()))
         selectedTrack = placeholder
         selectedTrackError = null
         isLoading = true
@@ -1668,7 +1709,7 @@ class FuoPlayerController(
     }
 
     fun openVideo(video: ProviderVideo) {
-        navigator.navigate(AppRoute.Video)
+        navigator.navigate(AppRoute.VideoDetail(video.toNavigationVideo()))
         selectedVideo = video
         selectedVideoPayload = null
         selectedVideoError = null
@@ -2008,7 +2049,12 @@ class FuoPlayerController(
     }
 
     fun openPlaylist(playlist: ProviderPlaylist, category: ProviderFeatureCategory? = null) {
-        navigator.navigate(AppRoute.Playlist)
+        navigator.navigate(
+            AppRoute.PlaylistDetail(
+                playlist = playlist.toNavigationPlaylist(),
+                category = category?.name,
+            )
+        )
         selectedPlaylistBackgroundLoadJob?.cancel()
         selectedPlaylist = playlist
         selectedPlaylistCategory = category
@@ -2066,7 +2112,7 @@ class FuoPlayerController(
     }
 
     fun openMediaItem(item: ProviderMediaItem) {
-        navigator.navigate(AppRoute.MediaItem)
+        navigator.navigate(AppRoute.MediaItemDetail(item.toNavigationMediaItem()))
         selectedMediaItem = item
         selectedMediaItemTracks = emptyList()
         selectedMediaItemTracksNextOffset = 0
@@ -3128,14 +3174,14 @@ class FuoPlayerController(
                 runCatching {
                     val payload = resolveTrack.toPayload()
                         ?: if (manualSelection != null) {
-                            providerRepository.resolveSelectedReplacement(
+                            playbackProviderRepository.resolveSelectedReplacement(
                                 resolveTrack,
                                 true,
                                 true,
                                 selectedSmartReplacementProviderIds(),
                             )
                         } else {
-                            providerRepository.resolve(
+                            playbackProviderRepository.resolve(
                                 resolveTrack,
                                 unavailablePlaybackPolicy,
                                 selectedSmartReplacementProviderIds(),
@@ -3143,7 +3189,7 @@ class FuoPlayerController(
                                 true,
                                 true,
                             )
-                    }
+                        }
                     if (requestSerial != playRequestSerial) return@playRequest
                     if (suppressPlaybackRecoveryRequestSerial == requestSerial) {
                         suppressPlaybackRecoveryRequestSerial = null
@@ -3617,28 +3663,11 @@ class FuoPlayerController(
         return "第 ${currentPartIndex + 1}P · ${part.title.ifBlank { "未命名分段" }}"
     }
 
-    private fun currentQueueTrack(): MusicTrack? {
-        return if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
-    }
+    private fun currentQueueTrack(): MusicTrack? = playbackQueueController.currentTrack()
 
-    private fun displayQueue(): List<MusicTrack> {
-        return buildList {
-            currentQueueTrack()?.let { add(it) }
-            addAll(upNextQueue)
-            val nextMainIndex = when {
-                currentIsUpNext -> mainQueueIndex + 1
-                mainQueueIndex >= 0 -> mainQueueIndex + 1
-                else -> 0
-            }
-            if (nextMainIndex in 0..mainQueue.size) {
-                addAll(mainQueue.drop(nextMainIndex))
-            }
-        }
-    }
+    private fun displayQueue(): List<MusicTrack> = playbackQueueController.displayQueue()
 
-    private fun displayQueueIndex(): Int {
-        return if (currentQueueTrack() != null) 0 else -1
-    }
+    private fun displayQueueIndex(): Int = playbackQueueController.displayQueueIndex()
 
     private fun updateCurrentTrack(track: MusicTrack) {
         if (currentIsUpNext) {
@@ -3700,16 +3729,7 @@ class FuoPlayerController(
     }
 
     private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
-        mainQueue = snapshot.mainQueue
-        originalMainQueue = snapshot.originalMainQueue
-        upNextQueue = snapshot.upNextQueue
-        mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
-        shuffleEnabled = snapshot.shuffleEnabled
-        _repeatMode = snapshot.repeatMode
-        isFmQueue = snapshot.isFmQueue
-        shuffleBeforeFm = snapshot.shuffleBeforeFm
-        currentUpNextTrack = null
-        currentIsUpNext = false
+        playbackQueueController.restore(snapshot)
         playbackParts = emptyList()
         currentPartIndex = -1
         playbackState = playbackState.copy(
@@ -3722,16 +3742,7 @@ class FuoPlayerController(
     }
 
     private fun persistPlaybackQueue() {
-        val snapshot = PlaybackQueueSnapshot(
-            mainQueue = mainQueue,
-            originalMainQueue = originalMainQueue,
-            upNextQueue = upNextQueue,
-            queueIndex = mainQueueIndex,
-            shuffleEnabled = shuffleEnabled,
-            repeatMode = _repeatMode,
-            isFmQueue = isFmQueue,
-            shuffleBeforeFm = shuffleBeforeFm,
-        )
+        val snapshot = playbackQueueController.snapshot()
         scope.launch {
             playbackQueueStore.save(snapshot)
         }
