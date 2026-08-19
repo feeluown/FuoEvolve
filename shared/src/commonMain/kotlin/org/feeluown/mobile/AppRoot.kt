@@ -340,6 +340,9 @@ fun AppRoot(
                                             emptyMap()
                                         },
                                     ) {
+                                        LaunchedEffect(route) {
+                                            controller.activateRoute(route)
+                                        }
                                         when (route) {
                                             AppRoute.Home -> HomeScreen(
                                                 controller = controller,
@@ -378,15 +381,35 @@ fun AppRoot(
                                                 onRequestMicrophonePermission = onRequestMicrophonePermission,
                                             )
                                             AppRoute.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
+                                            is AppRoute.FeatureDetail -> ProviderFeatureScreen(
+                                                controller,
+                                                currentFeature?.takeIf { it.id == route.feature.id } ?: route.feature.toProviderFeature(),
+                                            )
                                             AppRoute.Track -> ProviderTrackScreen(controller, currentTrack ?: lastTrack)
+                                            is AppRoute.TrackDetail -> ProviderTrackScreen(
+                                                controller,
+                                                currentTrack?.takeIf { it.id == route.track.id } ?: route.track.toMusicTrack(),
+                                            )
                                             AppRoute.Video -> ProviderVideoScreen(controller, currentVideo ?: lastVideo)
+                                            is AppRoute.VideoDetail -> ProviderVideoScreen(
+                                                controller,
+                                                currentVideo?.takeIf { it.id == route.video.id } ?: route.video.toProviderVideo(),
+                                            )
                                             AppRoute.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
+                                            is AppRoute.PlaylistDetail -> ProviderPlaylistScreen(
+                                                controller,
+                                                currentPlaylist?.takeIf { it.id == route.playlist.id } ?: route.playlist.toProviderPlaylist(),
+                                            )
                                             AppRoute.LocalPlaylist -> LocalPlaylistScreen(
                                                 controller,
                                                 currentLocalPlaylist ?: lastLocalPlaylist,
                                             )
                                             AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen(controller)
                                             AppRoute.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
+                                            is AppRoute.MediaItemDetail -> ProviderMediaItemScreen(
+                                                controller,
+                                                currentMediaItem?.takeIf { it.id == route.item.id } ?: route.item.toProviderMediaItem(),
+                                            )
                                         }
                                     }
                                 },
