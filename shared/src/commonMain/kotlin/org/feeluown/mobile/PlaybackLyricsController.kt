@@ -5,13 +5,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 internal class PlaybackLyricsController(
-    private val providerRepository: ProviderMusicRepository,
+    providerRepository: ProviderMusicRepository,
     private val scope: CoroutineScope,
     private val currentRequestSerial: () -> Long,
     private val currentTrackId: () -> String?,
     private val currentLyrics: () -> String?,
     private val updateLyrics: (String) -> Unit,
 ) {
+    private val providerRepository: ProviderPlaybackRepository = ProviderPlaybackRepositoryView(providerRepository)
     private var loadJob: Job? = null
     private var loadedForTrackId: String? = null
 
