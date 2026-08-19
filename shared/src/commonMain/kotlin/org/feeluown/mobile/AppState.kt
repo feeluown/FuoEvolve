@@ -38,13 +38,10 @@ sealed interface AppRoute : NavKey {
     ) : AppRoute
 
     @Serializable
-    data class LocalPlaylist(val playlistId: String) : AppRoute
+    data object LocalPlaylist : AppRoute
 
     @Serializable
-    data class LocalMusicCollection(
-        val mode: String,
-        val key: String,
-    ) : AppRoute
+    data object LocalMusicCollection : AppRoute
 
     @Serializable
     data class MediaItem(val item: NavigationMediaItem) : AppRoute
