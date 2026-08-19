@@ -14,7 +14,7 @@ sealed interface SearchAction {
 
 @Suppress("UNUSED_PARAMETER")
 internal class SearchController(
-    private val providerRepository: ProviderSearchRepository,
+    providerRepository: ProviderMusicRepository,
     private val localRepository: LocalMusicRepository,
     private val scope: CoroutineScope,
     private val state: SearchControllerState,
@@ -26,6 +26,7 @@ internal class SearchController(
     setMessage: (String) -> Unit,
     onError: (Throwable) -> Unit,
 ) {
+    private val providerRepository: ProviderSearchRepository = ProviderSearchRepositoryView(providerRepository)
     val uiState = state.uiState
 
     fun dispatch(action: SearchAction) {
