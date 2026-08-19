@@ -1,0 +1,114 @@
+name: Cleanup merged branches
+
+on:
+  push:
+    branches:
+      - agent/cleanup-merged-branches
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete safely merged remote branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SELF_BRANCH: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="${REPO%%/*}"
+          deleted=0
+          skipped=0
+
+          mapfile -t open_bases < <(
+            gh pr list --repo "$REPO" --state open --limit 500 \
+              --json baseRefName --jq '.[].baseRefName' | sort -u
+          )
+          mapfile -t open_heads < <(
+            gh pr list --repo "$REPO" --state open --limit 500 \
+              --json headRefName,headRepositoryOwner \
+            | jq -r --arg owner "$owner" '.[] | select((.headRepositoryOwner.login // "") == $owner) | .headRefName' \
+            | sort -u
+          )
+
+          is_in_array() {
+            local needle="$1"
+            shift
+            local item
+            for item in "$@"; do
+              [[ "$item" == "$needle" ]] && return 0
+            done
+            return 1
+          }
+
+          # Only consider PRs merged directly into the default branch. For each
+          # head branch, keep the newest merged PR so a reused branch is handled
+          # conservatively.
+          mapfile -t merged_prs < <(
+            gh pr list --repo "$REPO" --state merged --base "$DEFAULT_BRANCH" --limit 1000 \
+              --json number,headRefName,headRepositoryOwner,mergedAt \
+            | jq -r --arg owner "$owner" \
+                '.[] | select((.headRepositoryOwner.login // "") == $owner) | [.mergedAt, (.number|tostring), .headRefName] | @tsv' \
+            | sort -r \
+            | awk -F '\t' '!seen[$3]++ { print $2 "\t" $3 }'
+          )
+
+          echo "Default branch: $DEFAULT_BRANCH"
+          echo "Merged PR head candidates: ${#merged_prs[@]}"
+
+          for row in "${merged_prs[@]}"; do
+            pr_number="${row%%$'\t'*}"
+            branch="${row#*$'\t'}"
+
+            if [[ -z "$branch" || "$branch" == "$DEFAULT_BRANCH" || "$branch" == "$SELF_BRANCH" || "$branch" == backup/* ]]; then
+              continue
+            fi
+            if is_in_array "$branch" "${open_bases[@]}" || is_in_array "$branch" "${open_heads[@]}"; then
+              echo "SKIP open-PR dependency: $branch"
+              ((skipped+=1))
+              continue
+            fi
+
+            encoded="$(jq -rn --arg v "$branch" '$v|@uri')"
+            branch_json="$(gh api "repos/$REPO/branches/$encoded" 2>/dev/null || true)"
+            if [[ -z "$branch_json" ]]; then
+              continue
+            fi
+            if [[ "$(jq -r '.protected' <<<"$branch_json")" == "true" ]]; then
+              echo "SKIP protected: $branch"
+              ((skipped+=1))
+              continue
+            fi
+
+            current_sha="$(jq -r '.commit.sha' <<<"$branch_json")"
+            pr_json="$(gh api "repos/$REPO/pulls/$pr_number")"
+            merged_head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+            pr_base="$(jq -r '.base.ref' <<<"$pr_json")"
+            merged="$(jq -r '.merged' <<<"$pr_json")"
+
+            # A branch reused or advanced after merge must be kept.
+            if [[ "$merged" != "true" || "$pr_base" != "$DEFAULT_BRANCH" || "$current_sha" != "$merged_head_sha" ]]; then
+              echo "SKIP advanced/reused: $branch"
+              ((skipped+=1))
+              continue
+            fi
+
+            echo "DELETE $branch (PR #$pr_number)"
+            gh api --method DELETE "repos/$REPO/git/refs/heads/$encoded"
+            ((deleted+=1))
+          done
+
+          echo "Deleted merged branches: $deleted"
+          echo "Skipped for safety: $skipped"
+
+          # Remove this temporary cleanup branch as the final operation.
+          self_encoded="$(jq -rn --arg v "$SELF_BRANCH" '$v|@uri')"
+          echo "DELETE temporary cleanup branch: $SELF_BRANCH"
+          gh api --method DELETE "repos/$REPO/git/refs/heads/$self_encoded"
