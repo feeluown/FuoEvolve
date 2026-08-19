@@ -4,8 +4,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
+sealed interface SearchAction {
+    data class QueryChanged(val value: String) : SearchAction
+    data class ScopeChanged(val value: SearchScope) : SearchAction
+    data class ProviderChanged(val providerId: String) : SearchAction
+    data class ProviderTabChanged(val value: ProviderSearchTab) : SearchAction
+    data object Submit : SearchAction
+}
+
+@Suppress("UNUSED_PARAMETER")
 internal class SearchController(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRepository: ProviderSearchRepository,
     private val localRepository: LocalMusicRepository,
     private val scope: CoroutineScope,
     private val state: SearchControllerState,
@@ -13,15 +22,29 @@ internal class SearchController(
     private val providerExists: (String) -> Boolean,
     private val openSearch: () -> Unit,
     private val persistSettings: () -> Unit,
-    private val setLoading: (Boolean) -> Unit,
-    private val setMessage: (String) -> Unit,
-    private val onError: (Throwable) -> Unit,
+    setLoading: (Boolean) -> Unit,
+    setMessage: (String) -> Unit,
+    onError: (Throwable) -> Unit,
 ) {
+    val uiState = state.uiState
+
+    fun dispatch(action: SearchAction) {
+        when (action) {
+            is SearchAction.QueryChanged -> onQueryChange(action.value)
+            is SearchAction.ScopeChanged -> onScopeChange(action.value)
+            is SearchAction.ProviderChanged -> onProviderChange(action.providerId)
+            is SearchAction.ProviderTabChanged -> onProviderTabChange(action.value)
+            SearchAction.Submit -> search()
+        }
+    }
+
     fun normalizeProviderSelection(providerIds: Set<String>) {
         if (state.selectedSearchProviderId !in providerIds) {
-            state.selectedSearchProviderId = null
-            if (state.searchScope == SearchScope.Provider) {
-                state.searchScope = SearchScope.All
+            state.update { current ->
+                current.copy(
+                    selectedSearchProviderId = null,
+                    searchScope = if (current.searchScope == SearchScope.Provider) SearchScope.All else current.searchScope,
+                )
             }
         }
     }
@@ -31,17 +54,23 @@ internal class SearchController(
     }
 
     fun onScopeChange(value: SearchScope) {
-        state.searchScope = value
-        if (value != SearchScope.Provider) {
-            state.selectedSearchProviderId = null
+        state.update { current ->
+            current.copy(
+                searchScope = value,
+                selectedSearchProviderId = current.selectedSearchProviderId.takeIf { value == SearchScope.Provider },
+            )
         }
         persistSettings()
         if (state.query.isNotBlank()) search()
     }
 
     fun onProviderChange(providerId: String) {
-        state.searchScope = SearchScope.Provider
-        state.selectedSearchProviderId = providerId
+        state.update {
+            it.copy(
+                searchScope = SearchScope.Provider,
+                selectedSearchProviderId = providerId,
+            )
+        }
         persistSettings()
         if (state.query.isNotBlank()) search()
     }
@@ -51,13 +80,17 @@ internal class SearchController(
     }
 
     fun searchRecognizedSong(song: RecognizedSong) {
-        state.query = buildList {
-            song.title.trim().takeIf { it.isNotBlank() }?.let(::add)
-            song.artists.joinToString(" / ").trim().takeIf { it.isNotBlank() }?.let(::add)
-        }.joinToString(" ")
-        state.searchScope = SearchScope.All
-        state.selectedSearchProviderId = null
-        state.providerSearchTab = ProviderSearchTab.Songs
+        state.update {
+            it.copy(
+                query = buildList {
+                    song.title.trim().takeIf { title -> title.isNotBlank() }?.let(::add)
+                    song.artists.joinToString(" / ").trim().takeIf { artists -> artists.isNotBlank() }?.let(::add)
+                }.joinToString(" "),
+                searchScope = SearchScope.All,
+                selectedSearchProviderId = null,
+                providerSearchTab = ProviderSearchTab.Songs,
+            )
+        }
         openSearch()
         search()
     }
@@ -65,13 +98,19 @@ internal class SearchController(
     fun searchText(text: String, providerId: String?) {
         val keyword = text.trim()
         if (keyword.isBlank()) {
-            setMessage("没有可搜索的信息")
+            state.message = "没有可搜索的信息"
             return
         }
-        state.query = keyword
-        if (providerId != null && providerExists(providerId)) {
-            state.searchScope = SearchScope.Provider
-            state.selectedSearchProviderId = providerId
+        state.update { current ->
+            if (providerId != null && providerExists(providerId)) {
+                current.copy(
+                    query = keyword,
+                    searchScope = SearchScope.Provider,
+                    selectedSearchProviderId = providerId,
+                )
+            } else {
+                current.copy(query = keyword)
+            }
         }
         openSearch()
         search()
@@ -80,14 +119,18 @@ internal class SearchController(
     fun search() {
         val keyword = state.query.trim()
         if (keyword.isEmpty()) {
-            state.searchResults = emptyList()
-            state.providerSearchResults = ProviderSearchResults()
-            setMessage("请输入关键词")
+            state.update {
+                it.copy(
+                    searchResults = emptyList(),
+                    providerSearchResults = ProviderSearchResults(),
+                    isLoading = false,
+                    message = "请输入关键词",
+                )
+            }
             return
         }
         scope.launch {
-            setLoading(true)
-            setMessage("正在搜索：$keyword")
+            state.update { it.copy(isLoading = true, message = "正在搜索：$keyword") }
             runCatching {
                 withTimeout(25_000) {
                     when (state.searchScope) {
@@ -111,27 +154,36 @@ internal class SearchController(
                         }
                     }
                 }
-            }.onSuccess {
-                state.searchResults = it
+            }.onSuccess { results ->
+                state.searchResults = results
                 val total = when (state.searchScope) {
-                    SearchScope.Local -> it.size
+                    SearchScope.Local -> results.size
                     SearchScope.Provider,
                     SearchScope.All -> state.providerSearchResults.totalCount() + if (state.searchScope == SearchScope.All) {
-                        localOnlyCount(it, state.providerSearchResults.tracks)
+                        localOnlyCount(results, state.providerSearchResults.tracks)
                     } else {
                         0
                     }
                 }
-                setMessage(
-                    when {
-                        total == 0 && state.providerSearchResults.errorMessage != null ->
-                            state.providerSearchResults.errorMessage.orEmpty()
-                        total == 0 -> "没有搜索结果"
-                        else -> "搜索到 $total 项"
-                    }
-                )
-            }.onFailure(onError)
-            setLoading(false)
+                state.message = when {
+                    total == 0 && state.providerSearchResults.errorMessage != null ->
+                        state.providerSearchResults.errorMessage.orEmpty()
+                    total == 0 -> "没有搜索结果"
+                    else -> "搜索到 $total 项"
+                }
+            }.onFailure { throwable ->
+                val failure = throwable.providerFailureOrNull(state.selectedSearchProviderId)?.userMessage
+                    ?: throwable.message
+                    ?: throwable::class.simpleName.orEmpty()
+                state.update { current ->
+                    current.copy(
+                        searchResults = emptyList(),
+                        providerSearchResults = ProviderSearchResults(errorMessage = failure),
+                        message = failure,
+                    )
+                }
+            }
+            state.isLoading = false
         }
     }
 
@@ -150,11 +202,11 @@ internal class SearchController(
     }
 
     private fun List<ProviderSearchResults>.mergeSearchResults(): ProviderSearchResults = ProviderSearchResults(
-        tracks = flatMap { it.tracks },
-        playlists = flatMap { it.playlists },
-        artists = flatMap { it.artists },
-        albums = flatMap { it.albums },
-        videos = flatMap { it.videos },
+        tracks = flatMap { it.tracks }.distinctBy { it.id },
+        playlists = flatMap { it.playlists }.distinctBy { it.id },
+        artists = flatMap { it.artists }.distinctBy { it.id },
+        albums = flatMap { it.albums }.distinctBy { it.id },
+        videos = flatMap { it.videos }.distinctBy { it.id },
         errorMessage = firstNotNullOfOrNull { it.errorMessage },
     )
 }
