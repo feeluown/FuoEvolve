@@ -4,8 +4,8 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
@@ -20,6 +20,8 @@ import org.feeluown.mobile.playback.runtime.PlaybackRuntimeQueueActions
 internal fun createPlaybackRuntimeSession(
     controller: FuoPlayerController,
     playbackEngine: PlaybackEngine,
+    transportCoordinator: PlaybackTransportCoordinator,
+    startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
 ): PlaybackSession {
     val overlay = snapshotFlow { controller.playbackState.toPlaybackRuntimeOverlay() }
@@ -31,52 +33,60 @@ internal fun createPlaybackRuntimeSession(
         )
 
     return DefaultPlaybackRuntime(
-        engine = LegacyPlaybackRuntimeEngine(playbackEngine, scope),
+        engine = PlaybackRuntimeEngineAdapter(playbackEngine, startFailureSource, scope),
         overlay = overlay,
-        queueActions = LegacyPlaybackQueueActions(controller),
+        queueActions = PlaybackCoordinatorQueueActions(transportCoordinator),
         scope = scope,
     )
 }
 
-private class LegacyPlaybackRuntimeEngine(
+private class PlaybackRuntimeEngineAdapter(
     private val playbackEngine: PlaybackEngine,
+    startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
 ) : PlaybackRuntimeEngine {
-    override val state: StateFlow<PlaybackRuntimeEngineState> = playbackEngine.state
-        .map(PlaybackState::toPlaybackRuntimeEngineState)
-        .stateIn(
-            scope = scope,
-            started = SharingStarted.Eagerly,
-            initialValue = playbackEngine.state.value.toPlaybackRuntimeEngineState(),
-        )
+    override val state: StateFlow<PlaybackRuntimeEngineState> = combine(
+        playbackEngine.state,
+        startFailureSource.startFailure,
+    ) { engineState, startFailure ->
+        engineState.toPlaybackRuntimeEngineState(startFailure)
+    }.stateIn(
+        scope = scope,
+        started = SharingStarted.Eagerly,
+        initialValue = playbackEngine.state.value.toPlaybackRuntimeEngineState(
+            startFailureSource.startFailure.value,
+        ),
+    )
 
     override fun pause() = playbackEngine.pause()
 
     override fun resume() = playbackEngine.resume()
 }
 
-/**
- * Queue selection and resource resolution are still controller-owned in this migration slice.
- * Keeping that bridge explicit avoids leaking the controller into the runtime module itself.
- */
-private class LegacyPlaybackQueueActions(
-    private val controller: FuoPlayerController,
+private class PlaybackCoordinatorQueueActions(
+    private val coordinator: PlaybackTransportCoordinator,
 ) : PlaybackRuntimeQueueActions {
-    override fun startCurrent() = controller.toggle()
+    override fun startCurrent() = coordinator.startCurrent()
 
-    override fun previous() = controller.previous()
+    override fun previous() = coordinator.previous()
 
-    override fun next() = controller.next()
+    override fun next() = coordinator.next()
 }
 
-private fun PlaybackState.toPlaybackRuntimeEngineState(): PlaybackRuntimeEngineState =
-    PlaybackRuntimeEngineState(
-        status = status.toPlaybackSessionStatus(),
+private fun PlaybackState.toPlaybackRuntimeEngineState(
+    startFailure: PlaybackStartFailure? = null,
+): PlaybackRuntimeEngineState {
+    val activeFailure = startFailure?.takeIf { failure ->
+        status == PlayerStatus.Loading && currentTrack?.id == failure.trackId
+    }
+    return PlaybackRuntimeEngineState(
+        status = if (activeFailure != null) PlaybackSessionStatus.Error else status.toPlaybackSessionStatus(),
         positionMs = positionMs,
         durationMs = durationMs,
         bufferedMs = bufferedMs,
-        errorMessage = errorMessage,
+        errorMessage = activeFailure?.message ?: errorMessage,
     )
+}
 
 private fun PlaybackState.toPlaybackRuntimeOverlay(): PlaybackRuntimeOverlay =
     PlaybackRuntimeOverlay(

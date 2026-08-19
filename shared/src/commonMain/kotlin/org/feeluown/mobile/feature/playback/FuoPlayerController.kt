@@ -332,6 +332,10 @@ class FuoPlayerController(
         get() = isFmQueue
     val displayUpNextCount: Int
         get() = upNextQueue.size
+    val playbackTransportCoordinator: PlaybackTransportCoordinator
+        get() = playbackQueueCoordinator
+    val playbackStartFailureSource: PlaybackStartFailureSource
+        get() = playbackStartCoordinator
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
             selectedLocalMusicCollection != null ||
@@ -501,6 +505,71 @@ class FuoPlayerController(
         currentTrackId = { currentQueueTrack()?.id ?: playbackState.currentTrack?.id },
         currentLyrics = { playbackState.lyrics },
         updateLyrics = { lyrics -> playbackState = playbackState.copy(lyrics = lyrics) },
+    )
+    private val playbackStartCoordinator = PlaybackStartCoordinator(
+        queue = playbackQueueController,
+        playbackEngine = playbackEngine,
+        playbackRepository = playbackProviderRepository,
+        scope = scope,
+        currentPlaybackState = { playbackState },
+        publishPlaybackState = { playbackState = it },
+        prepareTrack = { track -> track.withRememberedReplacement().preferDownloaded() },
+        unavailablePlaybackPolicy = { unavailablePlaybackPolicy },
+        smartReplacementProviderIds = ::selectedSmartReplacementProviderIds,
+        smartReplacementMinScore = { smartReplacementMinScore },
+        nextRequestSerial = { ++playRequestSerial },
+        currentRequestSerial = { playRequestSerial },
+        playbackParts = { playbackParts },
+        setPlaybackParts = { playbackParts = it },
+        currentPartIndex = { currentPartIndex },
+        setCurrentPartIndex = { currentPartIndex = it },
+        prepareSleepTimer = sleepTimerController::prepareForTrack,
+        resetLyricsForPlaybackRequest = playbackLyricsController::resetForPlaybackRequest,
+        maybeLoadLyrics = playbackLyricsController::maybeLoad,
+        persistQueue = ::persistPlaybackQueue,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        failureMessage = { throwable ->
+            providerErrorMessage(throwable, throwable::class.simpleName.orEmpty())
+        },
+        onRequestStarted = { serial, suppressRecovery ->
+            suppressPlaybackRecoveryRequestSerial = serial.takeIf { suppressRecovery }
+        },
+        onManualSelectionStarted = { serial, playbackTrack, selection, rollbackTrack ->
+            pendingManualReplacementSwitch = PendingManualReplacementSwitch(
+                requestSerial = serial,
+                previousTrack = rollbackTrack,
+                originalTrackId = playbackTrack.originalId ?: playbackTrack.id,
+                selection = selection,
+            )
+        },
+        onStartFailure = startFailure@{ serial, playbackTrack, skippedUnavailableCount, manualSelection, throwable ->
+            if (manualSelection != null && rollbackManualReplacement(serial, throwable.message)) {
+                return@startFailure
+            }
+            if (suppressPlaybackRecoveryRequestSerial == serial) {
+                showManualReplacementRestoreFailure(throwable.message)
+            } else if (!skipUnavailableTrack(playbackTrack, skippedUnavailableCount, throwable)) {
+                setError(throwable)
+            }
+        },
+        prefetchQueue = ::prefetchFeatureQueueIfNeeded,
+    )
+    private val playbackQueueCoordinator = PlaybackQueueCoordinator(
+        queue = playbackQueueController,
+        scope = scope,
+        fallbackTrack = { playbackState.currentTrack },
+        playbackParts = { playbackParts },
+        currentPartIndex = { currentPartIndex },
+        startPlayback = { track, skippedUnavailableCount, requestedPartIndex ->
+            startPlayback(track, skippedUnavailableCount, requestedPartIndex)
+        },
+        stopPlayback = playbackEngine::stop,
+        persistQueue = ::persistPlaybackQueue,
+        updateQueueState = ::updatePlaybackQueueState,
+        appendFeatureQueue = ::appendFeatureQueue,
+        setTrackChangeDirection = { trackChangeDirection = it },
+        setMessage = { message = it },
     )
 
     init {
@@ -2592,36 +2661,9 @@ class FuoPlayerController(
         play(track, selectedTrackSimilar, index)
     }
 
-    fun playQueueIndex(index: Int) {
-        trackChangeDirection = TrackChangeDirection.Next
-        val currentOffset = if (currentQueueTrack() != null) 1 else 0
-        if (index == 0 && currentOffset == 1) {
-            currentQueueTrack()?.let(::startPlayback)
-            return
-        }
-        val pendingOffset = currentOffset
-        val pendingEnd = pendingOffset + upNextQueue.size
-        when {
-            index in pendingOffset until pendingEnd -> {
-                val upNextIndex = index - pendingOffset
-                playUpNextIndex(upNextIndex)
-            }
-            else -> {
-                val mainStartIndex = when {
-                    currentIsUpNext -> mainQueueIndex + 1
-                    mainQueueIndex >= 0 -> mainQueueIndex + 1
-                    else -> 0
-                }
-                val mainIndex = mainStartIndex + (index - pendingEnd)
-                playMainIndex(mainIndex)
-            }
-        }
-    }
+    fun playQueueIndex(index: Int) = playbackQueueCoordinator.playQueueIndex(index)
 
-    fun playPlaybackPart(index: Int) {
-        if (index !in playbackParts.indices) return
-        currentQueueTrack()?.let { startPlayback(it, requestedPartIndex = index) }
-    }
+    fun playPlaybackPart(index: Int) = playbackQueueCoordinator.playPlaybackPart(index)
 
     fun toggle() {
         when (playbackState.status) {
@@ -2630,73 +2672,14 @@ class FuoPlayerController(
                 if (playbackState.currentTrack != null) playbackEngine.resume()
             }
             PlayerStatus.Idle, PlayerStatus.Ended, PlayerStatus.Loading, PlayerStatus.Error -> {
-                (currentQueueTrack() ?: playbackState.currentTrack)?.let(::startPlayback)
+                playbackQueueCoordinator.startCurrent()
             }
         }
     }
 
-    fun next() {
-        trackChangeDirection = TrackChangeDirection.Next
-        if (_repeatMode == RepeatMode.SINGLE) {
-            if (playPlaybackPartOffset(1, wrap = true)) return
-            (currentQueueTrack() ?: playbackState.currentTrack)?.let { startPlayback(it) }
-            return
-        }
-        if (playPlaybackPartOffset(1)) return
-        if (currentIsUpNext) {
-            currentUpNextTrack = null
-            currentIsUpNext = false
-            persistPlaybackQueue()
-        }
-        if (upNextQueue.isNotEmpty()) {
-            playUpNextIndex(0)
-            return
-        }
-        if (mainQueue.isEmpty()) return
-        val feature = queueFeature
-        if (feature != null && mainQueueIndex >= mainQueue.lastIndex) {
-            scope.launch {
-                val nextIndex = mainQueue.size
-                val appendedCount = appendFeatureQueue(feature)
-                if (appendedCount > 0 && queueFeature == feature) {
-                    playMainIndex(nextIndex)
-                } else if (queueFeature == feature) {
-                    message = "${feature.title} 暂无后续歌曲"
-                }
-            }
-            return
-        }
-        val nextIndex = mainQueueIndex + 1
-        if (nextIndex < mainQueue.size) {
-            playMainIndex(nextIndex)
-        } else if (_repeatMode == RepeatMode.QUEUE) {
-            playMainIndex(0)
-        }
-    }
+    fun next() = playbackQueueCoordinator.next()
 
-    fun previous() {
-        trackChangeDirection = TrackChangeDirection.Previous
-        if (_repeatMode == RepeatMode.SINGLE) {
-            if (playPlaybackPartOffset(-1, wrap = true)) return
-            (currentQueueTrack() ?: playbackState.currentTrack)?.let { startPlayback(it) }
-            return
-        }
-        if (playPlaybackPartOffset(-1)) return
-        if (currentIsUpNext) {
-            currentUpNextTrack = null
-            currentIsUpNext = false
-            persistPlaybackQueue()
-            playMainIndex(mainQueueIndex.coerceAtLeast(0))
-            return
-        }
-        if (mainQueue.isEmpty()) return
-        val previousIndex = mainQueueIndex - 1
-        if (previousIndex >= 0) {
-            playMainIndex(previousIndex)
-        } else if (_repeatMode == RepeatMode.QUEUE) {
-            playMainIndex(mainQueue.lastIndex)
-        }
-    }
+    fun previous() = playbackQueueCoordinator.previous()
 
     fun seekTo(positionMs: Long) {
         val normalizedPosition = positionMs.coerceAtLeast(0).let { position ->
@@ -3117,210 +3100,14 @@ class FuoPlayerController(
         messageAfterStart: String? = null,
         suppressPlaybackRecovery: Boolean = false,
     ) {
-        sleepTimerController.prepareForTrack(track.id)
-        val requestSerial = ++playRequestSerial
-        suppressPlaybackRecoveryRequestSerial = requestSerial.takeIf { suppressPlaybackRecovery }
-        val playbackTrack = if (manualSelection != null) {
-            track
-        } else {
-            track.withRememberedReplacement().preferDownloaded()
-        }
-        pendingManualReplacementSwitch = manualSelection?.let { selection ->
-            PendingManualReplacementSwitch(
-                requestSerial = requestSerial,
-                previousTrack = rollbackTrack,
-                originalTrackId = playbackTrack.originalId ?: playbackTrack.id,
-                selection = selection,
-            )
-        }
-        val isPlaybackPartRequest = requestedPartIndex != null && playbackParts.isNotEmpty()
-        if (!isPlaybackPartRequest) {
-            playbackParts = emptyList()
-            currentPartIndex = -1
-        }
-        updateCurrentTrack(playbackTrack)
-        playbackLyricsController.resetForPlaybackRequest()
-        playbackState = playbackState.copy(
-            status = PlayerStatus.Loading,
-            currentTrack = playbackTrack,
-            queue = displayQueue(),
-            queueIndex = displayQueueIndex(),
-            positionMs = 0,
-            playbackParts = playbackParts,
-            currentPartIndex = requestedPartIndex.takeIf { isPlaybackPartRequest } ?: -1,
-            lyrics = playbackTrack.lyrics,
-            errorMessage = null,
-        )
-        persistPlaybackQueue()
-        playbackEngine.prepareLoading(playbackTrack)
-        isLoading = true
-        message = messageAfterStart ?: "正在播放：${track.title}"
-        val resolveTrack = requestedPartIndex
-            ?.let { index -> playbackParts.getOrNull(index) }
-            ?.toTrack(playbackTrack)
-            ?: playbackTrack
-        playbackLyricsController.maybeLoad(playbackTrack)
-        if (!playbackEngine.resolvesResourcesInternally) {
-            scope.launch playRequest@{
-                runCatching {
-                    val payload = resolveTrack.toPayload()
-                        ?: if (manualSelection != null) {
-                            playbackProviderRepository.resolveSelectedReplacement(
-                                resolveTrack,
-                                true,
-                                true,
-                                selectedSmartReplacementProviderIds(),
-                            )
-                        } else {
-                            playbackProviderRepository.resolve(
-                                resolveTrack,
-                                unavailablePlaybackPolicy,
-                                selectedSmartReplacementProviderIds(),
-                                smartReplacementMinScore,
-                                true,
-                                true,
-                            )
-                        }
-                    if (requestSerial != playRequestSerial) return@playRequest
-                    if (suppressPlaybackRecoveryRequestSerial == requestSerial) {
-                        suppressPlaybackRecoveryRequestSerial = null
-                    }
-                    val nextParts = payload.parts
-                    val nextPartIndex = when {
-                        nextParts.isEmpty() -> -1
-                        payload.currentPartIndex in nextParts.indices -> payload.currentPartIndex
-                        requestedPartIndex != null && requestedPartIndex in nextParts.indices -> requestedPartIndex
-                        else -> -1
-                    }
-                    playbackParts = nextParts
-                    currentPartIndex = nextPartIndex
-                    val isMultipartPlayback = playbackParts.isNotEmpty()
-                    val isSmartReplacementPlayback = payload.isSmartReplacement || manualSelection != null
-                    val playableTrack = playbackTrack.copy(
-                        title = if (isMultipartPlayback) playbackTrack.title else payload.title.ifBlank { playbackTrack.title },
-                        artists = payload.artists.ifBlank { playbackTrack.artists },
-                        album = payload.album.ifBlank { playbackTrack.album },
-                        source = if (isSmartReplacementPlayback) {
-                            payload.originalSource?.takeIf { it.isNotBlank() } ?: playbackTrack.source
-                        } else {
-                            payload.source.ifBlank { playbackTrack.source }
-                        },
-                        coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
-                        durationMs = if (isMultipartPlayback) playbackTrack.durationMs else payload.durationMs ?: playbackTrack.durationMs,
-                        providerName = if (isSmartReplacementPlayback) {
-                            payload.providerName ?: payload.replacementProviderName ?: playbackTrack.providerName
-                        } else {
-                            payload.providerName ?: playbackTrack.providerName
-                        },
-                        providerId = if (isSmartReplacementPlayback) {
-                            payload.originalId ?: playbackTrack.providerId
-                        } else {
-                            playbackTrack.providerId
-                        },
-                        isSmartReplacement = isSmartReplacementPlayback,
-                        originalId = payload.originalId.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalId.takeIf { isSmartReplacementPlayback },
-                        originalTitle = payload.originalTitle.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalTitle.takeIf { isSmartReplacementPlayback },
-                        originalArtists = payload.originalArtists.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalArtists.takeIf { isSmartReplacementPlayback },
-                        originalAlbum = payload.originalAlbum.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalAlbum.takeIf { isSmartReplacementPlayback },
-                        originalSource = payload.originalSource.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalSource.takeIf { isSmartReplacementPlayback },
-                        originalProviderName = payload.originalProviderName.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalProviderName.takeIf { isSmartReplacementPlayback },
-                        originalCoverUrl = payload.originalCoverUrl.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.originalCoverUrl.takeIf { isSmartReplacementPlayback },
-                        replacementId = payload.replacementId.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementId.takeIf { isSmartReplacementPlayback },
-                        replacementTitle = payload.replacementTitle.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementTitle.takeIf { isSmartReplacementPlayback },
-                        replacementArtists = payload.replacementArtists.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementArtists.takeIf { isSmartReplacementPlayback },
-                        replacementAlbum = payload.replacementAlbum.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementAlbum.takeIf { isSmartReplacementPlayback },
-                        replacementSource = payload.replacementSource.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementSource.takeIf { isSmartReplacementPlayback },
-                        replacementProviderName = payload.replacementProviderName.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementProviderName.takeIf { isSmartReplacementPlayback },
-                        replacementCoverUrl = payload.replacementCoverUrl.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementCoverUrl.takeIf { isSmartReplacementPlayback },
-                        replacementStrategy = payload.replacementStrategy.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementStrategy.takeIf { isSmartReplacementPlayback },
-                        replacementScore = payload.replacementScore.takeIf { isSmartReplacementPlayback }
-                            ?: playbackTrack.replacementScore.takeIf { isSmartReplacementPlayback },
-                        isUnavailable = false,
-                    )
-                    updateCurrentTrack(playableTrack)
-                    playbackEngine.play(playableTrack, payload)
-                    playbackState = playbackState.copy(
-                        status = PlayerStatus.Loading,
-                        currentTrack = playableTrack,
-                        queue = displayQueue(),
-                        queueIndex = displayQueueIndex(),
-                        lyrics = payload.lyrics?.takeIf { it.isNotBlank() } ?: playbackState.lyrics,
-                        audioQuality = payload.audioQuality,
-                        playbackParts = playbackParts,
-                        currentPartIndex = currentPartIndex,
-                    )
-                    playbackLyricsController.maybeLoad(playableTrack)
-                    persistPlaybackQueue()
-                    message = messageAfterStart
-                        ?: currentPlaybackPartLabel()?.let { "${playableTrack.title} · $it" }
-                        ?: "${playableTrack.title} - ${playableTrack.artists}"
-                    prefetchFeatureQueueIfNeeded()
-                }.onFailure { throwable ->
-                    if (requestSerial == playRequestSerial) {
-                        if (manualSelection != null && rollbackManualReplacement(requestSerial, throwable.message)) {
-                            return@onFailure
-                        }
-                        if (suppressPlaybackRecoveryRequestSerial == requestSerial) {
-                            showManualReplacementRestoreFailure(throwable.message)
-                        } else if (!skipUnavailableTrack(playbackTrack, skippedUnavailableCount, throwable)) {
-                            setError(throwable)
-                        }
-                    }
-                }
-                if (requestSerial == playRequestSerial) isLoading = false
-            }
-            return
-        }
-        playbackEngine.play(
-            PlaybackPlan(
-                generation = requestSerial,
-                requests = buildList {
-                    add(
-                        PlaybackRequest(
-                            track = playbackTrack,
-                            resolveTrack = resolveTrack,
-                            requestedPartIndex = requestedPartIndex,
-                            unavailablePolicy = unavailablePlaybackPolicy,
-                            smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
-                            smartReplacementMinScore = smartReplacementMinScore,
-                            smartReplacementUseOriginalMetadata = true,
-                            smartReplacementUseOriginalLyrics = true,
-                            resolveOnlySelectedReplacement = manualSelection != null,
-                        ),
-                    )
-                    displayQueue()
-                        .drop(1)
-                        .take(PLAYBACK_PLAN_LOOKAHEAD)
-                        .forEach { queuedTrack ->
-                            val nextTrack = queuedTrack.withRememberedReplacement().preferDownloaded()
-                            add(
-                                PlaybackRequest(
-                                    track = nextTrack,
-                                    unavailablePolicy = unavailablePlaybackPolicy,
-                                    smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
-                                    smartReplacementMinScore = smartReplacementMinScore,
-                                    smartReplacementUseOriginalMetadata = true,
-                                    smartReplacementUseOriginalLyrics = true,
-                                ),
-                            )
-                        }
-                },
-            ),
+        playbackStartCoordinator.start(
+            track = track,
+            skippedUnavailableCount = skippedUnavailableCount,
+            requestedPartIndex = requestedPartIndex,
+            manualSelection = manualSelection,
+            rollbackTrack = rollbackTrack,
+            messageAfterStart = messageAfterStart,
+            suppressPlaybackRecovery = suppressPlaybackRecovery,
         )
     }
 
@@ -3413,23 +3200,10 @@ class FuoPlayerController(
         persistPlaybackQueue()
     }
 
-    private fun playMainIndex(index: Int, skippedUnavailableCount: Int = 0) {
-        val track = mainQueue.getOrNull(index) ?: return
-        currentUpNextTrack = null
-        currentIsUpNext = false
-        mainQueueIndex = index
-        startPlayback(track, skippedUnavailableCount)
-    }
+    private fun playMainIndex(index: Int, skippedUnavailableCount: Int = 0) =
+        playbackQueueCoordinator.playMainIndex(index, skippedUnavailableCount)
 
-    private fun playUpNextIndex(index: Int) {
-        val track = upNextQueue.getOrNull(index) ?: return
-        upNextQueue = upNextQueue.filterIndexed { itemIndex, _ -> itemIndex != index }
-        currentUpNextTrack = track
-        currentIsUpNext = true
-        updatePlaybackQueueState()
-        persistPlaybackQueue()
-        startPlayback(track)
-    }
+    private fun playUpNextIndex(index: Int) = playbackQueueCoordinator.playUpNextIndex(index)
 
     private fun loadFeatureAndPlayAll(feature: ProviderFeature) {
         scope.launch {
@@ -3633,17 +3407,8 @@ class FuoPlayerController(
         )
     }
 
-    private fun playPlaybackPartOffset(offset: Int, wrap: Boolean = false): Boolean {
-        if (playbackParts.isEmpty() || currentPartIndex < 0) return false
-        val nextPartIndex = currentPartIndex + offset
-        val targetPartIndex = if (wrap) {
-            nextPartIndex.floorMod(playbackParts.size)
-        } else {
-            nextPartIndex.takeIf { it in playbackParts.indices } ?: return false
-        }
-        currentQueueTrack()?.let { startPlayback(it, requestedPartIndex = targetPartIndex) } ?: return false
-        return true
-    }
+    private fun playPlaybackPartOffset(offset: Int, wrap: Boolean = false): Boolean =
+        playbackQueueCoordinator.playPlaybackPartOffset(offset, wrap)
 
     private fun Int.floorMod(divisor: Int): Int {
         return ((this % divisor) + divisor) % divisor
@@ -3660,14 +3425,7 @@ class FuoPlayerController(
 
     private fun displayQueueIndex(): Int = playbackQueueController.displayQueueIndex()
 
-    private fun updateCurrentTrack(track: MusicTrack) {
-        if (currentIsUpNext) {
-            currentUpNextTrack = track
-        } else if (mainQueueIndex in mainQueue.indices) {
-            mainQueue = mainQueue.mapIndexed { index, item -> if (index == mainQueueIndex) track else item }
-            originalMainQueue = originalMainQueue.map { item -> if (item.id == track.id) track else item }
-        }
-    }
+    private fun updateCurrentTrack(track: MusicTrack) = playbackQueueController.updateCurrentTrack(track)
 
     private fun synchronizePlaybackTrack(track: MusicTrack) {
         val current = currentQueueTrack()
@@ -4078,7 +3836,6 @@ class FuoPlayerController(
 
     private fun String.isMediaNotFoundMessage(): Boolean =
         contains("media not found", ignoreCase = true) || contains("MediaNotFound", ignoreCase = true)
-
 }
 
 internal fun normalizedPlaylistPlaybackStats(settings: AppSettings): Map<String, PlaylistPlaybackStat> {

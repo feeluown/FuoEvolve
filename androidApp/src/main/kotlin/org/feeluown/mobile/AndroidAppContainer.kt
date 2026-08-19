@@ -247,7 +247,13 @@ internal class AndroidAppContainer(
     }
 
     private fun wireController(controller: FuoPlayerController) {
-        val playbackSession = createPlaybackRuntimeSession(controller, playbackEngine, appScope)
+        val playbackSession = createPlaybackRuntimeSession(
+            controller = controller,
+            playbackEngine = playbackEngine,
+            transportCoordinator = controller.playbackTransportCoordinator,
+            startFailureSource = controller.playbackStartFailureSource,
+            scope = appScope,
+        )
         playbackSessionHolder = playbackSession
 
         controller.updateStatusBarLyricsAvailability(isLyriconInstalled(context))

@@ -190,7 +190,13 @@ private class IosAppContainer(
     )
 
     private val playbackSession by lazy {
-        createIosPlaybackRuntimeSession(controller, playbackEngine, scope)
+        createIosPlaybackRuntimeSession(
+            controller = controller,
+            playbackEngine = playbackEngine,
+            transportCoordinator = controller.playbackTransportCoordinator,
+            startFailureSource = controller.playbackStartFailureSource,
+            scope = scope,
+        )
     }
 
     private val searchAppPort = object : SearchAppPort {

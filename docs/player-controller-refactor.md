@@ -48,8 +48,8 @@ Playback platform state and transport policy now have a dedicated owner.
 - New `:playback:runtime` contains `DefaultPlaybackRuntime`, which owns the authoritative `PlaybackSessionState` consumed by platform integrations.
 - Runtime state combines engine timing/status/error with queue/current-track/lyrics presentation supplied at the composition edge.
 - Play/pause/toggle decisions now live in the runtime and call the engine directly for pause/resume instead of round-tripping through `FuoPlayerController`.
-- The former Android-only `ControllerPlaybackSession` adapter is removed. Android now uses `AndroidPlaybackRuntime.kt` only to adapt the existing engine and the remaining legacy queue coordinator into the controller-free runtime module.
-- Only `startCurrent`, `previous`, and `next` remain as temporary queue-transition callbacks to the legacy coordinator; queue selection and resource resolution are intentionally deferred so this slice stays behavior-preserving.
+- The former Android-only `ControllerPlaybackSession` adapter is removed. Android now uses `AndroidPlaybackRuntime.kt` only to adapt the existing engine and playback composition edge into the controller-free runtime module.
+- `startCurrent`, `previous`, and `next` were initially left as temporary queue-transition callbacks while queue selection and resource resolution remained in the compatibility controller.
 - Focused runtime tests cover state composition and transport dispatch, and CI runs `:playback:runtime:allTests` on both Android and iOS workflows.
 - Architecture fitness rules scan the runtime module and reject reintroduction of `ControllerPlaybackSession`.
 
@@ -62,7 +62,7 @@ The MiniPlayer rendering/transport path consumes the dedicated playback session 
 - iOS has `IosPlaybackRuntime.kt`, mirroring the Android composition-edge adapter and constructing the same `DefaultPlaybackRuntime` contract.
 - `FuoAppViewModel` receives the app-scoped `PlaybackSession`; `AppRoot` provides it to playback UI through `LocalPlaybackSession`.
 - `RuntimeMiniPlayer` renders `PlaybackSessionState`, cover metadata from `TrackRef`, progress, lyrics, and previous/toggle/next transport without reading `FuoPlayerController`.
-- Review feedback exposed an iOS pre-engine resource-resolution failure path. `IosPlaybackRuntime` now bridges only the same-track `Loading -> coordinator Error` transition until resource resolution becomes runtime-owned, with focused iOS regression tests.
+- Review feedback exposed an iOS pre-engine resource-resolution failure path. C1 temporarily bridged the same-track `Loading -> coordinator Error` transition until start orchestration received a playback-owned failure channel.
 
 ### C2: FullPlayer, queue and lyrics
 
@@ -76,10 +76,23 @@ The active FullPlayer path is now controller-free.
 - Home and local-playlist MiniPlayer call sites now use the controller-free `PlaybackMiniPlayer` host. Other legacy feature screens can keep their old call signature until their own feature migration; that compatibility call does not change playback state/transport ownership.
 - Architecture fitness rules scan `PlaybackUiPort`, playback composition contracts, `RuntimeMiniPlayer`, and `RuntimeFullPlayer` to prevent direct controller dependencies from returning.
 
+## Phase 7: playback orchestration ownership (P1-D)
+
+Queue transition and playback-start policy now have dedicated playback owners instead of living in `FuoPlayerController`.
+
+- `PlaybackQueueCoordinator` owns `startCurrent`, `previous`, `next`, queue-index selection, up-next priority, repeat behavior, multi-part transitions, and dynamic-feature continuation decisions.
+- `PlaybackQueueController` remains the durable queue state holder; the compatibility controller delegates queue transition entry points to the coordinator instead of implementing the policy itself.
+- `PlaybackStartCoordinator` owns the prepare -> resolve/plan -> engine-start pipeline, including downloaded/local payload handling, provider resolution on iOS-style engines, `PlaybackPlan` look-ahead construction on Android-style internally resolving engines, multi-part payload mapping, stale-request protection, and start-failure publication.
+- `PlaybackStartFailureSource` publishes pre-engine resolution failures. Android and iOS runtime adapters combine this playback-owned failure with engine state, replacing the temporary iOS bridge that inspected `FuoPlayerController.playbackState` for an `Error`.
+- Android and iOS composition roots explicitly pass `PlaybackTransportCoordinator` and `PlaybackStartFailureSource` into their runtime adapters. Runtime transport no longer dispatches `controller.toggle()`, `controller.previous()`, or `controller.next()`.
+- `FuoPlayerController` keeps facade methods for legacy feature callers, but those methods delegate to the playback owners. Request serial / part-selection storage remains facade-compatible in this phase so the migration does not mix state relocation with orchestration policy changes.
+- Focused common tests cover up-next/repeat/part queue transitions, direct resource resolution success/failure, and internally resolving playback-plan construction. iOS tests verify same-track playback-start failures override Loading without unrelated failures leaking across tracks.
+- Architecture checks prevent the new coordinators from depending on `FuoPlayerController` and reject direct controller transport calls in the platform runtime adapters.
+
 ## Next phases
 
-1. Move the remaining `startCurrent` / `previous` / `next` queue-transition policy and resource-start orchestration out of `FuoPlayerController`, removing the final runtime queue bridge and the iOS pre-engine error compatibility bridge.
-2. Replace `ControllerPlaybackUiPort` responsibilities with explicit playback/download/provider-detail owners as those feature boundaries become available.
-3. Replace controller-backed Search/Recognition app-port operations as their sibling playback/download/provider-detail owners become explicit domain/feature ports.
-4. Apply the feature-owned state plus app-shell composition pattern to local music, downloads, provider content, and settings; remove their legacy MiniPlayer call signatures during those migrations.
+1. Split the remaining `ControllerPlaybackUiPort` responsibilities into explicit playback presentation, download, provider-detail and navigation owners, then remove the app-shell compatibility adapter.
+2. Replace controller-backed Search/Recognition app-port operations as their sibling download/provider-detail owners become explicit domain/feature ports.
+3. Apply the feature-owned state plus app-shell composition pattern to local music, downloads, provider content, and settings; remove their legacy MiniPlayer call signatures during those migrations.
+4. Move remaining queue/start compatibility state (request serial, playback parts/index, rich queue presentation) behind playback-owned state once downstream feature callers are ready, then retire the playback facade methods from `FuoPlayerController`.
 5. Continue moving stable contracts into compile-time modules and retire legacy aggregate provider dependencies and global loading/message state.

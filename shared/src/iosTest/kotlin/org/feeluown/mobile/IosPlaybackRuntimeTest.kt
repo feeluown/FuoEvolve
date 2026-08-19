@@ -6,19 +6,19 @@ import kotlin.test.assertEquals
 
 class IosPlaybackRuntimeTest {
     @Test
-    fun resolutionFailureOverridesLoadingEngineForSameTrack() {
+    fun playbackStartFailureOverridesLoadingEngineForSameTrack() {
         val track = testTrack("track:1")
-        val merged = mergeIosPlaybackRuntimeEngineState(
+        val merged = mergePlaybackStartFailure(
             engineState = PlaybackState(
                 status = PlayerStatus.Loading,
                 currentTrack = track,
                 positionMs = 1_200,
                 durationMs = 10_000,
+                bufferedMs = 4_000,
             ),
-            coordinatorState = PlaybackState(
-                status = PlayerStatus.Error,
-                currentTrack = track,
-                errorMessage = "资源解析失败",
+            startFailure = PlaybackStartFailure(
+                trackId = track.id,
+                message = "资源解析失败",
             ),
         )
 
@@ -26,19 +26,19 @@ class IosPlaybackRuntimeTest {
         assertEquals("资源解析失败", merged.errorMessage)
         assertEquals(1_200, merged.positionMs)
         assertEquals(10_000, merged.durationMs)
+        assertEquals(4_000, merged.bufferedMs)
     }
 
     @Test
-    fun unrelatedCoordinatorErrorDoesNotOverrideEngineState() {
-        val merged = mergeIosPlaybackRuntimeEngineState(
+    fun unrelatedPlaybackStartFailureDoesNotOverrideEngineState() {
+        val merged = mergePlaybackStartFailure(
             engineState = PlaybackState(
                 status = PlayerStatus.Loading,
                 currentTrack = testTrack("track:1"),
             ),
-            coordinatorState = PlaybackState(
-                status = PlayerStatus.Error,
-                currentTrack = testTrack("track:2"),
-                errorMessage = "其它页面加载失败",
+            startFailure = PlaybackStartFailure(
+                trackId = "track:2",
+                message = "其它歌曲解析失败",
             ),
         )
 

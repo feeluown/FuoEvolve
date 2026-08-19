@@ -19,6 +19,8 @@ val migratedControllerBoundaryFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackComposition.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackQueueCoordinator.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackStartCoordinator.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackUiPort.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackUiComposition.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/RuntimeMiniPlayer.kt",
@@ -30,6 +32,10 @@ val retiredControllerCompatibilityFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRouteCompat.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRouteCompat.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/ControllerPlaybackSession.kt",
+)
+val playbackRuntimeAdapterFiles = listOf(
+    "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidPlaybackRuntime.kt",
+    "shared/src/iosMain/kotlin/org/feeluown/mobile/IosPlaybackRuntime.kt",
 )
 
 tasks.register("checkArchitectureBoundaries") {
@@ -49,6 +55,7 @@ tasks.register("checkArchitectureBoundaries") {
         }.distinct()
     }
     inputs.files(sourceFiles)
+    inputs.files(playbackRuntimeAdapterFiles.map(rootProject::file))
 
     doLast {
         val retiredCompatViolations = retiredControllerCompatibilityFiles
@@ -86,6 +93,31 @@ tasks.register("checkArchitectureBoundaries") {
                     appendLine("FuoPlayerController leaked into migrated architecture boundaries:")
                     violations.forEach { appendLine(" - $it") }
                     append("Use feature-owned state/actions or a narrow app/playback/provider contract instead.")
+                },
+            )
+        }
+
+        val retiredTransportCalls = listOf(
+            "controller.toggle()",
+            "controller.previous()",
+            "controller.next()",
+        )
+        val transportViolations = playbackRuntimeAdapterFiles
+            .map(rootProject::file)
+            .filter { it.isFile }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    retiredTransportCalls.firstOrNull(line::contains)?.let { call ->
+                        "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1} ($call)"
+                    }
+                }
+            }
+        if (transportViolations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Playback runtime adapters reintroduced legacy controller transport calls:")
+                    transportViolations.forEach { appendLine(" - $it") }
+                    append("Inject PlaybackTransportCoordinator instead.")
                 },
             )
         }

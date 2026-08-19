@@ -20,6 +20,8 @@ import org.feeluown.mobile.playback.runtime.PlaybackRuntimeQueueActions
 internal fun createIosPlaybackRuntimeSession(
     controller: FuoPlayerController,
     playbackEngine: PlaybackEngine,
+    transportCoordinator: PlaybackTransportCoordinator,
+    startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
 ): PlaybackSession {
     val overlay = snapshotFlow { controller.playbackState.toPlaybackRuntimeOverlay() }
@@ -31,29 +33,29 @@ internal fun createIosPlaybackRuntimeSession(
         )
 
     return DefaultPlaybackRuntime(
-        engine = LegacyPlaybackRuntimeEngine(playbackEngine, controller, scope),
+        engine = PlaybackRuntimeEngineAdapter(playbackEngine, startFailureSource, scope),
         overlay = overlay,
-        queueActions = LegacyPlaybackQueueActions(controller),
+        queueActions = PlaybackCoordinatorQueueActions(transportCoordinator),
         scope = scope,
     )
 }
 
-private class LegacyPlaybackRuntimeEngine(
+private class PlaybackRuntimeEngineAdapter(
     private val playbackEngine: PlaybackEngine,
-    controller: FuoPlayerController,
+    startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
 ) : PlaybackRuntimeEngine {
     override val state: StateFlow<PlaybackRuntimeEngineState> = combine(
         playbackEngine.state,
-        snapshotFlow { controller.playbackState }.distinctUntilChanged(),
-    ) { engineState, coordinatorState ->
-        mergeIosPlaybackRuntimeEngineState(engineState, coordinatorState)
+        startFailureSource.startFailure,
+    ) { engineState, startFailure ->
+        mergePlaybackStartFailure(engineState, startFailure)
     }.stateIn(
         scope = scope,
         started = SharingStarted.Eagerly,
-        initialValue = mergeIosPlaybackRuntimeEngineState(
-            engineState = playbackEngine.state.value,
-            coordinatorState = controller.playbackState,
+        initialValue = mergePlaybackStartFailure(
+            playbackEngine.state.value,
+            startFailureSource.startFailure.value,
         ),
     )
 
@@ -62,34 +64,26 @@ private class LegacyPlaybackRuntimeEngine(
     override fun resume() = playbackEngine.resume()
 }
 
-private class LegacyPlaybackQueueActions(
-    private val controller: FuoPlayerController,
+private class PlaybackCoordinatorQueueActions(
+    private val coordinator: PlaybackTransportCoordinator,
 ) : PlaybackRuntimeQueueActions {
-    override fun startCurrent() = controller.toggle()
+    override fun startCurrent() = coordinator.startCurrent()
 
-    override fun previous() = controller.previous()
+    override fun previous() = coordinator.previous()
 
-    override fun next() = controller.next()
+    override fun next() = coordinator.next()
 }
 
-/**
- * iOS still resolves provider resources in the legacy coordinator before the native engine starts.
- * During that window the engine is already Loading, so a resolution failure exists only on the
- * coordinator state. Bridge that one transitional error into the session until resource resolution
- * moves behind the playback runtime boundary in C2.
- */
-internal fun mergeIosPlaybackRuntimeEngineState(
+/** Pre-engine resource failures are now published by PlaybackStartCoordinator. */
+internal fun mergePlaybackStartFailure(
     engineState: PlaybackState,
-    coordinatorState: PlaybackState,
+    startFailure: PlaybackStartFailure?,
 ): PlaybackRuntimeEngineState {
-    val useCoordinatorResolutionError =
-        engineState.status == PlayerStatus.Loading &&
-            coordinatorState.status == PlayerStatus.Error &&
-            engineState.currentTrack?.id != null &&
-            engineState.currentTrack?.id == coordinatorState.currentTrack?.id
-
+    val activeFailure = startFailure?.takeIf { failure ->
+        engineState.status == PlayerStatus.Loading && engineState.currentTrack?.id == failure.trackId
+    }
     return PlaybackRuntimeEngineState(
-        status = if (useCoordinatorResolutionError) {
+        status = if (activeFailure != null) {
             PlaybackSessionStatus.Error
         } else {
             engineState.status.toPlaybackSessionStatus()
@@ -97,11 +91,7 @@ internal fun mergeIosPlaybackRuntimeEngineState(
         positionMs = engineState.positionMs,
         durationMs = engineState.durationMs,
         bufferedMs = engineState.bufferedMs,
-        errorMessage = if (useCoordinatorResolutionError) {
-            coordinatorState.errorMessage
-        } else {
-            engineState.errorMessage
-        },
+        errorMessage = activeFailure?.message ?: engineState.errorMessage,
     )
 }
 

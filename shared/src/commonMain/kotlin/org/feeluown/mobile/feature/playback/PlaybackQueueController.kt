@@ -3,9 +3,8 @@ package org.feeluown.mobile
 /**
  * Owns the durable playback-queue state independently from the app controller.
  *
- * Queue mutation policy still lives in the playback coordinator/facade while it is
- * migrated, but the queue's single source of truth and persistence snapshot no
- * longer belong to [FuoPlayerController].
+ * Queue transition policy is coordinated by [PlaybackQueueCoordinator]; this
+ * type remains the single source of truth for queue state and persistence.
  */
 internal class PlaybackQueueController {
     var mainQueue: List<MusicTrack> = emptyList()
@@ -38,6 +37,15 @@ internal class PlaybackQueueController {
     }
 
     fun displayQueueIndex(): Int = if (currentTrack() != null) 0 else -1
+
+    fun updateCurrentTrack(track: MusicTrack) {
+        if (currentIsUpNext) {
+            currentUpNextTrack = track
+        } else if (mainQueueIndex in mainQueue.indices) {
+            mainQueue = mainQueue.mapIndexed { index, item -> if (index == mainQueueIndex) track else item }
+            originalMainQueue = originalMainQueue.map { item -> if (item.id == track.id) track else item }
+        }
+    }
 
     fun restore(snapshot: PlaybackQueueSnapshot) {
         mainQueue = snapshot.mainQueue
