@@ -23,25 +23,31 @@ sealed interface AppRoute : NavKey {
     data object AudioRecognition : AppRoute
 
     @Serializable
-    data object Feature : AppRoute
+    data class Feature(val feature: NavigationFeature) : AppRoute
 
     @Serializable
-    data object Track : AppRoute
+    data class Track(val track: NavigationTrack) : AppRoute
 
     @Serializable
-    data object Video : AppRoute
+    data class Video(val video: NavigationVideo) : AppRoute
 
     @Serializable
-    data object Playlist : AppRoute
+    data class Playlist(
+        val playlist: NavigationPlaylist,
+        val category: String? = null,
+    ) : AppRoute
 
     @Serializable
-    data object LocalPlaylist : AppRoute
+    data class LocalPlaylist(val playlistId: String) : AppRoute
 
     @Serializable
-    data object LocalMusicCollection : AppRoute
+    data class LocalMusicCollection(
+        val mode: String,
+        val key: String,
+    ) : AppRoute
 
     @Serializable
-    data object MediaItem : AppRoute
+    data class MediaItem(val item: NavigationMediaItem) : AppRoute
 
     @Serializable
     data object Settings : AppRoute
@@ -63,6 +69,8 @@ class AppNavigator {
 
     fun contains(route: AppRoute): Boolean = route in mutableBackStack.value
 
+    fun containsWhere(predicate: (AppRoute) -> Boolean): Boolean = mutableBackStack.value.any(predicate)
+
     fun navigate(route: AppRoute) {
         if (route == AppRoute.Home) {
             mutableBackStack.value = listOf(AppRoute.Home)
@@ -81,6 +89,14 @@ class AppNavigator {
         return true
     }
 
+    fun popWhere(predicate: (AppRoute) -> Boolean): Boolean {
+        val stack = mutableBackStack.value
+        val index = stack.indexOfLast(predicate)
+        if (index <= 0) return false
+        mutableBackStack.value = stack.take(index).ifEmpty { listOf(AppRoute.Home) }
+        return true
+    }
+
     fun pop(): Boolean {
         val stack = mutableBackStack.value
         if (stack.size <= 1) return false
@@ -90,6 +106,11 @@ class AppNavigator {
 
     fun remove(routes: Set<AppRoute>) {
         val filtered = mutableBackStack.value.filterNot { it != AppRoute.Home && it in routes }
+        mutableBackStack.value = filtered.ifEmpty { listOf(AppRoute.Home) }
+    }
+
+    fun removeWhere(predicate: (AppRoute) -> Boolean) {
+        val filtered = mutableBackStack.value.filterNot { it != AppRoute.Home && predicate(it) }
         mutableBackStack.value = filtered.ifEmpty { listOf(AppRoute.Home) }
     }
 }
