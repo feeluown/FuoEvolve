@@ -26,6 +26,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":provider:api"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.animation)

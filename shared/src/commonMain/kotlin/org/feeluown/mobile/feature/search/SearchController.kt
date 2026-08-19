@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import org.feeluown.mobile.provider.api.ProviderAvailability
 
 sealed interface SearchAction {
     data class QueryChanged(val value: String) : SearchAction
@@ -16,7 +17,7 @@ sealed interface SearchAction {
 /**
  * Search feature boundary consumed by the app shell and compatibility callers.
  *
- * The app composition root owns the concrete controller. `FuoPlayerController` may delegate to
+ * The app composition root owns the concrete controller. A compatibility facade may delegate to
  * the same instance while the rest of the application is migrated, but it must not create a
  * second search state when an owner is supplied.
  */
@@ -39,7 +40,7 @@ interface SearchFeatureController {
 
 /**
  * Composition-root factory. The aggregate provider repository is adapted here so the feature
- * implementation itself remains dependent on [ProviderSearchRepository].
+ * implementation itself remains dependent on narrow provider boundaries.
  */
 fun createSearchFeatureController(
     providerRepository: ProviderMusicRepository,
@@ -55,7 +56,7 @@ fun createSearchFeatureController(
     localRepository = localRepository,
     scope = scope,
     providerIdsForSearch = providerIdsForSearch,
-    providerExists = providerExists,
+    providerAvailability = ProviderAvailability { providerId -> providerExists(providerId) },
     openSearch = openSearch,
     onPreferencesChanged = onPreferencesChanged,
     initialState = initialState,
@@ -68,7 +69,7 @@ internal class SearchController private constructor(
     private val scope: CoroutineScope,
     private val state: SearchControllerState,
     private val providerIdsForSearch: () -> List<String>,
-    private val providerExists: (String) -> Boolean,
+    private val providerAvailability: ProviderAvailability,
     private val openSearch: () -> Unit,
     private val onPreferencesChanged: (SearchScope, String?) -> Unit,
 ) : SearchFeatureController {
@@ -87,12 +88,12 @@ internal class SearchController private constructor(
         scope = scope,
         state = SearchControllerState(initialState),
         providerIdsForSearch = providerIdsForSearch,
-        providerExists = providerExists,
+        providerAvailability = ProviderAvailability { providerId -> providerExists(providerId) },
         openSearch = openSearch,
         onPreferencesChanged = onPreferencesChanged,
     )
 
-    /** Compatibility constructor for standalone legacy `FuoPlayerController` instances. */
+    /** Compatibility constructor for standalone legacy controller instances. */
     @Suppress("UNUSED_PARAMETER")
     constructor(
         providerRepository: ProviderMusicRepository,
@@ -112,7 +113,7 @@ internal class SearchController private constructor(
         scope = scope,
         state = state,
         providerIdsForSearch = providerIdsForSearch,
-        providerExists = providerExists,
+        providerAvailability = ProviderAvailability { providerId -> providerExists(providerId) },
         openSearch = openSearch,
         onPreferencesChanged = { _, _ -> persistSettings() },
     )
@@ -214,7 +215,7 @@ internal class SearchController private constructor(
             return
         }
         state.update { current ->
-            if (providerId != null && providerExists(providerId)) {
+            if (providerId != null && providerAvailability.contains(providerId)) {
                 current.copy(
                     query = keyword,
                     searchScope = SearchScope.Provider,

@@ -7,6 +7,9 @@ name: iOS Debug App
     paths:
       - "iosApp/**"
       - "shared/**"
+      - "core/**"
+      - "playback/**"
+      - "provider/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
@@ -20,6 +23,9 @@ name: iOS Debug App
     paths:
       - "iosApp/**"
       - "shared/**"
+      - "core/**"
+      - "playback/**"
+      - "provider/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
@@ -61,8 +67,8 @@ jobs:
           path: ~/.konan
           key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
 
-      - name: Run shared tests
-        run: ./gradlew :shared:allTests
+      - name: Run shared tests and architecture checks
+        run: ./gradlew checkArchitectureBoundaries :shared:allTests
 
   build-debug-simulator:
     name: Build debug iOS simulator app

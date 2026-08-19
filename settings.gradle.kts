@@ -16,5 +16,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "FuoEvolve"
 
+include(":core:model")
+include(":playback:api")
+include(":provider:api")
 include(":shared")
 include(":androidApp")

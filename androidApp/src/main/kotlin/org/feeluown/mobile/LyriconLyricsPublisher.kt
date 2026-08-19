@@ -13,9 +13,13 @@ import io.github.proify.lyricon.provider.LyriconProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import org.feeluown.mobile.core.model.TrackRef
+import org.feeluown.mobile.playback.api.PlaybackSession
+import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
 internal const val LYRICON_PACKAGE_NAME = "io.github.proify.lyricon"
 
@@ -26,7 +30,8 @@ internal fun isLyriconInstalled(context: Context): Boolean = runCatching {
 
 internal class LyriconLyricsPublisher(
     context: Context,
-    private val controller: FuoPlayerController,
+    private val playbackSession: PlaybackSession,
+    private val statusBarLyricsEnabled: () -> Boolean,
     private val scope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -35,10 +40,10 @@ internal class LyriconLyricsPublisher(
     private var provider: LyriconProvider? = null
     private var lastTrackKey: String? = null
     private var lastPayload: StatusBarLyricsPayload? = null
-    private var lastPublishedStatus: PlayerStatus? = null
+    private var lastPublishedStatus: PlaybackSessionStatus? = null
     private var lastObservedPositionMs: Long? = null
     private var lastObservedRealtimeMs: Long = 0L
-    private var lastObservedStatus: PlayerStatus? = null
+    private var lastObservedStatus: PlaybackSessionStatus? = null
     private var anchorPositionMs: Long = 0L
     private var anchorRealtimeMs: Long = 0L
     private var anchorPlaying: Boolean = false
@@ -68,10 +73,12 @@ internal class LyriconLyricsPublisher(
     fun start() {
         if (collectJob != null) return
         collectJob = scope.launch {
-            snapshotFlow {
-                val state = controller.playbackState
+            combine(
+                playbackSession.state,
+                snapshotFlow { statusBarLyricsEnabled() }.distinctUntilChanged(),
+            ) { state, enabled ->
                 Snapshot(
-                    enabled = controller.statusBarLyricsEnabled,
+                    enabled = enabled,
                     status = state.status,
                     track = state.currentTrack,
                     positionMs = state.positionMs,
@@ -95,9 +102,9 @@ internal class LyriconLyricsPublisher(
         if (
             !snapshot.enabled ||
             track == null ||
-            snapshot.status == PlayerStatus.Idle ||
-            snapshot.status == PlayerStatus.Error ||
-            snapshot.status == PlayerStatus.Ended
+            snapshot.status == PlaybackSessionStatus.Idle ||
+            snapshot.status == PlaybackSessionStatus.Error ||
+            snapshot.status == PlaybackSessionStatus.Ended
         ) {
             deactivate()
             return
@@ -159,24 +166,19 @@ internal class LyriconLyricsPublisher(
                 lastPayload = payload
             }
 
-            // Follow Lyricon's documented manual synchronization path. setPosition() writes the
-            // current position to the shared-memory bridge and setPlaybackState(Boolean) makes the
-            // central service consume that bridge. Do not mix this with PlaybackState/State2,
-            // because seekTo() does not replace State2's position anchor and the next tick can jump
-            // back to the old position.
             activeProvider.player.setPosition(safePositionMs)
             if (positionDiscontinuity) {
                 activeProvider.player.seekTo(safePositionMs)
             }
             if (songChanged || playbackStateChanged) {
-                activeProvider.player.setPlaybackState(snapshot.status == PlayerStatus.Playing)
+                activeProvider.player.setPlaybackState(snapshot.status == PlaybackSessionStatus.Playing)
             }
             lastPublishedStatus = snapshot.status
         }.onFailure { throwable ->
             Log.w(TAG, "Failed to publish Lyricon state; playback is unaffected", throwable)
         }
 
-        if (snapshot.status == PlayerStatus.Playing) {
+        if (snapshot.status == PlaybackSessionStatus.Playing) {
             ensurePositionSyncLoop()
         } else {
             stopPositionSyncLoop()
@@ -190,7 +192,7 @@ internal class LyriconLyricsPublisher(
     private fun updatePositionAnchor(snapshot: Snapshot, realtimeMs: Long) {
         anchorPositionMs = snapshot.positionMs.coerceAtLeast(0L)
         anchorRealtimeMs = realtimeMs
-        anchorPlaying = snapshot.status == PlayerStatus.Playing
+        anchorPlaying = snapshot.status == PlaybackSessionStatus.Playing
     }
 
     private fun estimatedPositionMs(realtimeMs: Long = SystemClock.elapsedRealtime()): Long {
@@ -205,11 +207,8 @@ internal class LyriconLyricsPublisher(
             while (true) {
                 val activeProvider = provider ?: break
                 val snapshot = latestSnapshot ?: break
-                if (!snapshot.enabled || snapshot.status != PlayerStatus.Playing) break
+                if (!snapshot.enabled || snapshot.status != PlaybackSessionStatus.Playing) break
 
-                // Lyricon 0.1.70 reads the manual position bridge at ~24 fps by default. Keep the
-                // shared-memory value moving at a similar cadence, while the coarser playback-state
-                // updates periodically correct this elapsed-realtime interpolation anchor.
                 runCatching {
                     activeProvider.player.setPosition(estimatedPositionMs())
                 }
@@ -230,8 +229,8 @@ internal class LyriconLyricsPublisher(
         runCatching {
             val positionMs = estimatedPositionMs()
             activeProvider.player.setPosition(positionMs)
-            activeProvider.player.setPlaybackState(snapshot.status == PlayerStatus.Playing)
-            if (snapshot.status == PlayerStatus.Playing) {
+            activeProvider.player.setPlaybackState(snapshot.status == PlaybackSessionStatus.Playing)
+            if (snapshot.status == PlaybackSessionStatus.Playing) {
                 ensurePositionSyncLoop()
             }
         }.onFailure { throwable ->
@@ -243,7 +242,7 @@ internal class LyriconLyricsPublisher(
         val previousPositionMs = lastObservedPositionMs ?: return true
         val previousStatus = lastObservedStatus ?: return true
         val elapsedMs = (nowRealtimeMs - lastObservedRealtimeMs).coerceAtLeast(0L)
-        val expectedPositionMs = if (previousStatus == PlayerStatus.Playing) {
+        val expectedPositionMs = if (previousStatus == PlaybackSessionStatus.Playing) {
             previousPositionMs + elapsedMs
         } else {
             previousPositionMs
@@ -305,8 +304,8 @@ internal class LyriconLyricsPublisher(
 
     private data class Snapshot(
         val enabled: Boolean,
-        val status: PlayerStatus,
-        val track: MusicTrack?,
+        val status: PlaybackSessionStatus,
+        val track: TrackRef?,
         val positionMs: Long,
         val durationMs: Long,
         val lyrics: String?,

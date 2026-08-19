@@ -5,13 +5,15 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.playback.api.PlaybackSession
+import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
 /**
  * Android composition root.
@@ -25,6 +27,7 @@ internal class AndroidAppContainer(
     private val context: Context = application.applicationContext
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
+    private var playbackSessionHolder: PlaybackSession? = null
 
     val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
@@ -189,45 +192,32 @@ internal class AndroidAppContainer(
     }
 
     private fun wireController(controller: FuoPlayerController) {
+        val playbackSession = createPlaybackSession(controller, appScope)
+        playbackSessionHolder = playbackSession
+
         controller.updateStatusBarLyricsAvailability(isLyriconInstalled(context))
         lyriconLyricsPublisher = LyriconLyricsPublisher(
             context = context,
-            controller = controller,
+            playbackSession = playbackSession,
+            statusBarLyricsEnabled = { controller.statusBarLyricsEnabled },
             scope = appScope,
         ).also(LyriconLyricsPublisher::start)
 
         FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
-            override fun toggle() {
-                controller.toggle()
-            }
+            override fun toggle() = playbackSession.toggle()
 
-            override fun play() {
-                if (controller.playbackState.status != PlayerStatus.Playing) {
-                    controller.toggle()
-                }
-            }
+            override fun play() = playbackSession.play()
 
-            override fun pause() {
-                if (controller.playbackState.status == PlayerStatus.Playing) {
-                    controller.toggle()
-                }
-            }
+            override fun pause() = playbackSession.pause()
 
-            override fun previous() {
-                controller.previous()
-            }
+            override fun previous() = playbackSession.previous()
 
-            override fun next() {
-                controller.next()
-            }
+            override fun next() = playbackSession.next()
         }
 
         appScope.launch {
-            snapshotFlow {
-                controller.playbackState.let { state ->
-                    state.currentTrack?.id to state.lyrics
-                }
-            }
+            playbackSession.state
+                .map { state -> state.currentTrack?.id to state.lyrics }
                 .distinctUntilChanged()
                 .collect { (trackId, lyrics) ->
                     if (trackId != null) {
@@ -237,21 +227,20 @@ internal class AndroidAppContainer(
         }
 
         appScope.launch {
-            snapshotFlow {
-                controller.playbackState.let { state ->
+            playbackSession.state
+                .map { state ->
                     Triple(
                         state.currentTrack?.id,
                         state.status,
-                        state.queue.map { it.id } to state.queueIndex,
+                        state.queueTrackIds to state.queueIndex,
                     )
                 }
-            }
                 .distinctUntilChanged()
                 .collect { (trackId, status, _) ->
                     playbackEngine.republishRestoredState()
                     if (
                         trackId != null &&
-                        (status == PlayerStatus.Playing || status == PlayerStatus.Paused)
+                        (status == PlaybackSessionStatus.Playing || status == PlaybackSessionStatus.Paused)
                     ) {
                         playbackQueueStore.flushLatest()
                         playbackResumeStore.flush()
@@ -264,6 +253,7 @@ internal class AndroidAppContainer(
         FuoPlaybackService.transportControls = null
         lyriconLyricsPublisher?.close()
         lyriconLyricsPublisher = null
+        playbackSessionHolder = null
         appScope.cancel()
     }
 }
