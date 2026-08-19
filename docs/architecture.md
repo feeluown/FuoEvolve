@@ -1,6 +1,6 @@
 # FuoEvolve architecture boundaries
 
-This document records the P0 architecture boundaries used while the project migrates away from a flat `shared` source tree.
+This document records the architecture boundaries used while the project migrates away from a flat `shared` source tree.
 
 ## Dependency direction
 
@@ -48,12 +48,12 @@ New features should depend on narrow provider capability interfaces (`ProviderSe
 
 Platform dependency construction is isolated in platform containers. Android uses `AndroidAppContainer`; iOS uses `IosAppContainer`. `Application`, `UIViewController`, activities and services should remain thin hosts around those composition roots.
 
-Search and Recognition expose controller-free route contracts. Existing app-shell callers are temporarily isolated in `SearchRouteCompat` / `RecognitionRouteCompat` bridges while the remaining legacy app facade is migrated.
+Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. During the remaining migration, platform composition roots may adapt still-centralized controller operations to those ports; the dependency must not leak back into the feature or app route contract.
 
 ## Architecture fitness check
 
-`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition feature boundaries, their primary routes, and Android playback service/Lyricon integration. Compatibility shims and the composition root are deliberately excluded until their callers are migrated.
+`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition feature boundaries, their app-port contracts/routes, and Android playback service/Lyricon integration. It also rejects reintroduction of the retired `SearchRouteCompat` / `RecognitionRouteCompat` app-shell shims.
 
 ## Migration rule
 
-Architecture migration should be incremental and behavior-preserving. Move ownership first, keep compatibility adapters where necessary, and remove legacy facades only after callers have migrated and tests cover the new boundary.
+Architecture migration should be incremental and behavior-preserving. Move ownership first, introduce narrow ports at cross-feature boundaries, and remove legacy facades only after callers have migrated and tests cover the new boundary.

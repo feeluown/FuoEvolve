@@ -167,6 +167,8 @@ class FuoAppViewModel(
     val controller: FuoPlayerController,
     private val searchController: SearchFeatureController,
     private val recognitionController: RecognitionFeatureController,
+    internal val searchAppPort: SearchAppPort,
+    internal val recognitionAppPort: RecognitionAppPort,
     private val settingsRepository: AppSettingsRepository,
     providerSessionRepository: ProviderSessionRepository,
     private val navigator: AppNavigator,

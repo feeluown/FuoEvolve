@@ -180,11 +180,62 @@ internal class AndroidAppContainer(
         ).also(::wireController)
     }
 
+    private val searchAppPort: SearchAppPort by lazy {
+        object : SearchAppPort {
+            override val providers: List<ProviderInfo>
+                get() = controller.providers
+            override val downloadStates: Map<String, DownloadState>
+                get() = controller.downloadStates
+
+            override fun closeSearch() = controller.closeSearch()
+
+            override fun playResult(index: Int) = controller.playFromSearch(index)
+
+            override fun addToUpNext(track: MusicTrack) = controller.addToUpNext(track)
+
+            override fun download(track: MusicTrack) = controller.download(track)
+
+            override fun deleteDownload(track: MusicTrack) = controller.deleteDownload(track)
+
+            override fun openArtist(track: MusicTrack) = controller.openTrackArtist(track)
+
+            override fun openAlbum(track: MusicTrack) = controller.openTrackAlbum(track)
+
+            override fun openTrackDetail(track: MusicTrack) = controller.openTrackDetail(track)
+
+            override fun canAddToPlaylist(track: MusicTrack): Boolean =
+                controller.canAddTrackToPlaylist(track)
+
+            override fun openPlaylistTargetPicker(track: MusicTrack) =
+                controller.openPlaylistTargetPicker(track)
+
+            override fun openMediaItem(item: ProviderMediaItem) = controller.openMediaItem(item)
+
+            override fun openPlaylist(playlist: ProviderPlaylist) {
+                controller.openPlaylist(playlist)
+            }
+
+            override fun openVideo(video: ProviderVideo) = controller.openVideo(video)
+        }
+    }
+
+    private val recognitionAppPort: RecognitionAppPort by lazy {
+        object : RecognitionAppPort {
+            override fun canOpenNeteaseDetail(song: RecognizedSong): Boolean =
+                controller.canOpenRecognizedNeteaseDetail(song)
+
+            override fun openNeteaseDetail(song: RecognizedSong) =
+                controller.openRecognizedNeteaseDetail(song)
+        }
+    }
+
     val appViewModel: FuoAppViewModel by lazy {
         FuoAppViewModel(
             controller = controller,
             searchController = searchController,
             recognitionController = recognitionController,
+            searchAppPort = searchAppPort,
+            recognitionAppPort = recognitionAppPort,
             settingsRepository = settingsRepository,
             providerSessionRepository = providerSessionRepository,
             navigator = navigator,

@@ -8,7 +8,7 @@ Search ownership has moved out of `FuoPlayerController`.
 
 - `SearchFeatureScreen` consumes `SearchUiState`, provider/download snapshots, `SearchAction`, and narrow cross-feature callbacks instead of the global controller.
 - `SearchFeatureController` is constructed by the Android/iOS composition roots. The same owner instance is injected into `FuoAppViewModel` and the compatibility facade, so production has one search state owner.
-- The primary `SearchRoute` now accepts `SearchRouteDependencies` rather than a global controller. Existing app-shell callers are isolated in `SearchRouteCompat` until AppRoot is migrated.
+- The primary `SearchRoute` consumes `SearchAppPort`; it no longer accepts a global controller or a controller-backed route overload.
 - Search scope/provider preferences are restored into the feature owner and persisted through `AppSettingsRepository`.
 - Search provider ordering/selection comes from `AppSettings`, while actual provider availability is gated by initialized provider sessions through a provider-neutral availability contract.
 
@@ -18,9 +18,9 @@ Recognition now follows the same ownership model.
 
 - `RecognitionFeatureController` owns `StateFlow<RecognitionUiState>` and recognition operations through `RecognitionAction`.
 - Android/iOS composition roots construct the recognition owner from the platform `AudioRecognitionRepository` and `PlaybackEngine`; pausing active playback no longer routes through the global controller.
-- The primary `RecognitionRoute` composes `AudioRecognitionFeatureScreen` from feature state/actions plus narrow provider-detail/search callbacks. The old app-shell signature lives only in `RecognitionRouteCompat`.
+- The primary `RecognitionRoute` consumes `RecognitionAppPort`; the previous controller-backed app-shell overload has been removed.
 - Permission changes and app-background cancellation enter through `FuoAppViewModel`.
-- The compatibility facade keeps delegates to the same injected recognition owner, so production still has a single recognition state.
+- The compatibility facade keeps delegates to the same injected recognition owner where legacy callers still require them, so production still has a single recognition state.
 - Focused controller tests cover success/state ownership, playback pause, cancellation, and close/reset behavior.
 
 ## Phase 3: playback runtime boundary
@@ -33,9 +33,18 @@ The first playback runtime seam is now established.
 - `:core:model` provides the stable `TrackRef` used by the playback API, and `:provider:api` starts the provider-neutral compile-time boundary used by Search.
 - `checkArchitectureBoundaries` prevents migrated Search/Recognition and platform playback boundaries from regaining direct controller dependencies.
 
+## Phase 4: app-shell compatibility removal
+
+Search and Recognition no longer require controller-specific app-shell bridges.
+
+- `SearchRouteCompat` and `RecognitionRouteCompat` are removed.
+- `AppRoot` composes the primary routes directly from `FuoAppViewModel` plus `SearchAppPort` / `RecognitionAppPort`.
+- Android and iOS composition roots implement those ports. While sibling playback/download/provider-detail responsibilities remain centralized, the controller dependency is confined to the composition edge instead of leaking into route or feature contracts.
+- The architecture fitness check fails if either retired compat file is reintroduced.
+
 ## Next phases
 
-1. Replace `SearchRouteCompat` / `RecognitionRouteCompat` by migrating AppRoot to explicit app/domain action ports, then remove the remaining Search/Recognition compatibility delegates.
-2. Move actual playback orchestration/state ownership from `ControllerPlaybackSession` into a dedicated runtime implementation; then migrate player UI to the same session contract.
+1. Move actual playback orchestration/state ownership from `ControllerPlaybackSession` into a dedicated runtime implementation; then migrate player UI to the same session contract.
+2. Replace controller-backed Search/Recognition app-port operations as their sibling playback/download/provider-detail owners become explicit domain/feature ports.
 3. Apply the feature-owned state plus app-shell composition pattern to local music, downloads, provider content, and settings.
 4. Continue moving stable contracts into compile-time modules and retire legacy aggregate provider dependencies and global loading/message state.

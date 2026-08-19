@@ -373,11 +373,11 @@ fun AppRoot(
                                             )
                                             AppRoute.Search -> SearchRoute(
                                                 appViewModel = appViewModel,
-                                                controller = controller,
+                                                appPort = appViewModel.searchAppPort,
                                             )
                                             AppRoute.AudioRecognition -> RecognitionRoute(
                                                 appViewModel = appViewModel,
-                                                controller = controller,
+                                                appPort = appViewModel.recognitionAppPort,
                                                 hasMicrophonePermission = hasMicrophonePermission,
                                                 onRequestMicrophonePermission = onRequestMicrophonePermission,
                                             )

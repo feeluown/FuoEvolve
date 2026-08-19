@@ -14,15 +14,20 @@ val migratedControllerBoundaryRoots = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/recognition",
 )
 val migratedControllerBoundaryFiles = listOf(
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppFeaturePorts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRoute.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/FuoPlaybackService.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/LyriconLyricsPublisher.kt",
 )
+val retiredControllerCompatFiles = listOf(
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRouteCompat.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRouteCompat.kt",
+)
 
 tasks.register("checkArchitectureBoundaries") {
     group = "verification"
-    description = "Reject new FuoPlayerController dependencies in migrated architecture boundaries."
+    description = "Reject legacy controller dependencies or retired compat shims in migrated boundaries."
 
     val sourceFiles = provider {
         buildList {
@@ -39,6 +44,20 @@ tasks.register("checkArchitectureBoundaries") {
     inputs.files(sourceFiles)
 
     doLast {
+        val retiredCompatViolations = retiredControllerCompatFiles
+            .map(rootProject::file)
+            .filter { it.isFile }
+            .map { it.relativeTo(rootProject.projectDir).invariantSeparatorsPath }
+        if (retiredCompatViolations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Retired app-shell compatibility shims were reintroduced:")
+                    retiredCompatViolations.forEach { appendLine(" - $it") }
+                    append("Compose Search/Recognition through their app ports instead.")
+                },
+            )
+        }
+
         val controllerPattern = Regex("\\bFuoPlayerController\\b")
         val violations = sourceFiles.get().flatMap { file ->
             file.readLines().mapIndexedNotNull { index, line ->
