@@ -323,31 +323,33 @@ class FuoPlayerController(
     val isDebugLogViewerAvailable: Boolean
         get() = debugLogController.isAvailable
     val isShuffleEnabled: Boolean
-        get() = shuffleEnabled
+        get() = playbackQueueController.shuffleEnabled
     val repeatMode: RepeatMode
-        get() = _repeatMode
+        get() = playbackQueueController.repeatMode
     val isFmQueueActive: Boolean
-        get() = isFmQueue
+        get() = playbackQueueController.isFmQueue
     val displayUpNextCount: Int
-        get() = upNextQueue.size
+        get() = playbackQueueController.upNextCount
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
             selectedLocalMusicCollection != null ||
             selectedLocalMusicDirectoryId != null ||
             navigator.backStack.value.size > 1
 
-    private var mainQueue: List<MusicTrack> = emptyList()
-    private var originalMainQueue: List<MusicTrack> = emptyList()
-    private var upNextQueue: List<MusicTrack> = emptyList()
-    private var mainQueueIndex: Int = -1
-    private var currentUpNextTrack: MusicTrack? = null
-    private var currentIsUpNext: Boolean = false
-    private var queueFeature: ProviderFeature? = null
-    private var queuePlaylistId: String? = null
-    private var shuffleEnabled: Boolean = false
-    private var _repeatMode: RepeatMode = RepeatMode.QUEUE
-    private var isFmQueue: Boolean = false
-    private var shuffleBeforeFm: Boolean? = null
+    private val mainQueue: List<MusicTrack>
+        get() = playbackQueueController.mainQueue
+    private val upNextQueue: List<MusicTrack>
+        get() = playbackQueueController.upNextQueue
+    private val mainQueueIndex: Int
+        get() = playbackQueueController.mainQueueIndex
+    private val currentIsUpNext: Boolean
+        get() = playbackQueueController.currentIsUpNext
+    private val queueFeature: ProviderFeature?
+        get() = playbackQueueController.queueFeature
+    private val queuePlaylistId: String?
+        get() = playbackQueueController.queuePlaylistId
+    private val _repeatMode: RepeatMode
+        get() = playbackQueueController.repeatMode
     private var appendQueueFeatureTask: Deferred<Int>? = null
     private var selectedFeatureTracksNextOffset = 0
     private var selectedFeatureLoadMoreJob: Job? = null
@@ -489,6 +491,10 @@ class FuoPlayerController(
         setMessage = { message = it },
         onError = { setError(it) },
     )
+    private val playbackQueueController = PlaybackQueueController(
+        playbackQueueStore = playbackQueueStore,
+        scope = scope,
+    )
     private val sleepTimerController = PlaybackSleepTimerController(
         playbackEngine = playbackEngine,
         scope = scope,
@@ -521,8 +527,8 @@ class FuoPlayerController(
                 downloadRepository.updateParallelism(downloadParallelism)
             }
             isSettingsLoaded = true
-            runCatching { playbackQueueStore.load() }
-                .onSuccess { restorePlaybackQueue(it) }
+            runCatching { playbackQueueController.load() }
+                .onSuccess { restorePlaybackQueueState() }
             localMusicController.updateScanSettings()
             resourceCacheController.updateLimit()
             settingsController.updateAudioQualityPoliciesNow()
@@ -1952,16 +1958,10 @@ class FuoPlayerController(
     private fun removeDislikedTrack(track: MusicTrack) {
         val isCurrent = currentQueueTrack()?.id == track.id
         if (isCurrent) {
-            val hasNext = upNextQueue.isNotEmpty() || mainQueueIndex + 1 < mainQueue.size
+            val hasNext = playbackQueueController.hasNextAfterCurrent
             if (hasNext) next() else playbackEngine.stop()
         }
-        val removedBeforeCurrent = mainQueue
-            .take(mainQueueIndex.coerceIn(0, mainQueue.size))
-            .count { it.id == track.id }
-        mainQueue = mainQueue.filterNot { it.id == track.id }
-        originalMainQueue = originalMainQueue.filterNot { it.id == track.id }
-        upNextQueue = upNextQueue.filterNot { it.id == track.id }
-        mainQueueIndex = (mainQueueIndex - removedBeforeCurrent).coerceIn(-1, mainQueue.lastIndex)
+        playbackQueueController.removeTrackEverywhere(track.id)
         recommendSections = recommendSections.withoutTrack(track.id)
         musicSections = musicSections.withoutTrack(track.id)
         mineSections = mineSections.withoutTrack(track.id)
@@ -2602,8 +2602,7 @@ class FuoPlayerController(
         }
         if (playPlaybackPartOffset(1)) return
         if (currentIsUpNext) {
-            currentUpNextTrack = null
-            currentIsUpNext = false
+            playbackQueueController.clearCurrentUpNext()
             persistPlaybackQueue()
         }
         if (upNextQueue.isNotEmpty()) {
@@ -2641,8 +2640,7 @@ class FuoPlayerController(
         }
         if (playPlaybackPartOffset(-1)) return
         if (currentIsUpNext) {
-            currentUpNextTrack = null
-            currentIsUpNext = false
+            playbackQueueController.clearCurrentUpNext()
             persistPlaybackQueue()
             playMainIndex(mainQueueIndex.coerceAtLeast(0))
             return
@@ -2676,80 +2674,33 @@ class FuoPlayerController(
     }
 
     fun removeFromQueue(track: MusicTrack) {
-        if (currentUpNextTrack?.id == track.id) {
-            currentUpNextTrack = null
-            currentIsUpNext = false
-            updatePlaybackQueueState()
-            persistPlaybackQueue()
-            return
-        }
-        val upNextIndex = upNextQueue.indexOfFirst { it.id == track.id }
-        if (upNextIndex >= 0) {
-            upNextQueue = upNextQueue.filterIndexed { index, _ -> index != upNextIndex }
-            updatePlaybackQueueState()
-            persistPlaybackQueue()
-            return
-        }
-        val mainIndex = mainQueue.indexOfFirst { it.id == track.id }
-        if (mainIndex < 0) return
-        mainQueue = mainQueue.filterIndexed { index, _ -> index != mainIndex }
-        originalMainQueue = originalMainQueue.filterNot { it.id == track.id }
-        mainQueueIndex = when {
-            mainQueue.isEmpty() -> -1
-            mainIndex < mainQueueIndex -> mainQueueIndex - 1
-            mainIndex == mainQueueIndex -> mainQueueIndex.coerceAtMost(mainQueue.lastIndex)
-            else -> mainQueueIndex
-        }
+        if (!playbackQueueController.removeFromQueue(track.id)) return
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
 
     fun clearQueue() {
-        val currentTrack = currentQueueTrack()
-        mainQueue = emptyList()
-        originalMainQueue = emptyList()
-        upNextQueue = emptyList()
-        currentUpNextTrack = null
-        currentIsUpNext = false
-        mainQueueIndex = -1
-        queueFeature = null
-        queuePlaylistId = null
-        isFmQueue = false
-        shuffleBeforeFm = null
-        if (currentTrack != null) {
-            mainQueue = listOf(currentTrack)
-            mainQueueIndex = 0
-        }
+        val keptCurrentTrack = playbackQueueController.clearQueue()
         updatePlaybackQueueState()
         persistPlaybackQueue()
-        message = if (currentTrack != null) "已清空播放队列" else "播放队列已清空"
+        message = if (keptCurrentTrack) "已清空播放队列" else "播放队列已清空"
     }
 
     fun addToUpNext(track: MusicTrack) {
-        upNextQueue = upNextQueue + track
+        playbackQueueController.addToUpNext(track)
         message = "已加入接下来播放：${track.title}"
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
 
     fun toggleShuffle() {
-        if (isFmQueue) return
-        if (shuffleEnabled) {
-            disableShuffle()
-        } else {
-            enableShuffle()
-        }
+        if (!playbackQueueController.toggleShuffle()) return
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
 
     fun toggleRepeat() {
-        if (isFmQueue) return
-        _repeatMode = when (_repeatMode) {
-            RepeatMode.OFF -> RepeatMode.QUEUE
-            RepeatMode.QUEUE -> RepeatMode.SINGLE
-            RepeatMode.SINGLE -> RepeatMode.OFF
-        }
+        if (!playbackQueueController.toggleRepeat()) return
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
@@ -3311,37 +3262,18 @@ class FuoPlayerController(
         sourcePlaylistId: String?,
         keepSelectedTrack: Boolean,
     ): Int {
-        if (sourceQueue.isEmpty()) return -1
-        val normalizedIndex = index.coerceIn(0, sourceQueue.lastIndex)
-        val enteringFm = sourceFeature?.isDynamicQueueFeature() == true
-        val restoreShuffle = if (isFmQueue && !enteringFm) shuffleBeforeFm else null
-        if (enteringFm && !isFmQueue) {
-            shuffleBeforeFm = shuffleEnabled
-            shuffleEnabled = false
-        } else if (!enteringFm && restoreShuffle != null) {
-            shuffleEnabled = restoreShuffle
-            shuffleBeforeFm = null
+        val playbackIndex = playbackQueueController.replaceMainQueue(
+            sourceQueue = sourceQueue,
+            index = index,
+            sourceFeature = sourceFeature,
+            sourcePlaylistId = sourcePlaylistId,
+            keepSelectedTrack = keepSelectedTrack,
+        )
+        if (playbackIndex >= 0) {
+            updatePlaybackQueueState()
+            persistPlaybackQueue()
         }
-        isFmQueue = enteringFm
-        queueFeature = sourceFeature
-        queuePlaylistId = sourcePlaylistId
-        currentUpNextTrack = null
-        currentIsUpNext = false
-        originalMainQueue = emptyList()
-        mainQueue = sourceQueue
-        mainQueueIndex = normalizedIndex
-        if (shuffleEnabled && !enteringFm) {
-            if (keepSelectedTrack) {
-                enableShuffle()
-            } else {
-                originalMainQueue = mainQueue
-                mainQueue = mainQueue.shuffledForPlaybackStart()
-                mainQueueIndex = 0
-            }
-        }
-        updatePlaybackQueueState()
-        persistPlaybackQueue()
-        return mainQueueIndex
+        return playbackIndex
     }
 
     private fun appendPlaylistPlaybackQueue(
@@ -3355,40 +3287,25 @@ class FuoPlayerController(
         ) {
             return
         }
-        val existingIds = (mainQueue + originalMainQueue).mapTo(mutableSetOf()) { it.id }
-        val newTracks = tracks.filter { existingIds.add(it.id) }
-        if (newTracks.isEmpty()) return
-        if (shuffleEnabled) {
-            val sourceQueue = originalMainQueue.ifEmpty { mainQueue }
-            originalMainQueue = sourceQueue + newTracks
-        }
-        mainQueue = mainQueue + newTracks
+        if (playbackQueueController.appendPlaylistTracks(tracks).isEmpty()) return
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
 
     private fun reshuffleCompletedPlaylistQueue(playlist: ProviderPlaylist) {
         if (queuePlaylistId != playlist.id || selectedPlaylist?.id != playlist.id) return
-        if (!shuffleEnabled || mainQueue.isEmpty()) return
-        val nextIndex = (mainQueueIndex + 1).coerceIn(0, mainQueue.size)
-        mainQueue = mainQueue.take(nextIndex) + mainQueue.drop(nextIndex).shuffledForPlaybackStart()
+        if (!playbackQueueController.reshuffleRemaining()) return
         updatePlaybackQueueState()
         persistPlaybackQueue()
     }
 
     private fun playMainIndex(index: Int, skippedUnavailableCount: Int = 0) {
-        val track = mainQueue.getOrNull(index) ?: return
-        currentUpNextTrack = null
-        currentIsUpNext = false
-        mainQueueIndex = index
+        val track = playbackQueueController.selectMainIndex(index) ?: return
         startPlayback(track, skippedUnavailableCount)
     }
 
     private fun playUpNextIndex(index: Int) {
-        val track = upNextQueue.getOrNull(index) ?: return
-        upNextQueue = upNextQueue.filterIndexed { itemIndex, _ -> itemIndex != index }
-        currentUpNextTrack = track
-        currentIsUpNext = true
+        val track = playbackQueueController.selectUpNextIndex(index) ?: return
         updatePlaybackQueueState()
         persistPlaybackQueue()
         startPlayback(track)
@@ -3465,10 +3382,8 @@ class FuoPlayerController(
                 providerRepository.loadMoreFeatureTracks(feature)
             }
             if (queueFeature != feature) return 0
-            val seenQueueIds = mainQueue.mapTo(mutableSetOf()) { it.id }
-            val newTracks = tracks.filter { seenQueueIds.add(it.id) }
+            val newTracks = playbackQueueController.appendDistinctMainTracks(tracks)
             if (newTracks.isNotEmpty()) {
-                mainQueue = mainQueue + newTracks
                 updatePlaybackQueueState()
                 persistPlaybackQueue()
                 if (selectedFeature == feature) {
@@ -3617,68 +3532,24 @@ class FuoPlayerController(
         return "第 ${currentPartIndex + 1}P · ${part.title.ifBlank { "未命名分段" }}"
     }
 
-    private fun currentQueueTrack(): MusicTrack? {
-        return if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
-    }
+    private fun currentQueueTrack(): MusicTrack? = playbackQueueController.currentTrack
 
-    private fun displayQueue(): List<MusicTrack> {
-        return buildList {
-            currentQueueTrack()?.let { add(it) }
-            addAll(upNextQueue)
-            val nextMainIndex = when {
-                currentIsUpNext -> mainQueueIndex + 1
-                mainQueueIndex >= 0 -> mainQueueIndex + 1
-                else -> 0
-            }
-            if (nextMainIndex in 0..mainQueue.size) {
-                addAll(mainQueue.drop(nextMainIndex))
-            }
-        }
-    }
+    private fun displayQueue(): List<MusicTrack> = playbackQueueController.displayQueue()
 
-    private fun displayQueueIndex(): Int {
-        return if (currentQueueTrack() != null) 0 else -1
-    }
+    private fun displayQueueIndex(): Int = playbackQueueController.displayQueueIndex
 
     private fun updateCurrentTrack(track: MusicTrack) {
-        if (currentIsUpNext) {
-            currentUpNextTrack = track
-        } else if (mainQueueIndex in mainQueue.indices) {
-            mainQueue = mainQueue.mapIndexed { index, item -> if (index == mainQueueIndex) track else item }
-            originalMainQueue = originalMainQueue.map { item -> if (item.id == track.id) track else item }
-        }
+        playbackQueueController.updateCurrentTrack(track)
     }
 
     private fun synchronizePlaybackTrack(track: MusicTrack) {
-        val current = currentQueueTrack()
-        var changed = current != track
-        if (current?.id != track.id) {
-            val upNextIndex = upNextQueue.indexOfFirst { it.id == track.id }
-            if (upNextIndex >= 0) {
-                currentUpNextTrack = upNextQueue[upNextIndex]
-                upNextQueue = upNextQueue.filterIndexed { index, _ -> index != upNextIndex }
-                currentIsUpNext = true
-            } else {
-                val mainIndex = mainQueue.indexOfFirst { it.id == track.id }
-                if (mainIndex >= 0) {
-                    mainQueueIndex = mainIndex
-                    currentUpNextTrack = null
-                    currentIsUpNext = false
-                    changed = true
-                }
-            }
+        if (playbackQueueController.synchronizePlaybackTrack(track)) {
+            persistPlaybackQueue()
         }
-        updateCurrentTrack(track)
-        if (changed) persistPlaybackQueue()
     }
 
     private fun updateLocalTrackCopies(trackId: String, updatedTrack: MusicTrack) {
-        mainQueue = mainQueue.map { if (it.id == trackId) updatedTrack else it }
-        originalMainQueue = originalMainQueue.map { if (it.id == trackId) updatedTrack else it }
-        upNextQueue = upNextQueue.map { if (it.id == trackId) updatedTrack else it }
-        if (currentUpNextTrack?.id == trackId) {
-            currentUpNextTrack = updatedTrack
-        }
+        playbackQueueController.updateTrackCopies(trackId, updatedTrack)
         if (playbackState.currentTrack?.id == trackId) {
             playbackState = playbackState.copy(
                 currentTrack = updatedTrack,
@@ -3699,21 +3570,11 @@ class FuoPlayerController(
         )
     }
 
-    private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
-        mainQueue = snapshot.mainQueue
-        originalMainQueue = snapshot.originalMainQueue
-        upNextQueue = snapshot.upNextQueue
-        mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
-        shuffleEnabled = snapshot.shuffleEnabled
-        _repeatMode = snapshot.repeatMode
-        isFmQueue = snapshot.isFmQueue
-        shuffleBeforeFm = snapshot.shuffleBeforeFm
-        currentUpNextTrack = null
-        currentIsUpNext = false
+    private fun restorePlaybackQueueState() {
         playbackParts = emptyList()
         currentPartIndex = -1
         playbackState = playbackState.copy(
-            currentTrack = mainQueue.getOrNull(mainQueueIndex),
+            currentTrack = currentQueueTrack(),
             queue = displayQueue(),
             queueIndex = displayQueueIndex(),
             playbackParts = playbackParts,
@@ -3722,55 +3583,7 @@ class FuoPlayerController(
     }
 
     private fun persistPlaybackQueue() {
-        val snapshot = PlaybackQueueSnapshot(
-            mainQueue = mainQueue,
-            originalMainQueue = originalMainQueue,
-            upNextQueue = upNextQueue,
-            queueIndex = mainQueueIndex,
-            shuffleEnabled = shuffleEnabled,
-            repeatMode = _repeatMode,
-            isFmQueue = isFmQueue,
-            shuffleBeforeFm = shuffleBeforeFm,
-        )
-        scope.launch {
-            playbackQueueStore.save(snapshot)
-        }
-    }
-
-    private fun enableShuffle() {
-        if (isFmQueue || mainQueue.size <= 1) {
-            shuffleEnabled = !isFmQueue
-            return
-        }
-        val current = currentQueueTrack()
-        originalMainQueue = if (originalMainQueue.isEmpty()) mainQueue else originalMainQueue
-        val currentInMain = current?.let { track -> mainQueue.firstOrNull { it.id == track.id } }
-        val shuffledRest = mainQueue.filterNot { it.id == currentInMain?.id }.shuffled()
-        mainQueue = listOfNotNull(currentInMain) + shuffledRest
-        mainQueueIndex = currentInMain?.let { 0 } ?: mainQueueIndex.coerceIn(0, mainQueue.lastIndex)
-        shuffleEnabled = true
-    }
-
-    private fun List<MusicTrack>.shuffledForPlaybackStart(): List<MusicTrack> {
-        if (size <= 1) return this
-        val shuffled = shuffled()
-        return if (shuffled.first().id == first().id) {
-            shuffled.drop(1) + shuffled.first()
-        } else {
-            shuffled
-        }
-    }
-
-    private fun disableShuffle() {
-        val current = currentQueueTrack()
-        if (originalMainQueue.isNotEmpty()) {
-            mainQueue = originalMainQueue
-            mainQueueIndex = current?.let { track -> mainQueue.indexOfFirst { it.id == track.id } }
-                ?.takeIf { it >= 0 }
-                ?: mainQueueIndex.coerceIn(-1, mainQueue.lastIndex)
-        }
-        originalMainQueue = emptyList()
-        shuffleEnabled = false
+        playbackQueueController.persist()
     }
 
     private fun providerName(providerId: String): String {
@@ -3997,8 +3810,7 @@ class FuoPlayerController(
         persistPlaybackQueue()
         message = "播放失败，已切换下一首：${failedTrack.title}"
         if (currentIsUpNext) {
-            currentUpNextTrack = null
-            currentIsUpNext = false
+            playbackQueueController.clearCurrentUpNext()
             persistPlaybackQueue()
         }
         if (upNextQueue.isNotEmpty()) {
