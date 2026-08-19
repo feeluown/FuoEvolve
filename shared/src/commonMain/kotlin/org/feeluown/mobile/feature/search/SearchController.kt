@@ -55,11 +55,11 @@ fun createSearchFeatureController(
     providerRepository = ProviderSearchRepositoryView(providerRepository),
     localRepository = localRepository,
     scope = scope,
+    state = SearchControllerState(initialState),
     providerIdsForSearch = providerIdsForSearch,
     providerAvailability = ProviderAvailability { providerId -> providerExists(providerId) },
     openSearch = openSearch,
     onPreferencesChanged = onPreferencesChanged,
-    initialState = initialState,
 )
 
 /** Owns search state and search-specific operations. */
