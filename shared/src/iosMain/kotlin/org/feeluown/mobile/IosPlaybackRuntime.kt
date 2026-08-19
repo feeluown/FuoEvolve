@@ -4,8 +4,8 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
@@ -31,7 +31,7 @@ internal fun createIosPlaybackRuntimeSession(
         )
 
     return DefaultPlaybackRuntime(
-        engine = LegacyPlaybackRuntimeEngine(playbackEngine, scope),
+        engine = LegacyPlaybackRuntimeEngine(playbackEngine, controller, scope),
         overlay = overlay,
         queueActions = LegacyPlaybackQueueActions(controller),
         scope = scope,
@@ -40,15 +40,22 @@ internal fun createIosPlaybackRuntimeSession(
 
 private class LegacyPlaybackRuntimeEngine(
     private val playbackEngine: PlaybackEngine,
+    controller: FuoPlayerController,
     scope: CoroutineScope,
 ) : PlaybackRuntimeEngine {
-    override val state: StateFlow<PlaybackRuntimeEngineState> = playbackEngine.state
-        .map(PlaybackState::toPlaybackRuntimeEngineState)
-        .stateIn(
-            scope = scope,
-            started = SharingStarted.Eagerly,
-            initialValue = playbackEngine.state.value.toPlaybackRuntimeEngineState(),
-        )
+    override val state: StateFlow<PlaybackRuntimeEngineState> = combine(
+        playbackEngine.state,
+        snapshotFlow { controller.playbackState }.distinctUntilChanged(),
+    ) { engineState, coordinatorState ->
+        mergeIosPlaybackRuntimeEngineState(engineState, coordinatorState)
+    }.stateIn(
+        scope = scope,
+        started = SharingStarted.Eagerly,
+        initialValue = mergeIosPlaybackRuntimeEngineState(
+            engineState = playbackEngine.state.value,
+            coordinatorState = controller.playbackState,
+        ),
+    )
 
     override fun pause() = playbackEngine.pause()
 
@@ -65,14 +72,38 @@ private class LegacyPlaybackQueueActions(
     override fun next() = controller.next()
 }
 
-private fun PlaybackState.toPlaybackRuntimeEngineState(): PlaybackRuntimeEngineState =
-    PlaybackRuntimeEngineState(
-        status = status.toPlaybackSessionStatus(),
-        positionMs = positionMs,
-        durationMs = durationMs,
-        bufferedMs = bufferedMs,
-        errorMessage = errorMessage,
+/**
+ * iOS still resolves provider resources in the legacy coordinator before the native engine starts.
+ * During that window the engine is already Loading, so a resolution failure exists only on the
+ * coordinator state. Bridge that one transitional error into the session until resource resolution
+ * moves behind the playback runtime boundary in C2.
+ */
+internal fun mergeIosPlaybackRuntimeEngineState(
+    engineState: PlaybackState,
+    coordinatorState: PlaybackState,
+): PlaybackRuntimeEngineState {
+    val useCoordinatorResolutionError =
+        engineState.status == PlayerStatus.Loading &&
+            coordinatorState.status == PlayerStatus.Error &&
+            engineState.currentTrack?.id != null &&
+            engineState.currentTrack?.id == coordinatorState.currentTrack?.id
+
+    return PlaybackRuntimeEngineState(
+        status = if (useCoordinatorResolutionError) {
+            PlaybackSessionStatus.Error
+        } else {
+            engineState.status.toPlaybackSessionStatus()
+        },
+        positionMs = engineState.positionMs,
+        durationMs = engineState.durationMs,
+        bufferedMs = engineState.bufferedMs,
+        errorMessage = if (useCoordinatorResolutionError) {
+            coordinatorState.errorMessage
+        } else {
+            engineState.errorMessage
+        },
     )
+}
 
 private fun PlaybackState.toPlaybackRuntimeOverlay(): PlaybackRuntimeOverlay =
     PlaybackRuntimeOverlay(
