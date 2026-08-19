@@ -16,4 +16,12 @@ internal class LocalMusicControllerState {
     var selectedMetadataProviderId by mutableStateOf<String?>(null)
     var metadataSearchResults by mutableStateOf<List<MusicTrack>>(emptyList())
     var metadataSearchMessage by mutableStateOf<String?>(null)
+
+    // Transitional alias used by the app facade while feature state is moved behind
+    // dedicated state holders. Remove when the facade no longer delegates this field.
+    var localMetadataSearchMessage: String?
+        get() = metadataSearchMessage
+        set(value) {
+            metadataSearchMessage = value
+        }
 }
