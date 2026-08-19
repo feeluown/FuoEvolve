@@ -22,17 +22,33 @@ sealed interface AppRoute : NavKey {
     @Serializable
     data object AudioRecognition : AppRoute
 
+    /** Compatibility route kind. New navigation should push [FeatureDetail]. */
     @Serializable
-    data class Feature(val feature: NavigationFeature) : AppRoute
+    data object Feature : AppRoute
 
     @Serializable
-    data class Track(val track: NavigationTrack) : AppRoute
+    data class FeatureDetail(val feature: NavigationFeature) : AppRoute
+
+    /** Compatibility route kind. New navigation should push [TrackDetail]. */
+    @Serializable
+    data object Track : AppRoute
 
     @Serializable
-    data class Video(val video: NavigationVideo) : AppRoute
+    data class TrackDetail(val track: NavigationTrack) : AppRoute
+
+    /** Compatibility route kind. New navigation should push [VideoDetail]. */
+    @Serializable
+    data object Video : AppRoute
 
     @Serializable
-    data class Playlist(
+    data class VideoDetail(val video: NavigationVideo) : AppRoute
+
+    /** Compatibility route kind. New navigation should push [PlaylistDetail]. */
+    @Serializable
+    data object Playlist : AppRoute
+
+    @Serializable
+    data class PlaylistDetail(
         val playlist: NavigationPlaylist,
         val category: String? = null,
     ) : AppRoute
@@ -43,8 +59,12 @@ sealed interface AppRoute : NavKey {
     @Serializable
     data object LocalMusicCollection : AppRoute
 
+    /** Compatibility route kind. New navigation should push [MediaItemDetail]. */
     @Serializable
-    data class MediaItem(val item: NavigationMediaItem) : AppRoute
+    data object MediaItem : AppRoute
+
+    @Serializable
+    data class MediaItemDetail(val item: NavigationMediaItem) : AppRoute
 
     @Serializable
     data object Settings : AppRoute
@@ -56,15 +76,30 @@ sealed interface AppRoute : NavKey {
     data object DownloadManager : AppRoute
 }
 
+private fun AppRoute.routeKind(): AppRoute = when (this) {
+    is AppRoute.FeatureDetail -> AppRoute.Feature
+    is AppRoute.TrackDetail -> AppRoute.Track
+    is AppRoute.VideoDetail -> AppRoute.Video
+    is AppRoute.PlaylistDetail -> AppRoute.Playlist
+    is AppRoute.MediaItemDetail -> AppRoute.MediaItem
+    else -> this
+}
+
 class AppNavigator {
     private val mutableBackStack = MutableStateFlow<List<AppRoute>>(listOf(AppRoute.Home))
 
     val backStack: StateFlow<List<AppRoute>> = mutableBackStack
 
+    /** Route category retained for compatibility with controller-level navigation policy. */
     val currentRoute: AppRoute
+        get() = mutableBackStack.value.last().routeKind()
+
+    /** Exact typed entry currently at the top of the stack. */
+    val currentEntry: AppRoute
         get() = mutableBackStack.value.last()
 
-    fun contains(route: AppRoute): Boolean = route in mutableBackStack.value
+    fun contains(route: AppRoute): Boolean =
+        mutableBackStack.value.any { entry -> entry == route || entry.routeKind() == route }
 
     fun containsWhere(predicate: (AppRoute) -> Boolean): Boolean = mutableBackStack.value.any(predicate)
 
@@ -73,14 +108,14 @@ class AppNavigator {
             mutableBackStack.value = listOf(AppRoute.Home)
             return
         }
-        if (currentRoute != route) {
+        if (currentEntry != route) {
             mutableBackStack.value = mutableBackStack.value + route
         }
     }
 
     fun pop(route: AppRoute): Boolean {
         val stack = mutableBackStack.value
-        val index = stack.indexOfLast { it == route }
+        val index = stack.indexOfLast { entry -> entry == route || entry.routeKind() == route }
         if (index <= 0) return false
         mutableBackStack.value = stack.take(index).ifEmpty { listOf(AppRoute.Home) }
         return true
@@ -102,7 +137,9 @@ class AppNavigator {
     }
 
     fun remove(routes: Set<AppRoute>) {
-        val filtered = mutableBackStack.value.filterNot { it != AppRoute.Home && it in routes }
+        val filtered = mutableBackStack.value.filterNot { entry ->
+            entry != AppRoute.Home && (entry in routes || entry.routeKind() in routes)
+        }
         mutableBackStack.value = filtered.ifEmpty { listOf(AppRoute.Home) }
     }
 
