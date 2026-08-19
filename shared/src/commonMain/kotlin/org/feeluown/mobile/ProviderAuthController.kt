@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
 internal class ProviderAuthController(
-    private val providerRepository: ProviderMusicRepository,
+    providerRepository: ProviderMusicRepository,
     private val sessionRepository: ProviderSessionRepository,
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant,
     private val scope: CoroutineScope,
@@ -20,6 +20,7 @@ internal class ProviderAuthController(
     private val setMessage: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
 ) {
+    private val authRepository: ProviderAuthRepository = ProviderAuthRepositoryView(providerRepository)
     private var stateJob: Job? = null
     private var ytmusicOAuthJob: Job? = null
 
@@ -141,10 +142,11 @@ internal class ProviderAuthController(
             setMessage("无法读取 ytmusic_header.json")
             return
         }
-        val name = providerName("ytmusic")
+        val providerId = "ytmusic"
+        val name = providerName(providerId)
         scope.launch {
             setMessage("正在登录 $name")
-            runCatching { sessionRepository.loginWithYtmusicHeaderFile(headerFileJson) }
+            runCatching { sessionRepository.loginWithHeaderFile(providerId, headerFileJson) }
                 .onSuccess {
                     setMessage(
                         if (it.isLoggedIn) {
@@ -160,10 +162,11 @@ internal class ProviderAuthController(
     }
 
     fun startYtmusicTvOAuthLogin() {
-        val input = oauthInput("ytmusic")
+        val providerId = "ytmusic"
+        val input = oauthInput(providerId)
         val clientId = input.clientId.trim()
         val clientSecret = input.clientSecret.trim()
-        val name = providerName("ytmusic")
+        val name = providerName(providerId)
         if (clientId.isEmpty() || clientSecret.isEmpty()) {
             setMessage("请输入 $name 的 client_id 和 client_secret")
             return
@@ -172,7 +175,7 @@ internal class ProviderAuthController(
         ytmusicOAuthJob = scope.launch {
             setMessage("正在获取 Google 授权码")
             runCatching {
-                val deviceAuth = providerRepository.beginYtmusicOAuth(clientId, clientSecret)
+                val deviceAuth = authRepository.beginDeviceAuthorization(providerId, clientId, clientSecret)
                 state.ytmusicOAuthFlow = YtMusicOAuthFlowUiState(
                     userCode = deviceAuth.userCode,
                     verificationUrl = deviceAuth.verificationUrl,
@@ -187,32 +190,32 @@ internal class ProviderAuthController(
                     while (true) {
                         delay(intervalSeconds * 1_000L)
                         when (
-                            val result = providerRepository.pollYtmusicOAuth(
+                            val result = authRepository.pollDeviceAuthorization(
+                                providerId = providerId,
                                 deviceCode = deviceAuth.deviceCode,
                                 clientId = clientId,
                                 clientSecret = clientSecret,
                             )
                         ) {
-                            is org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Authorized ->
-                                return@withTimeout result.token
-                            org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Pending -> {
+                            is ProviderDeviceAuthorizationPollResult.Authorized -> return@withTimeout result.token
+                            ProviderDeviceAuthorizationPollResult.Pending -> {
                                 state.ytmusicOAuthFlow = state.ytmusicOAuthFlow?.copy(statusMessage = "等待授权中…")
                             }
-                            org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.SlowDown -> {
+                            ProviderDeviceAuthorizationPollResult.SlowDown -> {
                                 intervalSeconds += 5
                                 state.ytmusicOAuthFlow = state.ytmusicOAuthFlow?.copy(statusMessage = "轮询过快，已放慢…")
                             }
-                            is org.feeluown.mobile.provider.ytmusic.YtMusicOAuthPollResult.Denied ->
-                                error(result.message)
+                            is ProviderDeviceAuthorizationPollResult.Denied -> error(result.message)
                         }
                     }
                     @Suppress("UNREACHABLE_CODE")
                     error("unreachable")
                 }
-                sessionRepository.loginWithYtmusicOAuth(
+                sessionRepository.loginWithOAuth(
+                    providerId = providerId,
                     accessToken = token.accessToken,
                     refreshToken = token.refreshToken,
-                    expiresAtMillis = token.expiresAtEpochSeconds * 1_000,
+                    expiresAtMillis = token.expiresAtMillis,
                     scope = token.scope,
                     clientId = clientId,
                     clientSecret = clientSecret,
@@ -272,7 +275,8 @@ internal class ProviderAuthController(
     }
 
     fun loginYtmusicWithOAuthJson(oauthJson: String) {
-        val input = oauthInput("ytmusic")
+        val providerId = "ytmusic"
+        val input = oauthInput(providerId)
         val clientId = input.clientId.trim()
         val clientSecret = input.clientSecret.trim()
         if (oauthJson.isBlank()) {
@@ -283,12 +287,12 @@ internal class ProviderAuthController(
             setMessage("导入 oauth.json 前请填写或导入 client_id 和 client_secret")
             return
         }
-        val name = providerName("ytmusic")
+        val name = providerName(providerId)
         cancelYtmusicTvOAuthLogin()
         scope.launch {
             setMessage("正在登录 $name")
             runCatching {
-                sessionRepository.loginWithYtmusicOAuthJson(oauthJson, clientId, clientSecret)
+                sessionRepository.loginWithOAuthJson(providerId, oauthJson, clientId, clientSecret)
             }.onSuccess {
                 setMessage(
                     if (it.isLoggedIn) {
