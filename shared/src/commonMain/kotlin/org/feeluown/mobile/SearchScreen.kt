@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private const val MAX_SEARCH_HISTORY_ITEMS = 20
 
@@ -53,6 +54,7 @@ fun SearchScreen(
     controller: FuoPlayerController,
     onOpenRecognition: () -> Unit,
 ) {
+    val uiState by controller.searchUiState.collectAsStateWithLifecycle()
     val searchHistoryStore = rememberSearchHistoryStore()
     var searchHistory by remember(searchHistoryStore) {
         mutableStateOf(searchHistoryStore.load().take(MAX_SEARCH_HISTORY_ITEMS))
@@ -75,7 +77,7 @@ fun SearchScreen(
     }
 
     fun performSearch(keyword: String? = null) {
-        val requestedKeyword = keyword ?: controller.query
+        val requestedKeyword = keyword ?: uiState.query
         val normalized = requestedKeyword.trim()
         if (keyword != null) {
             controller.onQueryChange(keyword)
@@ -110,15 +112,15 @@ fun SearchScreen(
                     ) {
                         FuoSearchField(
                             modifier = Modifier.fillMaxWidth(),
-                            query = controller.query,
+                            query = uiState.query,
                             onQueryChange = controller::onQueryChange,
                             onSearch = { performSearch() },
-                            enabled = !controller.isLoading,
+                            enabled = !uiState.isLoading,
                             placeholder = "歌曲、歌手或专辑",
                             trailingContent = {
                                 FuoIconButton(
                                     contentDescription = "搜索",
-                                    enabled = !controller.isLoading,
+                                    enabled = !uiState.isLoading,
                                     onClick = { performSearch() },
                                 ) {
                                     Icon(Icons.Filled.Search, contentDescription = null)
@@ -137,10 +139,10 @@ fun SearchScreen(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            SearchScopeChip(controller, SearchScope.All, "全部")
-                            SearchScopeChip(controller, SearchScope.Local, "本地")
+                            SearchScopeChip(controller, uiState, SearchScope.All, "全部")
+                            SearchScopeChip(controller, uiState, SearchScope.Local, "本地")
                             controller.providers.forEach { provider ->
-                                SearchProviderChip(controller, provider)
+                                SearchProviderChip(controller, uiState, provider)
                             }
                         }
                         SearchHistoryStrip(
@@ -164,10 +166,11 @@ fun SearchScreen(
                         .fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                 ) {
-                    LoadingIndicator(controller.isLoading)
-                    ProviderSearchTabs(controller)
+                    LoadingIndicator(uiState.isLoading)
+                    ProviderSearchTabs(controller, uiState)
                     SearchResultList(
                         controller = controller,
+                        uiState = uiState,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
@@ -200,10 +203,10 @@ fun SearchScreen(
                             }
                             FuoSearchField(
                                 modifier = Modifier.weight(1f),
-                                query = controller.query,
+                                query = uiState.query,
                                 onQueryChange = controller::onQueryChange,
                                 onSearch = { performSearch() },
-                                enabled = !controller.isLoading,
+                                enabled = !uiState.isLoading,
                                 placeholder = "歌曲、歌手或专辑",
                                 trailingContent = {
                                     Row {
@@ -215,7 +218,7 @@ fun SearchScreen(
                                         }
                                         FuoIconButton(
                                             contentDescription = "搜索",
-                                            enabled = !controller.isLoading,
+                                            enabled = !uiState.isLoading,
                                             onClick = { performSearch() },
                                         ) {
                                             Icon(Icons.Filled.Search, contentDescription = null)
@@ -230,10 +233,10 @@ fun SearchScreen(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            SearchScopeChip(controller, SearchScope.All, "全部")
-                            SearchScopeChip(controller, SearchScope.Local, "本地")
+                            SearchScopeChip(controller, uiState, SearchScope.All, "全部")
+                            SearchScopeChip(controller, uiState, SearchScope.Local, "本地")
                             controller.providers.forEach { provider ->
-                                SearchProviderChip(controller, provider)
+                                SearchProviderChip(controller, uiState, provider)
                             }
                         }
                     }
@@ -247,8 +250,8 @@ fun SearchScreen(
                     .padding(horizontal = FuoSpacing.lg),
                 verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
             ) {
-                LoadingIndicator(controller.isLoading)
-                ProviderSearchTabs(controller)
+                LoadingIndicator(uiState.isLoading)
+                ProviderSearchTabs(controller, uiState)
                 SearchHistoryStrip(
                     history = searchHistory,
                     onSearch = { performSearch(it) },
@@ -259,7 +262,7 @@ fun SearchScreen(
                         .weight(1f)
                         .fillMaxWidth(),
                 ) {
-                    searchResultItems(controller)
+                    searchResultItems(controller, uiState)
                 }
             }
         }
@@ -351,15 +354,22 @@ private fun SearchHistoryChip(
 }
 
 @Composable
-fun SearchResultList(controller: FuoPlayerController, modifier: Modifier) {
+fun SearchResultList(
+    controller: FuoPlayerController,
+    uiState: SearchUiState,
+    modifier: Modifier,
+) {
     LazyColumn(modifier = modifier) {
-        searchResultItems(controller, compactTop = true)
+        searchResultItems(controller, uiState, compactTop = true)
     }
 }
 
 @Composable
-private fun ProviderSearchTabs(controller: FuoPlayerController) {
-    if (controller.searchScope == SearchScope.Local) return
+private fun ProviderSearchTabs(
+    controller: FuoPlayerController,
+    uiState: SearchUiState,
+) {
+    if (uiState.searchScope == SearchScope.Local) return
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -368,13 +378,13 @@ private fun ProviderSearchTabs(controller: FuoPlayerController) {
     ) {
         ProviderSearchTab.entries.forEach { tab ->
             FilterChip(
-                selected = controller.providerSearchTab == tab,
+                selected = uiState.providerSearchTab == tab,
                 onClick = { controller.onProviderSearchTabChange(tab) },
-                label = { Text(tab.label(controller)) },
+                label = { Text(tab.label(uiState)) },
             )
         }
     }
-    controller.providerSearchResults.errorMessage?.let {
+    uiState.providerSearchResults.errorMessage?.let {
         Text(
             text = it,
             style = MaterialTheme.typography.bodySmall,
@@ -385,14 +395,15 @@ private fun ProviderSearchTabs(controller: FuoPlayerController) {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
     controller: FuoPlayerController,
+    uiState: SearchUiState,
     compactTop: Boolean = false,
 ) {
-    when (controller.providerSearchTab.takeIf { controller.searchScope != SearchScope.Local } ?: ProviderSearchTab.Songs) {
+    when (uiState.providerSearchTab.takeIf { uiState.searchScope != SearchScope.Local } ?: ProviderSearchTab.Songs) {
         ProviderSearchTab.Songs -> {
-            if (controller.searchResults.isEmpty()) {
-                item { EmptySearchHint(controller.query, compactTop = compactTop) }
+            if (uiState.searchResults.isEmpty()) {
+                item { EmptySearchHint(uiState.query, compactTop = compactTop) }
             } else {
-                itemsIndexed(controller.searchResults, key = { _, item -> item.id }) { index, track ->
+                itemsIndexed(uiState.searchResults, key = { _, item -> item.id }) { index, track ->
                     TrackRow(
                         track = track,
                         downloadState = controller.downloadStates[track.id],
@@ -409,10 +420,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
                 }
             }
         }
-        ProviderSearchTab.Artists -> mediaItems(controller.providerSearchResults.artists, "没有歌手结果", controller)
-        ProviderSearchTab.Albums -> mediaItems(controller.providerSearchResults.albums, "没有专辑结果", controller)
-        ProviderSearchTab.Playlists -> playlists(controller.providerSearchResults.playlists, controller)
-        ProviderSearchTab.Videos -> videos(controller.providerSearchResults.videos, controller)
+        ProviderSearchTab.Artists -> mediaItems(uiState.providerSearchResults.artists, "没有歌手结果", controller)
+        ProviderSearchTab.Albums -> mediaItems(uiState.providerSearchResults.albums, "没有专辑结果", controller)
+        ProviderSearchTab.Playlists -> playlists(uiState.providerSearchResults.playlists, controller)
+        ProviderSearchTab.Videos -> videos(uiState.providerSearchResults.videos, controller)
     }
 }
 
@@ -521,12 +532,12 @@ private fun ProviderSearchRow(
     )
 }
 
-private fun ProviderSearchTab.label(controller: FuoPlayerController): String = when (this) {
-    ProviderSearchTab.Songs -> "歌曲 ${controller.searchResults.size}"
-    ProviderSearchTab.Artists -> "歌手 ${controller.providerSearchResults.artists.size}"
-    ProviderSearchTab.Albums -> "专辑 ${controller.providerSearchResults.albums.size}"
-    ProviderSearchTab.Playlists -> "歌单 ${controller.providerSearchResults.playlists.size}"
-    ProviderSearchTab.Videos -> "视频 ${controller.providerSearchResults.videos.size}"
+private fun ProviderSearchTab.label(uiState: SearchUiState): String = when (this) {
+    ProviderSearchTab.Songs -> "歌曲 ${uiState.searchResults.size}"
+    ProviderSearchTab.Artists -> "歌手 ${uiState.providerSearchResults.artists.size}"
+    ProviderSearchTab.Albums -> "专辑 ${uiState.providerSearchResults.albums.size}"
+    ProviderSearchTab.Playlists -> "歌单 ${uiState.providerSearchResults.playlists.size}"
+    ProviderSearchTab.Videos -> "视频 ${uiState.providerSearchResults.videos.size}"
 }
 
 @Composable
@@ -540,19 +551,28 @@ fun EmptySearchHint(query: String, compactTop: Boolean = false) {
 }
 
 @Composable
-fun SearchScopeChip(controller: FuoPlayerController, scope: SearchScope, label: String) {
+fun SearchScopeChip(
+    controller: FuoPlayerController,
+    uiState: SearchUiState,
+    scope: SearchScope,
+    label: String,
+) {
     FilterChip(
-        selected = controller.searchScope == scope && scope != SearchScope.Provider,
+        selected = uiState.searchScope == scope && scope != SearchScope.Provider,
         onClick = { controller.onSearchScopeChange(scope) },
         label = { Text(label) },
     )
 }
 
 @Composable
-fun SearchProviderChip(controller: FuoPlayerController, provider: ProviderInfo) {
+fun SearchProviderChip(
+    controller: FuoPlayerController,
+    uiState: SearchUiState,
+    provider: ProviderInfo,
+) {
     FilterChip(
-        selected = controller.searchScope == SearchScope.Provider &&
-            controller.selectedSearchProviderId == provider.providerId,
+        selected = uiState.searchScope == SearchScope.Provider &&
+            uiState.selectedSearchProviderId == provider.providerId,
         onClick = { controller.onSearchProviderChange(provider.providerId) },
         label = { Text(provider.providerName) },
     )
