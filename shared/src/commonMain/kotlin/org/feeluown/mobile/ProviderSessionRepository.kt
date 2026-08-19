@@ -25,8 +25,9 @@ interface ProviderSessionRepository {
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
-    suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState
-    suspend fun loginWithYtmusicOAuth(
+    suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState
+    suspend fun loginWithOAuth(
+        providerId: String,
         accessToken: String,
         refreshToken: String,
         expiresAtMillis: Long?,
@@ -34,12 +35,42 @@ interface ProviderSessionRepository {
         clientId: String,
         clientSecret: String,
     ): ProviderAuthState
-    suspend fun loginWithYtmusicOAuthJson(
+    suspend fun loginWithOAuthJson(
+        providerId: String,
         oauthJson: String,
         clientId: String,
         clientSecret: String,
     ): ProviderAuthState
     suspend fun logout(providerId: String): ProviderAuthState
+
+    @Deprecated("Use provider-neutral loginWithHeaderFile")
+    suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =
+        loginWithHeaderFile("ytmusic", headerFileJson)
+
+    @Deprecated("Use provider-neutral loginWithOAuth")
+    suspend fun loginWithYtmusicOAuth(
+        accessToken: String,
+        refreshToken: String,
+        expiresAtMillis: Long?,
+        scope: String?,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = loginWithOAuth(
+        providerId = "ytmusic",
+        accessToken = accessToken,
+        refreshToken = refreshToken,
+        expiresAtMillis = expiresAtMillis,
+        scope = scope,
+        clientId = clientId,
+        clientSecret = clientSecret,
+    )
+
+    @Deprecated("Use provider-neutral loginWithOAuthJson")
+    suspend fun loginWithYtmusicOAuthJson(
+        oauthJson: String,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderAuthState = loginWithOAuthJson("ytmusic", oauthJson, clientId, clientSecret)
 }
 
 /**
@@ -49,8 +80,9 @@ interface ProviderSessionRepository {
  * 也避免登录与退出并发时界面最终显示旧状态。
  */
 class DefaultProviderSessionRepository(
-    private val providerRepository: ProviderMusicRepository,
+    providerRepository: ProviderMusicRepository,
 ) : ProviderSessionRepository {
+    private val providerRepository: ProviderAuthRepository = ProviderAuthRepositoryView(providerRepository)
     private val operationMutex = Mutex()
     private val mutableState = MutableStateFlow(ProviderSessionState())
 
@@ -96,20 +128,22 @@ class DefaultProviderSessionRepository(
         providerRepository.loginWithHeaders(providerId, authorization, cookie)
     }
 
-    override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =
-        mutate("ytmusic", ProviderSessionOperation.Login) {
-            providerRepository.loginWithYtmusicHeaderFile(headerFileJson)
+    override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState =
+        mutate(providerId, ProviderSessionOperation.Login) {
+            providerRepository.loginWithHeaderFile(providerId, headerFileJson)
         }
 
-    override suspend fun loginWithYtmusicOAuth(
+    override suspend fun loginWithOAuth(
+        providerId: String,
         accessToken: String,
         refreshToken: String,
         expiresAtMillis: Long?,
         scope: String?,
         clientId: String,
         clientSecret: String,
-    ): ProviderAuthState = mutate("ytmusic", ProviderSessionOperation.Login) {
-        providerRepository.loginWithYtmusicOAuth(
+    ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
+        providerRepository.loginWithOAuth(
+            providerId = providerId,
             accessToken = accessToken,
             refreshToken = refreshToken,
             expiresAtMillis = expiresAtMillis,
@@ -119,12 +153,13 @@ class DefaultProviderSessionRepository(
         )
     }
 
-    override suspend fun loginWithYtmusicOAuthJson(
+    override suspend fun loginWithOAuthJson(
+        providerId: String,
         oauthJson: String,
         clientId: String,
         clientSecret: String,
-    ): ProviderAuthState = mutate("ytmusic", ProviderSessionOperation.Login) {
-        providerRepository.loginWithYtmusicOAuthJson(oauthJson, clientId, clientSecret)
+    ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
+        providerRepository.loginWithOAuthJson(providerId, oauthJson, clientId, clientSecret)
     }
 
     override suspend fun logout(providerId: String): ProviderAuthState =
