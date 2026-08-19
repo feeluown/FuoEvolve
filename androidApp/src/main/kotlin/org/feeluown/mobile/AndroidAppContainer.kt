@@ -28,6 +28,8 @@ internal class AndroidAppContainer(
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
     private var playbackSessionHolder: PlaybackSession? = null
+    private val playbackSession: PlaybackSession
+        get() = checkNotNull(playbackSessionHolder) { "Playback runtime is not wired" }
 
     val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
@@ -230,8 +232,10 @@ internal class AndroidAppContainer(
     }
 
     val appViewModel: FuoAppViewModel by lazy {
+        val wiredController = controller
         FuoAppViewModel(
-            controller = controller,
+            controller = wiredController,
+            playbackSession = playbackSession,
             searchController = searchController,
             recognitionController = recognitionController,
             searchAppPort = searchAppPort,

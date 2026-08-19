@@ -16,7 +16,7 @@ The first compile-time module boundaries are now explicit:
 - `:playback:api` owns the app-scoped playback session contract and depends only on `:core:model` plus coroutines.
 - `:playback:runtime` owns the default `PlaybackSession` state/transport implementation and depends only on `:playback:api` plus coroutines.
 - `:provider:api` owns provider-neutral cross-feature capability contracts.
-- `:shared` contains the current feature implementations and legacy playback/provider contracts that are still being migrated.
+- `:shared` consumes the playback/provider API contracts and contains the current feature implementations and legacy playback/provider contracts that are still being migrated.
 - `:androidApp` consumes `:shared` plus playback/core APIs and adapts the existing platform engine/queue coordinator into `:playback:runtime`.
 
 These modules intentionally start small. New cross-feature/platform contracts should move into the appropriate API/runtime module instead of expanding the flat shared contract surface. Feature implementation modules can be split later after their ownership boundaries are stable.
@@ -39,7 +39,9 @@ Feature state should have one owner. New feature work should expose immutable UI
 
 App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback-specific platform/session state now belongs to `DefaultPlaybackRuntime`. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
 
-Platform playback integrations must consume `PlaybackSession`, not the global controller. `ControllerPlaybackSession` has been retired. `DefaultPlaybackRuntime` now owns the published session state and play/pause/toggle policy. The Android composition edge still supplies the current queue/lyrics presentation and three temporary queue-transition callbacks (`startCurrent`, `previous`, `next`) while queue selection and resource-resolution policy are extracted from the legacy coordinator.
+Platform playback integrations and migrated playback UI must consume `PlaybackSession`, not the global controller. `ControllerPlaybackSession` has been retired. `DefaultPlaybackRuntime` now owns the published session state and play/pause/toggle policy. Android and iOS both adapt their existing engine/queue coordinator into the same runtime contract. The composition edge still supplies the current queue/lyrics presentation and three temporary queue-transition callbacks (`startCurrent`, `previous`, `next`) while queue selection and resource-resolution policy are extracted from the legacy coordinator.
+
+MiniPlayer is the first common playback UI consumer migrated to `PlaybackSessionState` and session transport controls. Its remaining full-player visibility/transition bridge is presentation-only and is scheduled for removal with the FullPlayer/queue/lyrics migration.
 
 ## Repository dependencies
 
@@ -51,11 +53,11 @@ Platform dependency construction is isolated in platform containers. Android use
 
 Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. During the remaining migration, platform composition roots may adapt still-centralized controller operations to those ports; the dependency must not leak back into the feature or app route contract.
 
-Android playback uses `AndroidPlaybackRuntime.kt` as a composition-edge adapter. The shared runtime module remains controller-free; only the adapter may bridge the remaining queue coordinator until that policy is moved into playback-owned components.
+Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. The shared runtime module remains controller-free; only these adapters may bridge the remaining queue coordinator until that policy is moved into playback-owned components. `FuoAppViewModel` exposes the resulting app-scoped `PlaybackSession`, and `AppRoot` supplies it to playback UI through `LocalPlaybackSession`.
 
 ## Architecture fitness check
 
-`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, app-port contracts/routes, and Android playback service/Lyricon integration. It also rejects reintroduction of the retired Search/Recognition route shims and `ControllerPlaybackSession` adapter.
+`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, the controller-free MiniPlayer implementation/composition contract, app-port contracts/routes, and Android playback service/Lyricon integration. It also rejects reintroduction of the retired Search/Recognition route shims and `ControllerPlaybackSession` adapter.
 
 ## Migration rule
 

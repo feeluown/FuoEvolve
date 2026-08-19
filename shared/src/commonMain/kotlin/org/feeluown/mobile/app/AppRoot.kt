@@ -313,6 +313,7 @@ fun AppRoot(
             }
 
             CompositionLocalProvider(
+                LocalPlaybackSession provides appViewModel.playbackSession,
                 LocalShareHandler provides { onShareText(it.text) },
                 LocalLocalPlaylistFileActions provides LocalPlaylistFileActions(
                     importFile = onImportLocalPlaylistFile,

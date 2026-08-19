@@ -26,6 +26,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            api(project(":playback:api"))
             implementation(project(":provider:api"))
             implementation(compose.runtime)
             implementation(compose.foundation)
@@ -59,6 +60,7 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
         }
         iosMain.dependencies {
+            implementation(project(":playback:runtime"))
             implementation(libs.ktor.client.darwin)
         }
     }

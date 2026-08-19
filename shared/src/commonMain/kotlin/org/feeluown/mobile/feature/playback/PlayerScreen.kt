@@ -109,7 +109,12 @@ import kotlin.math.roundToInt
 @Composable
 @OptIn(ExperimentalSharedTransitionApi::class)
 fun MiniPlayer(controller: FuoPlayerController) {
-    MiniPlayerContent(controller)
+    RuntimeMiniPlayer(
+        playbackSession = LocalPlaybackSession.current,
+        isFullPlayerOpen = controller.isFullPlayerOpen,
+        transitionDirection = controller.trackChangeDirection,
+        onOpenFullPlayer = controller::openFullPlayer,
+    )
 }
 
 @Composable

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import org.feeluown.mobile.playback.api.PlaybackSession
 
 @Serializable
 sealed interface AppRoute : NavKey {
@@ -165,6 +166,7 @@ sealed interface AppIntent {
 /** 应用壳层 ViewModel：组合设置、登录会话、导航和 feature owner。 */
 class FuoAppViewModel(
     val controller: FuoPlayerController,
+    val playbackSession: PlaybackSession,
     private val searchController: SearchFeatureController,
     private val recognitionController: RecognitionFeatureController,
     internal val searchAppPort: SearchAppPort,

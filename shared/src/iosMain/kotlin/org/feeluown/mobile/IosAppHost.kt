@@ -189,6 +189,10 @@ private class IosAppContainer(
         recognitionFeatureController = recognitionController,
     )
 
+    private val playbackSession by lazy {
+        createIosPlaybackRuntimeSession(controller, playbackEngine, scope)
+    }
+
     private val searchAppPort = object : SearchAppPort {
         override val providers: List<ProviderInfo>
             get() = controller.providers
@@ -236,6 +240,7 @@ private class IosAppContainer(
 
     val appViewModel = FuoAppViewModel(
         controller = controller,
+        playbackSession = playbackSession,
         searchController = searchController,
         recognitionController = recognitionController,
         searchAppPort = searchAppPort,

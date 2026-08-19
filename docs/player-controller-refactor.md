@@ -53,9 +53,20 @@ Playback platform state and transport policy now have a dedicated owner.
 - Focused runtime tests cover state composition and transport dispatch, and CI runs `:playback:runtime:allTests` on both Android and iOS workflows.
 - Architecture fitness rules scan the runtime module and reject reintroduction of `ControllerPlaybackSession`.
 
+## Phase 6: playback UI migration C1
+
+The MiniPlayer rendering/transport path now consumes the dedicated playback session on both platforms.
+
+- iOS now has `IosPlaybackRuntime.kt`, mirroring the Android composition-edge adapter and constructing the same `DefaultPlaybackRuntime` contract.
+- `FuoAppViewModel` receives the app-scoped `PlaybackSession`; `AppRoot` provides it to playback UI through `LocalPlaybackSession`.
+- `RuntimeMiniPlayer` renders `PlaybackSessionState`, cover metadata from `TrackRef`, progress, lyrics, and previous/toggle/next transport without reading `FuoPlayerController`.
+- The existing `MiniPlayer(controller)` entry point is intentionally kept as a C1-only presentation bridge for current screen call sites. It forwards only full-player visibility, transition direction, and the open-full-player action while all playback state/transport comes from `PlaybackSession`.
+- `checkArchitectureBoundaries` scans the new MiniPlayer implementation and playback composition contract so controller dependencies cannot leak into the migrated path.
+- FullPlayer, queue, lyrics presentation state, seek, shuffle/repeat, sleep timer, replacement actions, and removal of the temporary MiniPlayer entry bridge are deliberately deferred to C2 on the same PR after C1 review.
+
 ## Next phases
 
-1. Migrate mini/full player UI and playback overlays to `PlaybackSession`/runtime-owned UI state, expanding the playback action contract only for UI capabilities that are actually needed.
+1. C2: migrate FullPlayer/queue/lyrics and playback-specific presentation actions to runtime-owned state/narrow playback UI ports, then remove the temporary `MiniPlayer(controller)` bridge.
 2. Move the remaining `startCurrent` / `previous` / `next` queue-transition policy and resource-start orchestration out of `FuoPlayerController`, removing the final runtime queue bridge.
 3. Replace controller-backed Search/Recognition app-port operations as their sibling playback/download/provider-detail owners become explicit domain/feature ports.
 4. Apply the feature-owned state plus app-shell composition pattern to local music, downloads, provider content, and settings.

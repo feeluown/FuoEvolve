@@ -18,6 +18,8 @@ val migratedControllerBoundaryFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppFeaturePorts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRoute.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackComposition.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/RuntimeMiniPlayer.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/FuoPlaybackService.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/LyriconLyricsPublisher.kt",
 )
