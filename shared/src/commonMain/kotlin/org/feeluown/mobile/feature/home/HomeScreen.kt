@@ -72,6 +72,7 @@ fun HomeScreen(
     onOpenRecognition: () -> Unit,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
+    val playbackUiPort = LocalPlaybackUiPort.current
     Scaffold(
         topBar = {
             if (!layoutInfo.useWideLayout) {
@@ -97,8 +98,8 @@ fun HomeScreen(
             }
         },
         bottomBar = {
-            if (controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+            if (playbackUiPort.currentTrack != null) {
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->

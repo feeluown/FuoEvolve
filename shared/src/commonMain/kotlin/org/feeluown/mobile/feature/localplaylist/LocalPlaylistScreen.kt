@@ -59,6 +59,7 @@ fun LocalPlaylistScreen(
 ) {
     val displayPlaylist = controller.selectedLocalPlaylist ?: playlist ?: return
     val fileActions = LocalLocalPlaylistFileActions.current
+    val playbackUiPort = LocalPlaybackUiPort.current
     var showDeleteDialog by remember(displayPlaylist.id) { mutableStateOf(false) }
 
     Scaffold(
@@ -106,7 +107,7 @@ fun LocalPlaylistScreen(
             )
         },
         bottomBar = {
-            if (controller.playbackState.currentTrack != null) MiniPlayer(controller)
+            if (playbackUiPort.currentTrack != null) PlaybackMiniPlayer()
         },
     ) { paddingValues ->
         Column(

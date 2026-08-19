@@ -29,7 +29,7 @@ The first migration stage groups existing source files physically while keeping 
 - `core/model/`: legacy shared models during migration; stable new architecture models belong in `:core:model`.
 - `core/ui/`: design system and cross-feature UI/platform abstractions.
 - `feature/<name>/`: feature-local controller, state and UI.
-- `feature/playback/`: the remaining legacy playback coordinator and player UI while they migrate onto the runtime contract.
+- `feature/playback/`: playback session composition plus the remaining legacy coordinator/presentation helpers during migration.
 
 Provider protocol implementations remain under `provider/<provider>` because they already have a useful adapter boundary.
 
@@ -37,11 +37,13 @@ Provider protocol implementations remain under `provider/<provider>` because the
 
 Feature state should have one owner. New feature work should expose immutable UI state (preferably `StateFlow`) instead of adding new delegated properties to `FuoPlayerController`.
 
-App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback-specific platform/session state now belongs to `DefaultPlaybackRuntime`. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
+App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback status, timing, current stable track reference, lyrics, queue identity/index, errors, and transport policy belong to `PlaybackSession` / `DefaultPlaybackRuntime`. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
 
-Platform playback integrations and migrated playback UI must consume `PlaybackSession`, not the global controller. `ControllerPlaybackSession` has been retired. `DefaultPlaybackRuntime` now owns the published session state and play/pause/toggle policy. Android and iOS both adapt their existing engine/queue coordinator into the same runtime contract. The composition edge still supplies the current queue/lyrics presentation and three temporary queue-transition callbacks (`startCurrent`, `previous`, `next`) while queue selection and resource-resolution policy are extracted from the legacy coordinator.
+Platform playback integrations and migrated playback UI consume `PlaybackSession`, not the global controller. `ControllerPlaybackSession` has been retired. Android and iOS both adapt their existing engine/queue coordinator into the same runtime contract. The composition edge still supplies three temporary queue-transition callbacks (`startCurrent`, `previous`, `next`) while queue selection and resource-resolution policy are extracted from the legacy coordinator.
 
-MiniPlayer is the first common playback UI consumer migrated to `PlaybackSessionState` and session transport controls. Its remaining full-player visibility/transition bridge is presentation-only and is scheduled for removal with the FullPlayer/queue/lyrics migration.
+MiniPlayer and FullPlayer now read authoritative playback state/transport from `PlaybackSession`. FullPlayer-specific rich presentation and feature operations that do not belong in the narrow session contract—queue editing, seek/shuffle/repeat, sleep timer, rich `MusicTrack` metadata, downloads and replacement actions—flow through `PlaybackUiPort`. `ControllerPlaybackUiPort` is an app-shell compatibility adapter only; migrated playback UI does not depend on `FuoPlayerController` directly.
+
+Legacy feature screens that still call the old `MiniPlayer(controller)` signature are outside the playback UI boundary. That signature remains only as a feature-shell compatibility call site while those screens are migrated; playback state and transport themselves remain session-owned.
 
 ## Repository dependencies
 
@@ -53,11 +55,11 @@ Platform dependency construction is isolated in platform containers. Android use
 
 Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. During the remaining migration, platform composition roots may adapt still-centralized controller operations to those ports; the dependency must not leak back into the feature or app route contract.
 
-Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. The shared runtime module remains controller-free; only these adapters may bridge the remaining queue coordinator until that policy is moved into playback-owned components. `FuoAppViewModel` exposes the resulting app-scoped `PlaybackSession`, and `AppRoot` supplies it to playback UI through `LocalPlaybackSession`.
+Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. The shared runtime module remains controller-free. `FuoAppViewModel` exposes the resulting app-scoped `PlaybackSession`, and `AppRoot` supplies it to playback UI through `LocalPlaybackSession`. `AppRoot` also supplies the temporary `PlaybackUiPort` adapter separately so the stable runtime API does not expand into app-specific UI operations.
 
 ## Architecture fitness check
 
-`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, the controller-free MiniPlayer implementation/composition contract, app-port contracts/routes, and Android playback service/Lyricon integration. It also rejects reintroduction of the retired Search/Recognition route shims and `ControllerPlaybackSession` adapter.
+`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, `PlaybackUiPort`, playback composition contracts, controller-free MiniPlayer/FullPlayer implementations, app-port contracts/routes, and Android playback service/Lyricon integration. It also rejects reintroduction of the retired Search/Recognition route shims and `ControllerPlaybackSession` adapter.
 
 ## Migration rule
 
