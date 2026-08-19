@@ -22,6 +22,57 @@ class AppNavigatorTest {
     }
 
     @Test
+    fun typedRoutesKeepIndependentResourceIdentity() {
+        val navigator = AppNavigator()
+        val first = NavigationTrack(
+            id = "netease:1",
+            title = "First",
+            artists = "Artist",
+            album = "Album",
+            source = "netease",
+            sourceType = TrackSourceType.Provider.name,
+        )
+        val second = first.copy(id = "netease:2", title = "Second")
+
+        navigator.navigate(AppRoute.TrackDetail(first))
+        navigator.navigate(AppRoute.TrackDetail(second))
+
+        assertEquals(AppRoute.Track, navigator.currentRoute)
+        assertEquals(AppRoute.TrackDetail(second), navigator.currentEntry)
+        assertEquals(
+            listOf(
+                AppRoute.Home,
+                AppRoute.TrackDetail(first),
+                AppRoute.TrackDetail(second),
+            ),
+            navigator.backStack.value,
+        )
+
+        assertTrue(navigator.pop())
+        assertEquals(AppRoute.TrackDetail(first), navigator.currentEntry)
+        assertEquals(AppRoute.Track, navigator.currentRoute)
+    }
+
+    @Test
+    fun compatibilityPopMatchesTypedDetailRoute() {
+        val navigator = AppNavigator()
+        val track = NavigationTrack(
+            id = "qqmusic:1",
+            title = "Song",
+            artists = "Artist",
+            album = "Album",
+            source = "qqmusic",
+            sourceType = TrackSourceType.Provider.name,
+        )
+        navigator.navigate(AppRoute.Search)
+        navigator.navigate(AppRoute.TrackDetail(track))
+
+        assertTrue(navigator.contains(AppRoute.Track))
+        assertTrue(navigator.pop(AppRoute.Track))
+        assertEquals(AppRoute.Search, navigator.currentRoute)
+    }
+
+    @Test
     fun poppingAParentAlsoRemovesItsChildRoutes() {
         val navigator = AppNavigator()
         navigator.navigate(AppRoute.Settings)
