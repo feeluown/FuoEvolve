@@ -54,6 +54,80 @@ class AppNavigatorTest {
     }
 
     @Test
+    fun typedTrackRouteRoundTripPreservesCompleteTrackMetadata() {
+        val original = MusicTrack(
+            id = "ytmusic:replacement",
+            title = "Displayed title",
+            artists = "Artist A / Artist B",
+            album = "Displayed album",
+            source = "ytmusic",
+            sourceType = TrackSourceType.Provider,
+            coverUrl = "https://example.com/displayed.jpg",
+            durationMs = 210_000,
+            localUri = "content://unused/provider-track",
+            localDirectoryId = "unused/provider-dir/",
+            lyrics = "lyrics",
+            providerId = "ytmusic:replacement",
+            providerName = "YouTube Music",
+            isSmartReplacement = true,
+            originalId = "netease:original",
+            originalTitle = "Original title",
+            originalArtists = "Original artist",
+            originalAlbum = "Original album",
+            originalSource = "netease",
+            originalProviderName = "网易云音乐",
+            originalCoverUrl = "https://example.com/original.jpg",
+            replacementId = "ytmusic:replacement",
+            replacementTitle = "Replacement title",
+            replacementArtists = "Artist A / Artist B",
+            replacementAlbum = "Replacement album",
+            replacementSource = "ytmusic",
+            replacementProviderName = "YouTube Music",
+            replacementCoverUrl = "https://example.com/replacement.jpg",
+            replacementStrategy = "smart",
+            replacementScore = 0.93,
+            isUnavailable = false,
+            artistItemId = "artist:a",
+            albumItemId = "album:1",
+            artistItems = listOf(
+                ProviderMediaItem(
+                    id = "artist:a",
+                    title = "Artist A",
+                    providerId = "artist:a",
+                    providerName = "YouTube Music",
+                    type = ProviderMediaItemType.Artist,
+                    coverUrl = "https://example.com/a.jpg",
+                    providerUrl = "https://music.youtube.com/channel/a",
+                ),
+                ProviderMediaItem(
+                    id = "artist:b",
+                    title = "Artist B",
+                    providerId = "artist:b",
+                    providerName = "YouTube Music",
+                    type = ProviderMediaItemType.Artist,
+                    coverUrl = "https://example.com/b.jpg",
+                    providerUrl = "https://music.youtube.com/channel/b",
+                ),
+            ),
+            providerUrl = "https://music.youtube.com/watch?v=replacement",
+            providerTags = listOf("official", "music-video"),
+        )
+
+        val navigator = AppNavigator()
+        navigator.navigate(AppRoute.TrackDetail(original.toNavigationTrack()))
+        navigator.navigate(
+            AppRoute.TrackDetail(
+                original.copy(id = "ytmusic:other", title = "Other").toNavigationTrack(),
+            )
+        )
+
+        assertTrue(navigator.pop())
+        val restoredRoute = navigator.currentEntry as AppRoute.TrackDetail
+
+        assertEquals(original, restoredRoute.track.toMusicTrack())
+    }
+
+    @Test
     fun compatibilityPopMatchesTypedDetailRoute() {
         val navigator = AppNavigator()
         val track = NavigationTrack(
