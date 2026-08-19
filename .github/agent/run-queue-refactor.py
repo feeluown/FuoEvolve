@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Execute the queue refactor without the final mutation assertion so Kotlin
+# compiler diagnostics can expose any remaining direct queue-state writes.
 script_path = Path('.github/agent/refactor-playback-controller.py')
 script = script_path.read_text(encoding='utf-8')
 start = script.index('for forbidden in (')
