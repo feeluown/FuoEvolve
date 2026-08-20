@@ -6,7 +6,7 @@ package org.feeluown.mobile
  * Search owns query/result state. Cross-feature actions are composed here from narrow owners so
  * Android and iOS do not rebuild controller-backed forwarding objects independently.
  */
-internal class DefaultSearchAppPort(
+class DefaultSearchAppPort(
     private val searchController: SearchFeatureController,
     private val providerSessions: () -> ProviderSessionState,
     private val playbackQueue: PlaybackQueueUiPort,
@@ -64,7 +64,7 @@ internal class DefaultSearchAppPort(
 }
 
 /** Controller-free app-shell adapter for recognition result navigation. */
-internal class DefaultRecognitionAppPort(
+class DefaultRecognitionAppPort(
     private val isProviderEnabled: (String) -> Boolean,
     private val navigator: AppNavigator,
 ) : RecognitionAppPort {
