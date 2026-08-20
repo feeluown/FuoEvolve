@@ -1,10 +1,12 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.flow.StateFlow
+
 /**
  * App-shell capabilities that Search needs from sibling features.
  *
- * Implementations belong at platform composition roots while the legacy controller is being
- * decomposed. Search itself must only depend on this narrow port plus its feature owner.
+ * Shared app-shell adapters compose these capabilities from narrow feature owners so Search itself
+ * never depends on the compatibility controller or platform-specific forwarding objects.
  */
 interface SearchAppPort {
     val providers: List<ProviderInfo>
@@ -37,9 +39,18 @@ interface SearchAppPort {
     fun openVideo(video: ProviderVideo)
 }
 
+data class RecognitionDetailLoadState(
+    val loadingTrackId: String? = null,
+    val errorMessage: String? = null,
+)
+
 /** App-shell capabilities that Recognition needs outside its feature owner. */
 interface RecognitionAppPort {
+    val detailLoadState: StateFlow<RecognitionDetailLoadState>
+
     fun canOpenNeteaseDetail(song: RecognizedSong): Boolean
 
-    fun openNeteaseDetail(song: RecognizedSong)
+    suspend fun openNeteaseDetail(song: RecognizedSong)
+
+    fun clearDetailLoadError()
 }

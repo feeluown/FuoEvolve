@@ -216,6 +216,7 @@ private class IosAppContainer(
             isProviderEnabled = { providerId ->
                 providerSessionRepository.state.value.providers.any { it.providerId == providerId }
             },
+            loadTrackDetail = providerRepository::trackDetail,
             navigator = navigator,
         )
     }

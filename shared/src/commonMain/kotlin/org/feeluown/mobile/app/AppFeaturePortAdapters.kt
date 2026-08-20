@@ -1,5 +1,10 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * Shared app-shell adapter for Search.
  *
@@ -66,27 +71,42 @@ class DefaultSearchAppPort(
 /** Controller-free app-shell adapter for recognition result navigation. */
 class DefaultRecognitionAppPort(
     private val isProviderEnabled: (String) -> Boolean,
+    private val loadTrackDetail: suspend (String) -> MusicTrack,
     private val navigator: AppNavigator,
 ) : RecognitionAppPort {
+    private val mutableDetailLoadState = MutableStateFlow(RecognitionDetailLoadState())
+    override val detailLoadState: StateFlow<RecognitionDetailLoadState> = mutableDetailLoadState.asStateFlow()
+
     override fun canOpenNeteaseDetail(song: RecognizedSong): Boolean =
         isProviderEnabled(NETEASE_PROVIDER_ID) && !song.neteaseSongId.isNullOrBlank()
 
-    override fun openNeteaseDetail(song: RecognizedSong) {
+    override suspend fun openNeteaseDetail(song: RecognizedSong) {
         if (!canOpenNeteaseDetail(song)) return
+        if (mutableDetailLoadState.value.loadingTrackId != null) return
         val songId = song.neteaseSongId?.takeIf { it.isNotBlank() } ?: return
         val trackId = "$NETEASE_PROVIDER_ID:$songId"
-        val routeTrack = MusicTrack(
-            id = trackId,
-            title = song.title,
-            artists = song.artists.joinToString(" / "),
-            album = song.album,
-            source = NETEASE_PROVIDER_ID,
-            sourceType = TrackSourceType.Provider,
-            coverUrl = song.coverUrl,
-            providerId = trackId,
-            providerName = "网易云音乐",
-        )
-        navigator.navigate(AppRoute.TrackDetail(routeTrack.toNavigationTrack()))
+        mutableDetailLoadState.value = RecognitionDetailLoadState(loadingTrackId = trackId)
+        try {
+            val track = loadTrackDetail(trackId)
+            mutableDetailLoadState.value = RecognitionDetailLoadState()
+            navigator.navigate(AppRoute.TrackDetail(track.toNavigationTrack()))
+        } catch (cancelled: CancellationException) {
+            mutableDetailLoadState.value = RecognitionDetailLoadState()
+            throw cancelled
+        } catch (throwable: Throwable) {
+            mutableDetailLoadState.value = RecognitionDetailLoadState(
+                errorMessage = throwable.providerFailureOrNull(NETEASE_PROVIDER_ID)?.userMessage
+                    ?: throwable.message
+                    ?: "资源加载失败",
+            )
+        }
+    }
+
+    override fun clearDetailLoadError() {
+        val current = mutableDetailLoadState.value
+        if (current.errorMessage != null) {
+            mutableDetailLoadState.value = current.copy(errorMessage = null)
+        }
     }
 
     private companion object {

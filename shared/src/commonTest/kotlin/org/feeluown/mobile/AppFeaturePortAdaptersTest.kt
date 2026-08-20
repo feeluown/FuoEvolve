@@ -2,9 +2,11 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AppFeaturePortAdaptersTest {
@@ -62,38 +64,80 @@ class AppFeaturePortAdaptersTest {
     }
 
     @Test
-    fun recognitionPortBuildsTypedNeteaseTrackRouteOnlyWhenProviderIsEnabled() {
-        val song = RecognizedSong(
-            neteaseSongId = "123",
-            title = "Song",
-            artists = listOf("Artist A", "Artist B"),
-            album = "Album",
-            coverUrl = "https://example.test/cover.jpg",
-        )
-        val disabledNavigator = AppNavigator()
-        val disabled = DefaultRecognitionAppPort(
+    fun recognitionPortDoesNotLoadDetailWhenProviderIsDisabled() = runTest {
+        val navigator = AppNavigator()
+        var loadCount = 0
+        val port = DefaultRecognitionAppPort(
             isProviderEnabled = { false },
-            navigator = disabledNavigator,
+            loadTrackDetail = {
+                loadCount += 1
+                track(it)
+            },
+            navigator = navigator,
         )
+        val song = recognizedSong()
 
-        assertFalse(disabled.canOpenNeteaseDetail(song))
-        disabled.openNeteaseDetail(song)
-        assertEquals(AppRoute.Home, disabledNavigator.currentEntry)
+        assertFalse(port.canOpenNeteaseDetail(song))
+        port.openNeteaseDetail(song)
 
-        val enabledNavigator = AppNavigator()
-        val enabled = DefaultRecognitionAppPort(
-            isProviderEnabled = { it == "netease" },
-            navigator = enabledNavigator,
-        )
-
-        assertTrue(enabled.canOpenNeteaseDetail(song))
-        enabled.openNeteaseDetail(song)
-
-        val route = enabledNavigator.currentEntry as AppRoute.TrackDetail
-        assertEquals("netease:123", route.track.id)
-        assertEquals("Artist A / Artist B", route.track.artists)
-        assertEquals("netease", route.track.source)
+        assertEquals(0, loadCount)
+        assertEquals(AppRoute.Home, navigator.currentEntry)
+        assertEquals(RecognitionDetailLoadState(), port.detailLoadState.value)
     }
+
+    @Test
+    fun recognitionPortLoadsCanonicalNeteaseTrackBeforeTypedNavigation() = runTest {
+        val navigator = AppNavigator()
+        val canonical = track("netease:123").copy(
+            title = "Canonical title",
+            artists = "Canonical artist",
+            durationMs = 245_000,
+        )
+        var requestedTrackId: String? = null
+        val port = DefaultRecognitionAppPort(
+            isProviderEnabled = { it == "netease" },
+            loadTrackDetail = { trackId ->
+                requestedTrackId = trackId
+                canonical
+            },
+            navigator = navigator,
+        )
+        val song = recognizedSong()
+
+        assertTrue(port.canOpenNeteaseDetail(song))
+        port.openNeteaseDetail(song)
+
+        assertEquals("netease:123", requestedTrackId)
+        val route = navigator.currentEntry as AppRoute.TrackDetail
+        assertEquals(canonical.toNavigationTrack(), route.track)
+        assertEquals(RecognitionDetailLoadState(), port.detailLoadState.value)
+    }
+
+    @Test
+    fun recognitionPortSurfacesDetailLoadFailureWithoutNavigating() = runTest {
+        val navigator = AppNavigator()
+        val port = DefaultRecognitionAppPort(
+            isProviderEnabled = { it == "netease" },
+            loadTrackDetail = { throw IllegalStateException("detail failed") },
+            navigator = navigator,
+        )
+
+        port.openNeteaseDetail(recognizedSong())
+
+        assertEquals(AppRoute.Home, navigator.currentEntry)
+        assertNull(port.detailLoadState.value.loadingTrackId)
+        assertEquals("detail failed", port.detailLoadState.value.errorMessage)
+        port.clearDetailLoadError()
+        assertEquals(RecognitionDetailLoadState(), port.detailLoadState.value)
+    }
+
+    private fun recognizedSong() = RecognizedSong(
+        neteaseSongId = "123",
+        title = "Song",
+        artists = listOf("Artist A", "Artist B"),
+        album = "Album",
+        coverUrl = "https://example.test/cover.jpg",
+    )
 
     private fun track(id: String): MusicTrack = MusicTrack(
         id = id,
@@ -102,6 +146,8 @@ class AppFeaturePortAdaptersTest {
         album = "Album",
         source = "netease",
         sourceType = TrackSourceType.Provider,
+        providerId = id,
+        providerName = "网易云音乐",
     )
 
     private class FakeSearchController(

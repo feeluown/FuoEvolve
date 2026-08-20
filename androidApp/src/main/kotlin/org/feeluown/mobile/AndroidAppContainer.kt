@@ -200,6 +200,7 @@ internal class AndroidAppContainer(
             isProviderEnabled = { providerId ->
                 providerSessionRepository.state.value.providers.any { it.providerId == providerId }
             },
+            loadTrackDetail = providerRepository::trackDetail,
             navigator = navigator,
         )
     }
