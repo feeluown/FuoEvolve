@@ -244,24 +244,27 @@ private class IosAppContainer(
             controller.openRecognizedNeteaseDetail(song)
     }
 
-    private val playbackUiPort: PlaybackUiPort by lazy {
-        DefaultPlaybackUiPort(
-            navigation = controllerMirroredPlaybackNavigationPort(controller, scope),
-            presentation = DefaultPlaybackPresentationPort(
-                playbackEngine = playbackEngine,
-                settingsRepository = settingsRepository,
-                scope = scope,
-            ),
-            queuePort = controller.playbackTransportCoordinator,
-            sleepTimer = ControllerPlaybackSleepTimerPort(controller),
-            nowPlayingActions = ControllerNowPlayingActionPort(controller),
+    private val playbackPresentationPort: PlaybackPresentationPort by lazy {
+        DefaultPlaybackPresentationPort(
+            playbackEngine = playbackEngine,
+            queuePort = controller.playbackQueueUiPort,
+            settingsRepository = settingsRepository,
+            scope = scope,
         )
     }
 
     val appViewModel = FuoAppViewModel(
         controller = controller,
         playbackSession = playbackSession,
-        playbackUiPort = playbackUiPort,
+        playbackNavigationPort = controller.playbackNavigationPort,
+        playbackPresentationPort = playbackPresentationPort,
+        playbackQueueUiPort = controller.playbackQueueUiPort,
+        playbackSleepTimerPort = controller.playbackSleepTimerPort,
+        downloadActionPort = controller.downloadActionPort,
+        playlistActionPort = controller.playlistActionPort,
+        providerTrackActionPort = controller.providerTrackActionPort,
+        localMusicActionPort = controller.localMusicActionPort,
+        replacementActionPort = controller.replacementActionPort,
         searchController = searchController,
         recognitionController = recognitionController,
         searchAppPort = searchAppPort,

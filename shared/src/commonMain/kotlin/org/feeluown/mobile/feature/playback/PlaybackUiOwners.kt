@@ -3,71 +3,39 @@ package org.feeluown.mobile
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-internal data class PlaybackNavigationSnapshot(
-    val isFullPlayerOpen: Boolean = false,
-    val isQueueOpen: Boolean = false,
-)
-
-/**
- * Owns player-overlay navigation.
- *
- * The optional compatibility callbacks keep legacy feature callers working while their
- * `MiniPlayer(controller)` signatures are retired. The playback owner itself remains free of any
- * FuoPlayerController dependency and can drop this mirror once those call sites are migrated.
- */
-internal class DefaultPlaybackNavigationPort(
-    scope: CoroutineScope,
-    compatibilityState: (() -> PlaybackNavigationSnapshot)? = null,
-    private val compatibilityOpenFullPlayer: () -> Unit = {},
-    private val compatibilityCloseFullPlayer: () -> Unit = {},
-    private val compatibilityToggleQueue: () -> Unit = {},
-) : PlaybackNavigationPort {
+/** Owns FullPlayer and queue-overlay navigation without mirroring controller state. */
+class DefaultPlaybackNavigationPort : PlaybackNavigationPort {
     override var isFullPlayerOpen by mutableStateOf(false)
         private set
     override var isQueueOpen by mutableStateOf(false)
         private set
 
-    init {
-        val compatibilityReader = compatibilityState
-        if (compatibilityReader != null) {
-            scope.launch {
-                snapshotFlow { compatibilityReader() }.collect { snapshot ->
-                    isFullPlayerOpen = snapshot.isFullPlayerOpen
-                    isQueueOpen = snapshot.isQueueOpen && snapshot.isFullPlayerOpen
-                }
-            }
-        }
-    }
-
     override fun openFullPlayer() {
         isFullPlayerOpen = true
-        compatibilityOpenFullPlayer()
     }
 
     override fun closeFullPlayer() {
         isQueueOpen = false
         isFullPlayerOpen = false
-        compatibilityCloseFullPlayer()
     }
 
     override fun toggleQueue() {
         if (!isFullPlayerOpen) return
         isQueueOpen = !isQueueOpen
-        compatibilityToggleQueue()
     }
 }
 
 /**
- * Reads rich presentation directly from the playback engine and settings owner.
- * Queue state remains owned by [PlaybackQueueUiPort] and is merged only at the transitional
- * aggregate facade below.
+ * Reads rich presentation directly from the playback engine/settings owners and overlays durable
+ * queue metadata for the active track. The queue remains the source of restored/local metadata,
+ * while the engine remains the runtime identity authority during a real transition.
  */
 class DefaultPlaybackPresentationPort(
     private val playbackEngine: PlaybackEngine,
+    private val queuePort: PlaybackQueueUiPort,
     settingsRepository: AppSettingsRepository,
     scope: CoroutineScope,
 ) : PlaybackPresentationPort {
@@ -84,7 +52,10 @@ class DefaultPlaybackPresentationPort(
     }
 
     override val currentTrack: MusicTrack?
-        get() = playbackState.currentTrack
+        get() = resolvePlaybackPresentationTrack(
+            engineTrack = playbackState.currentTrack,
+            queueTrack = queuePort.currentQueueTrack,
+        )
     override val playbackParts: List<PlaybackPart>
         get() = playbackState.playbackParts
     override val currentPartIndex: Int
@@ -124,24 +95,4 @@ internal fun resolvePlaybackPresentationTrack(
     queueTrack == null -> engineTrack
     engineTrack.id == queueTrack.id -> queueTrack
     else -> engineTrack
-}
-
-/** Aggregate only for the current composable surface; ownership stays in the delegated ports. */
-class DefaultPlaybackUiPort(
-    navigation: PlaybackNavigationPort,
-    private val presentation: PlaybackPresentationPort,
-    private val queuePort: PlaybackQueueUiPort,
-    sleepTimer: PlaybackSleepTimerPort,
-    nowPlayingActions: NowPlayingActionPort,
-) : PlaybackUiPort,
-    PlaybackNavigationPort by navigation,
-    PlaybackPresentationPort by presentation,
-    PlaybackQueueUiPort by queuePort,
-    PlaybackSleepTimerPort by sleepTimer,
-    NowPlayingActionPort by nowPlayingActions {
-    override val currentTrack: MusicTrack?
-        get() = resolvePlaybackPresentationTrack(
-            engineTrack = presentation.currentTrack,
-            queueTrack = queuePort.currentQueueTrack,
-        )
 }

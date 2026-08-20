@@ -66,13 +66,11 @@ The MiniPlayer rendering/transport path consumes the dedicated playback session 
 
 ### C2: FullPlayer, queue and lyrics
 
-The active FullPlayer path is now controller-free.
+The active FullPlayer path is controller-free.
 
 - `RuntimeFullPlayer` consumes authoritative status, timing, lyrics, error, queue index, and previous/toggle/next transport from `PlaybackSession`.
-- `PlaybackUiPort` initially carried richer UI/application concerns that do not belong in the narrow runtime API: rich `MusicTrack` metadata, queue edits, seek/shuffle/repeat, sleep timer, audio/replacement information, downloads and now-playing actions.
 - Existing pure rendering helpers for cover transitions, progress, karaoke lyrics, controls and detail dialogs are reused through a render-only `PlaybackState` snapshot; session-owned fields remain sourced from `PlaybackSession`.
 - `AppRoot` supplies the app-scoped playback contracts and renders `RuntimeFullPlayer` as the active overlay.
-- Home and local-playlist MiniPlayer call sites use the controller-free `PlaybackMiniPlayer` host.
 
 ## Phase 7: playback orchestration ownership (P1-D)
 
@@ -87,27 +85,51 @@ Queue transition and playback-start policy now have dedicated playback owners in
 - Focused common tests cover up-next/repeat/part queue transitions, direct resource resolution success/failure, and internally resolving playback-plan construction. iOS tests verify same-track playback-start failures override Loading without unrelated failures leaking across tracks.
 - Architecture checks prevent the new coordinators from depending on `FuoPlayerController` and reject direct controller transport calls in the platform runtime adapters.
 
-## Phase 8: playback UI ownership split (P1-E1)
+## Phase 8: playback UI ownership (P1-E)
 
-The broad controller-backed playback UI bridge has been removed.
+P1-E is completed as a sequence of ownership migrations rather than another controller adapter layer.
 
-- `ControllerPlaybackUiPort` is deleted and protected as a retired compatibility file.
-- `PlaybackNavigationPort` owns FullPlayer and queue-overlay visibility. Android back handling and `FuoAppViewModel` dispatch use this playback owner first.
-- A two-flag navigation mirror at the composition edge keeps legacy `MiniPlayer(controller)` entry points and controller-owned detail actions behavior-compatible. The mirror is intentionally narrow and does not expose playback state or actions back through the controller.
-- `PlaybackPresentationPort` reads rich track/part/audio presentation directly from `PlaybackEngine`, reads lyric/theme presentation from `AppSettingsRepository`, and calls the engine directly for seek.
-- `PlaybackQueueUiPort` is implemented by `PlaybackQueueCoordinator`. Player queue display/edit, add-up-next, clear, shuffle/repeat and cover transition direction therefore use the playback owner rather than controller forwarding methods.
-- `PlaybackQueueController` queue fields are observable so direct playback-owner mutations recompose player UI without using `FuoPlayerController.playbackState` as an observation bridge.
-- `PlaybackSleepTimerPort` is intentionally a narrow temporary compatibility bridge because end-of-track timer completion is still coordinated in the legacy engine-ended loop.
-- `NowPlayingActionPort` intentionally isolates the remaining cross-feature actions: downloads, playlist mutations, provider/artist/album detail navigation, local metadata and smart replacement.
-- `PlaybackUiPort` remains only as a transitional composition facade delegating to these separate owners. It is no longer implemented by a controller adapter, and `AppRoot` receives the composed facade from the platform composition root instead of constructing it itself.
-- Focused tests cover playback-navigation ownership/mirroring and direct queue UI mutations; architecture checks scan the new playback-owned files and reject reintroduction of `ControllerPlaybackUiPort`.
+### E1: player-native UI owners
+
+- `ControllerPlaybackUiPort` was removed.
+- `PlaybackNavigationPort` owns FullPlayer / queue-overlay visibility.
+- `PlaybackPresentationPort` reads rich track/part/audio presentation from `PlaybackEngine` plus lyric/theme presentation from `AppSettingsRepository`.
+- `PlaybackQueueUiPort` is implemented directly by `PlaybackQueueCoordinator`.
+- Durable queue metadata overlays engine presentation for the same track identity, including restored queue state and local metadata edits.
+
+### E2: cross-feature now-playing ownership
+
+The former `NowPlayingActionPort` aggregate is removed and replaced by explicit feature contracts:
+
+- `DownloadActionPort` -> `DownloadController`.
+- `PlaylistActionPort` -> `PlaylistActionController`.
+- `ProviderTrackActionPort` -> `ProviderTrackActionController`.
+- `LocalMusicActionPort` -> `LocalMusicController`.
+- `ReplacementActionPort` -> `PlaybackReplacementController`.
+
+`ControllerNowPlayingActionPort` no longer exists. Provider artist/album/original-detail and dislike behavior, playlist target/removal behavior, local metadata editing, download actions and manual replacement discovery/selection therefore have explicit owners. `FuoPlayerController` keeps only compatibility delegates where unmigrated sibling screens still call the old public API.
+
+### E3: playback-end / sleep-timer lifecycle
+
+- `PlaybackSleepTimerController` implements `PlaybackSleepTimerPort` directly.
+- `PlaybackLifecycleCoordinator` owns the Playing/Ended state machine that decides whether an ended event completes an end-of-track timer or advances the queue/next playback part.
+- The controller engine collector publishes the engine snapshot before executing the coordinator action, preserving the historical observer ordering.
+- Multi-part behavior is preserved: an end-of-track timer only completes after the final playback part; intermediate part completion still advances playback.
+- `ControllerPlaybackSleepTimerPort` is removed.
+
+### E4: narrow player composition
+
+- The business `PlaybackUiPort` aggregate is removed.
+- `PlaybackUiGraph` remains only as a composition-time holder for the same owner instances; it has no business action contract.
+- `RuntimeFullPlayer` installs the graph into narrow `CompositionLocal` ports and each sub-surface consumes only its required dependency.
+- `PlaybackMiniPlayer` consumes the playback session plus navigation/queue state from the same graph.
+- The old two-way Controller navigation mirror is removed; `DefaultPlaybackNavigationPort` is the single overlay owner.
+- Android/iOS composition roots inject the actual playback/feature owners directly into `FuoAppViewModel` rather than constructing controller-backed playback UI adapters.
+- Architecture fitness rules reject reintroduction of the compatibility ports, a `PlaybackUiPort` aggregate declaration, controller leakage into the migrated owners, and legacy `MiniPlayer(controller)` callers.
 
 ## Next phases
 
-1. Split `NowPlayingActionPort` by feature owner: Download, Provider Detail/Replacement, Playlist and Local Music. Remove the remaining cross-feature controller adapter as each owner becomes explicit.
-2. Move sleep-timer end-of-track completion into a playback-owned lifecycle coordinator, then remove `ControllerPlaybackSleepTimerPort`.
-3. Change `RuntimeFullPlayer` and `PlaybackMiniPlayer` to consume the narrow ports directly and retire the transitional aggregate `PlaybackUiPort` plus the two-flag legacy navigation mirror as old MiniPlayer call sites disappear.
-4. Replace controller-backed Search/Recognition app-port operations as their sibling download/provider-detail owners become explicit domain/feature ports.
-5. Apply the feature-owned state plus app-shell composition pattern to local music, downloads, provider content, and settings.
-6. Move remaining queue/start compatibility state (request serial, playback parts/index, rich queue presentation) behind playback-owned state once downstream feature callers are ready, then retire the playback facade methods from `FuoPlayerController`.
-7. Continue moving stable contracts into compile-time modules and retire legacy aggregate provider dependencies and global loading/message state.
+1. Replace the remaining controller-backed Search/Recognition app-port operations with the now-explicit Download / Provider Track / Playlist owners where appropriate.
+2. Apply the feature-owned state plus app-shell composition pattern to local music, downloads, provider content, settings and other screens that still consume the broad controller facade.
+3. Move remaining playback queue/start compatibility state (`request serial`, playback parts/index and facade-facing presentation) behind playback-owned state, then retire playback facade methods from `FuoPlayerController`.
+4. Continue moving stable contracts into compile-time modules and retire legacy aggregate provider dependencies plus global loading/message/error state.

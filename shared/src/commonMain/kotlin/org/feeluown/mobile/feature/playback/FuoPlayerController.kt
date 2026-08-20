@@ -61,6 +61,7 @@ class FuoPlayerController(
     private val playlistState = PlaylistControllerState()
     private val settingsUiState = SettingsControllerState()
     private val playbackQueueController = PlaybackQueueController()
+    private val playbackNavigationController = DefaultPlaybackNavigationPort()
     private val playbackProviderRepository: ProviderPlaybackRepository = ProviderPlaybackRepositoryView(providerRepository)
 
     var isSettingsLoaded by mutableStateOf(false)
@@ -189,10 +190,10 @@ class FuoPlayerController(
         private set
     var localPlaylistImportPreview by playlistState::localPlaylistImportPreview
         private set
-    var artistTargetTrack by mutableStateOf<MusicTrack?>(null)
-        private set
-    var artistTargets by mutableStateOf<List<TrackArtistTarget>>(emptyList())
-        private set
+    val artistTargetTrack: MusicTrack?
+        get() = providerTrackActionController.artistTargetTrack
+    val artistTargets: List<TrackArtistTarget>
+        get() = providerTrackActionController.artistTargets
     var localTracks by localMusicState::tracks
         private set
     val query: String
@@ -239,8 +240,8 @@ class FuoPlayerController(
         get() = navigator.contains(AppRoute.AudioRecognition)
     val recognitionUiState: RecognitionUiState
         get() = recognitionController.uiState.value
-    var isFullPlayerOpen by mutableStateOf(false)
-        private set
+    val isFullPlayerOpen: Boolean
+        get() = playbackNavigationController.isFullPlayerOpen
     var isVideoFullscreen by mutableStateOf(false)
         private set
     val isSettingsOpen: Boolean
@@ -249,8 +250,8 @@ class FuoPlayerController(
         get() = navigator.contains(AppRoute.DebugLogs)
     val isDownloadManagerOpen: Boolean
         get() = navigator.contains(AppRoute.DownloadManager)
-    var isQueueOpen by mutableStateOf(false)
-        private set
+    val isQueueOpen: Boolean
+        get() = playbackNavigationController.isQueueOpen
     var isLoading by mutableStateOf(false)
         private set
     var message by mutableStateOf("正在初始化 FeelUOwn")
@@ -267,11 +268,8 @@ class FuoPlayerController(
         private set
     var playbackState by mutableStateOf(PlaybackState())
         private set
-    var sleepTimerState: SleepTimerState
-        get() = sleepTimerController.state
-        private set(value) {
-            sleepTimerController.state = value
-        }
+    val sleepTimerState: SleepTimerState
+        get() = sleepTimerController.sleepTimerState
     var trackChangeDirection by mutableStateOf(TrackChangeDirection.Next)
         private set
     var cacheUsage by settingsUiState::cacheUsage
@@ -292,8 +290,8 @@ class FuoPlayerController(
         private set
     var smartReplacementMinScore by settingsUiState::smartReplacementMinScore
         private set
-    var replacementCandidateState by mutableStateOf(ReplacementCandidateState())
-        private set
+    val replacementCandidateState: ReplacementCandidateState
+        get() = playbackReplacementController.replacementCandidateState
     var lyricFontSize by settingsUiState::lyricFontSize
         private set
     var statusBarLyricsEnabled by mutableStateOf(false)
@@ -334,8 +332,24 @@ class FuoPlayerController(
         get() = upNextQueue.size
     val playbackTransportCoordinator: PlaybackTransportCoordinator
         get() = playbackQueueCoordinator
+    val playbackQueueUiPort: PlaybackQueueUiPort
+        get() = playbackQueueCoordinator
     val playbackStartFailureSource: PlaybackStartFailureSource
         get() = playbackStartCoordinator
+    val playbackNavigationPort: PlaybackNavigationPort
+        get() = playbackNavigationController
+    val playbackSleepTimerPort: PlaybackSleepTimerPort
+        get() = sleepTimerController
+    val downloadActionPort: DownloadActionPort
+        get() = downloadController
+    val playlistActionPort: PlaylistActionPort
+        get() = playlistActionController
+    val providerTrackActionPort: ProviderTrackActionPort
+        get() = providerTrackActionController
+    val localMusicActionPort: LocalMusicActionPort
+        get() = localMusicController
+    val replacementActionPort: ReplacementActionPort
+        get() = playbackReplacementController
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
             selectedLocalMusicCollection != null ||
@@ -364,12 +378,9 @@ class FuoPlayerController(
     private var selectedMediaItemAlbumsNextOffset = 0
     private var selectedMediaItemTracksLoadMoreJob: Job? = null
     private var selectedMediaItemAlbumsLoadMoreJob: Job? = null
-    private var lastEndedTrackId: String? = null
-    private var autoAdvanceEligibleTrackId: String? = null
     private var lastRecoveredPlaybackErrorKey: String? = null
     private var playRequestSerial: Long = 0
     private var smartReplacementSelections: Map<String, SmartReplacementSelection> = emptyMap()
-    private var replacementCandidatesJob: Job? = null
     private var pendingManualReplacementSwitch: PendingManualReplacementSwitch? = null
     private var suppressPlaybackRecoveryRequestSerial: Long? = null
     private var playbackParts: List<PlaybackPart> = emptyList()
@@ -495,6 +506,7 @@ class FuoPlayerController(
     private val sleepTimerController = PlaybackSleepTimerController(
         playbackEngine = playbackEngine,
         scope = scope,
+        currentTrackId = { currentQueueTrack()?.id ?: playbackState.currentTrack?.id },
         nowMillis = nowMillis,
         onFeedback = { playbackFeedback = it },
     )
@@ -571,6 +583,64 @@ class FuoPlayerController(
         setTrackChangeDirection = { trackChangeDirection = it },
         setMessage = { message = it },
     )
+    private val playlistActionController = PlaylistActionController(
+        providerRepository = providerRepository,
+        localPlaylistController = localPlaylistController,
+        state = playlistState,
+        scope = scope,
+        selectedPlaylist = { selectedPlaylist },
+        selectedPlaylistCategory = { selectedPlaylistCategory },
+        selectedPlaylistTracks = { selectedPlaylistTracks },
+        updateSelectedPlaylistTracks = { selectedPlaylistTracks = it },
+        updateSelectedPlaylistError = { selectedPlaylistError = it },
+        providerCapabilities = { providerCapabilities },
+        isProviderLoggedIn = ::isProviderLoggedIn,
+        providerName = ::providerName,
+        refreshAfterProviderMutation = ::refreshAfterProviderMutation,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val providerTrackActionController = ProviderTrackActionController(
+        providerRepository = providerRepository,
+        scope = scope,
+        navigation = playbackNavigationController,
+        providerCapabilities = { providerCapabilities },
+        isProviderLoggedIn = ::isProviderLoggedIn,
+        openMediaItem = ::openMediaItem,
+        openTrackDetail = ::openTrackDetail,
+        searchTrackText = ::searchTrackText,
+        removeDislikedTrack = ::removeDislikedTrack,
+        refreshMineContent = ::refreshMineContent,
+        setLoading = { isLoading = it },
+        setMessage = { message = it },
+        onError = { setError(it) },
+    )
+    private val playbackReplacementController = PlaybackReplacementController(
+        playbackRepository = playbackProviderRepository,
+        scope = scope,
+        smartReplacementProviderIds = ::selectedSmartReplacementProviderIds,
+        smartReplacementMinScore = { smartReplacementMinScore },
+        currentTrack = { currentQueueTrack() ?: playbackState.currentTrack },
+        startManualReplacement = { track, selection, rollbackTrack ->
+            startPlayback(
+                track = track,
+                manualSelection = selection,
+                rollbackTrack = rollbackTrack,
+            )
+        },
+        closePlayer = playbackNavigationController::closeFullPlayer,
+        openTrackDetail = ::openTrackDetail,
+        failureMessage = { throwable, fallback, providerId ->
+            providerErrorMessage(throwable, fallback, providerId)
+        },
+    )
+    private val playbackLifecycleCoordinator = PlaybackLifecycleCoordinator(
+        sleepTimer = sleepTimerController,
+        fallbackPlaybackParts = { playbackParts },
+        fallbackCurrentPartIndex = { currentPartIndex },
+        autoAdvance = playbackQueueCoordinator::next,
+    )
 
     init {
         scope.launch {
@@ -625,48 +695,12 @@ class FuoPlayerController(
             playbackEngine.state.collect { engineState ->
                 engineState.currentTrack?.let(::synchronizePlaybackTrack)
                 val queueTrackId = currentQueueTrack()?.id
-                if (queueTrackId != null) {
-                    sleepTimerController.onTrackChanged(queueTrackId)
-                }
-                var shouldAutoAdvance = false
-                var shouldCompleteEndOfTrackTimer = false
-                when (engineState.status) {
-                    PlayerStatus.Playing -> {
-                        autoAdvanceEligibleTrackId = queueTrackId ?: engineState.currentTrack?.id
-                        lastEndedTrackId = null
-                        lastRecoveredPlaybackErrorKey = null
-                    }
-                    PlayerStatus.Ended -> {
-                        val endedTrackId = queueTrackId
-                        if (
-                            endedTrackId != null &&
-                            endedTrackId == autoAdvanceEligibleTrackId &&
-                            endedTrackId != lastEndedTrackId
-                        ) {
-                            autoAdvanceEligibleTrackId = null
-                            lastEndedTrackId = endedTrackId
-                            val activeParts = engineState.playbackParts.ifEmpty { playbackParts }
-                            val activePartIndex = engineState.currentPartIndex
-                                .takeIf { it >= 0 }
-                                ?: currentPartIndex
-                            val isFinalPlaybackPart = activeParts.isEmpty() ||
-                                activePartIndex !in activeParts.indices ||
-                                activePartIndex >= activeParts.lastIndex
-                            if (
-                                sleepTimerController.shouldCompleteEndOfTrack(
-                                    trackId = endedTrackId,
-                                    isFinalPlaybackPart = isFinalPlaybackPart,
-                                )
-                            ) {
-                                shouldCompleteEndOfTrackTimer = true
-                            } else {
-                                shouldAutoAdvance = true
-                            }
-                        }
-                    }
-                    else -> {
-                        lastEndedTrackId = null
-                    }
+                val playbackEndAction = playbackLifecycleCoordinator.evaluate(
+                    engineState = engineState,
+                    currentQueueTrackId = queueTrackId,
+                )
+                if (engineState.status == PlayerStatus.Playing) {
+                    lastRecoveredPlaybackErrorKey = null
                 }
                 playbackState = engineState.copy(
                     queue = displayQueue(),
@@ -686,10 +720,8 @@ class FuoPlayerController(
                     currentPartIndex = engineState.currentPartIndex
                 }
                 isLoading = engineState.status == PlayerStatus.Loading
-                if (shouldCompleteEndOfTrackTimer) {
-                    sleepTimerController.completeEndOfTrack()
-                } else if (shouldAutoAdvance) {
-                    next()
+                if (playbackEndAction != PlaybackEndAction.None) {
+                    playbackLifecycleCoordinator.execute(playbackEndAction)
                 } else if (engineState.status == PlayerStatus.Error) {
                     if (!rollbackManualReplacement(playRequestSerial, engineState.errorMessage)) {
                         if (suppressPlaybackRecoveryRequestSerial == playRequestSerial) {
@@ -869,7 +901,7 @@ class FuoPlayerController(
     fun navigateBack(): Boolean {
         return when {
             isFullPlayerOpen && isQueueOpen -> {
-                isQueueOpen = false
+                playbackNavigationController.toggleQueue()
                 true
             }
             isFullPlayerOpen -> {
@@ -997,22 +1029,12 @@ class FuoPlayerController(
         if (playbackFeedback == feedback) playbackFeedback = null
     }
 
-    fun setSleepTimerDurationMinutes(minutes: Int) {
-        sleepTimerController.setDurationMinutes(
-            minutes = minutes,
-            currentTrackId = currentQueueTrack()?.id ?: playbackState.currentTrack?.id,
-        )
-    }
+    fun setSleepTimerDurationMinutes(minutes: Int) =
+        sleepTimerController.setSleepTimerDurationMinutes(minutes)
 
-    fun setSleepTimerToEndOfTrack() {
-        sleepTimerController.setToEndOfTrack(
-            currentTrackId = currentQueueTrack()?.id ?: playbackState.currentTrack?.id,
-        )
-    }
+    fun setSleepTimerToEndOfTrack() = sleepTimerController.setSleepTimerToEndOfTrack()
 
-    fun clearSleepTimer() {
-        sleepTimerController.clear()
-    }
+    fun clearSleepTimer() = sleepTimerController.clearSleepTimer()
 
     fun onDownloadParallelismChange(value: Int) = downloadController.onParallelismChange(value)
 
@@ -1491,67 +1513,17 @@ class FuoPlayerController(
         loadSelectedTrackRelated(track)
     }
 
-    fun openOriginalTrackDetail(track: MusicTrack) {
-        closeFullPlayer()
-        openTrackDetail(track.originalDetailTrack())
-    }
+    fun openOriginalTrackDetail(track: MusicTrack) =
+        providerTrackActionController.openOriginalTrackDetail(track)
 
-    fun openReplacementTrackDetail(track: MusicTrack) {
-        val detailTrack = track.replacementDetailTrack() ?: return
-        closeFullPlayer()
-        openTrackDetail(detailTrack)
-    }
+    fun openReplacementTrackDetail(track: MusicTrack) =
+        playbackReplacementController.openReplacementTrackDetail(track)
 
-    fun loadReplacementCandidates(track: MusicTrack) {
-        val originalTrack = track.originalDetailTrack()
-        val trackId = originalTrack.id
-        replacementCandidatesJob?.cancel()
-        replacementCandidateState = ReplacementCandidateState(
-            trackId = trackId,
-            isLoading = true,
-        )
-        replacementCandidatesJob = scope.launch {
-            runCatching {
-                withTimeout(30_000) {
-                    playbackProviderRepository.replacementCandidates(
-                        track = originalTrack,
-                        smartReplacementProviderIds = selectedSmartReplacementProviderIds(),
-                        smartReplacementMinScore = smartReplacementMinScore,
-                    )
-                }
-            }.onSuccess { candidates ->
-                if (replacementCandidateState.trackId == trackId) {
-                    replacementCandidateState = ReplacementCandidateState(
-                        trackId = trackId,
-                        candidates = candidates
-                            .sortedByDescending { candidate -> candidate.score }
-                            .distinctBy { candidate -> candidate.track.id },
-                    )
-                }
-            }.onFailure { throwable ->
-                if (throwable is CancellationException) return@onFailure
-                if (replacementCandidateState.trackId == trackId) {
-                    replacementCandidateState = ReplacementCandidateState(
-                        trackId = trackId,
-                        errorMessage = providerErrorMessage(throwable, "查询失败", originalTrack.source),
-                    )
-                }
-            }
-        }
-    }
+    fun loadReplacementCandidates(track: MusicTrack) =
+        playbackReplacementController.loadReplacementCandidates(track)
 
-    fun selectReplacementCandidate(track: MusicTrack, candidate: ReplacementCandidate) {
-        val previousTrack = currentQueueTrack() ?: playbackState.currentTrack ?: return
-        val originalTrack = track.originalDetailTrack()
-        val selection = candidate.toSmartReplacementSelection()
-        val selectedTrack = originalTrack.withReplacementSelection(selection)
-        replacementCandidateState = replacementCandidateState.copy(isLoading = false)
-        startPlayback(
-            track = selectedTrack,
-            manualSelection = selection,
-            rollbackTrack = previousTrack,
-        )
-    }
+    fun selectReplacementCandidate(track: MusicTrack, candidate: ReplacementCandidate) =
+        playbackReplacementController.selectReplacementCandidate(track, candidate)
 
     private fun ReplacementCandidate.toSmartReplacementSelection(): SmartReplacementSelection {
         return SmartReplacementSelection(
@@ -1817,38 +1789,20 @@ class FuoPlayerController(
         isVideoFullscreen = !isVideoFullscreen
     }
 
-    fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
-        val providerId = trackProviderId(track) ?: return false
-        return track.sourceType == TrackSourceType.Provider &&
-            isProviderLoggedIn(providerId) &&
-            providerCapabilities[providerId]?.canAddSongToPlaylist == true
-    }
+    fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean =
+        playlistActionController.canAddTrackToProviderPlaylist(track)
 
     fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean =
-        localPlaylistController.canAddTrack(track)
+        playlistActionController.canAddTrackToLocalPlaylist(track)
 
-    fun canAddTrackToPlaylist(track: MusicTrack): Boolean {
-        return canAddTrackToProviderPlaylist(track) || canAddTrackToLocalPlaylist(track)
-    }
+    fun canAddTrackToPlaylist(track: MusicTrack): Boolean =
+        playlistActionController.canAddTrackToPlaylist(track)
 
-    fun playlistProviderName(track: MusicTrack): String {
-        val providerId = trackProviderId(track)
-        return playlistOperationTargets.firstOrNull()?.providerName
-            ?.takeIf { it.isNotBlank() }
-            ?: providerId?.let(::providerName)?.takeIf { it.isNotBlank() && it != providerId }
-            ?: track.providerName?.takeIf { it.isNotBlank() }
-            ?: providerId.orEmpty().ifBlank { "Provider" }
-    }
+    fun playlistProviderName(track: MusicTrack): String =
+        playlistActionController.playlistProviderName(track)
 
-    fun selectPlaylistTargetType(type: PlaylistTargetType) {
-        val track = playlistTargetTrack ?: return
-        if (type == PlaylistTargetType.Provider && !canAddTrackToProviderPlaylist(track)) return
-        if (type == PlaylistTargetType.Local && !canAddTrackToLocalPlaylist(track)) return
-        playlistTargetType = type
-        if (type == PlaylistTargetType.Local) {
-            localPlaylistOperationError = if (localPlaylists.isEmpty()) "请先新建本地歌单" else null
-        }
-    }
+    fun selectPlaylistTargetType(type: PlaylistTargetType) =
+        playlistActionController.selectPlaylistTargetType(type)
 
     fun openLocalPlaylistTargetPicker(track: MusicTrack) =
         localPlaylistController.openTargetPicker(track)
@@ -1858,7 +1812,7 @@ class FuoPlayerController(
     fun createLocalPlaylist(title: String) = localPlaylistController.create(title)
 
     fun addTrackToLocalPlaylist(playlist: LocalPlaylist) =
-        localPlaylistController.addTargetTrackTo(playlist)
+        playlistActionController.addTrackToLocalPlaylist(playlist)
 
     fun openLocalPlaylist(playlist: LocalPlaylist) = localPlaylistController.open(playlist)
 
@@ -1953,107 +1907,22 @@ class FuoPlayerController(
         }
     }
 
-    fun openPlaylistTargetPicker(track: MusicTrack) {
-        if (!canAddTrackToPlaylist(track)) return
-        playlistTargetTrack = track
-        playlistTargetType = if (canAddTrackToProviderPlaylist(track)) {
-            PlaylistTargetType.Provider
-        } else {
-            PlaylistTargetType.Local
-        }
-        playlistTargetPickerShowSwitcher = true
-        playlistOperationTargets = emptyList()
-        playlistOperationError = null
-        localPlaylistOperationError = if (localPlaylists.isEmpty()) "请先新建本地歌单" else null
-        if (!canAddTrackToProviderPlaylist(track)) return
-        scope.launch {
-            isLoading = true
-            message = "正在加载可添加歌单"
-            runCatching { providerRepository.playlistOperationTargets(track) }
-                .onSuccess {
-                    playlistOperationTargets = it
-                    playlistOperationError = if (it.isEmpty()) "没有可添加的歌单" else null
-                    message = if (it.isEmpty()) "没有可添加的歌单" else "请选择目标歌单"
-                }
-                .onFailure {
-                    playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
-                    setError(it)
-                }
-            isLoading = false
-        }
-    }
+    fun openPlaylistTargetPicker(track: MusicTrack) =
+        playlistActionController.openPlaylistTargetPicker(track)
 
-    fun closePlaylistTargetPicker() {
-        playlistTargetTrack = null
-        playlistTargetType = PlaylistTargetType.Provider
-        playlistTargetPickerShowSwitcher = true
-        playlistOperationTargets = emptyList()
-        playlistOperationError = null
-        localPlaylistOperationError = null
-    }
+    fun closePlaylistTargetPicker() = playlistActionController.closePlaylistTargetPicker()
 
-    fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) {
-        val track = playlistTargetTrack ?: return
-        scope.launch {
-            isLoading = true
-            message = "正在添加到歌单"
-            runCatching { providerRepository.addTrackToPlaylist(playlist, track) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        message = result.message.ifBlank { "已添加到：${playlist.title}" }
-                        playlistOperationFeedback = message
-                        closePlaylistTargetPicker()
-                        refreshAfterProviderMutation(playlist.providerId)
-                    } else {
-                        playlistOperationError = result.message.ifBlank { "添加失败" }
-                        message = playlistOperationError.orEmpty()
-                        playlistOperationFeedback = message
-                    }
-                }
-                .onFailure {
-                    playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
-                    setError(it)
-                    playlistOperationFeedback = message
-                }
-            isLoading = false
-        }
-    }
+    fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) =
+        playlistActionController.addTrackToProviderPlaylist(playlist)
 
-    fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean {
-        val playlist = selectedPlaylist ?: return false
-        return track.sourceType == TrackSourceType.Provider &&
-            selectedPlaylistCategory == ProviderFeatureCategory.MinePlaylists &&
-            trackProviderId(track) == playlist.providerId &&
-            isProviderLoggedIn(playlist.providerId) &&
-            providerCapabilities[playlist.providerId]?.canRemoveSongFromPlaylist == true
-    }
+    fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean =
+        playlistActionController.canRemoveTrackFromSelectedPlaylist(track)
 
-    fun canSetSongDisliked(track: MusicTrack, disliked: Boolean): Boolean {
-        val providerId = trackProviderId(track) ?: return false
-        val capabilities = providerCapabilities[providerId] ?: return false
-        return track.sourceType == TrackSourceType.Provider &&
-            isProviderLoggedIn(providerId) &&
-            if (disliked) capabilities.canAddDislikedSong else capabilities.canRemoveDislikedSong
-    }
+    fun canSetSongDisliked(track: MusicTrack, disliked: Boolean): Boolean =
+        providerTrackActionController.canSetSongDisliked(track, disliked)
 
-    fun setSongDisliked(track: MusicTrack, disliked: Boolean) {
-        if (!canSetSongDisliked(track, disliked)) return
-        scope.launch {
-            isLoading = true
-            message = if (disliked) "正在设为不喜欢" else "正在取消不喜欢"
-            runCatching { providerRepository.setSongDisliked(track, disliked) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        if (disliked) removeDislikedTrack(track) else refreshMineContent()
-                        message = result.message.ifBlank { if (disliked) "已设为不喜欢" else "已取消不喜欢" }
-                    } else {
-                        message = result.message.ifBlank { "操作失败" }
-                    }
-                }
-                .onFailure(::setError)
-            isLoading = false
-        }
-    }
+    fun setSongDisliked(track: MusicTrack, disliked: Boolean) =
+        providerTrackActionController.setSongDisliked(track, disliked)
 
     private fun removeDislikedTrack(track: MusicTrack) {
         val isCurrent = currentQueueTrack()?.id == track.id
@@ -2080,32 +1949,8 @@ class FuoPlayerController(
         persistPlaybackQueue()
     }
 
-    fun removeTrackFromSelectedPlaylist(track: MusicTrack) {
-        val playlist = selectedPlaylist ?: return
-        if (!canRemoveTrackFromSelectedPlaylist(track)) return
-        scope.launch {
-            isLoading = true
-            message = "正在从歌单移除"
-            runCatching { providerRepository.removeTrackFromPlaylist(playlist, track) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        selectedPlaylistTracks = selectedPlaylistTracks.filterNot { it.id == track.id }
-                        message = result.message.ifBlank { "已从歌单移除：${track.title}" }
-                        playlistOperationFeedback = message
-                        refreshAfterProviderMutation(playlist.providerId)
-                    } else {
-                        selectedPlaylistError = result.message.ifBlank { "移除失败" }
-                        message = selectedPlaylistError.orEmpty()
-                        playlistOperationFeedback = message
-                    }
-                }
-                .onFailure {
-                    setError(it)
-                    playlistOperationFeedback = message
-                }
-            isLoading = false
-        }
-    }
+    fun removeTrackFromSelectedPlaylist(track: MusicTrack) =
+        playlistActionController.removeTrackFromSelectedPlaylist(track)
 
     fun dismissPlaylistOperationFeedback(feedback: String) {
         if (playlistOperationFeedback == feedback) {
@@ -2688,17 +2533,11 @@ class FuoPlayerController(
         playbackEngine.seekTo(normalizedPosition)
     }
 
-    fun openFullPlayer() {
-        isFullPlayerOpen = true
-    }
+    fun openFullPlayer() = playbackNavigationController.openFullPlayer()
 
-    fun closeFullPlayer() {
-        isFullPlayerOpen = false
-    }
+    fun closeFullPlayer() = playbackNavigationController.closeFullPlayer()
 
-    fun toggleQueue() {
-        isQueueOpen = !isQueueOpen
-    }
+    fun toggleQueue() = playbackNavigationController.toggleQueue()
 
     fun removeFromQueue(track: MusicTrack) {
         if (currentUpNextTrack?.id == track.id) {
@@ -2790,124 +2629,15 @@ class FuoPlayerController(
     fun deleteDownloadTask(taskId: String, deleteFile: Boolean) =
         downloadController.deleteTask(taskId, deleteFile)
 
-    fun deleteDownload(track: MusicTrack) = downloadController.deleteDownloaded(track)
+    fun deleteDownload(track: MusicTrack) = downloadController.deleteDownload(track)
 
-    fun openTrackArtist(track: MusicTrack) {
-        openTrackArtist(track, loadDetailWhenMissing = true)
-    }
+    fun openTrackArtist(track: MusicTrack) = providerTrackActionController.openTrackArtist(track)
 
-    fun closeArtistTargetPicker() {
-        artistTargetTrack = null
-        artistTargets = emptyList()
-    }
+    fun closeArtistTargetPicker() = providerTrackActionController.closeArtistTargetPicker()
 
-    fun openArtistTarget(target: TrackArtistTarget) {
-        val track = artistTargetTrack ?: return
-        closeArtistTargetPicker()
-        closeFullPlayer()
-        target.mediaItem?.let(::openMediaItem)
-            ?: searchTrackText(target.name, track.source.takeIf { it.isNotBlank() })
-    }
+    fun openArtistTarget(target: TrackArtistTarget) = providerTrackActionController.openArtistTarget(target)
 
-    private fun openTrackArtist(track: MusicTrack, loadDetailWhenMissing: Boolean) {
-        val targets = track.artistNavigationTargets()
-        if (
-            loadDetailWhenMissing &&
-            targets.any { it.mediaItem == null } &&
-            track.canLoadProviderDetail()
-        ) {
-            scope.launch {
-                isLoading = true
-                val detail = runCatching { providerRepository.trackDetail(track.providerTrackId()) }
-                isLoading = false
-                detail
-                    .onSuccess { openTrackArtist(it, loadDetailWhenMissing = false) }
-                    .onFailure { openTrackArtist(track, loadDetailWhenMissing = false) }
-            }
-            return
-        }
-        if (targets.size > 1) {
-            artistTargetTrack = track
-            artistTargets = targets
-            return
-        }
-        targets.singleOrNull()?.mediaItem?.let {
-            closeFullPlayer()
-            openMediaItem(it)
-            return
-        }
-        val target = targets.singleOrNull()?.name.orEmpty().ifBlank { track.artists.trim() }
-        closeFullPlayer()
-        searchTrackText(target, track.source.takeIf { it.isNotBlank() })
-    }
-
-    fun openTrackAlbum(track: MusicTrack) {
-        openTrackAlbum(track, loadDetailWhenMissing = true)
-    }
-
-    private fun openTrackAlbum(track: MusicTrack, loadDetailWhenMissing: Boolean) {
-        val albumName = track.album.trim()
-        val providerId = track.source.takeIf { it.isNotBlank() }
-        val providerName = track.providerName ?: providerId.orEmpty()
-        val itemId = track.albumItemId
-        if (!itemId.isNullOrBlank() && providerId != null && albumName.isNotBlank()) {
-            closeFullPlayer()
-            openMediaItem(
-                ProviderMediaItem(
-                    id = itemId,
-                    title = albumName,
-                    providerId = providerId,
-                    providerName = providerName,
-                    type = ProviderMediaItemType.Album,
-                )
-            )
-            return
-        }
-        if (loadDetailWhenMissing && track.canLoadProviderDetail()) {
-            scope.launch {
-                isLoading = true
-                val detail = runCatching { providerRepository.trackDetail(track.providerTrackId()) }
-                isLoading = false
-                detail
-                    .onSuccess { openTrackAlbum(it, loadDetailWhenMissing = false) }
-                    .onFailure { openTrackAlbum(track, loadDetailWhenMissing = false) }
-            }
-            return
-        }
-        closeFullPlayer()
-        searchTrackText(albumName, providerId)
-    }
-
-    private fun MusicTrack.artistNavigationTargets(): List<TrackArtistTarget> {
-        if (artistItems.isNotEmpty()) {
-            return artistItems.distinctBy { it.id }.map { TrackArtistTarget(it.title, it) }
-        }
-        val names = artists
-            .split(" / ", "/", "·", ",", "，", "、")
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-        val providerId = source.takeIf { it.isNotBlank() }
-        val firstItem = if (!artistItemId.isNullOrBlank() && providerId != null && names.isNotEmpty()) {
-            ProviderMediaItem(
-                id = artistItemId,
-                title = names.first(),
-                providerId = providerId,
-                providerName = providerName ?: providerId,
-                type = ProviderMediaItemType.Artist,
-            )
-        } else {
-            null
-        }
-        return names.mapIndexed { index, name ->
-            TrackArtistTarget(name, firstItem.takeIf { index == 0 })
-        }
-    }
-
-    private fun MusicTrack.canLoadProviderDetail(): Boolean =
-        sourceType != TrackSourceType.LocalMediaStore && providerTrackId().isNotBlank()
-
-    private fun MusicTrack.providerTrackId(): String = providerId?.takeIf { it.isNotBlank() } ?: id
+    fun openTrackAlbum(track: MusicTrack) = providerTrackActionController.openTrackAlbum(track)
 
     private suspend fun refreshProviderCatalog() {
         val loadedAvailableProviders = providerRepository.availableProviders()

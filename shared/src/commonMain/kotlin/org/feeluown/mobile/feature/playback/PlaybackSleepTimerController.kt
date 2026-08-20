@@ -11,13 +11,27 @@ import kotlinx.coroutines.launch
 internal class PlaybackSleepTimerController(
     private val playbackEngine: PlaybackEngine,
     private val scope: CoroutineScope,
+    private val currentTrackId: () -> String? = { null },
     private val nowMillis: () -> Long,
     private val onFeedback: (String) -> Unit,
-) {
+) : PlaybackSleepTimerPort, PlaybackEndSleepTimer {
     var state by mutableStateOf(SleepTimerState())
+
+    override val sleepTimerState: SleepTimerState
+        get() = state
 
     private var timerJob: Job? = null
     private var timerSerial: Long = 0L
+
+    override fun setSleepTimerDurationMinutes(minutes: Int) {
+        setDurationMinutes(minutes, currentTrackId())
+    }
+
+    override fun setSleepTimerToEndOfTrack() {
+        setToEndOfTrack(currentTrackId())
+    }
+
+    override fun clearSleepTimer() = clear()
 
     fun setDurationMinutes(minutes: Int, currentTrackId: String?) {
         if (currentTrackId == null) {
@@ -59,7 +73,7 @@ internal class PlaybackSleepTimerController(
         playbackEngine.setStopAfterCurrentTrack(false)
     }
 
-    fun onTrackChanged(trackId: String?) {
+    override fun onTrackChanged(trackId: String?) {
         if (
             state.mode == SleepTimerMode.EndOfTrack &&
             state.targetTrackId != trackId
@@ -78,13 +92,13 @@ internal class PlaybackSleepTimerController(
         }
     }
 
-    fun shouldCompleteEndOfTrack(trackId: String, isFinalPlaybackPart: Boolean): Boolean {
+    override fun shouldCompleteEndOfTrack(trackId: String, isFinalPlaybackPart: Boolean): Boolean {
         return state.mode == SleepTimerMode.EndOfTrack &&
             state.targetTrackId == trackId &&
             isFinalPlaybackPart
     }
 
-    fun completeEndOfTrack() {
+    override fun completeEndOfTrack() {
         clear()
         onFeedback("当前曲目已播放完，播放已暂停")
     }

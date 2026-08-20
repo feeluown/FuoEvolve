@@ -45,13 +45,7 @@ interface PlaybackQueueUiPort {
     fun addToUpNext(track: MusicTrack)
 }
 
-/**
- * Temporary narrow bridge for sleep-timer state.
- *
- * End-of-track completion is still coupled to the legacy engine-ended compatibility loop. The
- * bridge is kept separate so that dependency does not pull the rest of player UI back through the
- * app controller.
- */
+/** Sleep-timer state and commands owned by playback. */
 interface PlaybackSleepTimerPort {
     val sleepTimerState: SleepTimerState
 
@@ -60,39 +54,41 @@ interface PlaybackSleepTimerPort {
     fun setSleepTimerToEndOfTrack()
 }
 
-/** Cross-feature actions surfaced from the now-playing UI. */
-interface NowPlayingActionPort {
-    val replacementCandidateState: ReplacementCandidateState
+/** Download state/actions used by the now-playing surface. */
+interface DownloadActionPort {
     val downloadStates: Map<String, DownloadState>
 
     fun download(track: MusicTrack)
     fun deleteDownload(track: MusicTrack)
-    fun openTrackArtist(track: MusicTrack)
-    fun openTrackAlbum(track: MusicTrack)
-    fun openOriginalTrackDetail(track: MusicTrack)
-    fun openLocalMetadataEditor(track: MusicTrack)
+}
+
+/** Playlist mutations used by the now-playing surface. */
+interface PlaylistActionPort {
     fun canAddTrackToPlaylist(track: MusicTrack): Boolean
     fun openPlaylistTargetPicker(track: MusicTrack)
     fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean
     fun removeTrackFromSelectedPlaylist(track: MusicTrack)
+}
+
+/** Provider-backed track navigation and dislike actions. */
+interface ProviderTrackActionPort {
+    fun openTrackArtist(track: MusicTrack)
+    fun openTrackAlbum(track: MusicTrack)
+    fun openOriginalTrackDetail(track: MusicTrack)
     fun canSetSongDisliked(track: MusicTrack): Boolean
     fun setSongDisliked(track: MusicTrack)
+}
+
+/** Local-library actions surfaced from now playing. */
+interface LocalMusicActionPort {
+    fun openLocalMetadataEditor(track: MusicTrack)
+}
+
+/** Smart-replacement state/actions used by the now-playing surface. */
+interface ReplacementActionPort {
+    val replacementCandidateState: ReplacementCandidateState
 
     fun loadReplacementCandidates(track: MusicTrack)
     fun selectReplacementCandidate(track: MusicTrack, candidate: ReplacementCandidate)
     fun openReplacementTrackDetail(track: MusicTrack)
 }
-
-/**
- * Transitional composition facade for the existing player composables.
- *
- * Ownership is deliberately split across the narrow ports above; no controller should implement
- * this interface directly. Once the player composables accept their narrow dependencies directly,
- * this aggregate can be removed without changing the owners underneath it.
- */
-interface PlaybackUiPort :
-    PlaybackNavigationPort,
-    PlaybackPresentationPort,
-    PlaybackQueueUiPort,
-    PlaybackSleepTimerPort,
-    NowPlayingActionPort

@@ -167,7 +167,15 @@ sealed interface AppIntent {
 class FuoAppViewModel(
     val controller: FuoPlayerController,
     val playbackSession: PlaybackSession,
-    val playbackUiPort: PlaybackUiPort,
+    val playbackNavigationPort: PlaybackNavigationPort,
+    val playbackPresentationPort: PlaybackPresentationPort,
+    val playbackQueueUiPort: PlaybackQueueUiPort,
+    val playbackSleepTimerPort: PlaybackSleepTimerPort,
+    val downloadActionPort: DownloadActionPort,
+    val playlistActionPort: PlaylistActionPort,
+    val providerTrackActionPort: ProviderTrackActionPort,
+    val localMusicActionPort: LocalMusicActionPort,
+    val replacementActionPort: ReplacementActionPort,
     private val searchController: SearchFeatureController,
     private val recognitionController: RecognitionFeatureController,
     internal val searchAppPort: SearchAppPort,
@@ -178,6 +186,19 @@ class FuoAppViewModel(
 ) : ViewModel() {
     val searchUiState: StateFlow<SearchUiState> = searchController.uiState
     val recognitionUiState: StateFlow<RecognitionUiState> = recognitionController.uiState
+
+    /** Composition-only holder; player composables consume the narrow ports installed from it. */
+    val playbackUiPort = PlaybackUiGraph(
+        navigation = playbackNavigationPort,
+        presentation = playbackPresentationPort,
+        queue = playbackQueueUiPort,
+        sleepTimer = playbackSleepTimerPort,
+        downloads = downloadActionPort,
+        playlists = playlistActionPort,
+        providerTrackActions = providerTrackActionPort,
+        localMusicActions = localMusicActionPort,
+        replacement = replacementActionPort,
+    )
 
     val uiState: StateFlow<AppUiState> = combine(
         settingsRepository.state,
@@ -234,8 +255,8 @@ class FuoAppViewModel(
     fun dispatch(intent: AppIntent) {
         when (intent) {
             AppIntent.NavigateBack -> when {
-                playbackUiPort.isQueueOpen -> playbackUiPort.toggleQueue()
-                playbackUiPort.isFullPlayerOpen -> playbackUiPort.closeFullPlayer()
+                playbackNavigationPort.isQueueOpen -> playbackNavigationPort.toggleQueue()
+                playbackNavigationPort.isFullPlayerOpen -> playbackNavigationPort.closeFullPlayer()
                 else -> controller.navigateBack()
             }
             is AppIntent.UpdateSettings -> viewModelScope.launch {

@@ -99,7 +99,7 @@ fun ProviderFeatureScreen(controller: FuoPlayerController, feature: ProviderFeat
         },
         bottomBar = {
             if (controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->
@@ -509,7 +509,7 @@ fun ProviderTrackScreen(controller: FuoPlayerController, track: MusicTrack?) {
         },
         bottomBar = {
             if (controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->
@@ -745,7 +745,7 @@ fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: ProviderPl
         },
         bottomBar = {
             if (controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->
@@ -971,7 +971,7 @@ fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMedia
         },
         bottomBar = {
             if (controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->

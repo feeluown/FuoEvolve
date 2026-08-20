@@ -104,7 +104,7 @@ fun EnhancedProviderVideoScreen(controller: FuoPlayerController, video: Provider
         },
         bottomBar = {
             if (!isFullscreen && controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->

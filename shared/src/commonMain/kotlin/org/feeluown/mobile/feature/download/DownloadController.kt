@@ -17,7 +17,7 @@ internal class DownloadController(
     private val persistSettings: () -> Unit,
     private val setMessage: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
-) {
+) : DownloadActionPort {
     private val offlineLibraryCoordinator = OfflineLibraryControllerCoordinator(
         scope = scope,
         downloadRepository = downloadRepository,
@@ -28,6 +28,9 @@ internal class DownloadController(
         shouldShowLocalMusicLoading = isLocalMusicSectionActive,
         refreshLocalMusic = localMusicController::refresh,
     )
+
+    override val downloadStates: Map<String, DownloadState>
+        get() = state.states
 
     fun start() {
         offlineLibraryCoordinator.start()
@@ -43,7 +46,7 @@ internal class DownloadController(
         scope.launch { downloadRepository.updateParallelism(state.parallelism) }
     }
 
-    fun download(track: MusicTrack) {
+    override fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
         state.queueFeedback = "已加入下载队列：${track.title}"
         scope.launch {
@@ -71,7 +74,7 @@ internal class DownloadController(
         downloadRepository.deleteTask(taskId, deleteFile)
     }
 
-    fun deleteDownloaded(track: MusicTrack) {
+    override fun deleteDownload(track: MusicTrack) {
         scope.launch {
             runCatching { downloadRepository.deleteDownloaded(track) }
                 .onSuccess {
@@ -86,6 +89,8 @@ internal class DownloadController(
                 .onFailure(onError)
         }
     }
+
+    fun deleteDownloaded(track: MusicTrack) = deleteDownload(track)
 
     private fun runAction(action: suspend () -> Unit) {
         scope.launch {

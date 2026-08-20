@@ -29,7 +29,7 @@ The first migration stage groups existing source files physically while keeping 
 - `core/model/`: legacy shared models during migration; stable new architecture models belong in `:core:model`.
 - `core/ui/`: design system and cross-feature UI/platform abstractions.
 - `feature/<name>/`: feature-local controller, state and UI.
-- `feature/playback/`: playback composition, queue/start coordinators, playback UI owners and the remaining narrow compatibility ports during migration.
+- `feature/playback/`: playback composition, queue/start/lifecycle coordinators, playback UI owners and now-playing replacement behavior.
 
 Provider protocol implementations remain under `provider/<provider>` because they already have a useful adapter boundary.
 
@@ -37,23 +37,29 @@ Provider protocol implementations remain under `provider/<provider>` because the
 
 Feature state should have one owner. New feature work should expose immutable UI state (preferably `StateFlow`) instead of adding new delegated properties to `FuoPlayerController`.
 
-App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback status, timing, current stable track reference, lyrics, queue identity/index, errors, and transport policy belong to `PlaybackSession` / `DefaultPlaybackRuntime`. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
+App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback status, timing, current stable track reference, lyrics, queue identity/index, errors, transport policy and playback-end lifecycle policy belong to playback-owned contracts/owners. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
 
-Queue and start orchestration now have explicit playback owners. `PlaybackQueueCoordinator` owns `startCurrent` / `previous` / `next`, up-next priority, repeat/part transitions and queue-index selection while `PlaybackQueueController` remains the durable queue state holder. `PlaybackStartCoordinator` owns the prepare -> resolve/plan -> engine-start pipeline, including direct provider resolution on platforms that do not resolve resources inside the engine and `PlaybackPlan` construction for engines that do.
+Queue and start orchestration have explicit playback owners. `PlaybackQueueCoordinator` owns `startCurrent` / `previous` / `next`, up-next priority, repeat/part transitions and queue-index selection while `PlaybackQueueController` remains the durable queue state holder. `PlaybackStartCoordinator` owns the prepare -> resolve/plan -> engine-start pipeline, including direct provider resolution on platforms that do not resolve resources inside the engine and `PlaybackPlan` construction for engines that do.
 
 Pre-engine start failures are published through `PlaybackStartFailureSource`. Android and iOS runtime adapters combine that playback-owned failure with engine state, so the old iOS compatibility path that read coordinator/controller `Error` state has been retired.
 
-MiniPlayer and FullPlayer read authoritative playback state/transport from `PlaybackSession`. Rich player UI concerns are now split into narrow contracts instead of being owned by one controller-backed UI adapter:
+`PlaybackLifecycleCoordinator` owns the Playing/Ended transition state machine that chooses between sleep-timer completion and queue auto-advance. `PlaybackSleepTimerController` owns sleep-timer state/commands and the end-of-track timer lifecycle contract. The controller engine collector publishes the current engine snapshot before executing the lifecycle action, preserving the historical state-observation ordering without owning the policy.
+
+MiniPlayer and FullPlayer read authoritative playback state/transport from `PlaybackSession`. Rich player UI concerns are split into narrow contracts:
 
 - `PlaybackNavigationPort` owns FullPlayer / queue-overlay visibility.
 - `PlaybackPresentationPort` reads rich engine presentation plus lyric/theme settings and owns seek normalization.
 - `PlaybackQueueUiPort` is implemented by `PlaybackQueueCoordinator` and owns queue display/edit, shuffle/repeat and transition direction for player UI.
-- `PlaybackSleepTimerPort` isolates the remaining sleep-timer compatibility until end-of-track completion leaves the legacy engine-ended loop.
-- `NowPlayingActionPort` isolates cross-feature download, playlist, provider-detail, local-metadata and replacement actions until those feature owners are extracted.
+- `PlaybackSleepTimerPort` is implemented directly by `PlaybackSleepTimerController`.
+- `DownloadActionPort` is implemented by `DownloadController`.
+- `PlaylistActionPort` is implemented by `PlaylistActionController`.
+- `ProviderTrackActionPort` is implemented by `ProviderTrackActionController`.
+- `LocalMusicActionPort` is implemented by `LocalMusicController`.
+- `ReplacementActionPort` is implemented by `PlaybackReplacementController`.
 
-`ControllerPlaybackUiPort` has been retired. `PlaybackUiPort` remains only as a transitional composition facade that delegates to the narrow owners above so the existing FullPlayer implementation can migrate incrementally without putting those responsibilities back into one owner. Android and iOS construct the same owner graph in their composition roots.
+The broad `PlaybackUiPort`, `ControllerPlaybackUiPort`, `ControllerNowPlayingActionPort`, `ControllerPlaybackSleepTimerPort`, and two-way playback-navigation mirror are retired. `PlaybackUiGraph` is only a composition-time dependency holder; it does not own business state or actions. `RuntimeFullPlayer` installs that graph into narrow `CompositionLocal` contracts and every player sub-surface consumes only the port it needs.
 
-Legacy feature screens that still call the old `MiniPlayer(controller)` signature are temporarily supported by a two-flag navigation mirror at the composition edge. The actual player overlay source remains `PlaybackNavigationPort`; the mirror exists only so old MiniPlayer entry points and controller-owned detail actions can open/close the same overlay during feature migration.
+`FuoPlayerController` may still expose compatibility facade methods to unmigrated sibling screens, but those methods delegate to the same feature/playback owner instances. New player UI must not route state or policy back through the facade.
 
 ## Repository dependencies
 
@@ -65,11 +71,13 @@ Platform dependency construction is isolated in platform containers. Android use
 
 Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. During the remaining migration, platform composition roots may adapt still-centralized controller operations to those ports; the dependency must not leak back into the feature or app route contract.
 
-Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. Both receive `PlaybackTransportCoordinator` and `PlaybackStartFailureSource` explicitly; they no longer dispatch runtime transport through controller methods or inspect controller error state. `FuoAppViewModel` exposes the resulting app-scoped `PlaybackSession` plus the composed playback UI facade, and `AppRoot` supplies them directly. `AppRoot` no longer constructs a controller-backed playback UI adapter.
+Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. Both receive `PlaybackTransportCoordinator` and `PlaybackStartFailureSource` explicitly; they no longer dispatch runtime transport through controller methods or inspect controller error state. Android/iOS composition roots inject the playback navigation, presentation, queue, sleep-timer, download, playlist, provider-track, local-music and replacement owners explicitly into `FuoAppViewModel`. `AppRoot` only installs the resulting composition graph; it does not construct controller-backed playback adapters.
 
 ## Architecture fitness check
 
-`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, `PlaybackQueueController`, `PlaybackQueueCoordinator`, `PlaybackStartCoordinator`, `PlaybackUiPort`, `PlaybackUiOwners`, playback composition contracts, controller-free MiniPlayer/FullPlayer implementations, app-port contracts/routes, and Android playback service/Lyricon integration. It also rejects reintroduction of the retired Search/Recognition route shims, `ControllerPlaybackSession`, and `ControllerPlaybackUiPort`, plus direct `controller.toggle()/previous()/next()` calls in platform playback runtime adapters.
+`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, Download/Local Music/Playlist/Provider Track now-playing owners, playback queue/start/lifecycle/replacement/sleep-timer owners, player composition contracts, controller-free MiniPlayer/FullPlayer implementations, app-port contracts/routes, and Android playback service/Lyricon integration.
+
+It also rejects reintroduction of retired Search/Recognition route shims, `ControllerPlaybackSession`, `ControllerPlaybackUiPort`, and `ControllerPlaybackCompatibilityPorts`; rejects any new `PlaybackUiPort` aggregate declaration; rejects legacy `MiniPlayer(controller)` callers after their migration; and rejects direct `controller.toggle()/previous()/next()` calls in platform playback runtime adapters.
 
 ## Migration rule
 

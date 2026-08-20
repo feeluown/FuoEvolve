@@ -76,45 +76,54 @@ import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
-/** Controller-free FullPlayer/queue/lyrics entry point for P1-C2. */
+/** Controller-free FullPlayer/queue/lyrics entry point consuming only narrow feature ports. */
 @Composable
 fun RuntimeFullPlayer() {
+    ProvideNarrowPlaybackUi {
+        RuntimeFullPlayerNarrow()
+    }
+}
+
+@Composable
+private fun RuntimeFullPlayerNarrow() {
     val playbackSession = LocalPlaybackSession.current
-    val uiPort = LocalPlaybackUiPort.current
+    val presentation = LocalPlaybackPresentationPort.current
+    val queue = LocalPlaybackQueueUiPort.current
     val sessionState by playbackSession.state.collectAsStateWithLifecycle()
-    val state = sessionState.toPlayerRenderState(uiPort)
+    val state = sessionState.toPlayerRenderState(presentation, queue)
 
     PlayerDynamicColorTheme(
-        themeMode = uiPort.themeMode,
-        dynamicCoverColorEnabled = uiPort.dynamicCoverColorEnabled,
-        coverImageUrl = uiPort.currentTrack?.coverUrl,
+        themeMode = presentation.themeMode,
+        dynamicCoverColorEnabled = presentation.dynamicCoverColorEnabled,
+        coverImageUrl = presentation.currentTrack?.coverUrl,
         isLoading = sessionState.status == PlaybackSessionStatus.Loading,
     ) {
         RuntimeFullPlayerContent(
             playbackSession = playbackSession,
-            uiPort = uiPort,
             state = state,
         )
     }
 }
 
-private fun PlaybackSessionState.toPlayerRenderState(uiPort: PlaybackUiPort): PlaybackState =
-    PlaybackState(
-        status = status.toPlayerStatus(),
-        currentTrack = uiPort.currentTrack,
-        positionMs = positionMs,
-        durationMs = durationMs,
-        bufferedMs = bufferedMs,
-        queue = uiPort.queue,
-        queueIndex = queueIndex,
-        lyrics = lyrics,
-        audioQuality = uiPort.audioQuality,
-        audioFormatInfo = uiPort.audioFormatInfo,
-        audioDecoderInfo = uiPort.audioDecoderInfo,
-        playbackParts = uiPort.playbackParts,
-        currentPartIndex = uiPort.currentPartIndex,
-        errorMessage = errorMessage,
-    )
+private fun PlaybackSessionState.toPlayerRenderState(
+    presentation: PlaybackPresentationPort,
+    queue: PlaybackQueueUiPort,
+): PlaybackState = PlaybackState(
+    status = status.toPlayerStatus(),
+    currentTrack = presentation.currentTrack,
+    positionMs = positionMs,
+    durationMs = durationMs,
+    bufferedMs = bufferedMs,
+    queue = queue.queue,
+    queueIndex = queueIndex,
+    lyrics = lyrics,
+    audioQuality = presentation.audioQuality,
+    audioFormatInfo = presentation.audioFormatInfo,
+    audioDecoderInfo = presentation.audioDecoderInfo,
+    playbackParts = presentation.playbackParts,
+    currentPartIndex = presentation.currentPartIndex,
+    errorMessage = errorMessage,
+)
 
 private fun PlaybackSessionStatus.toPlayerStatus(): PlayerStatus = when (this) {
     PlaybackSessionStatus.Idle -> PlayerStatus.Idle
@@ -128,9 +137,9 @@ private fun PlaybackSessionStatus.toPlayerStatus(): PlayerStatus = when (this) {
 @Composable
 private fun RuntimeFullPlayerContent(
     playbackSession: PlaybackSession,
-    uiPort: PlaybackUiPort,
     state: PlaybackState,
 ) {
+    val presentation = LocalPlaybackPresentationPort.current
     val currentTrack = state.currentTrack
     val pagerState = rememberPagerState(
         initialPage = PlayerVisualTab.Cover.ordinal,
@@ -149,7 +158,7 @@ private fun RuntimeFullPlayerContent(
                         .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 68.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    RuntimePlayerHeader(uiPort, currentTrack)
+                    RuntimePlayerHeader(currentTrack)
                     BoxWithConstraints(
                         modifier = Modifier
                             .weight(1f)
@@ -169,7 +178,7 @@ private fun RuntimeFullPlayerContent(
                             ) {
                                 LyricsPanel(
                                     state = state,
-                                    fontSize = uiPort.lyricFontSize,
+                                    fontSize = presentation.lyricFontSize,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -188,7 +197,6 @@ private fun RuntimeFullPlayerContent(
                                 ) {
                                     RuntimePlayerCoverPage(
                                         track = currentTrack,
-                                        uiPort = uiPort,
                                         isLoading = state.status == PlayerStatus.Loading,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -196,7 +204,6 @@ private fun RuntimeFullPlayerContent(
                                     )
                                     RuntimePlayerTitleBlock(
                                         track = currentTrack,
-                                        uiPort = uiPort,
                                         partLabel = currentPlaybackPartLabel(state),
                                     )
                                     Text(
@@ -207,12 +214,12 @@ private fun RuntimeFullPlayerContent(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                RuntimePlayerTransport(playbackSession, uiPort, state, dense = false)
+                                RuntimePlayerTransport(playbackSession, state, dense = false)
                             }
                         }
                     }
                 }
-                RuntimeQueueBottomSheet(uiPort, state)
+                RuntimeQueueBottomSheet(state)
             }
         }
         return
@@ -233,7 +240,7 @@ private fun RuntimeFullPlayerContent(
                     .padding(bottom = portraitBottomPadding),
                 verticalArrangement = Arrangement.spacedBy(portraitSpacing),
             ) {
-                RuntimePlayerHeader(uiPort, currentTrack)
+                RuntimePlayerHeader(currentTrack)
                 PrimaryTabRow(selectedTabIndex = pagerState.currentPage.coerceIn(0, PlayerVisualTab.entries.lastIndex)) {
                     PlayerVisualTab.entries.forEach { tab ->
                         Tab(
@@ -253,19 +260,17 @@ private fun RuntimeFullPlayerContent(
                     when (PlayerVisualTab.entries[page]) {
                         PlayerVisualTab.Cover -> RuntimePlayerCoverPage(
                             track = currentTrack,
-                            uiPort = uiPort,
                             isLoading = state.status == PlayerStatus.Loading,
                         )
                         PlayerVisualTab.Lyrics -> LyricsPanel(
                             state = state,
-                            fontSize = uiPort.lyricFontSize,
+                            fontSize = presentation.lyricFontSize,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
                 RuntimePlayerTitleBlock(
                     track = currentTrack,
-                    uiPort = uiPort,
                     partLabel = currentPlaybackPartLabel(state),
                 )
                 Text(
@@ -275,21 +280,22 @@ private fun RuntimeFullPlayerContent(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                RuntimePlayerTransport(playbackSession, uiPort, state, dense = compactPortrait)
+                RuntimePlayerTransport(playbackSession, state, dense = compactPortrait)
             }
-            RuntimeQueueBottomSheet(uiPort, state)
+            RuntimeQueueBottomSheet(state)
         }
     }
 }
 
 @Composable
-private fun RuntimePlayerHeader(uiPort: PlaybackUiPort, currentTrack: MusicTrack?) {
+private fun RuntimePlayerHeader(currentTrack: MusicTrack?) {
+    val navigation = LocalPlaybackNavigationPort.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = uiPort::closeFullPlayer) {
+        IconButton(onClick = navigation::closeFullPlayer) {
             Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起播放器")
         }
         Text(
@@ -301,10 +307,10 @@ private fun RuntimePlayerHeader(uiPort: PlaybackUiPort, currentTrack: MusicTrack
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = uiPort::toggleQueue) {
+            IconButton(onClick = navigation::toggleQueue) {
                 Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
             }
-            currentTrack?.let { RuntimeNowPlayingTrackAction(uiPort, it) }
+            currentTrack?.let { RuntimeNowPlayingTrackAction(it) }
         }
     }
 }
@@ -312,11 +318,12 @@ private fun RuntimePlayerHeader(uiPort: PlaybackUiPort, currentTrack: MusicTrack
 @Composable
 private fun RuntimePlayerTransport(
     playbackSession: PlaybackSession,
-    uiPort: PlaybackUiPort,
     state: PlaybackState,
     dense: Boolean,
 ) {
-    ProgressBlock(state, uiPort::seekTo)
+    val presentation = LocalPlaybackPresentationPort.current
+    val queue = LocalPlaybackQueueUiPort.current
+    ProgressBlock(state, presentation::seekTo)
     PlayerControls(
         state = state,
         modifier = Modifier.fillMaxWidth(),
@@ -324,10 +331,10 @@ private fun RuntimePlayerTransport(
         onToggle = playbackSession::toggle,
         onNext = playbackSession::next,
         dense = dense,
-        shuffleEnabled = uiPort.isShuffleEnabled,
-        shuffleAvailable = !uiPort.isFmQueueActive,
-        onShuffle = uiPort::toggleShuffle,
-        sleepTimerAction = { RuntimeSleepTimerAction(uiPort) },
+        shuffleEnabled = queue.isShuffleEnabled,
+        shuffleAvailable = !queue.isFmQueueActive,
+        onShuffle = queue::toggleShuffle,
+        sleepTimerAction = { RuntimeSleepTimerAction() },
     )
 }
 
@@ -335,10 +342,11 @@ private fun RuntimePlayerTransport(
 @OptIn(ExperimentalSharedTransitionApi::class)
 private fun RuntimePlayerCoverPage(
     track: MusicTrack?,
-    uiPort: PlaybackUiPort,
     isLoading: Boolean,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
+    val navigation = LocalPlaybackNavigationPort.current
+    val queue = LocalPlaybackQueueUiPort.current
     BoxWithConstraints(modifier = modifier) {
         val coverSize = minOf(maxWidth, maxHeight * 0.82f)
         Column(
@@ -348,8 +356,8 @@ private fun RuntimePlayerCoverPage(
         ) {
             PlayerSharedCover(
                 track = track ?: emptyDisplayTrack(),
-                heroEnabled = uiPort.isFullPlayerOpen,
-                transitionDirection = uiPort.trackChangeDirection,
+                heroEnabled = navigation.isFullPlayerOpen,
+                transitionDirection = queue.trackChangeDirection,
                 isLoading = isLoading,
                 cornerRadius = 22.dp,
                 modifier = Modifier.size(coverSize),
@@ -361,7 +369,6 @@ private fun RuntimePlayerCoverPage(
 @Composable
 private fun RuntimePlayerTitleBlock(
     track: MusicTrack?,
-    uiPort: PlaybackUiPort,
     partLabel: String?,
 ) {
     Column(
@@ -383,15 +390,18 @@ private fun RuntimePlayerTitleBlock(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        RuntimePlayerInfoTags(track, uiPort)
+        RuntimePlayerInfoTags(track)
     }
 }
 
 @Composable
-private fun RuntimePlayerInfoTags(track: MusicTrack?, uiPort: PlaybackUiPort) {
+private fun RuntimePlayerInfoTags(track: MusicTrack?) {
+    val presentation = LocalPlaybackPresentationPort.current
+    val replacement = LocalReplacementActionPort.current
     var replacementInfoTrack by remember(track?.id) { mutableStateOf<MusicTrack?>(null) }
     var showAudioFormatInfo by remember(track?.id) { mutableStateOf(false) }
-    val canShowAudioInfo = uiPort.audioFormatInfo?.hasDisplayableValue() == true || uiPort.audioDecoderInfo != null
+    val canShowAudioInfo = presentation.audioFormatInfo?.hasDisplayableValue() == true ||
+        presentation.audioDecoderInfo != null
 
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -403,14 +413,14 @@ private fun RuntimePlayerInfoTags(track: MusicTrack?, uiPort: PlaybackUiPort) {
                     text = replacementSourceLabel(track),
                     onClick = {
                         replacementInfoTrack = track
-                        uiPort.loadReplacementCandidates(track)
+                        replacement.loadReplacementCandidates(track)
                     },
                 )
             } else {
                 InfoTag(sourceLabel(track, null))
             }
         }
-        uiPort.audioQuality?.takeIf { it.isNotBlank() }?.let {
+        presentation.audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(
                 text = it.uppercase(),
                 onClick = if (canShowAudioInfo) ({ showAudioFormatInfo = true }) else null,
@@ -421,17 +431,17 @@ private fun RuntimePlayerInfoTags(track: MusicTrack?, uiPort: PlaybackUiPort) {
     replacementInfoTrack?.let { infoTrack ->
         ReplacementInfoDialog(
             track = infoTrack,
-            candidateState = uiPort.replacementCandidateState
+            candidateState = replacement.replacementCandidateState
                 .takeIf { it.trackId == (infoTrack.originalId ?: infoTrack.id) }
                 ?: ReplacementCandidateState(),
             onDismiss = { replacementInfoTrack = null },
-            onRetry = { uiPort.loadReplacementCandidates(infoTrack) },
+            onRetry = { replacement.loadReplacementCandidates(infoTrack) },
             onSelectCandidate = { candidate ->
-                uiPort.selectReplacementCandidate(infoTrack, candidate)
+                replacement.selectReplacementCandidate(infoTrack, candidate)
                 replacementInfoTrack = null
             },
             onOpenDetail = if (infoTrack.replacementId?.isNotBlank() == true) {
-                { uiPort.openReplacementTrackDetail(infoTrack) }
+                { replacement.openReplacementTrackDetail(infoTrack) }
             } else {
                 null
             },
@@ -439,47 +449,52 @@ private fun RuntimePlayerInfoTags(track: MusicTrack?, uiPort: PlaybackUiPort) {
     }
     if (showAudioFormatInfo) {
         AudioFormatInfoDialog(
-            info = uiPort.audioFormatInfo,
-            decoderInfo = uiPort.audioDecoderInfo,
+            info = presentation.audioFormatInfo,
+            decoderInfo = presentation.audioDecoderInfo,
             onDismiss = { showAudioFormatInfo = false },
         )
     }
 }
 
 @Composable
-private fun RuntimeNowPlayingTrackAction(uiPort: PlaybackUiPort, track: MusicTrack) {
+private fun RuntimeNowPlayingTrackAction(track: MusicTrack) {
+    val queue = LocalPlaybackQueueUiPort.current
+    val downloads = LocalDownloadActionPort.current
+    val playlists = LocalPlaylistActionPort.current
+    val providerActions = LocalProviderTrackActionPort.current
+    val localActions = LocalLocalMusicActionPort.current
     val onShare = LocalShareHandler.current
     val sharePayload = track.toSharePayload()
     TrackAction(
         track = track,
-        downloadState = uiPort.downloadStates[track.id],
-        onAddToUpNext = { uiPort.addToUpNext(track) },
-        onDownload = { uiPort.download(track) },
-        onDeleteDownload = { uiPort.deleteDownload(track) },
-        onOpenArtist = { uiPort.openTrackArtist(track) },
-        onOpenAlbum = { uiPort.openTrackAlbum(track) },
+        downloadState = downloads.downloadStates[track.id],
+        onAddToUpNext = { queue.addToUpNext(track) },
+        onDownload = { downloads.download(track) },
+        onDeleteDownload = { downloads.deleteDownload(track) },
+        onOpenArtist = { providerActions.openTrackArtist(track) },
+        onOpenAlbum = { providerActions.openTrackAlbum(track) },
         onOpenDetail = if (track.sourceType == TrackSourceType.Provider) {
-            { uiPort.openOriginalTrackDetail(track) }
+            { providerActions.openOriginalTrackDetail(track) }
         } else {
             null
         },
         onEditLocalMetadata = if (track.sourceType == TrackSourceType.LocalMediaStore) {
-            { uiPort.openLocalMetadataEditor(track) }
+            { localActions.openLocalMetadataEditor(track) }
         } else {
             null
         },
-        onAddToPlaylist = if (uiPort.canAddTrackToPlaylist(track)) {
-            { uiPort.openPlaylistTargetPicker(track) }
+        onAddToPlaylist = if (playlists.canAddTrackToPlaylist(track)) {
+            { playlists.openPlaylistTargetPicker(track) }
         } else {
             null
         },
-        onRemoveFromProviderPlaylist = if (uiPort.canRemoveTrackFromSelectedPlaylist(track)) {
-            { uiPort.removeTrackFromSelectedPlaylist(track) }
+        onRemoveFromProviderPlaylist = if (playlists.canRemoveTrackFromSelectedPlaylist(track)) {
+            { playlists.removeTrackFromSelectedPlaylist(track) }
         } else {
             null
         },
-        onSetDisliked = if (uiPort.canSetSongDisliked(track)) {
-            { uiPort.setSongDisliked(track) }
+        onSetDisliked = if (providerActions.canSetSongDisliked(track)) {
+            { providerActions.setSongDisliked(track) }
         } else {
             null
         },
@@ -491,15 +506,16 @@ private fun RuntimeNowPlayingTrackAction(uiPort: PlaybackUiPort, track: MusicTra
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RuntimeQueueBottomSheet(uiPort: PlaybackUiPort, state: PlaybackState) {
+private fun RuntimeQueueBottomSheet(state: PlaybackState) {
+    val navigation = LocalPlaybackNavigationPort.current
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     if (!isWideLayout) {
-        if (uiPort.isQueueOpen) {
+        if (navigation.isQueueOpen) {
             ModalBottomSheet(
-                onDismissRequest = uiPort::toggleQueue,
+                onDismissRequest = navigation::toggleQueue,
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
             ) {
-                RuntimeQueueContent(uiPort, state, sidePanel = false, embedded = true)
+                RuntimeQueueContent(state, sidePanel = false, embedded = true)
             }
         }
         return
@@ -509,7 +525,7 @@ private fun RuntimeQueueBottomSheet(uiPort: PlaybackUiPort, state: PlaybackState
         contentAlignment = if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter,
     ) {
         AnimatedVisibility(
-            visible = uiPort.isQueueOpen,
+            visible = navigation.isQueueOpen,
             modifier = Modifier.fillMaxSize(),
             enter = fadeIn(tween(160)),
             exit = fadeOut(tween(140)),
@@ -518,11 +534,11 @@ private fun RuntimeQueueBottomSheet(uiPort: PlaybackUiPort, state: PlaybackState
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                    .clickable(role = Role.Button, onClick = uiPort::toggleQueue),
+                    .clickable(role = Role.Button, onClick = navigation::toggleQueue),
             )
         }
         AnimatedVisibility(
-            visible = uiPort.isQueueOpen,
+            visible = navigation.isQueueOpen,
             modifier = Modifier.align(if (isWideLayout) Alignment.CenterEnd else Alignment.BottomCenter),
             enter = if (isWideLayout) {
                 slideInHorizontally(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it } +
@@ -537,18 +553,18 @@ private fun RuntimeQueueBottomSheet(uiPort: PlaybackUiPort, state: PlaybackState
                 error("Wide layout required for side-panel queue")
             },
         ) {
-            RuntimeQueueContent(uiPort, state, sidePanel = true)
+            RuntimeQueueContent(state, sidePanel = true)
         }
     }
 }
 
 @Composable
 private fun RuntimeQueueContent(
-    uiPort: PlaybackUiPort,
     state: PlaybackState,
     sidePanel: Boolean = false,
     embedded: Boolean = false,
 ) {
+    val queuePort = LocalPlaybackQueueUiPort.current
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     val queueSize = state.queue.size
 
@@ -568,20 +584,16 @@ private fun RuntimeQueueContent(
         },
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 8.dp,
-        shape = if (sidePanel) {
-            MaterialTheme.shapes.large
-        } else {
-            MaterialTheme.shapes.large
-        },
+        shape = MaterialTheme.shapes.large,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             QueueRepeatModeHeader(
-                isFmQueue = uiPort.isFmQueueActive,
-                repeatMode = uiPort.repeatMode,
-                onRepeat = uiPort::toggleRepeat,
+                isFmQueue = queuePort.isFmQueueActive,
+                repeatMode = queuePort.repeatMode,
+                onRepeat = queuePort::toggleRepeat,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -610,7 +622,6 @@ private fun RuntimeQueueContent(
                 }
             }
             RuntimeQueueList(
-                uiPort = uiPort,
                 state = state,
                 modifier = if (sidePanel) {
                     Modifier
@@ -633,7 +644,7 @@ private fun RuntimeQueueContent(
             confirmButton = {
                 TextButton(onClick = {
                     showClearConfirmDialog = false
-                    uiPort.clearQueue()
+                    queuePort.clearQueue()
                 }) {
                     Text("清空")
                 }
@@ -649,18 +660,17 @@ private fun RuntimeQueueContent(
 
 @Composable
 private fun RuntimeQueueList(
-    uiPort: PlaybackUiPort,
     state: PlaybackState,
     modifier: Modifier,
 ) {
+    val queuePort = LocalPlaybackQueueUiPort.current
+    val presentation = LocalPlaybackPresentationPort.current
     val queue = state.queue
-    val playbackParts = uiPort.playbackParts
-    val currentPartIndex = uiPort.currentPartIndex
+    val playbackParts = presentation.playbackParts
+    val currentPartIndex = presentation.currentPartIndex
     val currentCount = if (state.queueIndex == 0 && queue.isNotEmpty()) 1 else 0
-    val upNextCount = uiPort.displayUpNextCount
-    LazyColumn(
-        modifier = modifier,
-    ) {
+    val upNextCount = queuePort.displayUpNextCount
+    LazyColumn(modifier = modifier) {
         itemsIndexed(queue) { index, track ->
             if (index == 0 && currentCount == 1) {
                 Text(
@@ -700,7 +710,7 @@ private fun RuntimeQueueList(
                     .clickable(
                         enabled = !isUnavailable,
                         role = Role.Button,
-                    ) { uiPort.playQueueIndex(index) }
+                    ) { queuePort.playQueueIndex(index) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -732,7 +742,7 @@ private fun RuntimeQueueList(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(onClick = { uiPort.removeFromQueue(track) }) {
+                IconButton(onClick = { queuePort.removeFromQueue(track) }) {
                     Icon(Icons.Filled.RemoveCircleOutline, contentDescription = "从队列移除")
                 }
             }
@@ -740,7 +750,7 @@ private fun RuntimeQueueList(
                 PlaybackPartList(
                     parts = playbackParts,
                     currentPartIndex = currentPartIndex,
-                    onPartClick = uiPort::playPlaybackPart,
+                    onPartClick = queuePort::playPlaybackPart,
                 )
             }
             HorizontalDivider()
@@ -749,9 +759,10 @@ private fun RuntimeQueueList(
 }
 
 @Composable
-private fun RuntimeSleepTimerAction(uiPort: PlaybackUiPort) {
+private fun RuntimeSleepTimerAction() {
+    val sleepTimer = LocalPlaybackSleepTimerPort.current
     var showSheet by remember { mutableStateOf(false) }
-    val timerState = uiPort.sleepTimerState
+    val timerState = sleepTimer.sleepTimerState
     val isActive = timerState.mode != SleepTimerMode.Off
     val contentDescription = when (timerState.mode) {
         SleepTimerMode.Off -> "睡眠定时"
@@ -766,21 +777,16 @@ private fun RuntimeSleepTimerAction(uiPort: PlaybackUiPort) {
             selected = isActive,
         )
         if (showSheet) {
-            RuntimeSleepTimerBottomSheet(
-                uiPort = uiPort,
-                onDismiss = { showSheet = false },
-            )
+            RuntimeSleepTimerBottomSheet(onDismiss = { showSheet = false })
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RuntimeSleepTimerBottomSheet(
-    uiPort: PlaybackUiPort,
-    onDismiss: () -> Unit,
-) {
-    val timerState = uiPort.sleepTimerState
+private fun RuntimeSleepTimerBottomSheet(onDismiss: () -> Unit) {
+    val sleepTimer = LocalPlaybackSleepTimerPort.current
+    val timerState = sleepTimer.sleepTimerState
     var showCustomDurationDialog by remember { mutableStateOf(false) }
     var customMinutesText by remember { mutableStateOf("") }
     val customMinutes = customMinutesText.toIntOrNull()
@@ -818,7 +824,7 @@ private fun RuntimeSleepTimerBottomSheet(
                     timerState = timerState,
                     onExtend = if (timerState.mode == SleepTimerMode.Duration) {
                         {
-                            uiPort.setSleepTimerDurationMinutes(
+                            sleepTimer.setSleepTimerDurationMinutes(
                                 runtimeSleepTimerExtendedMinutes(timerState.remainingMs ?: 0L, 5),
                             )
                         }
@@ -826,7 +832,7 @@ private fun RuntimeSleepTimerBottomSheet(
                         null
                     },
                     onClear = {
-                        uiPort.clearSleepTimer()
+                        sleepTimer.clearSleepTimer()
                         onDismiss()
                     },
                 )
@@ -841,7 +847,7 @@ private fun RuntimeSleepTimerBottomSheet(
                         minutes = minutes,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            uiPort.setSleepTimerDurationMinutes(minutes)
+                            sleepTimer.setSleepTimerDurationMinutes(minutes)
                             onDismiss()
                         },
                     )
@@ -856,7 +862,7 @@ private fun RuntimeSleepTimerBottomSheet(
                         minutes = minutes,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            uiPort.setSleepTimerDurationMinutes(minutes)
+                            sleepTimer.setSleepTimerDurationMinutes(minutes)
                             onDismiss()
                         },
                     )
@@ -871,7 +877,7 @@ private fun RuntimeSleepTimerBottomSheet(
             RuntimeSleepTimerEndOfTrackOption(
                 selected = timerState.mode == SleepTimerMode.EndOfTrack,
                 onClick = {
-                    uiPort.setSleepTimerToEndOfTrack()
+                    sleepTimer.setSleepTimerToEndOfTrack()
                     onDismiss()
                 },
             )
@@ -907,7 +913,7 @@ private fun RuntimeSleepTimerBottomSheet(
                 TextButton(
                     enabled = customMinutesValid,
                     onClick = {
-                        customMinutes?.let(uiPort::setSleepTimerDurationMinutes)
+                        customMinutes?.let(sleepTimer::setSleepTimerDurationMinutes)
                         showCustomDurationDialog = false
                         onDismiss()
                     },

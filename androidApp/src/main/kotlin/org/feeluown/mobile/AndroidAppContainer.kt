@@ -231,18 +231,12 @@ internal class AndroidAppContainer(
         }
     }
 
-    private val playbackUiPort: PlaybackUiPort by lazy {
-        val wiredController = controller
-        DefaultPlaybackUiPort(
-            navigation = controllerMirroredPlaybackNavigationPort(wiredController, appScope),
-            presentation = DefaultPlaybackPresentationPort(
-                playbackEngine = playbackEngine,
-                settingsRepository = settingsRepository,
-                scope = appScope,
-            ),
-            queuePort = wiredController.playbackTransportCoordinator,
-            sleepTimer = ControllerPlaybackSleepTimerPort(wiredController),
-            nowPlayingActions = ControllerNowPlayingActionPort(wiredController),
+    private val playbackPresentationPort: PlaybackPresentationPort by lazy {
+        DefaultPlaybackPresentationPort(
+            playbackEngine = playbackEngine,
+            queuePort = controller.playbackQueueUiPort,
+            settingsRepository = settingsRepository,
+            scope = appScope,
         )
     }
 
@@ -251,7 +245,15 @@ internal class AndroidAppContainer(
         FuoAppViewModel(
             controller = wiredController,
             playbackSession = playbackSession,
-            playbackUiPort = playbackUiPort,
+            playbackNavigationPort = wiredController.playbackNavigationPort,
+            playbackPresentationPort = playbackPresentationPort,
+            playbackQueueUiPort = wiredController.playbackQueueUiPort,
+            playbackSleepTimerPort = wiredController.playbackSleepTimerPort,
+            downloadActionPort = wiredController.downloadActionPort,
+            playlistActionPort = wiredController.playlistActionPort,
+            providerTrackActionPort = wiredController.providerTrackActionPort,
+            localMusicActionPort = wiredController.localMusicActionPort,
+            replacementActionPort = wiredController.replacementActionPort,
             searchController = searchController,
             recognitionController = recognitionController,
             searchAppPort = searchAppPort,

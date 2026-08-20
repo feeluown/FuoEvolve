@@ -173,7 +173,7 @@ fun LocalMusicCollectionScreen(controller: FuoPlayerController) {
         },
         bottomBar = {
             if (controller.playbackState.currentTrack != null) {
-                MiniPlayer(controller)
+                PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->

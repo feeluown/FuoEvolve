@@ -18,9 +18,16 @@ val migratedControllerBoundaryFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppFeaturePorts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRoute.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/download/DownloadController.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/localmusic/LocalMusicController.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/localplaylist/PlaylistActionController.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/provider/ProviderTrackActionController.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackComposition.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackLifecycleCoordinator.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackQueueController.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackQueueCoordinator.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackReplacementController.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackSleepTimerController.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackStartCoordinator.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackUiPort.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackUiOwners.kt",
@@ -34,6 +41,7 @@ val retiredControllerCompatibilityFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRouteCompat.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRouteCompat.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/ControllerPlaybackUiPort.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/app/ControllerPlaybackCompatibilityPorts.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/ControllerPlaybackSession.kt",
 )
 val playbackRuntimeAdapterFiles = listOf(
@@ -57,7 +65,16 @@ tasks.register("checkArchitectureBoundaries") {
                 .filterTo(this) { it.isFile }
         }.distinct()
     }
+    val commonMainSources = provider {
+        val root = rootProject.file("shared/src/commonMain/kotlin")
+        if (root.isDirectory) {
+            root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        } else {
+            emptyList()
+        }
+    }
     inputs.files(sourceFiles)
+    inputs.files(commonMainSources)
     inputs.files(playbackRuntimeAdapterFiles.map(rootProject::file))
 
     doLast {
@@ -70,7 +87,7 @@ tasks.register("checkArchitectureBoundaries") {
                 buildString {
                     appendLine("Retired controller compatibility files were reintroduced:")
                     retiredCompatViolations.forEach { appendLine(" - $it") }
-                    append("Use app ports or the dedicated playback runtime boundary instead.")
+                    append("Use app ports or dedicated feature/playback owners instead.")
                 },
             )
         }
@@ -96,6 +113,49 @@ tasks.register("checkArchitectureBoundaries") {
                     appendLine("FuoPlayerController leaked into migrated architecture boundaries:")
                     violations.forEach { appendLine(" - $it") }
                     append("Use feature-owned state/actions or a narrow app/playback/provider contract instead.")
+                },
+            )
+        }
+
+        val playbackUiAggregatePattern = Regex("\\b(?:interface|class)\\s+PlaybackUiPort\\b")
+        val playbackUiAggregateViolations = commonMainSources.get().flatMap { file ->
+            file.readLines().mapIndexedNotNull { index, line ->
+                if (playbackUiAggregatePattern.containsMatchIn(line)) {
+                    "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1}"
+                } else {
+                    null
+                }
+            }
+        }
+        if (playbackUiAggregateViolations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Retired PlaybackUiPort aggregate was reintroduced:")
+                    playbackUiAggregateViolations.forEach { appendLine(" - $it") }
+                    append("Compose playback UI from the narrow feature ports through PlaybackUiGraph instead.")
+                },
+            )
+        }
+
+        val legacyMiniPlayerViolations = commonMainSources.get().flatMap { file ->
+            file.readLines().mapIndexedNotNull { index, line ->
+                val normalized = line.replace(" ", "")
+                if (
+                    "MiniPlayer(controller" in normalized &&
+                    !normalized.startsWith("funMiniPlayer(controller")
+                ) {
+                    "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1}"
+                } else {
+                    null
+                }
+            }
+        }
+        if (legacyMiniPlayerViolations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Legacy MiniPlayer(controller) callers remain:")
+                    legacyMiniPlayerViolations.forEach { appendLine(" - $it") }
+                    append("Use PlaybackMiniPlayer() so the mini player stays on the narrow playback graph.")
                 },
             )
         }

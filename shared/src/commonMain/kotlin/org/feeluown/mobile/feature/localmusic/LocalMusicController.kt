@@ -18,7 +18,7 @@ internal class LocalMusicController(
     private val setMessage: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
     private val onTrackUpdated: (String, MusicTrack) -> Unit,
-) {
+) : LocalMusicActionPort {
     var hasPermission: Boolean = false
         private set
 
@@ -161,6 +161,8 @@ internal class LocalMusicController(
         persistSettings()
         reload()
     }
+
+    override fun openLocalMetadataEditor(track: MusicTrack) = openMetadataEditor(track)
 
     fun openMetadataEditor(track: MusicTrack) {
         if (track.sourceType == TrackSourceType.Provider) return
