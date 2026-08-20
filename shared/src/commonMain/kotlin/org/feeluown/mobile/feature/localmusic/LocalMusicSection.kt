@@ -5,20 +5,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -42,11 +42,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+internal data class LocalMusicUiGraph(
+    val feature: LocalMusicFeatureController,
+    val playbackQueue: PlaybackQueueUiPort,
+    val downloads: DownloadActionPort,
+    val providerTrackActions: ProviderTrackActionPort,
+)
+
+internal val LocalLocalMusicUiGraph = staticCompositionLocalOf<LocalMusicUiGraph> {
+    error("LocalMusicUiGraph is not installed")
+}
 
 internal data class LocalMusicCollection(
     val key: String,
@@ -59,7 +72,6 @@ internal data class LocalMusicCollection(
 
 @Composable
 fun LocalMusicSection(
-    controller: FuoPlayerController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
     hasImagePermission: Boolean,
@@ -67,30 +79,32 @@ fun LocalMusicSection(
     showModeFilter: Boolean,
     modifier: Modifier,
 ) {
+    val graph = LocalLocalMusicUiGraph.current
+    val uiState by graph.feature.uiState.collectAsStateWithLifecycle()
     var previousImagePermission by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(hasAudioPermission, hasImagePermission) {
-        controller.onLocalMusicPermissionChange(hasAudioPermission)
+        graph.feature.onPermissionChange(hasAudioPermission)
         if (hasAudioPermission) {
             if (previousImagePermission == false && hasImagePermission) {
-                controller.refreshLocalMusic()
+                graph.feature.refresh()
             } else {
-                controller.ensureLocalMusic()
+                graph.feature.ensure()
             }
         }
         previousImagePermission = hasImagePermission
     }
-    val viewMode = controller.localMusicViewMode
+    val viewMode = uiState.viewMode
     val collections = remember(
-        controller.localTracks,
-        controller.localMusicDirectories,
-        controller.excludedLocalMusicDirectoryIds,
+        uiState.tracks,
+        uiState.directories,
+        uiState.excludedDirectoryIds,
         viewMode,
     ) {
         buildLocalMusicCollections(
             mode = viewMode,
-            tracks = controller.localTracks,
-            directories = controller.localMusicDirectories,
-            excludedDirectoryIds = controller.excludedLocalMusicDirectoryIds,
+            tracks = uiState.tracks,
+            directories = uiState.directories,
+            excludedDirectoryIds = uiState.excludedDirectoryIds,
         )
     }
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
@@ -105,13 +119,15 @@ fun LocalMusicSection(
         if (!hasImagePermission) {
             LocalMusicImagePermissionPanel(onRequestImagePermission)
         }
+        LoadingIndicator(uiState.isLoading)
+        uiState.errorMessage?.let { ProviderContentMessage(it) }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showModeFilter) {
-                LocalMusicViewModeTabs(controller)
+                LocalMusicViewModeTabs()
             } else {
                 Spacer(Modifier)
             }
@@ -119,7 +135,7 @@ fun LocalMusicSection(
         LocalMusicCollectionOverview(
             mode = viewMode,
             collections = collections,
-            onClick = { controller.openLocalMusicCollection(viewMode, it.key) },
+            onClick = { graph.feature.openCollection(viewMode, it.key) },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -129,28 +145,31 @@ fun LocalMusicSection(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocalMusicCollectionScreen(controller: FuoPlayerController) {
-    val selection = controller.selectedLocalMusicCollection ?: return
+fun LocalMusicCollectionScreen() {
+    val graph = LocalLocalMusicUiGraph.current
+    val uiState by graph.feature.uiState.collectAsStateWithLifecycle()
+    val selection = uiState.selectedCollection ?: return
     val collections = remember(
-        controller.localTracks,
-        controller.localMusicDirectories,
-        controller.excludedLocalMusicDirectoryIds,
+        uiState.tracks,
+        uiState.directories,
+        uiState.excludedDirectoryIds,
         selection.mode,
     ) {
         buildLocalMusicCollections(
             mode = selection.mode,
-            tracks = controller.localTracks,
-            directories = controller.localMusicDirectories,
-            excludedDirectoryIds = controller.excludedLocalMusicDirectoryIds,
+            tracks = uiState.tracks,
+            directories = uiState.directories,
+            excludedDirectoryIds = uiState.excludedDirectoryIds,
         )
     }
     val selectedCollection = collections.firstOrNull { it.key == selection.key }
-    LaunchedEffect(selection, selectedCollection, controller.isLoading) {
-        if (!controller.isLoading && selectedCollection == null) {
-            controller.closeLocalMusicCollection()
+    LaunchedEffect(selection, selectedCollection, uiState.isLoading) {
+        if (!uiState.isLoading && selectedCollection == null) {
+            graph.feature.closeCollection()
         }
     }
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val playbackUiPort = LocalPlaybackUiPort.current
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -162,7 +181,7 @@ fun LocalMusicCollectionScreen(controller: FuoPlayerController) {
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = controller::closeLocalMusicCollection) {
+                    IconButton(onClick = graph.feature::closeCollection) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
@@ -172,25 +191,33 @@ fun LocalMusicCollectionScreen(controller: FuoPlayerController) {
             )
         },
         bottomBar = {
-            if (controller.playbackState.currentTrack != null) {
+            if (playbackUiPort.currentTrack != null) {
                 PlaybackMiniPlayer()
             }
         },
     ) { paddingValues ->
-        selectedCollection?.let { collection ->
-            LocalMusicCollectionDetail(
-                controller = controller,
-                collection = collection,
-                mode = selection.mode,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(
-                        horizontal = if (isWideLayout) 20.dp else 16.dp,
-                        vertical = if (isWideLayout) 12.dp else 0.dp,
-                    ),
-                isWideLayout = isWideLayout,
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+        ) {
+            LoadingIndicator(uiState.isLoading)
+            uiState.errorMessage?.let { ProviderContentMessage(it) }
+            selectedCollection?.let { collection ->
+                LocalMusicCollectionDetail(
+                    graph = graph,
+                    collection = collection,
+                    mode = selection.mode,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = if (isWideLayout) 20.dp else 16.dp,
+                            vertical = if (isWideLayout) 12.dp else 0.dp,
+                        ),
+                    isWideLayout = isWideLayout,
+                )
+            }
         }
     }
 }
@@ -255,7 +282,7 @@ private fun LocalMusicCollectionOverview(
 
 @Composable
 private fun LocalMusicCollectionDetail(
-    controller: FuoPlayerController,
+    graph: LocalMusicUiGraph,
     collection: LocalMusicCollection,
     mode: LocalMusicViewMode,
     modifier: Modifier,
@@ -264,6 +291,11 @@ private fun LocalMusicCollectionDetail(
     val displayTrack = collection.toDisplayTrack(mode)
     val placeholder = mode.localMusicCollectionPlaceholder()
     val subtitle = mode.localMusicCollectionSubtitle(collection.trackCount)
+    val playAll = {
+        if (collection.tracks.isNotEmpty()) {
+            graph.playbackQueue.playTracks(collection.tracks, 0)
+        }
+    }
     if (isWideLayout) {
         Row(
             modifier = modifier,
@@ -295,11 +327,11 @@ private fun LocalMusicCollectionDetail(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (collection.tracks.isNotEmpty()) {
-                    PlayAllButton(onClick = { controller.playAllLocalTracks(collection.tracks) })
+                    PlayAllButton(onClick = playAll)
                 }
             }
             LocalMusicTrackList(
-                controller = controller,
+                graph = graph,
                 tracks = collection.tracks,
                 modifier = Modifier
                     .weight(1f)
@@ -320,13 +352,13 @@ private fun LocalMusicCollectionDetail(
                 placeholder = placeholder,
                 action = {
                     PlayAllButton(
-                        onClick = { controller.playAllLocalTracks(collection.tracks) },
+                        onClick = playAll,
                         enabled = collection.tracks.isNotEmpty(),
                     )
                 },
             )
             LocalMusicTrackList(
-                controller = controller,
+                graph = graph,
                 tracks = collection.tracks,
                 modifier = Modifier
                     .weight(1f)
@@ -339,7 +371,7 @@ private fun LocalMusicCollectionDetail(
 
 @Composable
 private fun LocalMusicTrackList(
-    controller: FuoPlayerController,
+    graph: LocalMusicUiGraph,
     tracks: List<MusicTrack>,
     modifier: Modifier,
     isWideLayout: Boolean,
@@ -357,7 +389,7 @@ private fun LocalMusicTrackList(
                 }
             } else {
                 items(tracks, key = { it.id }) { track ->
-                    LocalMusicTrackRow(controller, track, tracks)
+                    LocalMusicTrackRow(graph, track, tracks)
                 }
             }
         }
@@ -367,7 +399,7 @@ private fun LocalMusicTrackList(
                 item { ProviderContentMessage("暂无歌曲") }
             } else {
                 itemsIndexed(tracks, key = { _, item -> item.id }) { _, track ->
-                    LocalMusicTrackRow(controller, track, tracks)
+                    LocalMusicTrackRow(graph, track, tracks)
                     HorizontalDivider()
                 }
             }
@@ -377,20 +409,23 @@ private fun LocalMusicTrackList(
 
 @Composable
 private fun LocalMusicTrackRow(
-    controller: FuoPlayerController,
+    graph: LocalMusicUiGraph,
     track: MusicTrack,
     queue: List<MusicTrack>,
 ) {
     TrackRow(
         track = track,
-        downloadState = controller.downloadStates[track.id],
-        onClick = { controller.playLocalTrack(track, queue) },
-        onAddToUpNext = { controller.addToUpNext(track) },
-        onDownload = { controller.download(track) },
-        onDeleteDownload = { controller.deleteDownload(track) },
-        onOpenArtist = { controller.openTrackArtist(track) },
-        onOpenAlbum = { controller.openTrackAlbum(track) },
-        onEditLocalMetadata = { controller.openLocalMetadataEditor(track) },
+        downloadState = graph.downloads.downloadStates[track.id],
+        onClick = {
+            val index = queue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+            graph.playbackQueue.playTracks(queue, index)
+        },
+        onAddToUpNext = { graph.playbackQueue.addToUpNext(track) },
+        onDownload = { graph.downloads.download(track) },
+        onDeleteDownload = { graph.downloads.deleteDownload(track) },
+        onOpenArtist = { graph.providerTrackActions.openTrackArtist(track) },
+        onOpenAlbum = { graph.providerTrackActions.openTrackAlbum(track) },
+        onEditLocalMetadata = { graph.feature.openMetadataEditor(track) },
     )
 }
 
@@ -506,15 +541,15 @@ private fun LocalMusicImagePermissionPanel(onRequestImagePermission: () -> Unit)
 }
 
 @Composable
-fun LocalMetadataDialog(
-    controller: FuoPlayerController,
-    track: MusicTrack,
-) {
+fun LocalMetadataDialog() {
+    val feature = LocalLocalMusicUiGraph.current.feature
+    val uiState by feature.uiState.collectAsStateWithLifecycle()
+    val track = uiState.metadataEditorTrack ?: return
     var title by remember(track.id, track.title) { mutableStateOf(track.title) }
     var artists by remember(track.id, track.artists) { mutableStateOf(track.artists) }
     var album by remember(track.id, track.album) { mutableStateOf(track.album) }
     AlertDialog(
-        onDismissRequest = controller::closeLocalMetadataEditor,
+        onDismissRequest = feature::closeMetadataEditor,
         title = { Text("修改元信息") },
         text = {
             Column(
@@ -548,22 +583,22 @@ fun LocalMetadataDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (controller.providers.isNotEmpty()) {
+                if (uiState.metadataProviders.isNotEmpty()) {
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        controller.orderedProviders().forEach { provider ->
+                        uiState.metadataProviders.forEach { provider ->
                             FilterChip(
-                                selected = controller.selectedLocalMetadataProviderId == provider.providerId,
-                                onClick = { controller.onLocalMetadataProviderChange(provider.providerId) },
+                                selected = uiState.selectedMetadataProviderId == provider.providerId,
+                                onClick = { feature.onMetadataProviderChange(provider.providerId) },
                                 label = { Text(provider.providerName) },
                             )
                         }
                     }
                     TextButton(
-                        enabled = !controller.isLoading,
-                        onClick = { controller.searchLocalMetadata(title, artists, album) },
+                        enabled = !uiState.isLoading,
+                        onClick = { feature.searchMetadata(title, artists, album) },
                     ) {
                         Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.size(4.dp))
@@ -576,21 +611,21 @@ fun LocalMetadataDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                controller.localMetadataSearchMessage?.let { message ->
+                uiState.metadataSearchMessage?.let { message ->
                     Text(
                         text = message,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (controller.localMetadataSearchResults.isNotEmpty()) {
+                if (uiState.metadataSearchResults.isNotEmpty()) {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 280.dp),
                     ) {
                         itemsIndexed(
-                            controller.localMetadataSearchResults,
+                            uiState.metadataSearchResults,
                             key = { _, item -> item.id },
                         ) { _, result ->
                             LocalMetadataSearchResultRow(
@@ -599,9 +634,9 @@ fun LocalMetadataDialog(
                                     title = result.title
                                     artists = result.artists
                                     album = result.album
-                                    controller.applyProviderMetadata(track, result)
+                                    feature.applyProviderMetadata(track, result)
                                 },
-                                onDownloadLyrics = { controller.downloadLocalLyrics(track, result) },
+                                onDownloadLyrics = { feature.downloadLyrics(track, result) },
                             )
                             HorizontalDivider()
                         }
@@ -611,14 +646,14 @@ fun LocalMetadataDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = !controller.isLoading,
-                onClick = { controller.saveLocalMetadata(track, title, artists, album) },
+                enabled = !uiState.isLoading,
+                onClick = { feature.saveMetadata(track, title, artists, album) },
             ) {
                 Text("保存")
             }
         },
         dismissButton = {
-            TextButton(onClick = controller::closeLocalMetadataEditor) {
+            TextButton(onClick = feature::closeMetadataEditor) {
                 Text("关闭")
             }
         },
@@ -672,7 +707,9 @@ fun LocalMetadataSearchResultRow(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocalMusicViewModeTabs(controller: FuoPlayerController) {
+fun LocalMusicViewModeTabs() {
+    val feature = LocalLocalMusicUiGraph.current.feature
+    val uiState by feature.uiState.collectAsStateWithLifecycle()
     val modes = listOf(
         LocalMusicViewMode.All to "全部",
         LocalMusicViewMode.Artist to "歌手",
@@ -681,8 +718,8 @@ fun LocalMusicViewModeTabs(controller: FuoPlayerController) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         modes.forEach { (mode, label) ->
             CompactFilterChip(
-                selected = controller.localMusicViewMode == mode,
-                onClick = { controller.onLocalMusicViewModeChange(mode) },
+                selected = uiState.viewMode == mode,
+                onClick = { feature.onViewModeChange(mode) },
                 label = label,
             )
         }

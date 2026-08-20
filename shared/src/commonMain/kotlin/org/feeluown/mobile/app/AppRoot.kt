@@ -227,6 +227,8 @@ fun AppRoot(
     val sleepTimerFeedback by appViewModel.playbackSleepTimerPort.feedback.collectAsStateWithLifecycle()
     val controller = appViewModel.controller
     val playbackUiPort = appViewModel.playbackUiPort
+    val localMusicFeature = appViewModel.localMusicActionPort as? LocalMusicFeatureController
+        ?: error("Local Music feature owner is not installed")
     FuoTheme(
         themeMode = appUiState.settings.settings.themeMode,
         themeColorScheme = appUiState.settings.settings.themeColorScheme,
@@ -317,6 +319,12 @@ fun AppRoot(
             CompositionLocalProvider(
                 LocalPlaybackSession provides appViewModel.playbackSession,
                 LocalPlaybackUiPort provides playbackUiPort,
+                LocalLocalMusicUiGraph provides LocalMusicUiGraph(
+                    feature = localMusicFeature,
+                    playbackQueue = appViewModel.playbackQueueUiPort,
+                    downloads = appViewModel.downloadActionPort,
+                    providerTrackActions = appViewModel.providerTrackActionPort,
+                ),
                 LocalShareHandler provides { onShareText(it.text) },
                 LocalLocalPlaylistFileActions provides LocalPlaylistFileActions(
                     importFile = onImportLocalPlaylistFile,
@@ -415,7 +423,7 @@ fun AppRoot(
                                                 controller,
                                                 currentLocalPlaylist ?: lastLocalPlaylist,
                                             )
-                                            AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen(controller)
+                                            AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen()
                                             AppRoute.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                                             is AppRoute.MediaItemDetail -> ProviderMediaItemScreen(
                                                 controller,
@@ -435,9 +443,7 @@ fun AppRoot(
                             ) {
                                 RuntimeFullPlayer()
                             }
-                            controller.localMetadataEditorTrack?.let { track ->
-                                LocalMetadataDialog(controller = controller, track = track)
-                            }
+                            LocalMetadataDialog()
                             controller.playlistTargetTrack?.let { track ->
                                 PlaylistTargetDialog(controller = controller, track = track)
                             }

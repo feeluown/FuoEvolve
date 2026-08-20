@@ -24,6 +24,8 @@ val migratedControllerBoundaryFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/download/DownloadController.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/download/DownloadManagerScreen.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/localmusic/LocalMusicController.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/localmusic/LocalMusicControllerState.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/localmusic/LocalMusicSection.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/localplaylist/PlaylistActionController.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/provider/ProviderTrackActionController.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlaybackComposition.kt",
@@ -135,8 +137,11 @@ tasks.register("checkArchitectureBoundaries") {
             "controller.playlistOperationFeedback",
             "controller.downloadQueueFeedback",
             "controller.playbackFeedback",
+            "controller.localMetadataEditorTrack",
             "DebugLogScreen(controller",
             "DownloadManagerScreen(controller",
+            "LocalMusicCollectionScreen(controller",
+            "LocalMetadataDialog(controller",
         )
         val appRootViolations = appRoot.readLines().mapIndexedNotNull { index, line ->
             retiredAppShellReads.firstOrNull(line::contains)?.let { legacyRead ->
