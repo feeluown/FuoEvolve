@@ -58,6 +58,29 @@ internal class PlaybackQueueCoordinator(
         (queueState.currentTrack() ?: fallbackTrack())?.let { startPlayback(it, 0, null) }
     }
 
+    override fun playTracks(tracks: List<MusicTrack>, index: Int) {
+        if (tracks.isEmpty() || index !in tracks.indices) return
+        updateTrackChangeDirection(TrackChangeDirection.Next)
+        val restoreShuffle = if (queueState.isFmQueue) queueState.shuffleBeforeFm else null
+        if (restoreShuffle != null) {
+            queueState.shuffleEnabled = restoreShuffle
+            queueState.shuffleBeforeFm = null
+        }
+        queueState.isFmQueue = false
+        queueState.queueFeature = null
+        queueState.queuePlaylistId = null
+        queueState.currentUpNextTrack = null
+        queueState.currentIsUpNext = false
+        queueState.originalMainQueue = emptyList()
+        queueState.mainQueue = tracks
+        queueState.mainQueueIndex = index
+        if (queueState.shuffleEnabled) {
+            enableShuffle()
+        }
+        publishQueueMutation()
+        playMainIndexInternal(queueState.mainQueueIndex, 0, TrackChangeDirection.Next)
+    }
+
     override fun next() {
         updateTrackChangeDirection(TrackChangeDirection.Next)
         if (queueState.repeatMode == RepeatMode.SINGLE) {

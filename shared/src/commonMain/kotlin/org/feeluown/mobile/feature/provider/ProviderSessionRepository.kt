@@ -13,6 +13,7 @@ enum class ProviderSessionOperation {
 }
 
 data class ProviderSessionState(
+    val providers: List<ProviderInfo> = emptyList(),
     val authStates: Map<String, ProviderAuthState> = emptyMap(),
     val operations: Map<String, ProviderSessionOperation> = emptyMap(),
     val errors: Map<String, String> = emptyMap(),
@@ -93,6 +94,7 @@ class DefaultProviderSessionRepository(
             val providerIds = providers.mapTo(mutableSetOf()) { it.providerId }
             val current = mutableState.value
             mutableState.value = current.copy(
+                providers = providers,
                 authStates = providers.associate { provider ->
                     provider.providerId to (current.authStates[provider.providerId] ?: ProviderAuthState(
                         providerId = provider.providerId,

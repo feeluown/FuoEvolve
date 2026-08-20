@@ -36,6 +36,8 @@ interface PlaybackQueueUiPort {
     val isFmQueueActive: Boolean
     val trackChangeDirection: TrackChangeDirection
 
+    /** Replace the active source queue and start the selected item through the queue owner. */
+    fun playTracks(tracks: List<MusicTrack>, index: Int)
     fun toggleShuffle()
     fun toggleRepeat()
     fun clearQueue()

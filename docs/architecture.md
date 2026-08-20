@@ -39,7 +39,7 @@ Feature state should have one owner. New feature work should expose immutable UI
 
 App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback status, timing, current stable track reference, lyrics, queue identity/index, errors, transport policy and playback-end lifecycle policy belong to playback-owned contracts/owners. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
 
-Queue and start orchestration have explicit playback owners. `PlaybackQueueCoordinator` owns `startCurrent` / `previous` / `next`, up-next priority, repeat/part transitions and queue-index selection while `PlaybackQueueController` remains the durable queue state holder. `PlaybackStartCoordinator` owns the prepare -> resolve/plan -> engine-start pipeline, including direct provider resolution on platforms that do not resolve resources inside the engine and `PlaybackPlan` construction for engines that do.
+Queue and start orchestration have explicit playback owners. `PlaybackQueueCoordinator` owns `startCurrent` / `previous` / `next`, up-next priority, repeat/part transitions, queue-index selection and controller-free source-queue selection for migrated cross-feature callers, while `PlaybackQueueController` remains the durable queue state holder. `PlaybackStartCoordinator` owns the prepare -> resolve/plan -> engine-start pipeline, including direct provider resolution on platforms that do not resolve resources inside the engine and `PlaybackPlan` construction for engines that do.
 
 Pre-engine start failures are published through `PlaybackStartFailureSource`. Android and iOS runtime adapters combine that playback-owned failure with engine state, so the old iOS compatibility path that read coordinator/controller `Error` state has been retired.
 
@@ -49,7 +49,7 @@ MiniPlayer and FullPlayer read authoritative playback state/transport from `Play
 
 - `PlaybackNavigationPort` owns FullPlayer / queue-overlay visibility.
 - `PlaybackPresentationPort` reads rich engine presentation plus lyric/theme settings and owns seek normalization.
-- `PlaybackQueueUiPort` is implemented by `PlaybackQueueCoordinator` and owns queue display/edit, shuffle/repeat and transition direction for player UI.
+- `PlaybackQueueUiPort` is implemented by `PlaybackQueueCoordinator` and owns queue display/edit, source-queue selection, shuffle/repeat and transition direction for player/cross-feature UI.
 - `PlaybackSleepTimerPort` is implemented directly by `PlaybackSleepTimerController`.
 - `DownloadActionPort` is implemented by `DownloadController`.
 - `PlaylistActionPort` is implemented by `PlaylistActionController`.
@@ -69,7 +69,7 @@ New features should depend on narrow provider capability interfaces (`ProviderSe
 
 Platform dependency construction is isolated in platform containers. Android uses `AndroidAppContainer`; iOS uses `IosAppContainer`. `Application`, `UIViewController`, activities and services should remain thin hosts around those composition roots.
 
-Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. During the remaining migration, platform composition roots may adapt still-centralized controller operations to those ports; the dependency must not leak back into the feature or app route contract.
+Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. Android and iOS use the same shared app-port adapters, which compose those routes from provider-session state plus narrow playback/download/playlist/provider/navigation owners instead of rebuilding per-platform controller forwarding objects.
 
 Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. Both receive `PlaybackTransportCoordinator` and `PlaybackStartFailureSource` explicitly; they no longer dispatch runtime transport through controller methods or inspect controller error state. Android/iOS composition roots inject the playback navigation, presentation, queue, sleep-timer, download, playlist, provider-track, local-music and replacement owners explicitly into `FuoAppViewModel`. `AppRoot` only installs the resulting composition graph; it does not construct controller-backed playback adapters.
 
@@ -77,8 +77,10 @@ Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRunti
 
 `checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, Download/Local Music/Playlist/Provider Track now-playing owners, playback queue/start/lifecycle/replacement/sleep-timer owners, player composition contracts, controller-free MiniPlayer/FullPlayer implementations, app-port contracts/routes, and Android playback service/Lyricon integration.
 
-It also rejects reintroduction of retired Search/Recognition route shims, `ControllerPlaybackSession`, `ControllerPlaybackUiPort`, and `ControllerPlaybackCompatibilityPorts`; rejects any new `PlaybackUiPort` aggregate declaration; rejects legacy `MiniPlayer(controller)` callers after their migration; and rejects direct `controller.toggle()/previous()/next()` calls in platform playback runtime adapters.
+It also rejects reintroduction of retired Search/Recognition route shims, `ControllerPlaybackSession`, `ControllerPlaybackUiPort`, and `ControllerPlaybackCompatibilityPorts`; rejects any new `PlaybackUiPort` aggregate declaration; rejects legacy `MiniPlayer(controller)` callers; rejects platform-local Search/Recognition app-port forwarding objects; and rejects direct `controller.toggle()/previous()/next()` calls in platform playback runtime adapters.
 
 ## Migration rule
 
 Architecture migration should be incremental and behavior-preserving. Move ownership first, introduce narrow ports at cross-feature boundaries, and remove legacy facades only after callers have migrated and tests cover the new boundary.
+
+The post-P1 migration order and exit criteria are tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md).

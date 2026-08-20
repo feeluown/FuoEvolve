@@ -15,6 +15,8 @@ class ProviderSessionRepositoryTest {
         val repository = DefaultProviderSessionRepository(provider)
         repository.updateProviders(listOf(PROVIDER))
 
+        assertEquals(listOf(PROVIDER), repository.state.value.providers)
+
         val refresh = async { repository.refresh(PROVIDER.providerId, refreshUserInfo = true) }
         provider.refreshStarted.await()
         val login = async { repository.loginWithCookies(PROVIDER.providerId, "{}") }

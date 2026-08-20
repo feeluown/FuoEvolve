@@ -16,6 +16,7 @@ val migratedControllerBoundaryRoots = listOf(
 )
 val migratedControllerBoundaryFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppFeaturePorts.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppFeaturePortAdapters.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/SearchRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/RecognitionRoute.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/download/DownloadController.kt",
@@ -48,6 +49,10 @@ val playbackRuntimeAdapterFiles = listOf(
     "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidPlaybackRuntime.kt",
     "shared/src/iosMain/kotlin/org/feeluown/mobile/IosPlaybackRuntime.kt",
 )
+val platformCompositionRootFiles = listOf(
+    "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidAppContainer.kt",
+    "shared/src/iosMain/kotlin/org/feeluown/mobile/IosAppHost.kt",
+)
 
 tasks.register("checkArchitectureBoundaries") {
     group = "verification"
@@ -76,6 +81,7 @@ tasks.register("checkArchitectureBoundaries") {
     inputs.files(sourceFiles)
     inputs.files(commonMainSources)
     inputs.files(playbackRuntimeAdapterFiles.map(rootProject::file))
+    inputs.files(platformCompositionRootFiles.map(rootProject::file))
 
     doLast {
         val retiredCompatViolations = retiredControllerCompatibilityFiles
@@ -113,6 +119,29 @@ tasks.register("checkArchitectureBoundaries") {
                     appendLine("FuoPlayerController leaked into migrated architecture boundaries:")
                     violations.forEach { appendLine(" - $it") }
                     append("Use feature-owned state/actions or a narrow app/playback/provider contract instead.")
+                },
+            )
+        }
+
+        val platformAppPortPattern = Regex("object\\s*:\\s*(?:SearchAppPort|RecognitionAppPort)")
+        val platformAppPortViolations = platformCompositionRootFiles
+            .map(rootProject::file)
+            .filter { it.isFile }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (platformAppPortPattern.containsMatchIn(line)) {
+                        "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1}"
+                    } else {
+                        null
+                    }
+                }
+            }
+        if (platformAppPortViolations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Platform composition roots rebuilt Search/Recognition app-port bridges:")
+                    platformAppPortViolations.forEach { appendLine(" - $it") }
+                    append("Use the shared controller-free app-port adapters composed from narrow owners instead.")
                 },
             )
         }
