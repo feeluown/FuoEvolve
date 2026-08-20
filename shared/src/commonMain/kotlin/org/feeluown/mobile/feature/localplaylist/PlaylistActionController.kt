@@ -113,9 +113,10 @@ internal class PlaylistActionController(
                     }
                 }
                 .onFailure {
-                    state.playlistOperationError = it.message ?: it::class.simpleName.orEmpty()
+                    val feedback = playlistMutationErrorMessage(it, playlist.providerId)
+                    state.playlistOperationError = feedback
                     onError(it)
-                    state.playlistOperationFeedback = state.playlistOperationError
+                    state.playlistOperationFeedback = feedback
                 }
             setLoading(false)
         }
@@ -155,8 +156,9 @@ internal class PlaylistActionController(
                     }
                 }
                 .onFailure {
+                    val feedback = playlistMutationErrorMessage(it, playlist.providerId)
                     onError(it)
-                    state.playlistOperationFeedback = it.message
+                    state.playlistOperationFeedback = feedback
                 }
             setLoading(false)
         }
@@ -166,3 +168,10 @@ internal class PlaylistActionController(
         track.source.takeIf { it.isNotBlank() }
             ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
 }
+
+internal fun playlistMutationErrorMessage(
+    throwable: Throwable,
+    providerId: String,
+): String = throwable.providerFailureOrNull(providerId)?.userMessage
+    ?: throwable.message
+    ?: throwable::class.simpleName.orEmpty().ifBlank { "操作失败" }
