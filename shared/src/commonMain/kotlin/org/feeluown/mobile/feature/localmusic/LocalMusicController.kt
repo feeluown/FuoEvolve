@@ -56,6 +56,7 @@ internal class LocalMusicController(
         private set
 
     private var refreshSerial: Long = 0
+    private var activeRefreshLoadingSerial: Long? = null
     private var featureLoading = false
     private var featureMessage: String? = null
     private var featureErrorMessage: String? = null
@@ -101,7 +102,10 @@ internal class LocalMusicController(
         val serial = ++refreshSerial
         scope.launch {
             if (showLoading) {
-                publishLoading(if (forceRefresh) "正在刷新本地音乐库" else "正在加载本地音乐")
+                publishLoading(
+                    message = if (forceRefresh) "正在刷新本地音乐库" else "正在加载本地音乐",
+                    loadingRefreshSerial = serial,
+                )
             }
             val result = runCatching {
                 updateScanSettings()
@@ -110,11 +114,12 @@ internal class LocalMusicController(
                 val shouldRefresh = forceRefresh || !databaseReady || databaseStale
                 if (showLoading) {
                     publishLoading(
-                        when {
+                        message = when {
                             !databaseReady -> "正在建立本地音乐库"
                             shouldRefresh -> "正在更新本地音乐库"
                             else -> "正在加载本地音乐"
-                        }
+                        },
+                        loadingRefreshSerial = serial,
                     )
                 }
                 val tracks = if (shouldRefresh) {
@@ -125,23 +130,29 @@ internal class LocalMusicController(
                 tracks to repository.directories()
             }
             if (serial == refreshSerial) {
-                result
-                    .onSuccess { (tracks, directories) ->
-                        state.tracks = tracks
-                        state.directories = directories
-                        if (
-                            state.selectedDirectoryId != null &&
-                            directories.none { it.id == state.selectedDirectoryId }
-                        ) {
-                            closeCollection()
-                        }
-                        if (showLoading) {
+                result.onSuccess { (tracks, directories) ->
+                    state.tracks = tracks
+                    state.directories = directories
+                    if (
+                        state.selectedDirectoryId != null &&
+                        directories.none { it.id == state.selectedDirectoryId }
+                    ) {
+                        closeCollection()
+                    }
+                }
+            }
+            if (showLoading && activeRefreshLoadingSerial == serial) {
+                if (serial == refreshSerial) {
+                    result
+                        .onSuccess { (tracks, _) ->
                             finishLoading(if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首")
                         }
-                    }
-                    .onFailure { throwable ->
-                        if (showLoading) publishError(throwable)
-                    }
+                        .onFailure(::publishError)
+                } else {
+                    clearLoading()
+                }
+            } else if (!showLoading && serial == refreshSerial) {
+                clearSupersededRefreshLoading(serial)
             }
         }
     }
@@ -364,7 +375,7 @@ internal class LocalMusicController(
         if (!hasPermission) return
         val serial = ++refreshSerial
         scope.launch {
-            publishLoading("正在更新本地音乐筛选")
+            publishLoading("正在更新本地音乐筛选", loadingRefreshSerial = serial)
             val result = runCatching {
                 updateScanSettings()
                 repository.tracks() to repository.directories()
@@ -383,11 +394,14 @@ internal class LocalMusicController(
                         finishLoading(if (tracks.isEmpty()) "未发现本地音乐" else "本地音乐 ${tracks.size} 首")
                     }
                     .onFailure(::publishError)
+            } else if (activeRefreshLoadingSerial == serial) {
+                clearLoading()
             }
         }
     }
 
-    private fun publishLoading(message: String) {
+    private fun publishLoading(message: String, loadingRefreshSerial: Long? = null) {
+        activeRefreshLoadingSerial = loadingRefreshSerial
         featureLoading = true
         featureMessage = message
         featureErrorMessage = null
@@ -397,10 +411,24 @@ internal class LocalMusicController(
     }
 
     private fun finishLoading(message: String) {
+        activeRefreshLoadingSerial = null
         featureLoading = false
         featureMessage = message
         featureErrorMessage = null
         setMessage(message)
+        setLoading(false)
+        publishUiState()
+    }
+
+    private fun clearSupersededRefreshLoading(latestRefreshSerial: Long) {
+        val loadingSerial = activeRefreshLoadingSerial ?: return
+        if (loadingSerial >= latestRefreshSerial) return
+        clearLoading()
+    }
+
+    private fun clearLoading() {
+        activeRefreshLoadingSerial = null
+        featureLoading = false
         setLoading(false)
         publishUiState()
     }
@@ -420,6 +448,7 @@ internal class LocalMusicController(
     }
 
     private fun publishError(throwable: Throwable, message: String) {
+        activeRefreshLoadingSerial = null
         featureLoading = false
         featureMessage = message
         featureErrorMessage = message
