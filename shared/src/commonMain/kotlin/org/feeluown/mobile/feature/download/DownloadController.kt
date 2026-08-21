@@ -61,7 +61,7 @@ internal class DownloadController(
 
     override fun download(track: MusicTrack) {
         if (track.sourceType != TrackSourceType.Provider) return
-        updateQueueFeedback("已加入下载队列：${track.title}")
+        publishFeedback("已加入下载队列：${track.title}")
         scope.launch {
             runCatching {
                 val payload = providerRepository.resolve(
@@ -73,7 +73,7 @@ internal class DownloadController(
                     true,
                 )
                 downloadRepository.download(track, payload)
-            }.onFailure(onError)
+            }.onFailure(::publishError)
         }
     }
 
@@ -97,9 +97,9 @@ internal class DownloadController(
                             showLoading = isLocalMusicSectionActive(),
                         )
                     }
-                    setMessage("已删除下载：${track.title}")
+                    publishFeedback("已删除下载：${track.title}")
                 }
-                .onFailure(onError)
+                .onFailure(::publishError)
         }
     }
 
@@ -115,10 +115,23 @@ internal class DownloadController(
         mutableManagerState.value = mutableManagerState.value.copy(queueFeedback = feedback)
     }
 
+    private fun publishFeedback(message: String) {
+        updateQueueFeedback(message)
+        setMessage(message)
+    }
+
+    private fun publishError(throwable: Throwable) {
+        val message = throwable.providerFailureOrNull()?.userMessage
+            ?: throwable.message
+            ?: throwable::class.simpleName.orEmpty().ifBlank { "下载操作失败" }
+        updateQueueFeedback(message)
+        onError(throwable)
+    }
+
     private fun runAction(action: suspend () -> Unit) {
         scope.launch {
             runCatching { action() }
-                .onFailure(onError)
+                .onFailure(::publishError)
         }
     }
 }

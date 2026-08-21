@@ -134,26 +134,37 @@ internal class LocalPlaylistController(
     }
 
     fun addTargetTrackTo(playlist: LocalPlaylist) {
-        val track = state.playlistTargetTrack ?: return
-        val localTrack = toLocalPlaylistTrack(track) ?: return
-        scope.launch {
-            publishLoading("正在添加到本地歌单")
-            runCatching { repository.addTrack(playlist, localTrack) }
-                .onSuccess { result ->
+        scope.launch { addTargetTrackToAwait(playlist) }
+    }
+
+    suspend fun addTargetTrackToAwait(playlist: LocalPlaylist): LocalPlaylistOperationResult? {
+        val track = state.playlistTargetTrack ?: return null
+        val localTrack = toLocalPlaylistTrack(track) ?: return null
+        publishLoading("正在添加到本地歌单")
+        return runCatching { repository.addTrack(playlist, localTrack) }
+            .fold(
+                onSuccess = { result ->
                     val resultMessage = result.message.ifBlank {
                         if (result.success) "已添加到：${playlist.title}" else "添加失败"
                     }
-                    state.localPlaylistOperationError = result.message.takeUnless { result.success }
                     state.playlistOperationFeedback = resultMessage
-                    if (result.success) result.playlist?.let(::replacePlaylist)
-                    closeTargetPicker()
+                    if (result.success) {
+                        state.localPlaylistOperationError = null
+                        result.playlist?.let(::replacePlaylist)
+                        closeTargetPicker()
+                    } else {
+                        state.localPlaylistOperationError = resultMessage
+                    }
                     finishLoading(resultMessage)
-                }
-                .onFailure { throwable ->
-                    state.localPlaylistOperationError = throwable.message ?: "添加失败"
+                    result.copy(message = resultMessage)
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: throwable::class.simpleName.orEmpty().ifBlank { "添加失败" }
+                    state.localPlaylistOperationError = message
                     publishError(throwable)
-                }
-        }
+                    LocalPlaylistOperationResult(success = false, message = message)
+                },
+            )
     }
 
     override fun open(playlist: LocalPlaylist) {

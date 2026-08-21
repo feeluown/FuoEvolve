@@ -139,9 +139,18 @@ private class DefaultPlaylistActionOwner(
     override fun addTrackToLocalPlaylist(playlist: LocalPlaylist) {
         val track = targetPickerState.value.track ?: return
         if (!localPlaylist.canAddTrack(track)) return
-        localPlaylist.addTrack(playlist, track)
-        mutableFeedback.value = "已添加到：${playlist.title}"
-        closePlaylistTargetPicker()
+        scope.launch {
+            val result = localPlaylist.addTrack(playlist, track)
+            val message = result.message.ifBlank {
+                if (result.success) "已添加到：${playlist.title}" else "添加失败"
+            }
+            mutableFeedback.value = message
+            if (result.success) {
+                closePlaylistTargetPicker()
+            } else if (targetPickerState.value.track?.id == track.id) {
+                mutableTargetPickerState.value = targetPickerState.value.copy(localError = message)
+            }
+        }
     }
 
     override fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean =

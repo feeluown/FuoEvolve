@@ -388,9 +388,13 @@ private class DefaultPlaybackFeatureOwner(
             }
             additions.size
         } catch (_: TimeoutCancellationException) {
-            0
-        } catch (_: Throwable) {
-            0
+            playbackFeedback.value = "${feature.title} 加载超时，请重试"
+            FEATURE_QUEUE_APPEND_FAILED
+        } catch (throwable: Throwable) {
+            playbackFeedback.value = throwable.providerFailureOrNull(feature.providerId)?.userMessage
+                ?: throwable.message
+                ?: "${feature.title} 加载后续歌曲失败"
+            FEATURE_QUEUE_APPEND_FAILED
         }
     }
 

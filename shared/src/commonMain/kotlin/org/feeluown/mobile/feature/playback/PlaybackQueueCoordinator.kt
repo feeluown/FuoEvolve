@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+internal const val FEATURE_QUEUE_APPEND_FAILED = -1
+
 /**
  * Runtime-facing transport contract owned by the playback feature.
  *
@@ -114,10 +116,15 @@ internal class PlaybackQueueCoordinator(
             scope.launch {
                 val nextIndex = queueState.mainQueue.size
                 val appendedCount = appendFeatureQueue(feature)
-                if (appendedCount > 0 && queueState.queueFeature == feature) {
-                    playMainIndexInternal(nextIndex, 0, TrackChangeDirection.Next)
-                } else if (queueState.queueFeature == feature) {
-                    publishMessage("${feature.title} 暂无后续歌曲")
+                when {
+                    appendedCount > 0 && queueState.queueFeature == feature ->
+                        playMainIndexInternal(nextIndex, 0, TrackChangeDirection.Next)
+                    appendedCount == 0 && queueState.queueFeature == feature ->
+                        publishMessage("${feature.title} 暂无后续歌曲")
+                    // Negative values represent a load failure. The playback owner has already
+                    // published the retryable provider/network error and it must not be replaced
+                    // with an indistinguishable "no more songs" message here.
+                    else -> Unit
                 }
             }
             return

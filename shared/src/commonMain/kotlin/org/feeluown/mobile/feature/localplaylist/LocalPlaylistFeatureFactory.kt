@@ -2,10 +2,11 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 interface LocalPlaylistFeatureOwner : LocalPlaylistFeatureController {
     fun canAddTrack(track: MusicTrack): Boolean
-    fun addTrack(playlist: LocalPlaylist, track: MusicTrack)
+    suspend fun addTrack(playlist: LocalPlaylist, track: MusicTrack): LocalPlaylistOperationResult
 }
 
 fun createLocalPlaylistFeatureController(
@@ -43,6 +44,7 @@ fun createLocalPlaylistFeatureController(
         setMessage = {},
         onError = {},
     )
+    scope.launch { controller.refreshInternal(showMessage = false) }
     return object : LocalPlaylistFeatureOwner {
         override val uiState: StateFlow<LocalPlaylistUiState> = controller.uiState
 
@@ -64,10 +66,13 @@ fun createLocalPlaylistFeatureController(
 
         override fun canAddTrack(track: MusicTrack): Boolean = controller.canAddTrack(track)
 
-        override fun addTrack(playlist: LocalPlaylist, track: MusicTrack) {
-            if (!controller.canAddTrack(track)) return
+        override suspend fun addTrack(playlist: LocalPlaylist, track: MusicTrack): LocalPlaylistOperationResult {
+            if (!controller.canAddTrack(track)) {
+                return LocalPlaylistOperationResult(success = false, message = "当前歌曲无法添加到本地歌单")
+            }
             controller.openTargetPicker(track)
-            controller.addTargetTrackTo(playlist)
+            return controller.addTargetTrackToAwait(playlist)
+                ?: LocalPlaylistOperationResult(success = false, message = "添加失败")
         }
     }
 }
