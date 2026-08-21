@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +18,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,22 +94,19 @@ fun P2AppRoot(
 
         val snackbar = remember { SnackbarHostState() }
         LaunchedEffect(playlistFeedback) {
-            playlistFeedback?.let {
-                snackbar.showSnackbar(it)
-                appViewModel.playlistActionPort.dismissFeedback(it)
-            }
+            val message = playlistFeedback ?: return@LaunchedEffect
+            snackbar.showSnackbar(message)
+            appViewModel.playlistActionPort.dismissFeedback(message)
         }
         LaunchedEffect(downloadState.queueFeedback) {
-            downloadState.queueFeedback?.let {
-                snackbar.showSnackbar(it)
-                appViewModel.downloadActionPort.dismissQueueFeedback(it)
-            }
+            val message = downloadState.queueFeedback ?: return@LaunchedEffect
+            snackbar.showSnackbar(message)
+            appViewModel.downloadActionPort.dismissQueueFeedback(message)
         }
         LaunchedEffect(sleepFeedback) {
-            sleepFeedback?.let {
-                snackbar.showSnackbar(it)
-                appViewModel.playbackSleepTimerPort.dismissFeedback(it)
-            }
+            val message = sleepFeedback ?: return@LaunchedEffect
+            snackbar.showSnackbar(message)
+            appViewModel.playbackSleepTimerPort.dismissFeedback(message)
         }
 
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -142,7 +139,7 @@ fun P2AppRoot(
                                     modifier = Modifier.fillMaxSize(),
                                     onBack = { appViewModel.dispatch(AppIntent.NavigateBack) },
                                     entryProvider = { route ->
-                                        NavEntry(route) {
+                                        NavEntry(key = route) {
                                             when (route) {
                                                 AppRoute.Home -> HomeScreen(
                                                     home = appViewModel.homeFeatureController,
@@ -170,14 +167,8 @@ fun P2AppRoot(
                                                     onImportYtmusicOAuthFile = onImportYtmusicOAuthFile,
                                                     onStartYtmusicOAuth = onStartYtmusicOAuth,
                                                 )
-                                                AppRoute.DebugLogs -> DebugLogFeatureScreen(
-                                                    controller = appViewModel.debugLogFeatureController,
-                                                    onBack = appViewModel::closeDebugLogs,
-                                                )
-                                                AppRoute.DownloadManager -> DownloadManagerScreen(
-                                                    port = appViewModel.downloadActionPort,
-                                                    onBack = appViewModel::closeDownloadManager,
-                                                )
+                                                AppRoute.DebugLogs -> DebugLogFeatureScreen(appViewModel.debugLogFeatureController, appViewModel::closeDebugLogs)
+                                                AppRoute.DownloadManager -> DownloadManagerScreen(appViewModel.downloadActionPort, appViewModel::closeDownloadManager)
                                                 is AppRoute.FeatureDetail -> ProviderFeatureDetailRoute(route.feature.toProviderFeature())
                                                 is AppRoute.PlaylistDetail -> ProviderPlaylistDetailRoute(
                                                     playlist = route.playlist.toProviderPlaylist(),
@@ -192,25 +183,18 @@ fun P2AppRoot(
                                                     playlist = localPlaylistState.selectedPlaylist,
                                                 )
                                                 AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen()
-                                                AppRoute.Feature,
-                                                AppRoute.Playlist,
-                                                AppRoute.Track,
-                                                AppRoute.Video,
-                                                AppRoute.MediaItem -> EmptyHomeSection(Modifier.fillMaxSize(), "内容已迁移，请返回重试")
+                                                AppRoute.Feature, AppRoute.Playlist, AppRoute.Track, AppRoute.Video, AppRoute.MediaItem ->
+                                                    EmptyHomeSection(Modifier.fillMaxSize(), "内容已迁移，请返回重试")
                                             }
                                         }
                                     },
                                 )
-
                                 AnimatedVisibility(
                                     visible = playbackGraph.isFullPlayerOpen,
                                     modifier = Modifier.fillMaxSize(),
-                                    enter = slideInVertically(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it / 2 } +
-                                        fadeIn(tween(FuoMotion.overlayFadeMillis)),
-                                    exit = slideOutVertically(animationSpec = tween(FuoMotion.overlayExitMillis)) { it / 2 } +
-                                        fadeOut(tween(FuoMotion.overlayFadeMillis)),
+                                    enter = slideInVertically(animationSpec = tween(FuoMotion.overlayEnterMillis)) { it / 2 } + fadeIn(tween(FuoMotion.overlayFadeMillis)),
+                                    exit = slideOutVertically(animationSpec = tween(FuoMotion.overlayExitMillis)) { it / 2 } + fadeOut(tween(FuoMotion.overlayFadeMillis)),
                                 ) { RuntimeFullPlayer() }
-
                                 LocalMetadataDialog()
                                 val legacy = appViewModel.controller
                                 legacy.playlistTargetTrack?.let { PlaylistTargetDialog(legacy, it) }
