@@ -113,7 +113,6 @@ sealed interface AppIntent {
 }
 
 class FuoAppViewModel(
-    val controller: FuoPlayerController,
     val playbackSession: PlaybackSession,
     val playbackNavigationPort: PlaybackNavigationPort,
     val playbackPresentationPort: PlaybackPresentationPort,
