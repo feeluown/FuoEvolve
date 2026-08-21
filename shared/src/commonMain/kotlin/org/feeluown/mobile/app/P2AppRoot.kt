@@ -1,12 +1,16 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +30,38 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
+
+private fun p2PageTransition(
+    initialOffsetX: (Int) -> Int,
+    targetOffsetX: (Int) -> Int,
+): ContentTransform = (
+    slideInHorizontally(
+        initialOffsetX = initialOffsetX,
+        animationSpec = tween(FuoMotion.pageTransitionMillis),
+    ) + fadeIn(animationSpec = tween(FuoMotion.pageFadeMillis))
+    ) togetherWith (
+    slideOutHorizontally(
+        targetOffsetX = targetOffsetX,
+        animationSpec = tween(FuoMotion.pageTransitionMillis),
+    ) + fadeOut(animationSpec = tween(FuoMotion.pageFadeMillis))
+    )
+
+private fun p2ForwardPageTransition(): ContentTransform =
+    p2PageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+
+private fun p2PopPageTransition(): ContentTransform =
+    p2PageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+
+private fun p2SettingsForwardPageTransition(): ContentTransform =
+    p2PageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+
+private fun p2SettingsPopPageTransition(): ContentTransform =
+    p2PageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+
+private fun p2SettingsNavigationMetadata(): Map<String, Any> =
+    NavDisplay.transitionSpec { p2SettingsForwardPageTransition() } +
+        NavDisplay.popTransitionSpec { p2SettingsPopPageTransition() } +
+        NavDisplay.predictivePopTransitionSpec { p2SettingsPopPageTransition() }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -141,8 +177,18 @@ fun P2AppRoot(
                                     backStack = appUiState.backStack,
                                     modifier = Modifier.fillMaxSize(),
                                     onBack = { appViewModel.dispatch(AppIntent.NavigateBack) },
+                                    transitionSpec = { p2ForwardPageTransition() },
+                                    popTransitionSpec = { p2PopPageTransition() },
+                                    predictivePopTransitionSpec = { p2PopPageTransition() },
                                     entryProvider = { route ->
-                                        NavEntry(key = route) {
+                                        NavEntry(
+                                            key = route,
+                                            metadata = if (route == AppRoute.Settings) {
+                                                p2SettingsNavigationMetadata()
+                                            } else {
+                                                emptyMap()
+                                            },
+                                        ) {
                                             when (route) {
                                                 AppRoute.Home -> HomeScreen(
                                                     home = appViewModel.homeFeatureController,
