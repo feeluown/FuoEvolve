@@ -15,22 +15,7 @@ class ShareReceiverActivity : ComponentActivity() {
             return
         }
         lifecycleScope.launch {
-            val resolvedText = resolveAndroidSharedText(sharedText)
-            if (parseSharedResource(resolvedText) != null) {
-                openMainActivity(resolvedText)
-                return@launch
-            }
-            val query = sharedSearchQuery(resolvedText)
-            if (!query.isNullOrBlank()) {
-                val controller = (application as FuoEvolveApplication).controller
-                controller.onQueryChange(query)
-                controller.openSearch()
-                controller.search()
-                controller.showMessage("未识别为已支持音源链接，已按分享内容搜索")
-                openMainActivity()
-            } else {
-                openMainActivity(resolvedText)
-            }
+            openMainActivity(resolveAndroidSharedText(sharedText))
         }
     }
 
