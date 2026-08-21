@@ -42,11 +42,49 @@ internal class PlaylistControllerState {
             localPlaylistChanged()
         }
 
-    var playlistTargetTrack by mutableStateOf<MusicTrack?>(null)
-    var playlistTargetType by mutableStateOf(PlaylistTargetType.Provider)
-    var playlistTargetPickerShowSwitcher by mutableStateOf(true)
-    var playlistOperationTargets by mutableStateOf<List<ProviderPlaylist>>(emptyList())
-    var playlistOperationError by mutableStateOf<String?>(null)
+    private var playlistTargetTrackState by mutableStateOf<MusicTrack?>(null)
+    var playlistTargetTrack: MusicTrack?
+        get() = playlistTargetTrackState
+        set(value) {
+            playlistTargetTrackState = value
+            playlistTargetPickerChanged()
+        }
+
+    private var playlistTargetTypeState by mutableStateOf(PlaylistTargetType.Provider)
+    var playlistTargetType: PlaylistTargetType
+        get() = playlistTargetTypeState
+        set(value) {
+            playlistTargetTypeState = value
+            playlistTargetPickerChanged()
+        }
+
+    private var playlistTargetPickerShowSwitcherState by mutableStateOf(true)
+    var playlistTargetPickerShowSwitcher: Boolean
+        get() = playlistTargetPickerShowSwitcherState
+        set(value) {
+            playlistTargetPickerShowSwitcherState = value
+            playlistTargetPickerChanged()
+        }
+
+    private var playlistOperationTargetsState by mutableStateOf<List<ProviderPlaylist>>(emptyList())
+    var playlistOperationTargets: List<ProviderPlaylist>
+        get() = playlistOperationTargetsState
+        set(value) {
+            playlistOperationTargetsState = value
+            playlistTargetPickerChanged()
+        }
+
+    private var playlistOperationErrorState by mutableStateOf<String?>(null)
+    var playlistOperationError: String?
+        get() = playlistOperationErrorState
+        set(value) {
+            playlistOperationErrorState = value
+            playlistTargetPickerChanged()
+        }
+
+    private val mutablePlaylistTargetPickerState = MutableStateFlow(PlaylistTargetPickerUiState())
+    val playlistTargetPickerFlow: StateFlow<PlaylistTargetPickerUiState> =
+        mutablePlaylistTargetPickerState.asStateFlow()
 
     private val playlistOperationFeedbackState = mutableStateOf<String?>(null)
     private val mutablePlaylistOperationFeedback = MutableStateFlow<String?>(null)
@@ -64,6 +102,7 @@ internal class PlaylistControllerState {
         set(value) {
             localPlaylistOperationErrorState = value
             localPlaylistChanged()
+            playlistTargetPickerChanged()
         }
 
     private var localPlaylistImportPreviewState by mutableStateOf<LocalPlaylistImportPreview?>(null)
@@ -81,5 +120,16 @@ internal class PlaylistControllerState {
 
     private fun localPlaylistChanged() {
         localPlaylistChangeListener?.invoke()
+    }
+
+    private fun playlistTargetPickerChanged() {
+        mutablePlaylistTargetPickerState.value = PlaylistTargetPickerUiState(
+            track = playlistTargetTrackState,
+            targetType = playlistTargetTypeState,
+            showSwitcher = playlistTargetPickerShowSwitcherState,
+            providerTargets = playlistOperationTargetsState,
+            providerError = playlistOperationErrorState,
+            localError = localPlaylistOperationErrorState,
+        )
     }
 }
