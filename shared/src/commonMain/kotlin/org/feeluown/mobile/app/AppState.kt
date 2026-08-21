@@ -222,14 +222,41 @@ class FuoAppViewModel(
 
     fun dispatch(intent: AppIntent) {
         when (intent) {
-            AppIntent.NavigateBack -> when {
-                playbackNavigationPort.isQueueOpen -> playbackNavigationPort.toggleQueue()
-                playbackNavigationPort.isFullPlayerOpen -> playbackNavigationPort.closeFullPlayer()
-                else -> controller.navigateBack()
-            }
+            AppIntent.NavigateBack -> navigateBack()
             is AppIntent.UpdateSettings -> viewModelScope.launch { settingsRepository.update(intent.transform) }
             is AppIntent.UpdateThemePaletteStyle -> viewModelScope.launch { settingsRepository.updateThemePaletteStyle(intent.value) }
             is AppIntent.UpdateThemeColorSpec -> viewModelScope.launch { settingsRepository.updateThemeColorSpec(intent.value) }
+        }
+    }
+
+    private fun navigateBack() {
+        when {
+            playlistActionPort.targetPickerState.value.track != null -> playlistActionPort.closePlaylistTargetPicker()
+            providerTrackActionPort.artistTargetPickerState.value.track != null -> providerTrackActionPort.closeArtistTargetPicker()
+            localMusicFeatureController.uiState.value.metadataEditorTrack != null -> localMusicFeatureController.closeMetadataEditor()
+            playbackNavigationPort.isQueueOpen -> playbackNavigationPort.toggleQueue()
+            playbackNavigationPort.isFullPlayerOpen -> playbackNavigationPort.closeFullPlayer()
+            providerDetailOwners.video.uiState.value.isFullscreen -> providerDetailOwners.video.toggleFullscreen()
+            else -> when (navigator.currentEntry) {
+                AppRoute.Home -> Unit
+                AppRoute.Search -> searchAppPort.closeSearch()
+                AppRoute.AudioRecognition -> closeRecognition()
+                AppRoute.Settings -> settingsFeatureController.close()
+                AppRoute.DebugLogs -> closeDebugLogs()
+                AppRoute.DownloadManager -> closeDownloadManager()
+                AppRoute.LocalPlaylist -> localPlaylistFeatureController.close()
+                AppRoute.LocalMusicCollection -> localMusicFeatureController.closeCollection()
+                is AppRoute.FeatureDetail -> providerDetailOwners.feature.close()
+                is AppRoute.PlaylistDetail -> providerDetailOwners.playlist.close()
+                is AppRoute.TrackDetail -> providerDetailOwners.track.close()
+                is AppRoute.VideoDetail -> providerDetailOwners.video.close()
+                is AppRoute.MediaItemDetail -> providerDetailOwners.mediaItem.close()
+                AppRoute.Feature,
+                AppRoute.Playlist,
+                AppRoute.Track,
+                AppRoute.Video,
+                AppRoute.MediaItem -> navigator.pop()
+            }
         }
     }
 }
