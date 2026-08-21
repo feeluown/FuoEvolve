@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "FuoEvolve"
 
 include(":core:model")
+include(":feature:recognition")
 include(":playback:api")
 include(":playback:runtime")
 include(":provider:api")
