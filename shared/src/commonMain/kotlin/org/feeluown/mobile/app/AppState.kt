@@ -133,6 +133,7 @@ class FuoAppViewModel(
     val localMusicFeatureController: LocalMusicFeatureController,
     val localPlaylistFeatureController: LocalPlaylistFeatureController,
     val homeFeatureController: HomeFeatureController,
+    val sharedResourceActionPort: SharedResourceActionPort,
     private val searchController: SearchFeatureController,
     private val recognitionController: RecognitionFeatureController,
     internal val searchAppPort: SearchAppPort,
