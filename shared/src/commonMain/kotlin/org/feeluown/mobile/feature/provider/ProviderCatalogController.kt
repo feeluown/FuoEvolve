@@ -83,6 +83,7 @@ private class DefaultProviderCatalogFeatureController(
                 providerRepository.updateEnabledProviders(enabled)
                 catalogProviders = providerRepository.providers().sortedWith(providerComparator(settings.providerOrderIds))
                 sessionRepository.updateProviders(catalogProviders)
+                refreshProviderSessions(catalogProviders)
                 catalogCapabilities = providerRepository.providerCapabilities().associateBy { it.providerId }
                 catalogFeatures = providerRepository.features()
             }.onFailure { throwable ->
@@ -138,6 +139,15 @@ private class DefaultProviderCatalogFeatureController(
                     )
                 }
             }
+        }
+    }
+
+    private suspend fun refreshProviderSessions(providers: List<ProviderInfo>) {
+        providers.forEach { provider ->
+            // Rehydrate the provider-owned persisted login state after rebuilding the catalog.
+            // A failed auth probe should be scoped to that provider and must not make catalog
+            // initialization fail for every source.
+            runCatching { sessionRepository.refresh(provider.providerId) }
         }
     }
 
