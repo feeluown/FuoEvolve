@@ -21,9 +21,6 @@ internal class AndroidAppContainer(
     private val context: Context = application.applicationContext
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
-    private var playbackSessionHolder: PlaybackSession? = null
-    private val playbackSession: PlaybackSession
-        get() = checkNotNull(playbackSessionHolder) { "Playback runtime is not wired" }
 
     val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
@@ -63,6 +60,17 @@ internal class AndroidAppContainer(
     private val navigator by lazy { AppNavigator() }
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant by lazy { AndroidOAuthDeviceCodeAssistant(context) }
 
+    private val playbackQueueStore: AndroidPlaybackQueueStore by lazy { AndroidPlaybackQueueStore(context) }
+    private val playbackResumeStore: AndroidPlaybackResumeStore by lazy { AndroidPlaybackResumeStore(context) }
+    private val resourceCacheRepository: AndroidResourceCacheRepository by lazy { AndroidResourceCacheRepository(context) }
+    private val debugLogRepository: AndroidDebugLogRepository by lazy {
+        AndroidDebugLogRepository(context, (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+    }
+    private val debugLogFeatureController: DebugLogFeatureController by lazy {
+        createDebugLogFeatureController(debugLogRepository, appScope)
+    }
+    private val audioRecognitionRepository: AndroidAudioRecognitionRepository by lazy { AndroidAudioRecognitionRepository(context) }
+
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
         createSearchFeatureController(
@@ -89,16 +97,6 @@ internal class AndroidAppContainer(
         )
     }
 
-    private val playbackQueueStore: AndroidPlaybackQueueStore by lazy { AndroidPlaybackQueueStore(context) }
-    private val playbackResumeStore: AndroidPlaybackResumeStore by lazy { AndroidPlaybackResumeStore(context) }
-    private val resourceCacheRepository: AndroidResourceCacheRepository by lazy { AndroidResourceCacheRepository(context) }
-    private val debugLogRepository: AndroidDebugLogRepository by lazy {
-        AndroidDebugLogRepository(context, (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
-    }
-    private val debugLogFeatureController: DebugLogFeatureController by lazy {
-        createDebugLogFeatureController(debugLogRepository, appScope)
-    }
-    private val audioRecognitionRepository: AndroidAudioRecognitionRepository by lazy { AndroidAudioRecognitionRepository(context) }
     private val recognitionController: RecognitionFeatureController by lazy {
         createRecognitionFeatureController(
             repository = audioRecognitionRepository,
@@ -106,32 +104,6 @@ internal class AndroidAppContainer(
             isPlaybackActive = { playbackEngine.state.value.status == PlayerStatus.Playing },
             pausePlayback = playbackEngine::pause,
         )
-    }
-
-    val controller: FuoPlayerController by lazy {
-        FuoPlayerController(
-            providerRepository = providerRepository,
-            localRepository = localRepository,
-            localPlaylistRepository = localPlaylistRepository,
-            downloadRepository = downloadRepository,
-            playbackEngine = playbackEngine,
-            settingsRepository = settingsRepository,
-            providerSessionRepository = providerSessionRepository,
-            navigator = navigator,
-            playbackQueueStore = playbackQueueStore,
-            resourceCacheRepository = resourceCacheRepository,
-            debugLogRepository = debugLogRepository,
-            audioRecognitionRepository = audioRecognitionRepository,
-            oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
-            scope = appScope,
-            searchFeatureController = searchController,
-            recognitionFeatureController = recognitionController,
-        ).also(::wireController)
-    }
-
-    private val localMusicFeatureController: LocalMusicFeatureController by lazy {
-        controller.localMusicActionPort as? LocalMusicFeatureController
-            ?: error("Local Music feature owner is not installed")
     }
 
     private val providerCatalogFeatureController: ProviderCatalogFeatureController by lazy {
@@ -143,12 +115,105 @@ internal class AndroidAppContainer(
         )
     }
 
-    private val localPlaylistFeatureController: LocalPlaylistFeatureController by lazy {
+    private val localPlaylistFeatureController: LocalPlaylistFeatureOwner by lazy {
         createLocalPlaylistFeatureController(
             repository = localPlaylistRepository,
             navigator = navigator,
             scope = appScope,
             providers = { providerCatalogFeatureController.uiState.value.providers },
+        )
+    }
+
+    private val localMusicFeatureController: LocalMusicFeatureController by lazy {
+        createLocalMusicFeatureController(
+            repository = localRepository,
+            providerRepository = providerRepository,
+            navigator = navigator,
+            settingsRepository = settingsRepository,
+            providers = { providerCatalogFeatureController.uiState.value.providers },
+            isLocalMusicSectionActive = {
+                val state = homeFeatureController.uiState.value
+                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+            },
+            scope = appScope,
+            onTrackUpdated = { trackId, track -> playbackFeatureOwner.updateTrackCopies(trackId, track) },
+        )
+    }
+
+    private val downloadActionPort: DownloadActionPort by lazy {
+        createDownloadActionPort(
+            providerRepository = providerRepository,
+            downloadRepository = downloadRepository,
+            localRepository = localRepository,
+            localMusicController = localMusicFeatureController,
+            settingsRepository = settingsRepository,
+            scope = appScope,
+            isLocalMusicSectionActive = {
+                val state = homeFeatureController.uiState.value
+                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+            },
+        )
+    }
+
+    private val playbackFeatureOwner: PlaybackFeatureOwner by lazy {
+        createPlaybackFeatureOwner(
+            providerRepository = providerRepository,
+            playbackEngine = playbackEngine,
+            playbackQueueStore = playbackQueueStore,
+            settingsRepository = settingsRepository,
+            downloadActions = downloadActionPort,
+            scope = appScope,
+            openTrackDetail = { track -> providerDetailOwners.track.open(track) },
+        )
+    }
+
+    private val providerDetailOwners: ProviderDetailOwners by lazy {
+        createProviderDetailOwners(
+            providerRepository = providerRepository,
+            playbackQueue = playbackFeatureOwner.transport,
+            settingsRepository = settingsRepository,
+            providerCatalog = providerCatalogFeatureController,
+            navigator = navigator,
+            scope = appScope,
+            onProviderMutation = { homeFeatureController.refreshMine() },
+        )
+    }
+
+    private val homeFeatureController: HomeFeatureController by lazy {
+        createHomeFeatureController(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            playbackQueue = playbackFeatureOwner.transport,
+            localPlaylist = localPlaylistFeatureController,
+            localMusic = localMusicFeatureController,
+            settingsRepository = settingsRepository,
+            navigator = navigator,
+            scope = appScope,
+        )
+    }
+
+    private val playlistActionPort: PlaylistActionPort by lazy {
+        createPlaylistActionPort(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            localPlaylist = localPlaylistFeatureController,
+            scope = appScope,
+            onProviderMutation = { homeFeatureController.refreshMine() },
+        )
+    }
+
+    private val providerTrackActionPort: ProviderTrackActionPort by lazy {
+        createProviderTrackActionPort(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            searchController = searchController,
+            playbackNavigation = playbackFeatureOwner.navigation,
+            playbackQueue = playbackFeatureOwner.transport,
+            scope = appScope,
+            refreshMineContent = homeFeatureController::refreshMine,
         )
     }
 
@@ -192,32 +257,6 @@ internal class AndroidAppContainer(
         )
     }
 
-    private val providerDetailOwners: ProviderDetailOwners by lazy {
-        createProviderDetailOwners(
-            providerRepository = providerRepository,
-            playbackQueue = controller.playbackQueueUiPort,
-            settingsRepository = settingsRepository,
-            providerCatalog = providerCatalogFeatureController,
-            navigator = navigator,
-            scope = appScope,
-            onProviderMutation = { homeFeatureController.refreshMine() },
-        )
-    }
-
-    private val homeFeatureController: HomeFeatureController by lazy {
-        createHomeFeatureController(
-            providerRepository = providerRepository,
-            providerCatalog = providerCatalogFeatureController,
-            providerDetails = providerDetailOwners,
-            playbackQueue = controller.playbackQueueUiPort,
-            localPlaylist = localPlaylistFeatureController,
-            localMusic = localMusicFeatureController,
-            settingsRepository = settingsRepository,
-            navigator = navigator,
-            scope = appScope,
-        )
-    }
-
     private val sharedResourceActionPort: SharedResourceActionPort by lazy {
         createSharedResourceActionPort(
             providerRepository = providerRepository,
@@ -230,14 +269,13 @@ internal class AndroidAppContainer(
     }
 
     private val searchAppPort: SearchAppPort by lazy {
-        val wiredController = controller
         DefaultSearchAppPort(
             searchController = searchController,
             providerSessions = { providerSessionRepository.state.value },
-            playbackQueue = wiredController.playbackQueueUiPort,
-            downloads = wiredController.downloadActionPort,
-            playlists = wiredController.playlistActionPort,
-            providerTrackActions = wiredController.providerTrackActionPort,
+            playbackQueue = playbackFeatureOwner.transport,
+            downloads = downloadActionPort,
+            playlists = playlistActionPort,
+            providerTrackActions = providerTrackActionPort,
             navigator = navigator,
         )
     }
@@ -253,26 +291,26 @@ internal class AndroidAppContainer(
     private val playbackPresentationPort: PlaybackPresentationPort by lazy {
         DefaultPlaybackPresentationPort(
             playbackEngine = playbackEngine,
-            queuePort = controller.playbackQueueUiPort,
+            queuePort = playbackFeatureOwner.transport,
             settingsRepository = settingsRepository,
             scope = appScope,
         )
     }
 
+    private val playbackSession: PlaybackSession by lazy(::wirePlaybackRuntime)
+
     val appViewModel: FuoAppViewModel by lazy {
-        val wiredController = controller
         FuoAppViewModel(
-            controller = wiredController,
             playbackSession = playbackSession,
-            playbackNavigationPort = wiredController.playbackNavigationPort,
+            playbackNavigationPort = playbackFeatureOwner.navigation,
             playbackPresentationPort = playbackPresentationPort,
-            playbackQueueUiPort = wiredController.playbackQueueUiPort,
-            playbackSleepTimerPort = wiredController.playbackSleepTimerPort,
-            downloadActionPort = wiredController.downloadActionPort,
-            playlistActionPort = wiredController.playlistActionPort,
-            providerTrackActionPort = wiredController.providerTrackActionPort,
+            playbackQueueUiPort = playbackFeatureOwner.transport,
+            playbackSleepTimerPort = playbackFeatureOwner.sleepTimer,
+            downloadActionPort = downloadActionPort,
+            playlistActionPort = playlistActionPort,
+            providerTrackActionPort = providerTrackActionPort,
             localMusicActionPort = localMusicFeatureController,
-            replacementActionPort = wiredController.replacementActionPort,
+            replacementActionPort = playbackFeatureOwner.replacement,
             debugLogFeatureController = debugLogFeatureController,
             providerCatalogFeatureController = providerCatalogFeatureController,
             providerAuthFeatureController = providerAuthFeatureController,
@@ -293,20 +331,19 @@ internal class AndroidAppContainer(
         )
     }
 
-    private fun wireController(controller: FuoPlayerController) {
+    private fun wirePlaybackRuntime(): PlaybackSession {
         val session = createPlaybackRuntimeSession(
-            controller = controller,
+            playbackState = playbackFeatureOwner.playbackState,
             playbackEngine = playbackEngine,
-            transportCoordinator = controller.playbackTransportCoordinator,
-            startFailureSource = controller.playbackStartFailureSource,
+            transportCoordinator = playbackFeatureOwner.transport,
+            startFailureSource = playbackFeatureOwner.startFailureSource,
             scope = appScope,
         )
-        playbackSessionHolder = session
-        controller.updateStatusBarLyricsAvailability(isLyriconInstalled(context))
+        settingsFeatureController.setStatusBarLyricsAvailability(isLyriconInstalled(context))
         lyriconLyricsPublisher = LyriconLyricsPublisher(
             context = context,
             playbackSession = session,
-            statusBarLyricsEnabled = { controller.statusBarLyricsEnabled },
+            statusBarLyricsEnabled = { settingsRepository.state.value.settings.statusBarLyricsEnabled },
             scope = appScope,
         ).also(LyriconLyricsPublisher::start)
 
@@ -334,13 +371,13 @@ internal class AndroidAppContainer(
                 }
             }
         }
+        return session
     }
 
     override fun close() {
         FuoPlaybackService.transportControls = null
         lyriconLyricsPublisher?.close()
         lyriconLyricsPublisher = null
-        playbackSessionHolder = null
         appScope.cancel()
     }
 }
