@@ -66,29 +66,20 @@ fun P2AppRoot(
             return@FuoTheme
         }
         if (!appUiState.onboardingCompleted) {
-            val onboarding = appViewModel.onboardingFeatureController
-            if (onboarding != null) {
-                OnboardingFeatureScreen(
-                    onboarding = onboarding,
-                    settings = appViewModel.settingsFeatureController,
-                    providerCatalog = appViewModel.providerCatalogFeatureController,
-                    providerAuth = appViewModel.providerAuthFeatureController,
-                    onOpenProviderWebLogin = onOpenProviderWebLogin,
-                    onLogoutProvider = onLogoutProvider,
-                    onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
-                    onImportYtmusicOAuthFile = onImportYtmusicOAuthFile,
-                    onStartYtmusicOAuth = onStartYtmusicOAuth,
-                )
-            } else {
-                OnboardingScreen(
-                    controller = appViewModel.controller,
-                    onOpenProviderWebLogin = onOpenProviderWebLogin,
-                    onLogoutProvider = onLogoutProvider,
-                    onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
-                    onImportYtmusicOAuthFile = onImportYtmusicOAuthFile,
-                    onStartYtmusicOAuth = onStartYtmusicOAuth,
-                )
+            val onboarding = requireNotNull(appViewModel.onboardingFeatureController) {
+                "Onboarding feature owner is not installed"
             }
+            OnboardingFeatureScreen(
+                onboarding = onboarding,
+                settings = appViewModel.settingsFeatureController,
+                providerCatalog = appViewModel.providerCatalogFeatureController,
+                providerAuth = appViewModel.providerAuthFeatureController,
+                onOpenProviderWebLogin = onOpenProviderWebLogin,
+                onLogoutProvider = onLogoutProvider,
+                onImportYtmusicHeaderFile = onImportYtmusicHeaderFile,
+                onImportYtmusicOAuthFile = onImportYtmusicOAuthFile,
+                onStartYtmusicOAuth = onStartYtmusicOAuth,
+            )
             return@FuoTheme
         }
 
