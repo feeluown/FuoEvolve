@@ -1,11 +1,11 @@
 package org.feeluown.mobile
 
-import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
@@ -18,18 +18,19 @@ import org.feeluown.mobile.playback.runtime.PlaybackRuntimeQueueActions
 
 /** Android composition-edge adapter for the shared playback runtime. */
 internal fun createPlaybackRuntimeSession(
-    controller: FuoPlayerController,
+    playbackState: StateFlow<PlaybackState>,
     playbackEngine: PlaybackEngine,
     transportCoordinator: PlaybackTransportCoordinator,
     startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
 ): PlaybackSession {
-    val overlay = snapshotFlow { controller.playbackState.toPlaybackRuntimeOverlay() }
+    val overlay = playbackState
+        .map(PlaybackState::toPlaybackRuntimeOverlay)
         .distinctUntilChanged()
         .stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,
-            initialValue = controller.playbackState.toPlaybackRuntimeOverlay(),
+            initialValue = playbackState.value.toPlaybackRuntimeOverlay(),
         )
 
     return DefaultPlaybackRuntime(
