@@ -15,7 +15,7 @@ internal class DownloadController(
     private val providerRepository: ProviderMusicRepository,
     private val downloadRepository: DownloadRepository,
     private val localRepository: LocalMusicRepository,
-    private val localMusicController: LocalMusicController,
+    private val localMusicController: LocalMusicFeatureController,
     private val scope: CoroutineScope,
     val state: DownloadControllerState = DownloadControllerState(),
     private val unavailablePlaybackPolicy: () -> UnavailablePlaybackPolicy,
