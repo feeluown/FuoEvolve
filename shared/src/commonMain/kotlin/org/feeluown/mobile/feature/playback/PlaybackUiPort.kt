@@ -53,6 +53,9 @@ interface PlaybackQueueUiPort {
     fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) =
         playTracks(tracks, index)
 
+    /** Append lazily loaded playlist tracks only when the same playlist still owns the queue. */
+    fun appendPlaylistTracks(sourcePlaylistId: String, tracks: List<MusicTrack>) = Unit
+
     /**
      * Replace the active queue from a provider feature while preserving dynamic-queue identity.
      * This is required by FM/daily-recommendation style features whose queue is extended lazily.
