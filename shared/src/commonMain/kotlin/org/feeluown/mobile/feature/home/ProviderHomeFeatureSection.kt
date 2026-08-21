@@ -130,7 +130,7 @@ fun ProviderContentHomeFeatureSection(
                             ProviderFeatureHeader(
                                 feature = contentSection.feature,
                                 onPlayAll = contentSection.tracks.takeIf { it.isNotEmpty() }?.let {
-                                    { home.playFeature(contentSection, 0) }
+                                    { home.playAllFeature(contentSection) }
                                 },
                             )
                         }
