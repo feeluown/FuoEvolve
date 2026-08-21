@@ -102,10 +102,9 @@ private class DefaultSettingsFeatureController(
         }
         scope.launch {
             runCatching {
-                val settings = settingsRepository.awaitSettings()
-                providerRepository.updateAudioQualityPolicies(
-                    settings.wifiAudioQualityPolicy,
-                    settings.cellularAudioQualityPolicy,
+                applySavedAudioQualityPolicies(
+                    loadSettings = settingsRepository::awaitSettings,
+                    applyPolicies = providerRepository::updateAudioQualityPolicies,
                 )
             }.onFailure(::failed)
         }
@@ -242,4 +241,12 @@ private class DefaultSettingsFeatureController(
             feedback = throwable.message ?: throwable::class.simpleName.orEmpty().ifBlank { "操作失败" },
         )
     }
+}
+
+internal suspend fun applySavedAudioQualityPolicies(
+    loadSettings: suspend () -> AppSettings,
+    applyPolicies: suspend (AudioQualityPolicy, AudioQualityPolicy) -> Unit,
+) {
+    val settings = loadSettings()
+    applyPolicies(settings.wifiAudioQualityPolicy, settings.cellularAudioQualityPolicy)
 }
