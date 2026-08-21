@@ -247,6 +247,7 @@ private class IosAppContainer(
             providerRepository = providerRepository,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
+            searchController = searchController,
             settingsRepository = settingsRepository,
             scope = scope,
         )
@@ -283,6 +284,7 @@ private class IosAppContainer(
     }
 
     val appViewModel = FuoAppViewModel(
+        controller = controller,
         playbackSession = playbackSession,
         playbackNavigationPort = controller.playbackNavigationPort,
         playbackPresentationPort = playbackPresentationPort,
