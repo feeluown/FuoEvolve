@@ -4,6 +4,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 internal data class HomeFeatureUiGraph(
     val home: HomeFeatureController,
+    val providerCatalog: ProviderCatalogFeatureController,
     val playbackQueue: PlaybackQueueUiPort,
     val downloads: DownloadActionPort,
     val playlists: PlaylistActionPort,
