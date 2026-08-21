@@ -35,6 +35,7 @@ internal class PlaybackQueueCoordinator(
     private val appendFeatureQueue: suspend (ProviderFeature) -> Int,
     private val setTrackChangeDirection: (TrackChangeDirection) -> Unit,
     private val setMessage: (String) -> Unit,
+    private val shuffleTracks: (List<MusicTrack>) -> List<MusicTrack> = { it.shuffled() },
 ) : PlaybackTransportCoordinator {
     private val queueState = queue
 
@@ -76,6 +77,7 @@ internal class PlaybackQueueCoordinator(
             val originalSeenIds = queueState.originalMainQueue.mapTo(mutableSetOf()) { it.id }
             queueState.originalMainQueue = queueState.originalMainQueue + additions.filter { originalSeenIds.add(it.id) }
         }
+        reshufflePendingMainQueue()
         publishQueueMutation()
     }
 
@@ -295,7 +297,7 @@ internal class PlaybackQueueCoordinator(
             queueState.shuffleBeforeFm = null
         }
         queueState.isFmQueue = enteringFm
-        queueState.queueFeature = sourceFeature
+        queueState.queueFeature = sourceFeature?.takeIf { enteringFm }
         queueState.queuePlaylistId = sourcePlaylistId
         queueState.currentUpNextTrack = null
         queueState.currentIsUpNext = false
@@ -356,11 +358,19 @@ internal class PlaybackQueueCoordinator(
         val currentInMain = current?.let { track ->
             queueState.mainQueue.firstOrNull { it.id == track.id }
         }
-        val shuffledRest = queueState.mainQueue.filterNot { it.id == currentInMain?.id }.shuffled()
+        val shuffledRest = shuffleTracks(queueState.mainQueue.filterNot { it.id == currentInMain?.id })
         queueState.mainQueue = listOfNotNull(currentInMain) + shuffledRest
         queueState.mainQueueIndex = currentInMain?.let { 0 }
             ?: queueState.mainQueueIndex.coerceIn(0, queueState.mainQueue.lastIndex)
         queueState.shuffleEnabled = true
+    }
+
+    private fun reshufflePendingMainQueue() {
+        if (!queueState.shuffleEnabled || queueState.isFmQueue || queueState.mainQueue.size <= 1) return
+        val firstPendingIndex = (queueState.mainQueueIndex + 1).coerceIn(0, queueState.mainQueue.size)
+        val pending = queueState.mainQueue.drop(firstPendingIndex)
+        if (pending.size <= 1) return
+        queueState.mainQueue = queueState.mainQueue.take(firstPendingIndex) + shuffleTracks(pending)
     }
 
     private fun disableShuffle() {
