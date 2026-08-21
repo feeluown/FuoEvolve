@@ -44,6 +44,7 @@ interface HomeFeatureController {
     fun openMediaItem(item: ProviderMediaItem)
     fun openVideo(video: ProviderVideo)
     fun playFeature(section: ProviderContentSection, index: Int = 0)
+    fun playAllFeature(section: ProviderContentSection)
 
     fun createProviderPlaylist(providerId: String, name: String)
     fun creatablePlaylistProviders(): List<ProviderInfo>
@@ -229,6 +230,31 @@ private class DefaultHomeFeatureController(
     override fun playFeature(section: ProviderContentSection, index: Int) {
         if (index !in section.tracks.indices) return
         playbackQueue.playFeatureTracks(section.tracks, index, section.feature)
+    }
+
+    override fun playAllFeature(section: ProviderContentSection) {
+        if (section.tracks.isEmpty()) return
+        if (section.feature.isDynamicQueueFeature() || !section.hasMore) {
+            playbackQueue.playFeatureTracks(section.tracks, 0, section.feature)
+            return
+        }
+        scope.launch {
+            publishLoading("正在加载${section.feature.title}")
+            runCatching {
+                loadAllHomeFeatureTracks(section) { feature, offset ->
+                    withTimeout(HOME_PROVIDER_TIMEOUT_MS) {
+                        providerRepository.loadFeaturePage(feature, offset)
+                    }
+                }
+            }.onSuccess { tracks ->
+                if (tracks.isEmpty()) {
+                    finishLoading("暂无可播放歌曲")
+                } else {
+                    playbackQueue.playFeatureTracks(tracks, 0, section.feature)
+                    finishLoading("已加载全部歌曲")
+                }
+            }.onFailure(::publishError)
+        }
     }
 
     override fun creatablePlaylistProviders(): List<ProviderInfo> {
@@ -437,6 +463,32 @@ private class DefaultHomeFeatureController(
         val message = providerHomeError(throwable)
         mutableUiState.value = uiState.value.copy(isLoading = false, message = message, errorMessage = message)
     }
+}
+
+internal suspend fun loadAllHomeFeatureTracks(
+    initial: ProviderContentSection,
+    loadPage: suspend (ProviderFeature, Int) -> ProviderContentSection,
+): List<MusicTrack> {
+    val tracks = initial.tracks.toMutableList()
+    val seenIds = tracks.mapTo(mutableSetOf()) { it.id }
+    var hasMore = initial.hasMore
+    var nextOffset = initial.nextOffset.takeIf { it > 0 } ?: initial.tracks.size
+
+    while (hasMore) {
+        val requestedOffset = nextOffset
+        val page = loadPage(initial.feature, requestedOffset)
+        page.tracks.forEach { track ->
+            if (seenIds.add(track.id)) tracks += track
+        }
+        hasMore = page.hasMore
+        if (!hasMore) break
+
+        val candidateOffset = page.nextOffset.takeIf { it > requestedOffset }
+            ?: (requestedOffset + page.tracks.size)
+        if (candidateOffset <= requestedOffset || page.tracks.isEmpty()) break
+        nextOffset = candidateOffset
+    }
+    return tracks
 }
 
 private fun MineSection.normalizeMineSection(): MineSection =
