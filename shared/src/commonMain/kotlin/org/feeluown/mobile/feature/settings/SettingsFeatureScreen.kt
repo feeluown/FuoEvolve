@@ -220,7 +220,11 @@ fun SettingsFeatureScreen(
                         isLoading = settingsState.isBusy || catalogState.isLoading,
                     ) { bodyModifier ->
                         SettingsDetailColumn(modifier = bodyModifier) {
-                            ThemeSettingsContent(settingsState, settingsController)
+                            ThemeSettingsContent(
+                                state = settingsState,
+                                controller = settingsController,
+                                predictiveBackPreference = predictiveBackPreference,
+                            )
                         }
                     }
 
@@ -795,6 +799,7 @@ private fun AppearanceFeatureSettings(
 private fun ThemeSettingsContent(
     state: SettingsFeatureUiState,
     controller: SettingsFeatureController,
+    predictiveBackPreference: PredictiveBackPreference,
 ) {
     val settings = state.settings
     SettingsGroup(title = "颜色") {
@@ -826,6 +831,16 @@ private fun ThemeSettingsContent(
             optionLabel = ThemeColorSpec::label,
             onSelect = controller::setThemeColorSpec,
         )
+    }
+    if (predictiveBackPreference.isSupported) {
+        SettingsGroup(title = "导航") {
+            SettingsToggleRow(
+                title = "预测性返回手势",
+                supportingText = "返回手势过程中预览上一页",
+                checked = predictiveBackPreference.enabled,
+                onCheckedChange = predictiveBackPreference.onEnabledChange,
+            )
+        }
     }
     SettingsGroup(title = "封面") {
         SettingsToggleRow(
