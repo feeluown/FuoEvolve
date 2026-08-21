@@ -242,6 +242,15 @@ private class IosAppContainer(
             scope = scope,
         )
     }
+    private val sharedResourceActionPort: SharedResourceActionPort by lazy {
+        createSharedResourceActionPort(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            settingsRepository = settingsRepository,
+            scope = scope,
+        )
+    }
     private val playbackSession by lazy {
         createIosPlaybackRuntimeSession(
             controller = controller,
@@ -294,6 +303,7 @@ private class IosAppContainer(
         localMusicFeatureController = localMusicFeatureController,
         localPlaylistFeatureController = localPlaylistFeatureController,
         homeFeatureController = homeFeatureController,
+        sharedResourceActionPort = sharedResourceActionPort,
         searchController = searchController,
         recognitionController = recognitionController,
         searchAppPort = searchAppPort,
