@@ -119,6 +119,55 @@ class PlaybackQueueCoordinatorTest {
     }
 
     @Test
+    fun playAllPlaylistShufflesTheWholeQueueInsteadOfPinningTheFirstTrack() = runTest {
+        val first = track("main:1")
+        val second = track("main:2")
+        val third = track("main:3")
+        val tracks = listOf(first, second, third)
+        val queue = PlaybackQueueController().apply {
+            shuffleEnabled = true
+        }
+        var started: MusicTrack? = null
+        val coordinator = coordinator(
+            queue = queue,
+            onStart = { track, _, _ -> started = track },
+            shuffleTracks = { it },
+        )
+
+        coordinator.playAllPlaylistTracks(tracks, "playlist:1")
+
+        assertEquals(second, started)
+        assertEquals(listOf(second, third, first), queue.mainQueue)
+        assertEquals(tracks, queue.originalMainQueue)
+        assertEquals(0, queue.mainQueueIndex)
+        assertEquals("playlist:1", queue.queuePlaylistId)
+    }
+
+    @Test
+    fun selectingPlaylistTrackStillPinsTheSelectedTrackWhenShuffleIsEnabled() = runTest {
+        val first = track("main:1")
+        val second = track("main:2")
+        val third = track("main:3")
+        val tracks = listOf(first, second, third)
+        val queue = PlaybackQueueController().apply {
+            shuffleEnabled = true
+        }
+        var started: MusicTrack? = null
+        val coordinator = coordinator(
+            queue = queue,
+            onStart = { track, _, _ -> started = track },
+            shuffleTracks = { it },
+        )
+
+        coordinator.playPlaylistTracks(tracks, index = 1, sourcePlaylistId = "playlist:1")
+
+        assertEquals(second, started)
+        assertEquals(second, queue.mainQueue.first())
+        assertEquals(tracks, queue.originalMainQueue)
+        assertEquals(0, queue.mainQueueIndex)
+    }
+
+    @Test
     fun nextAdvancesPlaybackPartBeforeQueueTrack() = runTest {
         val current = track("main:1")
         val next = track("main:2")

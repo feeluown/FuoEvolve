@@ -73,6 +73,14 @@ interface PlaybackQueueUiPort {
     fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) =
         playTracks(tracks, index)
 
+    /**
+     * Start a durable playlist with Play All semantics instead of pinning a selected item.
+     * The distinction matters while shuffle is enabled: selecting a row keeps that row first,
+     * while Play All starts from a newly shuffled queue, matching the pre-refactor behavior.
+     */
+    fun playAllPlaylistTracks(tracks: List<MusicTrack>, sourcePlaylistId: String) =
+        playPlaylistTracks(tracks, 0, sourcePlaylistId)
+
     /** Append lazily loaded playlist tracks only when the same playlist still owns the queue. */
     fun appendPlaylistTracks(sourcePlaylistId: String, tracks: List<MusicTrack>) = Unit
 

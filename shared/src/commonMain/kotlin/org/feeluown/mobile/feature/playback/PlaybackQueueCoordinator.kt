@@ -68,11 +68,33 @@ internal class PlaybackQueueCoordinator(
     }
 
     override fun playTracks(tracks: List<MusicTrack>, index: Int) {
-        replaceSourceQueue(tracks, index, sourceFeature = null, sourcePlaylistId = null)
+        replaceSourceQueue(
+            tracks = tracks,
+            index = index,
+            sourceFeature = null,
+            sourcePlaylistId = null,
+            keepSelectedTrack = true,
+        )
     }
 
     override fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) {
-        replaceSourceQueue(tracks, index, sourceFeature = null, sourcePlaylistId = sourcePlaylistId)
+        replaceSourceQueue(
+            tracks = tracks,
+            index = index,
+            sourceFeature = null,
+            sourcePlaylistId = sourcePlaylistId,
+            keepSelectedTrack = true,
+        )
+    }
+
+    override fun playAllPlaylistTracks(tracks: List<MusicTrack>, sourcePlaylistId: String) {
+        replaceSourceQueue(
+            tracks = tracks,
+            index = 0,
+            sourceFeature = null,
+            sourcePlaylistId = sourcePlaylistId,
+            keepSelectedTrack = false,
+        )
     }
 
     override fun appendPlaylistTracks(sourcePlaylistId: String, tracks: List<MusicTrack>) {
@@ -90,7 +112,13 @@ internal class PlaybackQueueCoordinator(
     }
 
     override fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, sourceFeature: ProviderFeature) {
-        replaceSourceQueue(tracks, index, sourceFeature = sourceFeature, sourcePlaylistId = null)
+        replaceSourceQueue(
+            tracks = tracks,
+            index = index,
+            sourceFeature = sourceFeature,
+            sourcePlaylistId = null,
+            keepSelectedTrack = true,
+        )
     }
 
     override fun next() {
@@ -301,6 +329,7 @@ internal class PlaybackQueueCoordinator(
         index: Int,
         sourceFeature: ProviderFeature?,
         sourcePlaylistId: String?,
+        keepSelectedTrack: Boolean,
     ) {
         if (tracks.isEmpty() || index !in tracks.indices) return
         updateTrackChangeDirection(TrackChangeDirection.Next)
@@ -321,7 +350,15 @@ internal class PlaybackQueueCoordinator(
         queueState.originalMainQueue = emptyList()
         queueState.mainQueue = tracks
         queueState.mainQueueIndex = index
-        if (queueState.shuffleEnabled && !enteringFm) enableShuffle()
+        if (queueState.shuffleEnabled && !enteringFm) {
+            if (keepSelectedTrack) {
+                enableShuffle()
+            } else {
+                queueState.originalMainQueue = queueState.mainQueue
+                queueState.mainQueue = shuffledForPlaybackStart(queueState.mainQueue)
+                queueState.mainQueueIndex = 0
+            }
+        }
         publishQueueMutation()
         playMainIndexInternal(queueState.mainQueueIndex, 0, TrackChangeDirection.Next)
     }
@@ -381,6 +418,16 @@ internal class PlaybackQueueCoordinator(
         queueState.mainQueueIndex = currentInMain?.let { 0 }
             ?: queueState.mainQueueIndex.coerceIn(0, queueState.mainQueue.lastIndex)
         queueState.shuffleEnabled = true
+    }
+
+    private fun shuffledForPlaybackStart(tracks: List<MusicTrack>): List<MusicTrack> {
+        if (tracks.size <= 1) return tracks
+        val shuffled = shuffleTracks(tracks)
+        return if (shuffled.first().id == tracks.first().id) {
+            shuffled.drop(1) + shuffled.first()
+        } else {
+            shuffled
+        }
     }
 
     private fun reshufflePendingMainQueue() {

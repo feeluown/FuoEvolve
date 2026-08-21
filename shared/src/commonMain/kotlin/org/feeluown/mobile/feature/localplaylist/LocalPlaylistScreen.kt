@@ -125,7 +125,7 @@ fun LocalPlaylistScreen(
                     PlayAllButton(
                         onClick = {
                             if (uiState.selectedTracks.isNotEmpty()) {
-                                playbackQueue.playPlaylistTracks(uiState.selectedTracks, 0, displayPlaylist.id)
+                                playbackQueue.playAllPlaylistTracks(uiState.selectedTracks, displayPlaylist.id)
                             }
                         },
                         enabled = uiState.selectedTracks.isNotEmpty(),
