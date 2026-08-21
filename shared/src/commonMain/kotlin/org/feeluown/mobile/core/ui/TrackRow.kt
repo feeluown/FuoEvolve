@@ -18,8 +18,8 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
@@ -353,45 +353,5 @@ fun TrackAction(
                 )
             }
         }
-    }
-}
-
-fun addToPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
-    return if (controller.canAddTrackToPlaylist(track)) {
-        { controller.openPlaylistTargetPicker(track) }
-    } else {
-        null
-    }
-}
-
-fun addToLocalPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
-    return if (controller.canAddTrackToLocalPlaylist(track)) {
-        { controller.openLocalPlaylistTargetPicker(track) }
-    } else {
-        null
-    }
-}
-
-fun removeFromSelectedPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
-    return if (controller.canRemoveTrackFromSelectedPlaylist(track)) {
-        { controller.removeTrackFromSelectedPlaylist(track) }
-    } else {
-        null
-    }
-}
-
-fun removeFromSelectedLocalPlaylistAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
-    return if (controller.canRemoveTrackFromSelectedLocalPlaylist(track)) {
-        { controller.removeTrackFromSelectedLocalPlaylist(track) }
-    } else {
-        null
-    }
-}
-
-fun trackDetailAction(controller: FuoPlayerController, track: MusicTrack): (() -> Unit)? {
-    return if (track.sourceType == TrackSourceType.Provider) {
-        { controller.openTrackDetail(track) }
-    } else {
-        null
     }
 }
