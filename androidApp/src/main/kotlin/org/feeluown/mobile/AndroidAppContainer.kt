@@ -261,7 +261,6 @@ internal class AndroidAppContainer(
     val appViewModel: FuoAppViewModel by lazy {
         val wiredController = controller
         FuoAppViewModel(
-            controller = wiredController,
             playbackSession = playbackSession,
             playbackNavigationPort = wiredController.playbackNavigationPort,
             playbackPresentationPort = playbackPresentationPort,
