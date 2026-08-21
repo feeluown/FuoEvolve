@@ -183,6 +183,10 @@ class FuoAppViewModel(
     val localMusicActionPort: LocalMusicActionPort,
     val replacementActionPort: ReplacementActionPort,
     val debugLogFeatureController: DebugLogFeatureController,
+    val providerCatalogFeatureController: ProviderCatalogFeatureController,
+    val providerAuthFeatureController: ProviderAuthFeatureController,
+    val settingsFeatureController: SettingsFeatureController,
+    val providerDetailOwners: ProviderDetailOwners,
     private val searchController: SearchFeatureController,
     private val recognitionController: RecognitionFeatureController,
     internal val searchAppPort: SearchAppPort,
@@ -205,6 +209,14 @@ class FuoAppViewModel(
         providerTrackActions = providerTrackActionPort,
         localMusicActions = localMusicActionPort,
         replacement = replacementActionPort,
+    )
+
+    val providerDetailUiGraph = ProviderDetailUiGraph(
+        owners = providerDetailOwners,
+        playbackQueue = playbackQueueUiPort,
+        downloads = downloadActionPort,
+        playlists = playlistActionPort,
+        providerTrackActions = providerTrackActionPort,
     )
 
     val uiState: StateFlow<AppUiState> = combine(
