@@ -196,9 +196,11 @@ fun P2AppRoot(
                                     exit = slideOutVertically(animationSpec = tween(FuoMotion.overlayExitMillis)) { it / 2 } + fadeOut(tween(FuoMotion.overlayFadeMillis)),
                                 ) { RuntimeFullPlayer() }
                                 LocalMetadataDialog()
-                                val legacy = appViewModel.controller
-                                legacy.playlistTargetTrack?.let { PlaylistTargetDialog(legacy, it) }
-                                legacy.artistTargetTrack?.let { TrackArtistTargetDialog(legacy, it) }
+                                PlaylistTargetFeatureDialog(
+                                    actions = appViewModel.playlistActionPort,
+                                    localPlaylist = appViewModel.localPlaylistFeatureController,
+                                )
+                                TrackArtistTargetFeatureDialog(appViewModel.providerTrackActionPort)
                                 SnackbarHost(
                                     hostState = snackbar,
                                     modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp),
