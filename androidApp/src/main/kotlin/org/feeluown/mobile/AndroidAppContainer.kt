@@ -343,7 +343,9 @@ internal class AndroidAppContainer(
         lyriconLyricsPublisher = LyriconLyricsPublisher(
             context = context,
             playbackSession = session,
-            statusBarLyricsEnabled = { settingsRepository.state.value.settings.statusBarLyricsEnabled },
+            statusBarLyricsEnabled = settingsRepository.state
+                .map { state -> state.settings.statusBarLyricsEnabled }
+                .distinctUntilChanged(),
             scope = appScope,
         ).also(LyriconLyricsPublisher::start)
 
