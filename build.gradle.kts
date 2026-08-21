@@ -11,7 +11,7 @@ plugins {
 
 val migratedControllerBoundaryRoots = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/search",
-    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/recognition",
+    "feature/recognition/src/commonMain/kotlin",
     "playback/runtime/src/commonMain/kotlin",
 )
 val migratedControllerBoundaryFiles = listOf(
@@ -49,6 +49,36 @@ val retiredControllerCompatibilityFiles = listOf(
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/ControllerPlaybackUiPort.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/app/ControllerPlaybackCompatibilityPorts.kt",
     "androidApp/src/main/kotlin/org/feeluown/mobile/ControllerPlaybackSession.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/FuoPlayerController.kt",
+    "shared/src/commonTest/kotlin/org/feeluown/mobile/FuoPlayerControllerTest.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/PlayerScreen.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/home/HomeLegacyBridge.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/home/MineHomeSection.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/home/ProviderHomeSection.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/provider/ProviderFeatureFilters.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/settings/SettingsScreen.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/settings/SettingsScreenV2.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/onboarding/OnboardingScreen.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/provider/ProviderDetailScreens.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/provider/EnhancedProviderVideoScreen.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/recognition/AudioRecognition.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/feature/recognition/AudioRecognitionController.kt",
+)
+val requiredPhysicalFeatureFiles = listOf(
+    "feature/recognition/build.gradle.kts",
+    "feature/recognition/src/commonMain/kotlin/org/feeluown/mobile/AudioRecognition.kt",
+    "feature/recognition/src/commonMain/kotlin/org/feeluown/mobile/AudioRecognitionController.kt",
+)
+val productionSourceRoots = listOf(
+    "core/model/src/commonMain/kotlin",
+    "feature/recognition/src/commonMain/kotlin",
+    "playback/api/src/commonMain/kotlin",
+    "playback/runtime/src/commonMain/kotlin",
+    "provider/api/src/commonMain/kotlin",
+    "shared/src/commonMain/kotlin",
+    "shared/src/androidMain/kotlin",
+    "shared/src/iosMain/kotlin",
+    "androidApp/src/main/kotlin",
 )
 val playbackRuntimeAdapterFiles = listOf(
     "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidPlaybackRuntime.kt",
@@ -62,7 +92,7 @@ val appRootFile = "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppRoot.
 
 tasks.register("checkArchitectureBoundaries") {
     group = "verification"
-    description = "Reject legacy controller dependencies or retired compatibility files in migrated boundaries."
+    description = "Reject retired P2 compatibility code, controller dependencies, or missing physical feature boundaries."
 
     val sourceFiles = provider {
         buildList {
@@ -84,10 +114,22 @@ tasks.register("checkArchitectureBoundaries") {
             emptyList()
         }
     }
+    val productionSources = provider {
+        productionSourceRoots.flatMap { path ->
+            val root = rootProject.file(path)
+            if (root.isDirectory) {
+                root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            } else {
+                emptyList()
+            }
+        }.distinct()
+    }
     inputs.files(sourceFiles)
     inputs.files(commonMainSources)
+    inputs.files(productionSources)
     inputs.files(playbackRuntimeAdapterFiles.map(rootProject::file))
     inputs.files(platformCompositionRootFiles.map(rootProject::file))
+    inputs.files(requiredPhysicalFeatureFiles.map(rootProject::file))
     inputs.file(rootProject.file(appRootFile))
 
     doLast {
@@ -98,15 +140,29 @@ tasks.register("checkArchitectureBoundaries") {
         if (retiredCompatViolations.isNotEmpty()) {
             throw GradleException(
                 buildString {
-                    appendLine("Retired controller compatibility files were reintroduced:")
+                    appendLine("Retired P2 compatibility files were reintroduced:")
                     retiredCompatViolations.forEach { appendLine(" - $it") }
                     append("Use app ports or dedicated feature/playback owners instead.")
                 },
             )
         }
 
+        val missingPhysicalFeatureFiles = requiredPhysicalFeatureFiles
+            .map(rootProject::file)
+            .filterNot { it.isFile }
+            .map { it.relativeTo(rootProject.projectDir).invariantSeparatorsPath }
+        if (missingPhysicalFeatureFiles.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Required P2 physical feature boundary is missing:")
+                    missingPhysicalFeatureFiles.forEach { appendLine(" - $it") }
+                    append("Keep Recognition owned by :feature:recognition instead of moving it back into :shared.")
+                },
+            )
+        }
+
         val controllerPattern = Regex("\\bFuoPlayerController\\b")
-        val violations = sourceFiles.get().flatMap { file ->
+        val violations = productionSources.get().flatMap { file ->
             file.readLines().mapIndexedNotNull { index, line ->
                 val trimmed = line.trimStart()
                 val commentOnly = trimmed.startsWith("//") ||
@@ -123,9 +179,9 @@ tasks.register("checkArchitectureBoundaries") {
         if (violations.isNotEmpty()) {
             throw GradleException(
                 buildString {
-                    appendLine("FuoPlayerController leaked into migrated architecture boundaries:")
+                    appendLine("FuoPlayerController was reintroduced into production source:")
                     violations.forEach { appendLine(" - $it") }
-                    append("Use feature-owned state/actions or a narrow app/playback/provider contract instead.")
+                    append("P2 production code must use feature-owned state/actions or narrow app/playback/provider contracts.")
                 },
             )
         }
