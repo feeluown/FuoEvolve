@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 launchLocalPlaylistImport?.let(::handleLocalPlaylistImport)
-                launchSharedText?.let(fuoApplication.controller::openSharedResource)
+                launchSharedText?.let(appViewModel.sharedResourceActionPort::open)
             }
 
             P2AppRoot(
@@ -215,7 +215,9 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (handleOAuthUserCodeCopyIntent(intent)) return
         localPlaylistImportFromIntent(intent)?.let { handleLocalPlaylistImport(it); return }
-        sharedTextFromIntent(intent)?.let { (application as FuoEvolveApplication).controller.openSharedResource(it) }
+        sharedTextFromIntent(intent)?.let {
+            (application as FuoEvolveApplication).appViewModel.sharedResourceActionPort.open(it)
+        }
     }
 
     private fun handleOAuthUserCodeCopyIntent(intent: Intent?): Boolean {
