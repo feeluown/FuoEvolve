@@ -8,6 +8,7 @@ name: Android APK
       - "androidApp/**"
       - "shared/**"
       - "core/**"
+      - "feature/**"
       - "playback/**"
       - "provider/**"
       - "build.gradle.kts"
@@ -22,6 +23,7 @@ name: Android APK
       - "androidApp/**"
       - "shared/**"
       - "core/**"
+      - "feature/**"
       - "playback/**"
       - "provider/**"
       - "build.gradle.kts"
@@ -63,8 +65,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Run architecture checks, playback runtime tests, shared tests and coverage
-        run: ./gradlew checkArchitectureBoundaries :playback:runtime:allTests :shared:allTests :shared:koverXmlReportDebug
+      - name: Run architecture checks, feature/playback runtime tests, shared tests and coverage
+        run: ./gradlew checkArchitectureBoundaries :feature:recognition:allTests :playback:runtime:allTests :shared:allTests :shared:koverXmlReportDebug
 
   build-release-apks:
     name: Build signed multi-ABI release APK
