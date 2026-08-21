@@ -100,6 +100,15 @@ private class DefaultSettingsFeatureController(
                 )
             }.collect { mutableUiState.value = it }
         }
+        scope.launch {
+            runCatching {
+                val settings = settingsRepository.awaitSettings()
+                providerRepository.updateAudioQualityPolicies(
+                    settings.wifiAudioQualityPolicy,
+                    settings.cellularAudioQualityPolicy,
+                )
+            }.onFailure(::failed)
+        }
         refreshCacheUsage()
     }
 
