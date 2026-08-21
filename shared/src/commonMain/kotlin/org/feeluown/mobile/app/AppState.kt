@@ -143,6 +143,8 @@ class FuoAppViewModel(
 ) : ViewModel() {
     val searchUiState: StateFlow<SearchUiState> = searchController.uiState
     val recognitionUiState: StateFlow<RecognitionUiState> = recognitionController.uiState
+    private val mutableAppFeedback = MutableStateFlow<String?>(null)
+    val appFeedback: StateFlow<String?> = mutableAppFeedback
 
     val playbackUiPort = PlaybackUiGraph(
         navigation = playbackNavigationPort,
@@ -211,6 +213,14 @@ class FuoAppViewModel(
     fun closeDebugLogs() { navigator.pop(AppRoute.DebugLogs) }
     fun openDownloadManager() { navigator.navigate(AppRoute.DownloadManager) }
     fun closeDownloadManager() { navigator.pop(AppRoute.DownloadManager) }
+
+    fun showFeedback(message: String) {
+        if (message.isNotBlank()) mutableAppFeedback.value = message
+    }
+
+    fun dismissFeedback(message: String) {
+        if (mutableAppFeedback.value == message) mutableAppFeedback.value = null
+    }
 
     fun onMicrophonePermissionChange(hasPermission: Boolean) {
         if (hasPermission && navigator.contains(AppRoute.AudioRecognition) && recognitionController.uiState.value == RecognitionUiState.Idle) {
