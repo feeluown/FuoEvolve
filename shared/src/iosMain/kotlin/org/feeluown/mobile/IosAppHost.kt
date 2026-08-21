@@ -210,7 +210,7 @@ private class IosAppContainer(
             scope = scope,
         )
     }
-    private val providerDetailOwners by lazy {
+    private val providerDetailOwners: ProviderDetailOwners by lazy {
         createProviderDetailOwners(
             providerRepository = providerRepository,
             playbackQueue = controller.playbackQueueUiPort,
@@ -221,7 +221,7 @@ private class IosAppContainer(
             onProviderMutation = { homeFeatureController.refreshMine() },
         )
     }
-    private val homeFeatureController by lazy {
+    private val homeFeatureController: HomeFeatureController by lazy {
         createHomeFeatureController(
             providerRepository = providerRepository,
             providerCatalog = providerCatalogFeatureController,
