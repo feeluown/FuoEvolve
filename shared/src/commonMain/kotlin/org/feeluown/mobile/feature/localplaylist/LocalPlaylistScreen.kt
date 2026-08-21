@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -19,14 +18,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -54,38 +52,38 @@ fun LocalPlaylist.toDisplayTrack(): MusicTrack = MusicTrack(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LocalPlaylistScreen(
-    controller: FuoPlayerController,
-    playlist: LocalPlaylist?,
+    uiState: LocalPlaylistUiState,
+    actions: LocalPlaylistUiActions,
+    playlist: LocalPlaylist? = null,
 ) {
-    val displayPlaylist = controller.selectedLocalPlaylist ?: playlist ?: return
+    val displayPlaylist = uiState.selectedPlaylist ?: playlist ?: return
     val fileActions = LocalLocalPlaylistFileActions.current
     val playbackUiPort = LocalPlaybackUiPort.current
+    val playbackQueue = LocalPlaybackQueueUiPort.current
+    val downloads = LocalDownloadActionPort.current
+    val playlistActions = LocalPlaylistActionPort.current
+    val providerTrackActions = LocalProviderTrackActionPort.current
     var showDeleteDialog by remember(displayPlaylist.id) { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = displayPlaylist.title.ifBlank { "本地歌单" },
-                        maxLines = 1,
-                    )
-                },
+                title = { Text(displayPlaylist.title.ifBlank { "本地歌单" }, maxLines = 1) },
                 navigationIcon = {
-                    IconButton(onClick = controller::closeLocalPlaylist) {
+                    IconButton(onClick = actions::close) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
                     IconButton(
                         onClick = { showDeleteDialog = true },
-                        enabled = controller.canDeleteSelectedLocalPlaylist(),
+                        enabled = actions.canDeleteSelected(),
                     ) {
                         Icon(Icons.Filled.Delete, contentDescription = "删除歌单")
                     }
                     IconButton(
                         onClick = {
-                            controller.exportSelectedLocalPlaylist { file ->
+                            actions.exportSelected { file ->
                                 fileActions.exportFile?.invoke(file.fileName, file.content)
                             }
                         },
@@ -95,7 +93,7 @@ fun LocalPlaylistScreen(
                     }
                     IconButton(
                         onClick = {
-                            controller.exportSelectedLocalPlaylist { file ->
+                            actions.exportSelected { file ->
                                 fileActions.shareFile?.invoke(file.fileName, file.content)
                             }
                         },
@@ -120,42 +118,60 @@ fun LocalPlaylistScreen(
             ProviderDetailHeader(
                 track = displayPlaylist.toDisplayTrack(),
                 title = displayPlaylist.title.ifBlank { "未命名歌单" },
-                subtitle = "本地文件 · ${controller.selectedLocalPlaylistTracks.size} 首",
+                subtitle = "本地文件 · ${uiState.selectedTracks.size} 首",
                 description = displayPlaylist.description,
                 placeholder = CoverPlaceholder.Playlist,
                 action = {
                     PlayAllButton(
-                        onClick = controller::playAllFromSelectedLocalPlaylist,
-                        enabled = controller.selectedLocalPlaylistTracks.isNotEmpty(),
+                        onClick = {
+                            if (uiState.selectedTracks.isNotEmpty()) {
+                                playbackQueue.playPlaylistTracks(uiState.selectedTracks, 0, displayPlaylist.id)
+                            }
+                        },
+                        enabled = uiState.selectedTracks.isNotEmpty(),
                     )
                 },
             )
-            LoadingIndicator(controller.isLoading)
-            controller.selectedLocalPlaylistError?.let { ProviderContentMessage(it) }
+            LoadingIndicator(uiState.isLoading)
+            uiState.selectedError?.let { ProviderContentMessage(it) }
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                if (controller.selectedLocalPlaylistTracks.isEmpty() && !controller.isLoading) {
+                if (uiState.selectedTracks.isEmpty() && !uiState.isLoading) {
                     item { ProviderContentMessage("歌单暂无歌曲") }
                 } else {
                     itemsIndexed(
-                        controller.selectedLocalPlaylistTracks,
+                        uiState.selectedTracks,
                         key = { _, track -> track.id },
                     ) { index, track ->
                         TrackRow(
                             track = track,
-                            downloadState = controller.downloadStates[track.id],
-                            onClick = { controller.playFromSelectedLocalPlaylist(index) },
-                            onAddToUpNext = { controller.addToUpNext(track) },
-                            onDownload = { controller.download(track) },
-                            onDeleteDownload = { controller.deleteDownload(track) },
-                            onOpenArtist = { controller.openTrackArtist(track) },
-                            onOpenAlbum = { controller.openTrackAlbum(track) },
-                            onOpenDetail = trackDetailAction(controller, track),
-                            onAddToPlaylist = addToPlaylistAction(controller, track),
-                            onRemoveFromProviderPlaylist = removeFromSelectedLocalPlaylistAction(controller, track),
+                            downloadState = downloads.downloadStates[track.id],
+                            onClick = {
+                                playbackQueue.playPlaylistTracks(uiState.selectedTracks, index, displayPlaylist.id)
+                            },
+                            onAddToUpNext = { playbackQueue.addToUpNext(track) },
+                            onDownload = { downloads.download(track) },
+                            onDeleteDownload = { downloads.deleteDownload(track) },
+                            onOpenArtist = { providerTrackActions.openTrackArtist(track) },
+                            onOpenAlbum = { providerTrackActions.openTrackAlbum(track) },
+                            onOpenDetail = if (track.sourceType == TrackSourceType.Provider) {
+                                { providerTrackActions.openOriginalTrackDetail(track) }
+                            } else {
+                                null
+                            },
+                            onAddToPlaylist = if (playlistActions.canAddTrackToPlaylist(track)) {
+                                { playlistActions.openPlaylistTargetPicker(track) }
+                            } else {
+                                null
+                            },
+                            onRemoveFromProviderPlaylist = if (actions.canRemove(track)) {
+                                { actions.remove(track) }
+                            } else {
+                                null
+                            },
                         )
                         HorizontalDivider()
                     }
@@ -173,7 +189,7 @@ fun LocalPlaylistScreen(
                 TextButton(
                     onClick = {
                         showDeleteDialog = false
-                        controller.deleteSelectedLocalPlaylist()
+                        actions.deleteSelected()
                     },
                 ) { Text("删除") }
             },

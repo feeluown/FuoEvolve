@@ -45,6 +45,14 @@ interface PlaybackQueueUiPort {
 
     /** Replace the active source queue and start the selected item through the queue owner. */
     fun playTracks(tracks: List<MusicTrack>, index: Int)
+
+    /**
+     * Replace the active queue from a durable playlist while preserving playlist playback context.
+     * Implementations that do not track playlist context can safely fall back to [playTracks].
+     */
+    fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) =
+        playTracks(tracks, index)
+
     fun toggleShuffle()
     fun toggleRepeat()
     fun clearQueue()

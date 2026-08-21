@@ -8,10 +8,39 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 internal class PlaylistControllerState {
-    var localPlaylists by mutableStateOf<List<LocalPlaylist>>(emptyList())
-    var selectedLocalPlaylist by mutableStateOf<LocalPlaylist?>(null)
-    var selectedLocalPlaylistTracks by mutableStateOf<List<MusicTrack>>(emptyList())
-    var selectedLocalPlaylistError by mutableStateOf<String?>(null)
+    private var localPlaylistChangeListener: (() -> Unit)? = null
+
+    private var localPlaylistsState by mutableStateOf<List<LocalPlaylist>>(emptyList())
+    var localPlaylists: List<LocalPlaylist>
+        get() = localPlaylistsState
+        set(value) {
+            localPlaylistsState = value
+            localPlaylistChanged()
+        }
+
+    private var selectedLocalPlaylistState by mutableStateOf<LocalPlaylist?>(null)
+    var selectedLocalPlaylist: LocalPlaylist?
+        get() = selectedLocalPlaylistState
+        set(value) {
+            selectedLocalPlaylistState = value
+            localPlaylistChanged()
+        }
+
+    private var selectedLocalPlaylistTracksState by mutableStateOf<List<MusicTrack>>(emptyList())
+    var selectedLocalPlaylistTracks: List<MusicTrack>
+        get() = selectedLocalPlaylistTracksState
+        set(value) {
+            selectedLocalPlaylistTracksState = value
+            localPlaylistChanged()
+        }
+
+    private var selectedLocalPlaylistErrorState by mutableStateOf<String?>(null)
+    var selectedLocalPlaylistError: String?
+        get() = selectedLocalPlaylistErrorState
+        set(value) {
+            selectedLocalPlaylistErrorState = value
+            localPlaylistChanged()
+        }
 
     var playlistTargetTrack by mutableStateOf<MusicTrack?>(null)
     var playlistTargetType by mutableStateOf(PlaylistTargetType.Provider)
@@ -29,6 +58,28 @@ internal class PlaylistControllerState {
             mutablePlaylistOperationFeedback.value = value
         }
 
-    var localPlaylistOperationError by mutableStateOf<String?>(null)
-    var localPlaylistImportPreview by mutableStateOf<LocalPlaylistImportPreview?>(null)
+    private var localPlaylistOperationErrorState by mutableStateOf<String?>(null)
+    var localPlaylistOperationError: String?
+        get() = localPlaylistOperationErrorState
+        set(value) {
+            localPlaylistOperationErrorState = value
+            localPlaylistChanged()
+        }
+
+    private var localPlaylistImportPreviewState by mutableStateOf<LocalPlaylistImportPreview?>(null)
+    var localPlaylistImportPreview: LocalPlaylistImportPreview?
+        get() = localPlaylistImportPreviewState
+        set(value) {
+            localPlaylistImportPreviewState = value
+            localPlaylistChanged()
+        }
+
+    fun observeLocalPlaylistChanges(listener: () -> Unit) {
+        localPlaylistChangeListener = listener
+        listener()
+    }
+
+    private fun localPlaylistChanged() {
+        localPlaylistChangeListener?.invoke()
+    }
 }
