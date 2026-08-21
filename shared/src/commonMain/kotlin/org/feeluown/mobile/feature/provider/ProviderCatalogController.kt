@@ -19,6 +19,7 @@ data class ProviderCatalogUiState(
     val recommendProviderIds: Set<String> = emptySet(),
     val exploreProviderIds: Set<String> = emptySet(),
     val mineProviderIds: Set<String> = emptySet(),
+    val replacementProviderIds: Set<String> = emptySet(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -132,6 +133,9 @@ private class DefaultProviderCatalogFeatureController(
                     ProviderDisplaySection.Recommend -> settings.copy(recommendProviderIds = next(settings.recommendProviderIds))
                     ProviderDisplaySection.Explore -> settings.copy(exploreProviderIds = next(settings.exploreProviderIds))
                     ProviderDisplaySection.Mine -> settings.copy(mineProviderIds = next(settings.mineProviderIds))
+                    ProviderDisplaySection.Replace -> settings.copy(
+                        smartReplacementProviderIds = next(settings.smartReplacementProviderIds),
+                    )
                 }
             }
         }
@@ -155,6 +159,7 @@ private class DefaultProviderCatalogFeatureController(
             recommendProviderIds = settings.recommendProviderIds,
             exploreProviderIds = settings.exploreProviderIds,
             mineProviderIds = settings.mineProviderIds,
+            replacementProviderIds = settings.smartReplacementProviderIds,
             isLoading = loading || !settingsState.isLoaded,
             errorMessage = error ?: settingsState.errorMessage,
         )
