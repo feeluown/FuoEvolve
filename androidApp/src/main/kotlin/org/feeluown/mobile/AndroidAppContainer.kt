@@ -218,6 +218,16 @@ internal class AndroidAppContainer(
         )
     }
 
+    private val sharedResourceActionPort: SharedResourceActionPort by lazy {
+        createSharedResourceActionPort(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            settingsRepository = settingsRepository,
+            scope = appScope,
+        )
+    }
+
     private val searchAppPort: SearchAppPort by lazy {
         val wiredController = controller
         DefaultSearchAppPort(
@@ -271,6 +281,7 @@ internal class AndroidAppContainer(
             localMusicFeatureController = localMusicFeatureController,
             localPlaylistFeatureController = localPlaylistFeatureController,
             homeFeatureController = homeFeatureController,
+            sharedResourceActionPort = sharedResourceActionPort,
             searchController = searchController,
             recognitionController = recognitionController,
             searchAppPort = searchAppPort,
