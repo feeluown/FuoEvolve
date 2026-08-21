@@ -53,6 +53,13 @@ interface PlaybackQueueUiPort {
     fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) =
         playTracks(tracks, index)
 
+    /**
+     * Replace the active queue from a provider feature while preserving dynamic-queue identity.
+     * This is required by FM/daily-recommendation style features whose queue is extended lazily.
+     */
+    fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, sourceFeature: ProviderFeature) =
+        playTracks(tracks, index)
+
     fun toggleShuffle()
     fun toggleRepeat()
     fun clearQueue()
