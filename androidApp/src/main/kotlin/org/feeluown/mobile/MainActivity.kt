@@ -53,7 +53,6 @@ class MainActivity : ComponentActivity() {
             var hasImagePermission by remember { mutableStateOf(hasImagePermission()) }
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val appViewModel = fuoApplication.appViewModel
-            val controller = appViewModel.controller
             remember { AndroidPredictiveBackPreference.initialize(this@MainActivity); Unit }
             val predictiveBackEnabled by AndroidPredictiveBackPreference.enabled
 
@@ -72,7 +71,7 @@ class MainActivity : ComponentActivity() {
             }
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
-            ) { controller.startYtmusicTvOAuthLogin() }
+            ) { appViewModel.providerAuthFeatureController.startYtmusicTvOAuthLogin() }
 
             val lifecycleOwner = LocalLifecycleOwner.current
             val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
@@ -108,13 +107,12 @@ class MainActivity : ComponentActivity() {
             }
             val ytmusicHeaderFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
-                    val json = readText(uri)
-                    appViewModel.providerAuthFeatureController.loginWithYtmusicHeaderFile(json)
+                    appViewModel.providerAuthFeatureController.loginYtmusicWithHeaderFile(readText(uri))
                 }
             }
             val ytmusicOAuthFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
-                    appViewModel.providerAuthFeatureController.loginWithYtmusicOAuthJson(readText(uri))
+                    appViewModel.providerAuthFeatureController.importYtmusicOAuthRelatedJson(readText(uri))
                 }
             }
 
@@ -122,7 +120,7 @@ class MainActivity : ComponentActivity() {
             val localPlaylistFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
                     val content = readText(uri)
-                    if (content.isBlank()) controller.showMessage("无法读取本地歌单文件")
+                    if (content.isBlank()) appViewModel.showFeedback("无法读取本地歌单文件")
                     else appViewModel.localPlaylistFeatureController.prepareImport(displayNameFor(uri), content)
                 }
             }
@@ -134,23 +132,26 @@ class MainActivity : ComponentActivity() {
                     runCatching {
                         contentResolver.openOutputStream(uri)?.use { it.write(pending.content.toByteArray(Charsets.UTF_8)) }
                             ?: error("无法打开导出目标")
-                    }.onFailure { controller.showMessage(it.message ?: "导出本地歌单失败") }
+                    }.onFailure { appViewModel.showFeedback(it.message ?: "导出本地歌单失败") }
                 }
                 pendingLocalPlaylistExport = null
             }
 
-            val controllerHandlesBack = appViewModel.playbackUiPort.isFullPlayerOpen ||
-                controller.isVideoFullscreen || controller.settingsLoginProviderId != null ||
-                controller.selectedLocalMusicCollection != null || controller.selectedLocalMusicDirectoryId != null
+            val appShellHandlesBack = appViewModel.playbackUiPort.isFullPlayerOpen ||
+                appViewModel.playbackNavigationPort.isQueueOpen ||
+                appViewModel.providerDetailOwners.video.uiState.value.isFullscreen ||
+                appViewModel.playlistActionPort.targetPickerState.value.track != null ||
+                appViewModel.providerTrackActionPort.artistTargetPickerState.value.track != null ||
+                appViewModel.localMusicFeatureController.uiState.value.metadataEditorTrack != null
             val useLegacyPageBack = AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
                 appUiState.backStack.size > 1 && appUiState.backStack.lastOrNull() != AppRoute.Settings
-            BackHandler(enabled = controllerHandlesBack || useLegacyPageBack) {
+            BackHandler(enabled = appShellHandlesBack || useLegacyPageBack) {
                 appViewModel.dispatch(AppIntent.NavigateBack)
             }
 
             LaunchedEffect(Unit) {
                 launchLocalPlaylistImport?.let(::handleLocalPlaylistImport)
-                launchSharedText?.let(controller::openSharedResource)
+                launchSharedText?.let(fuoApplication.controller::openSharedResource)
             }
 
             P2AppRoot(
@@ -196,7 +197,7 @@ class MainActivity : ComponentActivity() {
             )
 
             BackHandler(
-                enabled = !controllerHandlesBack && AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
+                enabled = !appShellHandlesBack && AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
                     appUiState.backStack.lastOrNull() != AppRoute.Settings,
             ) {
                 if (appUiState.backStack.size > 1) appViewModel.dispatch(AppIntent.NavigateBack) else finish()
@@ -221,7 +222,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.action != AndroidOAuthDeviceCodeAssistant.ACTION_COPY_OAUTH_USER_CODE) return false
         val code = intent.getStringExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)?.takeIf { it.isNotBlank() } ?: return true
         AndroidOAuthDeviceCodeAssistant.copyToClipboard(this, code)
-        (application as FuoEvolveApplication).controller.showMessage("验证码已复制：$code")
+        (application as FuoEvolveApplication).appViewModel.showFeedback("验证码已复制：$code")
         intent.action = null
         intent.removeExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)
         return true
@@ -260,7 +261,9 @@ class MainActivity : ComponentActivity() {
             val intent = Intent(Intent.ACTION_SEND).setType(LOCAL_PLAYLIST_MIME_TYPE)
                 .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(Intent.createChooser(intent, "分享本地歌单文件"))
-        }.onFailure { (application as FuoEvolveApplication).controller.showMessage(it.message ?: "分享本地歌单失败") }
+        }.onFailure {
+            (application as FuoEvolveApplication).appViewModel.showFeedback(it.message ?: "分享本地歌单失败")
+        }
     }
 
     private fun displayNameFor(uri: Uri): String {
@@ -287,7 +290,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleLocalPlaylistImport(pending: PendingLocalPlaylistImport) {
         val vm = (application as FuoEvolveApplication).appViewModel
-        if (pending.content.isBlank()) (application as FuoEvolveApplication).controller.showMessage("无法读取本地歌单文件")
+        if (pending.content.isBlank()) vm.showFeedback("无法读取本地歌单文件")
         else vm.localPlaylistFeatureController.prepareImport(pending.fileName, pending.content)
     }
 
