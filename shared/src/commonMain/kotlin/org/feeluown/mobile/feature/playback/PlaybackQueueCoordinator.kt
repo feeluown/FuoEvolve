@@ -59,26 +59,15 @@ internal class PlaybackQueueCoordinator(
     }
 
     override fun playTracks(tracks: List<MusicTrack>, index: Int) {
-        if (tracks.isEmpty() || index !in tracks.indices) return
-        updateTrackChangeDirection(TrackChangeDirection.Next)
-        val restoreShuffle = if (queueState.isFmQueue) queueState.shuffleBeforeFm else null
-        if (restoreShuffle != null) {
-            queueState.shuffleEnabled = restoreShuffle
-            queueState.shuffleBeforeFm = null
-        }
-        queueState.isFmQueue = false
-        queueState.queueFeature = null
-        queueState.queuePlaylistId = null
-        queueState.currentUpNextTrack = null
-        queueState.currentIsUpNext = false
-        queueState.originalMainQueue = emptyList()
-        queueState.mainQueue = tracks
-        queueState.mainQueueIndex = index
-        if (queueState.shuffleEnabled) {
-            enableShuffle()
-        }
-        publishQueueMutation()
-        playMainIndexInternal(queueState.mainQueueIndex, 0, TrackChangeDirection.Next)
+        replaceSourceQueue(tracks, index, sourceFeature = null, sourcePlaylistId = null)
+    }
+
+    override fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) {
+        replaceSourceQueue(tracks, index, sourceFeature = null, sourcePlaylistId = sourcePlaylistId)
+    }
+
+    override fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, sourceFeature: ProviderFeature) {
+        replaceSourceQueue(tracks, index, sourceFeature = sourceFeature, sourcePlaylistId = null)
     }
 
     override fun next() {
@@ -273,6 +262,38 @@ internal class PlaybackQueueCoordinator(
         }
         queueState.currentTrack()?.let { startPlayback(it, 0, targetPartIndex) } ?: return false
         return true
+    }
+
+    private fun replaceSourceQueue(
+        tracks: List<MusicTrack>,
+        index: Int,
+        sourceFeature: ProviderFeature?,
+        sourcePlaylistId: String?,
+    ) {
+        if (tracks.isEmpty() || index !in tracks.indices) return
+        updateTrackChangeDirection(TrackChangeDirection.Next)
+        val enteringFm = sourceFeature?.isDynamicQueueFeature() == true
+        val restoreShuffle = if (queueState.isFmQueue && !enteringFm) queueState.shuffleBeforeFm else null
+        if (enteringFm && !queueState.isFmQueue) {
+            queueState.shuffleBeforeFm = queueState.shuffleEnabled
+            queueState.shuffleEnabled = false
+        } else if (!enteringFm && restoreShuffle != null) {
+            queueState.shuffleEnabled = restoreShuffle
+            queueState.shuffleBeforeFm = null
+        }
+        queueState.isFmQueue = enteringFm
+        queueState.queueFeature = sourceFeature
+        queueState.queuePlaylistId = sourcePlaylistId
+        queueState.currentUpNextTrack = null
+        queueState.currentIsUpNext = false
+        queueState.originalMainQueue = emptyList()
+        queueState.mainQueue = tracks
+        queueState.mainQueueIndex = index
+        if (queueState.shuffleEnabled && !enteringFm) {
+            enableShuffle()
+        }
+        publishQueueMutation()
+        playMainIndexInternal(queueState.mainQueueIndex, 0, TrackChangeDirection.Next)
     }
 
     private fun playMainIndexInternal(
