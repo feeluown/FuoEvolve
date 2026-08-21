@@ -1,116 +1,95 @@
-# Post-P1 architecture roadmap
+# P2 architecture roadmap
 
-This document defines the migration order after the playback ownership work completed in PRs #96-#100.
-
-The architectural target remains:
+P2 moves FuoEvolve from a broad controller facade to explicit app, feature and playback ownership while preserving the dependency direction:
 
 `platform composition root -> app shell -> feature owner -> core/api`
 
-`FuoPlayerController` stays available only as a compatibility facade while production screens migrate to feature-owned state/actions. The goal is not to reduce the controller by line count in isolation; the exit criterion is that production UI and cross-feature composition no longer require the facade.
+## Closeout status
 
-## P1 closeout
+P2 ownership migration is complete when all of the following hold:
 
-P1 is considered complete when the boundaries already extracted during the first migration phase cannot silently regress back to controller forwarding.
+- production Kotlin code has zero `FuoPlayerController` dependencies;
+- active screens consume feature/app/playback owners rather than compatibility forwarding APIs;
+- Android/iOS composition roots build the owner graph directly;
+- playback runtime and player UI remain controller-free;
+- Search/Recognition platform forwarding shims do not return;
+- at least one stable logical feature boundary is enforced as a physical Gradle feature module without a `feature -> shared` dependency;
+- architecture checks and Android/iOS CI enforce those boundaries.
 
-The final closeout slice does the following:
+PR #104 implements that closeout. `FuoPlayerController`, its monolithic compatibility test, the controller-backed player screen and the remaining retired feature screens/bridges have been removed. Recognition is now owned by the physical `:feature:recognition` module and its tests run in both Android and iOS CI.
 
-- Search and Recognition keep their feature-owned state/controllers.
-- Android and iOS stop rebuilding `SearchAppPort` / `RecognitionAppPort` objects that forward individual calls to `FuoPlayerController`.
-- Shared app-shell adapters compose Search/Recognition from narrow playback/download/playlist/provider/navigation owners.
-- Provider catalog data used by app-shell composition is published by `ProviderSessionRepository` instead of being read from controller facade state.
-- Search result playback enters playback through the queue owner (`PlaybackQueueUiPort.playTracks`) instead of `FuoPlayerController.playFromSearch`.
-- Architecture checks reject reintroduction of platform-local Search/Recognition forwarding adapters.
+## P2-1: app navigation and app-scoped state
 
-After this slice, new Search/Recognition work must not add controller calls back into either platform composition root.
+Completed.
 
-## P2-1: remove controller ownership from app navigation and app-scoped feedback
+Navigation/back-stack policy is app-owned. Startup/onboarding state and app-scoped feedback are exposed through app state/ports rather than a concrete player controller. Feature loading/errors no longer compete through a global controller `isLoading/message` pair.
 
-First move app-level responsibilities that are not feature business state:
+## P2-2: low-risk feature ownership
 
-1. route activation and back-stack policy into `AppNavigator` / an app route coordinator;
-2. true app-scoped transient feedback into an explicit app event owner;
-3. startup/onboarding completion state into an app-owned state holder where practical.
+Completed for the targeted production surfaces:
 
-Do not replace `FuoPlayerController` with another broad `AppController`. Prefer small app contracts that only coordinate feature owners.
+- Debug logs;
+- Download manager;
+- Local Music;
+- Local Playlists;
+- Settings/provider authentication/onboarding.
 
-Exit criteria:
-
-- `FuoAppViewModel` does not need a concrete `FuoPlayerController` for navigation policy;
-- typed routes can activate feature owners without a controller callback;
-- feature loading/errors do not compete through the global `isLoading` / `message` pair.
-
-## P2-2: migrate low-risk screens to feature-owned state/actions
-
-Migrate production UI one bounded context at a time. Suggested order:
-
-1. Debug logs;
-2. Download manager;
-3. Local music;
-4. Local playlists;
-5. Settings and provider authentication.
-
-For each migrated screen:
-
-- replace `Screen(FuoPlayerController)` with immutable UI state plus actions, or the narrow owning controller;
-- move transient loading/error/feedback to that feature owner;
-- add an architecture guard forbidding `FuoPlayerController` in the migrated screen/boundary;
-- keep legacy facade methods only while another caller still needs them.
+Each active screen consumes its owning state/actions or narrow ports. Retired controller screens are listed in the architecture fitness check so they cannot silently return.
 
 ## P2-3: provider detail ownership
 
-Provider details should move only after the lower-risk screens above are stable because the current controller still coordinates pagination, selected-item state and route restoration for several provider destinations.
+Completed.
 
-Split state by destination rather than creating one replacement provider mega-controller:
+Provider detail state is split by destination rather than collected into another provider mega-controller:
 
 - feature detail;
-- track detail and related content;
-- playlist detail and background pagination;
-- media item detail;
+- playlist detail;
+- track detail/related content;
+- media-item detail;
 - video detail.
 
-Typed route payloads remain the navigation identity. Feature owners load/restore their own detail state from those payloads.
+Typed route payloads remain navigation identity and each owner activates/restores itself from the route.
 
-## P2-4: home/provider content ownership
+## P2-4: Home/provider-content ownership
 
-Home is the highest-coupling slice and should be last among the major screens.
+Completed.
 
-Move Recommend / Explore / Mine loading and selection state out of the compatibility controller, while preserving the existing incremental provider loading behavior. Avoid merging Search, provider detail and Home back into one provider facade.
+Recommend/Explore/Mine content is owned by `HomeFeatureController` and related feature owners. Legacy Home controller bridges/screens have been removed. Refresh/loading/selection state is feature-local.
 
-Exit criteria:
+## P2-5: compatibility facade retirement
 
-- Home consumes a dedicated home/provider-content UI state;
-- provider selection/filter state has one owner;
-- Home refresh operations do not mutate global loading/message state.
+Completed.
 
-## P2-5: retire the compatibility controller
+`FuoPlayerController.kt` and `FuoPlayerControllerTest.kt` are deleted. The old controller-backed `PlayerScreen.kt` was decomposed into reusable controller-free player primitives before retirement. Android/iOS composition roots no longer construct or receive the facade.
 
-Delete `FuoPlayerController` only after production code search shows that remaining references are compatibility tests or platform migration glue scheduled for removal.
+The architecture gate scans production Kotlin roots globally and rejects any executable `FuoPlayerController` reference.
 
-Before removal:
+## P2-6: physical feature boundary and fitness checks
 
-- all active screens use feature/app/playback owners;
-- playback runtime and player UI remain controller-free;
-- Search/Recognition platform adapters remain controller-free;
-- app navigation no longer delegates to the facade;
-- provider detail and Home have independent state owners;
-- characterization tests have moved to the new owners where appropriate.
+Completed as the safe physical-module closeout of P2.
 
-## P2-6: physical Gradle feature modules
+`:feature:recognition` is a real Kotlin Multiplatform feature module containing recognition contracts, state/controller implementation and controller tests. `:shared` consumes it through a one-way Gradle dependency and keeps only shared Compose/application integration.
 
-Only after the logical dependency graph above is stable should feature source sets become additional Gradle modules.
+Other feature implementations such as Search and Download remain logically isolated inside `:shared` for now because their current repository contracts still live in the shared graph. Moving them today would require `feature -> shared`, which is explicitly not accepted as P2 completion because it would create a distributed monolith. Their future physical extraction must first move the required repository/model contracts to lower-level API modules.
 
-Likely candidates:
+The final architecture gate also rejects:
 
-- `:feature:search`
-- `:feature:recognition`
-- `:feature:download`
-- `:feature:localmusic`
-- `:feature:localplaylist`
-- `:feature:settings`
-- later `:feature:provider-content` / `:feature:home`
+- reintroduction of retired P2 compatibility files/screens;
+- production `FuoPlayerController` references;
+- retired playback aggregate compatibility types;
+- controller transport calls in platform playback adapters;
+- platform-local Search/Recognition forwarding objects;
+- removal/move-back of the physical Recognition owner boundary.
 
-Do not modularize a feature while it still depends on `FuoPlayerController`; that would turn the current monolith into a distributed monolith rather than establish a real boundary.
+Android and iOS CI run Recognition module tests alongside playback/shared tests and architecture checks.
 
-## Pull-request sizing rule
+## Follow-up module candidates
 
-Keep each architecture PR behavior-preserving and independently revertible. A normal P2 PR should migrate one ownership boundary, add regression/architecture coverage for it, and remove only the compatibility surface whose last caller moved in that same PR.
+Future architecture work can continue with physical modules after their lower-level contracts are ready. Likely order remains:
+
+1. `:feature:search` after search result/provider/local repository contracts no longer live in `:shared`;
+2. `:feature:download` after download/provider/local repository contracts are extracted;
+3. `:feature:localmusic` and `:feature:localplaylist`;
+4. Settings/provider-content/Home once their shared UI/provider contracts are sufficiently narrow.
+
+These are post-P2 modularization iterations; they must preserve the same one-way dependency rule rather than reintroduce facade-style coupling across modules.
