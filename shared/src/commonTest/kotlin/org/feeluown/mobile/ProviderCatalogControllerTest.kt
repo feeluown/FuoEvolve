@@ -19,7 +19,7 @@ class ProviderCatalogControllerTest {
             providerRepository = providerRepository,
             sessionRepository = sessionRepository,
             settingsRepository = settingsRepository,
-            scope = this,
+            scope = backgroundScope,
         )
         advanceUntilIdle()
 
