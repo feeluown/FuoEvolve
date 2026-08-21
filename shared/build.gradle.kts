@@ -27,6 +27,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":playback:api"))
+            api(project(":feature:recognition"))
             implementation(project(":provider:api"))
             implementation(compose.runtime)
             implementation(compose.foundation)
