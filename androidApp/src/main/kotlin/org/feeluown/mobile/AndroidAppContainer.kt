@@ -183,6 +183,15 @@ internal class AndroidAppContainer(
         )
     }
 
+    private val onboardingFeatureController: OnboardingFeatureController by lazy {
+        createOnboardingFeatureController(
+            providerRepository = providerRepository,
+            settingsRepository = settingsRepository,
+            providerCatalog = providerCatalogFeatureController,
+            scope = appScope,
+        )
+    }
+
     private val providerDetailOwners: ProviderDetailOwners by lazy {
         createProviderDetailOwners(
             providerRepository = providerRepository,
@@ -257,6 +266,7 @@ internal class AndroidAppContainer(
             providerCatalogFeatureController = providerCatalogFeatureController,
             providerAuthFeatureController = providerAuthFeatureController,
             settingsFeatureController = settingsFeatureController,
+            onboardingFeatureController = onboardingFeatureController,
             providerDetailOwners = providerDetailOwners,
             localMusicFeatureController = localMusicFeatureController,
             localPlaylistFeatureController = localPlaylistFeatureController,
