@@ -20,9 +20,6 @@ class FuoEvolveApplication : Application() {
     internal val settingsRepository: AppSettingsRepository
         get() = container().settingsRepository
 
-    val controller: FuoPlayerController
-        get() = container().controller
-
     val appViewModel: FuoAppViewModel
         get() = container().appViewModel
 
