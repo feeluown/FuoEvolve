@@ -12,6 +12,12 @@ interface SharedResourceActionPort {
     fun dismissFeedback(feedback: String)
 }
 
+object NoOpSharedResourceActionPort : SharedResourceActionPort {
+    override val feedback: StateFlow<String?> = MutableStateFlow(null)
+    override fun open(text: String) = Unit
+    override fun dismissFeedback(feedback: String) = Unit
+}
+
 fun createSharedResourceActionPort(
     providerRepository: ProviderMusicRepository,
     providerCatalog: ProviderCatalogFeatureController,
