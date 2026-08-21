@@ -62,7 +62,7 @@ private fun IosApp(
             networkStatusOutput, audioRecognitionOutput, oauthDeviceCodeOutput,
         )
     }
-    AppRoot(
+    P2AppRoot(
         appViewModel = container.appViewModel,
         hasAudioPermission = container.hasAudioPermission,
         onRequestAudioPermission = container::requestAudioPermission,
@@ -210,6 +210,14 @@ private class IosAppContainer(
             scope = scope,
         )
     }
+    private val onboardingFeatureController: OnboardingFeatureController by lazy {
+        createOnboardingFeatureController(
+            providerRepository = providerRepository,
+            settingsRepository = settingsRepository,
+            providerCatalog = providerCatalogFeatureController,
+            scope = scope,
+        )
+    }
     private val providerDetailOwners: ProviderDetailOwners by lazy {
         createProviderDetailOwners(
             providerRepository = providerRepository,
@@ -281,6 +289,7 @@ private class IosAppContainer(
         providerCatalogFeatureController = providerCatalogFeatureController,
         providerAuthFeatureController = providerAuthFeatureController,
         settingsFeatureController = settingsFeatureController,
+        onboardingFeatureController = onboardingFeatureController,
         providerDetailOwners = providerDetailOwners,
         localMusicFeatureController = localMusicFeatureController,
         localPlaylistFeatureController = localPlaylistFeatureController,
