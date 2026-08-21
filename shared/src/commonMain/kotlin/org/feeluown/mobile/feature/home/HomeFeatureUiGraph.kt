@@ -2,7 +2,7 @@ package org.feeluown.mobile
 
 import androidx.compose.runtime.staticCompositionLocalOf
 
-internal data class HomeFeatureUiGraph(
+data class HomeFeatureUiGraph(
     val home: HomeFeatureController,
     val providerCatalog: ProviderCatalogFeatureController,
     val playbackQueue: PlaybackQueueUiPort,
@@ -13,6 +13,6 @@ internal data class HomeFeatureUiGraph(
     val localMusic: LocalMusicFeatureController,
 )
 
-internal val LocalHomeFeatureUiGraph = staticCompositionLocalOf<HomeFeatureUiGraph> {
+val LocalHomeFeatureUiGraph = staticCompositionLocalOf<HomeFeatureUiGraph> {
     error("HomeFeatureUiGraph is not installed")
 }
