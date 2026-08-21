@@ -24,18 +24,19 @@ internal class PlaylistActionController(
     private val onError: (Throwable) -> Unit,
 ) : PlaylistActionPort {
     override val feedback: StateFlow<String?> = state.playlistOperationFeedbackFlow
+    override val targetPickerState: StateFlow<PlaylistTargetPickerUiState> = state.playlistTargetPickerFlow
 
     override fun canAddTrackToPlaylist(track: MusicTrack): Boolean =
         canAddTrackToProviderPlaylist(track) || canAddTrackToLocalPlaylist(track)
 
-    fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
+    override fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
         val providerId = trackProviderId(track) ?: return false
         return track.sourceType == TrackSourceType.Provider &&
             isProviderLoggedIn(providerId) &&
             providerCapabilities()[providerId]?.canAddSongToPlaylist == true
     }
 
-    fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean =
+    override fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean =
         localPlaylistController.canAddTrack(track)
 
     override fun openPlaylistTargetPicker(track: MusicTrack) {
@@ -68,7 +69,7 @@ internal class PlaylistActionController(
         }
     }
 
-    fun closePlaylistTargetPicker() {
+    override fun closePlaylistTargetPicker() {
         state.playlistTargetTrack = null
         state.playlistTargetType = PlaylistTargetType.Provider
         state.playlistTargetPickerShowSwitcher = true
@@ -77,7 +78,7 @@ internal class PlaylistActionController(
         state.localPlaylistOperationError = null
     }
 
-    fun playlistProviderName(track: MusicTrack): String {
+    override fun playlistProviderName(track: MusicTrack): String {
         val providerId = trackProviderId(track)
         return state.playlistOperationTargets.firstOrNull()?.providerName
             ?.takeIf { it.isNotBlank() }
@@ -86,7 +87,7 @@ internal class PlaylistActionController(
             ?: providerId.orEmpty().ifBlank { "Provider" }
     }
 
-    fun selectPlaylistTargetType(type: PlaylistTargetType) {
+    override fun selectPlaylistTargetType(type: PlaylistTargetType) {
         val track = state.playlistTargetTrack ?: return
         if (type == PlaylistTargetType.Provider && !canAddTrackToProviderPlaylist(track)) return
         if (type == PlaylistTargetType.Local && !canAddTrackToLocalPlaylist(track)) return
@@ -96,7 +97,7 @@ internal class PlaylistActionController(
         }
     }
 
-    fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) {
+    override fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) {
         val track = state.playlistTargetTrack ?: return
         scope.launch {
             setLoading(true)
@@ -125,7 +126,7 @@ internal class PlaylistActionController(
         }
     }
 
-    fun addTrackToLocalPlaylist(playlist: LocalPlaylist) =
+    override fun addTrackToLocalPlaylist(playlist: LocalPlaylist) =
         localPlaylistController.addTargetTrackTo(playlist)
 
     override fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean {
