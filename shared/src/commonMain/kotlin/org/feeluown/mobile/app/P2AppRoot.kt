@@ -53,6 +53,7 @@ fun P2AppRoot(
     val playlistFeedback by appViewModel.playlistActionPort.feedback.collectAsStateWithLifecycle()
     val downloadState by appViewModel.downloadActionPort.managerState.collectAsStateWithLifecycle()
     val sleepFeedback by appViewModel.playbackSleepTimerPort.feedback.collectAsStateWithLifecycle()
+    val appFeedback by appViewModel.appFeedback.collectAsStateWithLifecycle()
     val playbackGraph = appViewModel.playbackUiPort
 
     FuoTheme(
@@ -98,6 +99,11 @@ fun P2AppRoot(
             val message = sleepFeedback ?: return@LaunchedEffect
             snackbar.showSnackbar(message)
             appViewModel.playbackSleepTimerPort.dismissFeedback(message)
+        }
+        LaunchedEffect(appFeedback) {
+            val message = appFeedback ?: return@LaunchedEffect
+            snackbar.showSnackbar(message)
+            appViewModel.dismissFeedback(message)
         }
 
         BoxWithConstraints(Modifier.fillMaxSize()) {
