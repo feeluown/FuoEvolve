@@ -15,12 +15,6 @@ import kotlinx.coroutines.launch
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
-/**
- * Android composition root.
- *
- * Keeps platform service wiring and repository construction out of [FuoEvolveApplication],
- * matching the iOS-side container pattern while preserving the existing runtime behavior.
- */
 internal class AndroidAppContainer(
     private val application: Application,
 ) : AutoCloseable {
@@ -46,59 +40,28 @@ internal class AndroidAppContainer(
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     }
 
-    private val offlineAssetStore: AndroidOfflineAssetStore by lazy {
-        AndroidOfflineAssetStore(context)
-    }
-
+    private val offlineAssetStore: AndroidOfflineAssetStore by lazy { AndroidOfflineAssetStore(context) }
     private val indexedLocalRepository: LocalMusicRepository by lazy {
-        AndroidIndexedLocalMusicRepository(
-            context = context,
-            assetStore = offlineAssetStore,
-        )
+        AndroidIndexedLocalMusicRepository(context = context, assetStore = offlineAssetStore)
     }
-
     private val localRepository: LocalMusicRepository by lazy {
         AndroidCoalescingLocalMusicRepository(
             delegate = indexedLocalRepository,
             assetStore = offlineAssetStore,
         )
     }
-
-    private val localPlaylistRepository: AndroidLocalPlaylistRepository by lazy {
-        AndroidLocalPlaylistRepository(context)
-    }
-
+    private val localPlaylistRepository: AndroidLocalPlaylistRepository by lazy { AndroidLocalPlaylistRepository(context) }
     private val rawDownloadRepository: AndroidDownloadRepository by lazy {
-        AndroidDownloadRepository(context, providerRepository) { tasks ->
-            FuoDownloadService.update(context, tasks)
-        }
+        AndroidDownloadRepository(context, providerRepository) { tasks -> FuoDownloadService.update(context, tasks) }
     }
-
     private val downloadRepository: DownloadRepository by lazy {
-        AndroidOfflineAwareDownloadRepository(
-            delegate = rawDownloadRepository,
-            assetStore = offlineAssetStore,
-            scope = appScope,
-        )
+        AndroidOfflineAwareDownloadRepository(delegate = rawDownloadRepository, assetStore = offlineAssetStore, scope = appScope)
     }
-
-    private val playbackEngine: AndroidNativeAudioEngine by lazy {
-        AndroidNativeAudioEngine(context, appScope)
-    }
-
-    val settingsRepository: AppSettingsRepository by lazy {
-        createAndroidAppSettingsRepository(context, appScope)
-    }
-
-    private val providerSessionRepository: ProviderSessionRepository by lazy {
-        DefaultProviderSessionRepository(providerRepository)
-    }
-
+    private val playbackEngine: AndroidNativeAudioEngine by lazy { AndroidNativeAudioEngine(context, appScope) }
+    val settingsRepository: AppSettingsRepository by lazy { createAndroidAppSettingsRepository(context, appScope) }
+    private val providerSessionRepository: ProviderSessionRepository by lazy { DefaultProviderSessionRepository(providerRepository) }
     private val navigator by lazy { AppNavigator() }
-
-    private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant by lazy {
-        AndroidOAuthDeviceCodeAssistant(context)
-    }
+    private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant by lazy { AndroidOAuthDeviceCodeAssistant(context) }
 
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
@@ -108,21 +71,14 @@ internal class AndroidAppContainer(
             scope = appScope,
             providerIdsForSearch = {
                 val activeProviderIds = providerSessionRepository.state.value.authStates.keys
-                settingsRepository.state.value.settings
-                    .searchProviderIdsForFeature()
-                    .filter(activeProviderIds::contains)
+                settingsRepository.state.value.settings.searchProviderIdsForFeature().filter(activeProviderIds::contains)
             },
-            providerExists = { providerId ->
-                providerId in providerSessionRepository.state.value.authStates
-            },
+            providerExists = { it in providerSessionRepository.state.value.authStates },
             openSearch = { navigator.navigate(AppRoute.Search) },
             onPreferencesChanged = { searchScope, selectedProviderId ->
                 appScope.launch {
                     settingsRepository.update { settings ->
-                        settings.copy(
-                            searchScope = searchScope,
-                            selectedSearchProviderId = selectedProviderId,
-                        )
+                        settings.copy(searchScope = searchScope, selectedSearchProviderId = selectedProviderId)
                     }
                 }
             },
@@ -133,33 +89,16 @@ internal class AndroidAppContainer(
         )
     }
 
-    private val playbackQueueStore: AndroidPlaybackQueueStore by lazy {
-        AndroidPlaybackQueueStore(context)
-    }
-
-    private val playbackResumeStore: AndroidPlaybackResumeStore by lazy {
-        AndroidPlaybackResumeStore(context)
-    }
-
-    private val resourceCacheRepository: AndroidResourceCacheRepository by lazy {
-        AndroidResourceCacheRepository(context)
-    }
-
+    private val playbackQueueStore: AndroidPlaybackQueueStore by lazy { AndroidPlaybackQueueStore(context) }
+    private val playbackResumeStore: AndroidPlaybackResumeStore by lazy { AndroidPlaybackResumeStore(context) }
+    private val resourceCacheRepository: AndroidResourceCacheRepository by lazy { AndroidResourceCacheRepository(context) }
     private val debugLogRepository: AndroidDebugLogRepository by lazy {
-        AndroidDebugLogRepository(
-            context,
-            (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
-        )
+        AndroidDebugLogRepository(context, (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
     }
-
     private val debugLogFeatureController: DebugLogFeatureController by lazy {
         createDebugLogFeatureController(debugLogRepository, appScope)
     }
-
-    private val audioRecognitionRepository: AndroidAudioRecognitionRepository by lazy {
-        AndroidAudioRecognitionRepository(context)
-    }
-
+    private val audioRecognitionRepository: AndroidAudioRecognitionRepository by lazy { AndroidAudioRecognitionRepository(context) }
     private val recognitionController: RecognitionFeatureController by lazy {
         createRecognitionFeatureController(
             repository = audioRecognitionRepository,
@@ -204,6 +143,15 @@ internal class AndroidAppContainer(
         )
     }
 
+    private val localPlaylistFeatureController: LocalPlaylistFeatureController by lazy {
+        createLocalPlaylistFeatureController(
+            repository = localPlaylistRepository,
+            navigator = navigator,
+            scope = appScope,
+            providers = { providerCatalogFeatureController.uiState.value.providers },
+        )
+    }
+
     private val providerAuthFeatureController: ProviderAuthFeatureController by lazy {
         createProviderAuthFeatureController(
             providerRepository = providerRepository,
@@ -212,11 +160,13 @@ internal class AndroidAppContainer(
             scope = appScope,
             providerName = { providerId ->
                 providerCatalogFeatureController.uiState.value.availableProviders
-                    .firstOrNull { it.providerId == providerId }
-                    ?.providerName
-                    ?: providerId
+                    .firstOrNull { it.providerId == providerId }?.providerName ?: providerId
             },
-            onSessionChanged = { controller.refreshHomeContent() },
+            onSessionChanged = {
+                homeFeatureController.refreshHome(HomeSection.Recommend)
+                homeFeatureController.refreshHome(HomeSection.Music)
+                homeFeatureController.refreshMine()
+            },
         )
     }
 
@@ -241,7 +191,21 @@ internal class AndroidAppContainer(
             providerCatalog = providerCatalogFeatureController,
             navigator = navigator,
             scope = appScope,
-            onProviderMutation = { controller.refreshHomeContent() },
+            onProviderMutation = { homeFeatureController.refreshMine() },
+        )
+    }
+
+    private val homeFeatureController: HomeFeatureController by lazy {
+        createHomeFeatureController(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            playbackQueue = controller.playbackQueueUiPort,
+            localPlaylist = localPlaylistFeatureController,
+            localMusic = localMusicFeatureController,
+            settingsRepository = settingsRepository,
+            navigator = navigator,
+            scope = appScope,
         )
     }
 
@@ -260,9 +224,7 @@ internal class AndroidAppContainer(
 
     private val recognitionAppPort: RecognitionAppPort by lazy {
         DefaultRecognitionAppPort(
-            isProviderEnabled = { providerId ->
-                providerSessionRepository.state.value.providers.any { it.providerId == providerId }
-            },
+            isProviderEnabled = { providerId -> providerSessionRepository.state.value.providers.any { it.providerId == providerId } },
             loadTrackDetail = providerRepository::trackDetail,
             navigator = navigator,
         )
@@ -296,6 +258,9 @@ internal class AndroidAppContainer(
             providerAuthFeatureController = providerAuthFeatureController,
             settingsFeatureController = settingsFeatureController,
             providerDetailOwners = providerDetailOwners,
+            localMusicFeatureController = localMusicFeatureController,
+            localPlaylistFeatureController = localPlaylistFeatureController,
+            homeFeatureController = homeFeatureController,
             searchController = searchController,
             recognitionController = recognitionController,
             searchAppPort = searchAppPort,
@@ -307,66 +272,45 @@ internal class AndroidAppContainer(
     }
 
     private fun wireController(controller: FuoPlayerController) {
-        val playbackSession = createPlaybackRuntimeSession(
+        val session = createPlaybackRuntimeSession(
             controller = controller,
             playbackEngine = playbackEngine,
             transportCoordinator = controller.playbackTransportCoordinator,
             startFailureSource = controller.playbackStartFailureSource,
             scope = appScope,
         )
-        playbackSessionHolder = playbackSession
-
+        playbackSessionHolder = session
         controller.updateStatusBarLyricsAvailability(isLyriconInstalled(context))
         lyriconLyricsPublisher = LyriconLyricsPublisher(
             context = context,
-            playbackSession = playbackSession,
+            playbackSession = session,
             statusBarLyricsEnabled = { controller.statusBarLyricsEnabled },
             scope = appScope,
         ).also(LyriconLyricsPublisher::start)
 
         FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
-            override fun toggle() = playbackSession.toggle()
-
-            override fun play() = playbackSession.play()
-
-            override fun pause() = playbackSession.pause()
-
-            override fun previous() = playbackSession.previous()
-
-            override fun next() = playbackSession.next()
+            override fun toggle() = session.toggle()
+            override fun play() = session.play()
+            override fun pause() = session.pause()
+            override fun previous() = session.previous()
+            override fun next() = session.next()
         }
 
         appScope.launch {
-            playbackSession.state
-                .map { state -> state.currentTrack?.id to state.lyrics }
-                .distinctUntilChanged()
-                .collect { (trackId, lyrics) ->
-                    if (trackId != null) {
-                        playbackEngine.publishLockScreenLyrics(trackId, lyrics)
-                    }
-                }
+            session.state.map { it.currentTrack?.id to it.lyrics }.distinctUntilChanged().collect { (trackId, lyrics) ->
+                if (trackId != null) playbackEngine.publishLockScreenLyrics(trackId, lyrics)
+            }
         }
-
         appScope.launch {
-            playbackSession.state
-                .map { state ->
-                    Triple(
-                        state.currentTrack?.id,
-                        state.status,
-                        state.queueTrackIds to state.queueIndex,
-                    )
+            session.state.map { state ->
+                Triple(state.currentTrack?.id, state.status, state.queueTrackIds to state.queueIndex)
+            }.distinctUntilChanged().collect { (trackId, status, _) ->
+                playbackEngine.republishRestoredState()
+                if (trackId != null && (status == PlaybackSessionStatus.Playing || status == PlaybackSessionStatus.Paused)) {
+                    playbackQueueStore.flushLatest()
+                    playbackResumeStore.flush()
                 }
-                .distinctUntilChanged()
-                .collect { (trackId, status, _) ->
-                    playbackEngine.republishRestoredState()
-                    if (
-                        trackId != null &&
-                        (status == PlaybackSessionStatus.Playing || status == PlaybackSessionStatus.Paused)
-                    ) {
-                        playbackQueueStore.flushLatest()
-                        playbackResumeStore.flush()
-                    }
-                }
+            }
         }
     }
 
