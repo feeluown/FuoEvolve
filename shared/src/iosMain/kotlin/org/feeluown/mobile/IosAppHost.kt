@@ -76,7 +76,7 @@ private fun IosApp(
                     fileName = fileName,
                     content = content,
                     onImport = container.appViewModel.localPlaylistFeatureController::prepareImport,
-                    onReadFailure = { container.controller.showMessage("无法读取本地歌单文件") },
+                    onReadFailure = { container.appViewModel.showFeedback("无法读取本地歌单文件") },
                 )
             }
         },
