@@ -4,6 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** Provider-track actions shared by now playing while legacy screens still use controller facades. */
@@ -27,16 +30,21 @@ internal class ProviderTrackActionController(
     var artistTargets by mutableStateOf<List<TrackArtistTarget>>(emptyList())
         private set
 
+    private val mutableArtistTargetPickerState = MutableStateFlow(ArtistTargetPickerUiState())
+    override val artistTargetPickerState: StateFlow<ArtistTargetPickerUiState> =
+        mutableArtistTargetPickerState.asStateFlow()
+
     override fun openTrackArtist(track: MusicTrack) {
         openTrackArtist(track, loadDetailWhenMissing = true)
     }
 
-    fun closeArtistTargetPicker() {
+    override fun closeArtistTargetPicker() {
         artistTargetTrack = null
         artistTargets = emptyList()
+        publishArtistTargetPickerState()
     }
 
-    fun openArtistTarget(target: TrackArtistTarget) {
+    override fun openArtistTarget(target: TrackArtistTarget) {
         val track = artistTargetTrack ?: return
         closeArtistTargetPicker()
         navigation.closeFullPlayer()
@@ -108,6 +116,7 @@ internal class ProviderTrackActionController(
         if (targets.size > 1) {
             artistTargetTrack = track
             artistTargets = targets
+            publishArtistTargetPickerState()
             return
         }
         targets.singleOrNull()?.mediaItem?.let {
@@ -177,6 +186,13 @@ internal class ProviderTrackActionController(
         return names.mapIndexed { index, name ->
             TrackArtistTarget(name, firstItem.takeIf { index == 0 })
         }
+    }
+
+    private fun publishArtistTargetPickerState() {
+        mutableArtistTargetPickerState.value = ArtistTargetPickerUiState(
+            track = artistTargetTrack,
+            targets = artistTargets,
+        )
     }
 
     private fun MusicTrack.canLoadProviderDetail(): Boolean =
