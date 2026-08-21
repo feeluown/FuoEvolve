@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
@@ -61,10 +62,11 @@ fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
         LinearProgressIndicator(modifier = modifier.fillMaxWidth())
     }
 }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    controller: FuoPlayerController,
+    home: HomeFeatureController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
     hasImagePermission: Boolean,
@@ -73,13 +75,15 @@ fun HomeScreen(
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     val playbackUiPort = LocalPlaybackUiPort.current
+    val state = home.uiState.collectAsStateWithLifecycle().value
+    LaunchedEffect(Unit) { home.ensureInitialContent() }
     Scaffold(
         topBar = {
             if (!layoutInfo.useWideLayout) {
                 CenterAlignedTopAppBar(
                     title = { Text("FeelUOwn") },
                     navigationIcon = {
-                        IconButton(onClick = { controller.openSettings() }) {
+                        IconButton(onClick = { home.openSettings() }) {
                             Icon(Icons.Filled.Settings, contentDescription = "设置")
                         }
                     },
@@ -87,7 +91,7 @@ fun HomeScreen(
                         IconButton(onClick = onOpenRecognition) {
                             Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
                         }
-                        IconButton(onClick = controller::openSearch) {
+                        IconButton(onClick = home::openSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "搜索")
                         }
                     },
@@ -98,23 +102,19 @@ fun HomeScreen(
             }
         },
         bottomBar = {
-            if (playbackUiPort.currentTrack != null) {
-                PlaybackMiniPlayer()
-            }
+            if (playbackUiPort.currentTrack != null) PlaybackMiniPlayer()
         },
     ) { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
             verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) 6.dp else 12.dp),
         ) {
             LoadingIndicator(
-                visible = controller.isLoading,
+                visible = state.isLoading,
                 modifier = Modifier.padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
             )
             HomeSectionPager(
-                controller = controller,
+                home = home,
                 hasAudioPermission = hasAudioPermission,
                 onRequestAudioPermission = onRequestAudioPermission,
                 hasImagePermission = hasImagePermission,
@@ -129,7 +129,7 @@ fun HomeScreen(
 
 @Composable
 fun HomeSectionPager(
-    controller: FuoPlayerController,
+    home: HomeFeatureController,
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
     hasImagePermission: Boolean,
@@ -138,75 +138,58 @@ fun HomeSectionPager(
     modifier: Modifier,
     contentHorizontalPadding: Dp,
 ) {
+    val state = home.uiState.collectAsStateWithLifecycle().value
     val sections = listOf(
         HomeSection.Recommend to "推荐",
         HomeSection.Music to "探索",
         HomeSection.Mine to "我的",
     )
-    val selectedIndex = sections.indexOfFirst { it.first == controller.homeSection }.coerceAtLeast(0)
-    val pagerState = rememberPagerState(
-        initialPage = selectedIndex,
-        pageCount = { sections.size },
-    )
+    val selectedIndex = sections.indexOfFirst { it.first == state.homeSection }.coerceAtLeast(0)
+    val pagerState = rememberPagerState(initialPage = selectedIndex, pageCount = { sections.size })
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(controller.homeSection) {
-        val page = sections.indexOfFirst { it.first == controller.homeSection }
-        if (page >= 0 && page != pagerState.currentPage) {
-            pagerState.animateScrollToPage(page)
-        }
+    LaunchedEffect(state.homeSection) {
+        val page = sections.indexOfFirst { it.first == state.homeSection }
+        if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
     }
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .collect { page ->
-                val section = sections.getOrNull(page)?.first
-                if (section != null && section != controller.homeSection) {
-                    controller.onHomeSectionChange(section)
+                sections.getOrNull(page)?.first?.let { section ->
+                    if (section != state.homeSection) home.setHomeSection(section)
                 }
             }
     }
 
     if (LocalAppLayoutInfo.current.useWideLayout) {
         Row(
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(horizontal = contentHorizontalPadding),
+            modifier = modifier.fillMaxWidth().padding(horizontal = contentHorizontalPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             HomeSectionRail(
                 sections = sections,
                 selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
-                onSettings = { controller.openSettings() },
-                onSearch = controller::openSearch,
+                onSettings = { home.openSettings() },
+                onSearch = home::openSearch,
                 onRecognition = onOpenRecognition,
                 onClick = { index, section ->
-                    if (section != controller.homeSection || index != pagerState.currentPage) {
+                    if (section != state.homeSection || index != pagerState.currentPage) {
                         scope.launch { pagerState.animateScrollToPage(index) }
                     }
                 },
             )
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
                 pageSpacing = 16.dp,
             ) { page ->
                 when (sections[page].first) {
-                    HomeSection.Recommend -> ProviderContentHomeSection(
-                        controller = controller,
-                        section = HomeSection.Recommend,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    HomeSection.Music -> ProviderContentHomeSection(
-                        controller = controller,
-                        section = HomeSection.Music,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    HomeSection.Recommend -> ProviderContentHomeSection(home, HomeSection.Recommend, Modifier.fillMaxSize())
+                    HomeSection.Music -> ProviderContentHomeSection(home, HomeSection.Music, Modifier.fillMaxSize())
                     HomeSection.Mine -> MineHomeSection(
-                        controller = controller,
+                        home = home,
                         hasAudioPermission = hasAudioPermission,
                         onRequestAudioPermission = onRequestAudioPermission,
                         hasImagePermission = hasImagePermission,
@@ -229,32 +212,21 @@ fun HomeSectionPager(
             selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
             indicatorOffsetFraction = pagerState.currentPageOffsetFraction,
             onClick = { index, section ->
-                if (section != controller.homeSection || index != pagerState.currentPage) {
+                if (section != state.homeSection || index != pagerState.currentPage) {
                     scope.launch { pagerState.animateScrollToPage(index) }
                 }
             },
         )
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = contentHorizontalPadding),
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = contentHorizontalPadding),
             pageSpacing = 16.dp,
         ) { page ->
             when (sections[page].first) {
-                HomeSection.Recommend -> ProviderContentHomeSection(
-                    controller = controller,
-                    section = HomeSection.Recommend,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                HomeSection.Music -> ProviderContentHomeSection(
-                    controller = controller,
-                    section = HomeSection.Music,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                HomeSection.Recommend -> ProviderContentHomeSection(home, HomeSection.Recommend, Modifier.fillMaxSize())
+                HomeSection.Music -> ProviderContentHomeSection(home, HomeSection.Music, Modifier.fillMaxSize())
                 HomeSection.Mine -> MineHomeSection(
-                    controller = controller,
+                    home = home,
                     hasAudioPermission = hasAudioPermission,
                     onRequestAudioPermission = onRequestAudioPermission,
                     hasImagePermission = hasImagePermission,
@@ -276,39 +248,23 @@ fun HomeSectionRail(
     onClick: (Int, HomeSection) -> Unit,
 ) {
     Surface(
-        modifier = Modifier
-            .width(64.dp)
-            .fillMaxHeight(),
+        modifier = Modifier.width(64.dp).fillMaxHeight(),
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .padding(vertical = 8.dp),
+            modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = "设置")
-            }
+            IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "设置") }
             Spacer(Modifier.weight(1f))
             sections.forEachIndexed { index, (section, label) ->
                 val selected = index == selectedIndex
                 Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fuoInteractive()
-                        .clickable(role = Role.Tab) { onClick(index, section) }
-                        .padding(vertical = 4.dp),
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surface
-                    },
-                    contentColor = if (selected) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    modifier = Modifier.fillMaxWidth().fuoInteractive().clickable(role = Role.Tab) {
+                        onClick(index, section)
+                    }.padding(vertical = 4.dp),
+                    color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                    contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                     shape = RoundedCornerShape(8.dp),
                 ) {
                     Column(
@@ -328,12 +284,8 @@ fun HomeSectionRail(
                 }
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRecognition) {
-                Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
-            }
-            IconButton(onClick = onSearch) {
-                Icon(Icons.Filled.Search, contentDescription = "搜索")
-            }
+            IconButton(onClick = onRecognition) { Icon(Icons.Filled.Mic, contentDescription = "听歌识曲") }
+            IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "搜索") }
         }
     }
 }
@@ -364,11 +316,8 @@ fun HomeSectionTabs(
             val indicatorLeft = lerp(current.left, target.left, progress)
             val indicatorWidth = lerp(current.width, target.width, progress)
             TabRowDefaults.SecondaryIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentSize(Alignment.BottomStart)
-                    .offset { IntOffset(indicatorLeft.roundToPx(), 0) }
-                    .width(indicatorWidth),
+                modifier = Modifier.fillMaxWidth().wrapContentSize(Alignment.BottomStart)
+                    .offset { IntOffset(indicatorLeft.roundToPx(), 0) }.width(indicatorWidth),
             )
         },
     ) {
@@ -381,11 +330,7 @@ fun HomeSectionTabs(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = homeSectionIcon(section),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
+                        Icon(homeSectionIcon(section), contentDescription = null, modifier = Modifier.size(18.dp))
                         Text(
                             text = label,
                             style = MaterialTheme.typography.titleSmall,
@@ -400,20 +345,15 @@ fun HomeSectionTabs(
     }
 }
 
-fun homeSectionIcon(section: HomeSection): ImageVector {
-    return when (section) {
-        HomeSection.Recommend -> Icons.Filled.PlayArrow
-        HomeSection.Music -> Icons.Filled.Album
-        HomeSection.Mine -> Icons.Filled.Person
-    }
+fun homeSectionIcon(section: HomeSection): ImageVector = when (section) {
+    HomeSection.Recommend -> Icons.Filled.PlayArrow
+    HomeSection.Music -> Icons.Filled.Album
+    HomeSection.Mine -> Icons.Filled.Person
 }
 
 @Composable
 fun EmptyHomeSection(modifier: Modifier, title: String) {
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.surface,
-    ) {
+    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
