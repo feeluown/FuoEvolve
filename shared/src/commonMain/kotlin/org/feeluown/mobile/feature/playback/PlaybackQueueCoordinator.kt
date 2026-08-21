@@ -66,6 +66,19 @@ internal class PlaybackQueueCoordinator(
         replaceSourceQueue(tracks, index, sourceFeature = null, sourcePlaylistId = sourcePlaylistId)
     }
 
+    override fun appendPlaylistTracks(sourcePlaylistId: String, tracks: List<MusicTrack>) {
+        if (tracks.isEmpty() || queueState.queuePlaylistId != sourcePlaylistId) return
+        val seenIds = queueState.mainQueue.mapTo(mutableSetOf()) { it.id }
+        val additions = tracks.filter { seenIds.add(it.id) }
+        if (additions.isEmpty()) return
+        queueState.mainQueue = queueState.mainQueue + additions
+        if (queueState.originalMainQueue.isNotEmpty()) {
+            val originalSeenIds = queueState.originalMainQueue.mapTo(mutableSetOf()) { it.id }
+            queueState.originalMainQueue = queueState.originalMainQueue + additions.filter { originalSeenIds.add(it.id) }
+        }
+        publishQueueMutation()
+    }
+
     override fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, sourceFeature: ProviderFeature) {
         replaceSourceQueue(tracks, index, sourceFeature = sourceFeature, sourcePlaylistId = null)
     }
