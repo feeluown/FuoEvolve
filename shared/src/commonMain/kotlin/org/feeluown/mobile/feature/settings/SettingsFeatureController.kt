@@ -108,7 +108,15 @@ private class DefaultSettingsFeatureController(
                 )
             }.onFailure(::failed)
         }
-        refreshCacheUsage()
+        scope.launch {
+            runCatching {
+                applySavedCacheLimits(
+                    loadSettings = settingsRepository::awaitSettings,
+                    applyLimit = resourceCacheRepository::updateLimit,
+                )
+                resourceCacheRepository.refreshUsage()
+            }.onFailure(::failed)
+        }
     }
 
     override fun close() {
@@ -217,12 +225,7 @@ private class DefaultSettingsFeatureController(
             settingsRepository.update {
                 it.copy(audioCacheLimitMb = nextAudio, imageCacheLimitMb = nextImage)
             }
-            resourceCacheRepository.updateLimit(
-                CacheLimit(
-                    audioMaxBytes = nextAudio.toLong() * 1024L * 1024L,
-                    imageMaxBytes = nextImage.toLong() * 1024L * 1024L,
-                )
-            )
+            resourceCacheRepository.updateLimit(cacheLimitFor(nextAudio, nextImage))
             resourceCacheRepository.refreshUsage()
         }
     }
@@ -250,3 +253,16 @@ internal suspend fun applySavedAudioQualityPolicies(
     val settings = loadSettings()
     applyPolicies(settings.wifiAudioQualityPolicy, settings.cellularAudioQualityPolicy)
 }
+
+internal suspend fun applySavedCacheLimits(
+    loadSettings: suspend () -> AppSettings,
+    applyLimit: suspend (CacheLimit) -> Unit,
+) {
+    val settings = loadSettings()
+    applyLimit(cacheLimitFor(settings.audioCacheLimitMb, settings.imageCacheLimitMb))
+}
+
+internal fun cacheLimitFor(audioMb: Int, imageMb: Int): CacheLimit = CacheLimit(
+    audioMaxBytes = audioMb.coerceAtLeast(0).toLong() * 1024L * 1024L,
+    imageMaxBytes = imageMb.coerceAtLeast(0).toLong() * 1024L * 1024L,
+)

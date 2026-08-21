@@ -47,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -105,9 +106,7 @@ fun OnboardingFeatureScreen(
                     if (!sourcePage) {
                         IconButton(
                             enabled = !busy,
-                            onClick = {
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                            },
+                            onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一步")
                         }
@@ -131,9 +130,7 @@ fun OnboardingFeatureScreen(
                 onAction = {
                     when {
                         sourcePage -> onboarding.applyProviderSelection { success ->
-                            if (success) {
-                                scope.launch { pagerState.animateScrollToPage(1) }
-                            }
+                            if (success) scope.launch { pagerState.animateScrollToPage(1) }
                         }
                         qualityPage -> onboarding.complete()
                         else -> scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
@@ -320,10 +317,7 @@ private fun OnboardingThemePage(
                 }
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("封面动态取色")
                 Text("根据当前播放封面生成播放器主题色", style = MaterialTheme.typography.bodySmall)
@@ -393,12 +387,14 @@ private fun OnboardingProviderLoginPage(
     onImportYtmusicOAuthFile: (() -> Unit)?,
     onStartYtmusicOAuth: (() -> Unit)?,
 ) {
+    val uriHandler = LocalUriHandler.current
     val currentAuth = authController.authStateFor(provider)
     val busy = authController.isBusy(provider.providerId)
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
     var selectedMode by rememberSaveable(provider.providerId) { mutableStateOf(modes.first()) }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
+    val oauthFlow = authState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
 
     Column(
         modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -421,6 +417,7 @@ private fun OnboardingProviderLoginPage(
             modes.forEach { mode ->
                 FilterChip(
                     selected = selectedMode == mode,
+                    enabled = !busy,
                     onClick = { selectedMode = mode },
                     label = { Text(onboardingLoginModeLabel(mode)) },
                 )
@@ -437,12 +434,11 @@ private fun OnboardingProviderLoginPage(
                     onValueChange = { authController.onCookiesChange(provider.providerId, it) },
                     label = { Text("Cookie / Cookie JSON") },
                     minLines = 3,
+                    enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
-                    onClick = {
-                        authController.loginWithCookies(provider.providerId, authController.cookieInput(provider.providerId))
-                    },
+                    onClick = { authController.loginWithCookies(provider.providerId, authController.cookieInput(provider.providerId)) },
                     enabled = !busy,
                 ) { Text("使用 Cookie 登录") }
             }
@@ -452,6 +448,7 @@ private fun OnboardingProviderLoginPage(
                     onValueChange = { authController.onHeaderAuthorizationChange(provider.providerId, it) },
                     label = { Text("Authorization") },
                     visualTransformation = PasswordVisualTransformation(),
+                    enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -459,20 +456,29 @@ private fun OnboardingProviderLoginPage(
                     onValueChange = { authController.onHeaderCookieChange(provider.providerId, it) },
                     label = { Text("Cookie") },
                     minLines = 2,
+                    enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(onClick = { authController.loginWithHeaders(provider.providerId) }, enabled = !busy) {
                     Text("使用 Headers 登录")
                 }
                 if (provider.providerId == "ytmusic") {
-                    onImportYtmusicHeaderFile?.let { action -> TextButton(onClick = action) { Text("导入 ytmusic_header.json") } }
+                    onImportYtmusicHeaderFile?.let { action ->
+                        TextButton(onClick = action, enabled = !busy) { Text("导入 ytmusic_header.json") }
+                    }
                 }
             }
             ProviderLoginMode.OAuth -> {
+                Text(
+                    "使用 Google Cloud「TVs and Limited Input devices」类型的 OAuth 客户端。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
                     value = oauth.clientId,
                     onValueChange = { authController.onOAuthClientIdChange(provider.providerId, it) },
                     label = { Text("client_id") },
+                    enabled = !busy && oauthFlow == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -480,21 +486,49 @@ private fun OnboardingProviderLoginPage(
                     onValueChange = { authController.onOAuthClientSecretChange(provider.providerId, it) },
                     label = { Text("client_secret") },
                     visualTransformation = PasswordVisualTransformation(),
+                    enabled = !busy && oauthFlow == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                onStartYtmusicOAuth?.let { action ->
-                    Button(onClick = action, enabled = !busy) { Text("Google TV OAuth 登录") }
-                }
-                onImportYtmusicOAuthFile?.let { action -> TextButton(onClick = action) { Text("导入 OAuth JSON") } }
-                authState.ytmusicOAuthFlow?.let { flow ->
-                    Text(
-                        text = "验证码 ${flow.userCode}\n${flow.verificationUrl}\n${flow.statusMessage}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = authController::copyYtmusicOAuthUserCode) { Text("复制验证码") }
-                        OutlinedButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消") }
+                if (oauthFlow == null) {
+                    val startAction = onStartYtmusicOAuth ?: authController::startYtmusicTvOAuthLogin
+                    Button(onClick = startAction, enabled = !busy) { Text("使用 Google 登录（TV）") }
+                    onImportYtmusicOAuthFile?.let { action ->
+                        TextButton(onClick = action, enabled = !busy) { Text("导入 client_secret.json / oauth.json") }
                     }
+                } else {
+                    val verificationUrl = oauthFlow.verificationUrlWithCode.ifBlank { oauthFlow.verificationUrl }
+                    LaunchedEffect(oauthFlow.userCode, verificationUrl) {
+                        if (!oauthFlow.browserOpened && verificationUrl.isNotBlank()) {
+                            runCatching { uriHandler.openUri(verificationUrl) }
+                                .onSuccess { authController.markYtmusicOAuthBrowserOpened() }
+                        }
+                    }
+                    Text(
+                        if (oauthFlow.browserOpened) "浏览器已打开，请输入下方验证码" else oauthFlow.statusMessage,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("设备验证码", style = MaterialTheme.typography.labelMedium)
+                            Text(oauthFlow.userCode, style = MaterialTheme.typography.headlineMedium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = authController::copyYtmusicOAuthUserCode) { Text("复制验证码") }
+                                OutlinedButton(
+                                    enabled = verificationUrl.isNotBlank(),
+                                    onClick = {
+                                        runCatching { uriHandler.openUri(verificationUrl) }
+                                            .onSuccess { authController.markYtmusicOAuthBrowserOpened() }
+                                    },
+                                ) { Text("重新打开浏览器") }
+                            }
+                        }
+                    }
+                    Text(verificationUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消授权") }
                 }
             }
         }

@@ -71,6 +71,7 @@ private class DefaultPlaybackFeatureOwner(
     private val navigationOwner = DefaultPlaybackNavigationPort()
     private val playbackRepository: ProviderPlaybackRepository = ProviderPlaybackRepositoryView(providerRepository)
     private val mutablePlaybackState = MutableStateFlow(PlaybackState())
+    private val playbackFeedback = MutableStateFlow<String?>(null)
     override val playbackState: StateFlow<PlaybackState> = mutablePlaybackState.asStateFlow()
 
     private var playbackParts: List<PlaybackPart> = emptyList()
@@ -121,7 +122,7 @@ private class DefaultPlaybackFeatureOwner(
         maybeLoadLyrics = lyricsOwner::maybeLoad,
         persistQueue = ::persistPlaybackQueue,
         setLoading = {},
-        setMessage = {},
+        setMessage = { playbackFeedback.value = it },
         failureMessage = { throwable -> playbackFailureMessage(throwable) },
         onRequestStarted = { serial, suppressRecovery ->
             suppressPlaybackRecoveryRequestSerial = serial.takeIf { suppressRecovery }
@@ -160,6 +161,7 @@ private class DefaultPlaybackFeatureOwner(
         appendFeatureQueue = ::appendFeatureQueue,
         setTrackChangeDirection = {},
         setMessage = {},
+        feedbackState = playbackFeedback,
     )
 
     private val replacementOwner = PlaybackReplacementController(

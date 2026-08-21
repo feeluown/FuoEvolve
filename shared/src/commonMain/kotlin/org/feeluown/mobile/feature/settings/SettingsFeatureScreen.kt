@@ -8,6 +8,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,16 +29,19 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,6 +65,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -73,6 +78,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -84,6 +90,7 @@ import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.ui.NavDisplay
 import kotlinx.serialization.Serializable
+import kotlin.math.abs
 
 @Serializable
 private enum class FeatureSettingsCategory(
@@ -100,17 +107,10 @@ private enum class FeatureSettingsCategory(
 
 @Serializable
 private sealed interface FeatureSettingsRoute : NavKey {
-    @Serializable
-    data object Main : FeatureSettingsRoute
-
-    @Serializable
-    data class Category(val category: FeatureSettingsCategory) : FeatureSettingsRoute
-
-    @Serializable
-    data object Theme : FeatureSettingsRoute
-
-    @Serializable
-    data class Provider(val providerId: String) : FeatureSettingsRoute
+    @Serializable data object Main : FeatureSettingsRoute
+    @Serializable data class Category(val category: FeatureSettingsCategory) : FeatureSettingsRoute
+    @Serializable data object Theme : FeatureSettingsRoute
+    @Serializable data class Provider(val providerId: String) : FeatureSettingsRoute
 }
 
 private fun settingsPageTransition(
@@ -160,11 +160,7 @@ fun SettingsFeatureScreen(
     }
 
     fun pop() {
-        if (backStack.size > 1) {
-            backStack = backStack.dropLast(1)
-        } else {
-            settingsController.close()
-        }
+        if (backStack.size > 1) backStack = backStack.dropLast(1) else settingsController.close()
     }
 
     fun openCategory(category: FeatureSettingsCategory) {
@@ -201,7 +197,6 @@ fun SettingsFeatureScreen(
                         settingsController = settingsController,
                         providerCatalog = providerCatalog,
                     )
-
                     is FeatureSettingsRoute.Category -> SettingsCategoryPage(
                         category = route.category,
                         settings = settingsState,
@@ -213,7 +208,6 @@ fun SettingsFeatureScreen(
                         onOpenProvider = { push(FeatureSettingsRoute.Provider(it.providerId)) },
                         onBack = ::pop,
                     )
-
                     FeatureSettingsRoute.Theme -> SettingsScaffold(
                         title = "主题设置",
                         onBack = ::pop,
@@ -227,7 +221,6 @@ fun SettingsFeatureScreen(
                             )
                         }
                     }
-
                     is FeatureSettingsRoute.Provider -> {
                         val provider = catalogState.availableProviders.firstOrNull { it.providerId == route.providerId }
                             ?: catalogState.providers.firstOrNull { it.providerId == route.providerId }
@@ -554,87 +547,161 @@ private fun ProviderCatalogSettings(
         val order = state.providerOrderIds.withIndex().associate { it.value to it.index }
         state.availableProviders.sortedBy { order[it.providerId] ?: Int.MAX_VALUE }
     }
+    var configuringProvider by remember { mutableStateOf<ProviderInfo?>(null) }
+    var draggingProviderId by remember { mutableStateOf<String?>(null) }
+    var dragDistance by remember { mutableStateOf(0f) }
+
     SettingsGroup(title = "音源") {
         ordered.forEachIndexed { index, provider ->
             val enabled = provider.providerId in state.enabledProviderIds
             val auth = state.sessions.authStates[provider.providerId]
-            Column {
-                SettingsRow(
-                    title = provider.providerName,
-                    supportingText = providerStatusText(enabled, auth),
-                    leadingContent = {
-                        Icon(
-                            Icons.Filled.ManageAccounts,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            SettingsRow(
+                title = provider.providerName,
+                supportingText = providerStatusText(enabled, auth) + " · " + providerDisplaySummary(state, provider.providerId),
+                selected = draggingProviderId == provider.providerId,
+                enabled = !state.isLoading,
+                leadingContent = {
+                    Icon(
+                        modifier = Modifier.pointerInput(provider.providerId, state.isLoading) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    if (!state.isLoading) {
+                                        draggingProviderId = provider.providerId
+                                        dragDistance = 0f
+                                    }
+                                },
+                                onDragEnd = {
+                                    draggingProviderId = null
+                                    dragDistance = 0f
+                                },
+                                onDragCancel = {
+                                    draggingProviderId = null
+                                    dragDistance = 0f
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    if (state.isLoading || draggingProviderId != provider.providerId) return@detectDragGesturesAfterLongPress
+                                    dragDistance += amount.y
+                                    val threshold = 44.dp.toPx()
+                                    when {
+                                        dragDistance >= threshold -> {
+                                            controller.moveProvider(provider.providerId, 1)
+                                            dragDistance = 0f
+                                        }
+                                        dragDistance <= -threshold -> {
+                                            controller.moveProvider(provider.providerId, -1)
+                                            dragDistance = 0f
+                                        }
+                                    }
+                                },
+                            )
+                        },
+                        imageVector = Icons.Filled.DragHandle,
+                        contentDescription = "长按拖动排序${provider.providerName}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                trailingContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            enabled = !state.isLoading,
+                            onClick = { configuringProvider = provider },
+                        ) {
+                            Icon(Icons.Filled.Settings, contentDescription = "配置${provider.providerName}")
+                        }
+                        IconButton(
+                            enabled = !state.isLoading && enabled,
+                            onClick = { onOpenProvider(provider) },
+                        ) {
+                            Icon(Icons.Filled.ManageAccounts, contentDescription = "管理${provider.providerName}账号")
+                        }
+                        Switch(
+                            checked = enabled,
+                            enabled = !state.isLoading && (!enabled || state.enabledProviderIds.size > 1),
+                            onCheckedChange = { controller.setProviderEnabled(provider.providerId, it) },
                         )
-                    },
-                    trailingContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { controller.moveProvider(provider.providerId, -1) }) {
-                                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上移")
-                            }
-                            IconButton(onClick = { controller.moveProvider(provider.providerId, 1) }) {
-                                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下移")
-                            }
-                            Switch(
-                                checked = enabled,
-                                onCheckedChange = { controller.setProviderEnabled(provider.providerId, it) },
-                            )
-                            Spacer(Modifier.size(FuoSpacing.xs))
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    onClick = { onOpenProvider(provider) },
-                )
-                if (enabled) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                            .padding(horizontal = FuoSpacing.lg, vertical = FuoSpacing.sm),
-                        horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
-                    ) {
-                        ProviderScopeChip("搜索", provider.providerId in state.searchProviderIds) {
-                            controller.setDisplayProviderEnabled(ProviderDisplaySection.Search, provider.providerId, it)
-                        }
-                        ProviderScopeChip("推荐", provider.providerId in state.recommendProviderIds) {
-                            controller.setDisplayProviderEnabled(ProviderDisplaySection.Recommend, provider.providerId, it)
-                        }
-                        ProviderScopeChip("探索", provider.providerId in state.exploreProviderIds) {
-                            controller.setDisplayProviderEnabled(ProviderDisplaySection.Explore, provider.providerId, it)
-                        }
-                        ProviderScopeChip("我的", provider.providerId in state.mineProviderIds) {
-                            controller.setDisplayProviderEnabled(ProviderDisplaySection.Mine, provider.providerId, it)
-                        }
-                        ProviderScopeChip("替换", provider.providerId in state.replacementProviderIds) {
-                            controller.setDisplayProviderEnabled(ProviderDisplaySection.Replace, provider.providerId, it)
-                        }
                     }
-                }
-            }
+                },
+            )
             if (index < ordered.lastIndex) SettingsDivider()
         }
     }
     SettingsGroup(title = "说明") {
         SettingsRow(
-            title = "显示范围独立控制",
-            supportingText = "启用音源后，可分别选择是否参与搜索、推荐、探索、我的和智能替换。",
+            title = "长按拖动调整音源优先级",
+            supportingText = "配置按钮单独管理搜索、推荐、探索和“我的”显示范围；账号按钮用于登录与授权。",
+        )
+    }
+    configuringProvider?.let { provider ->
+        ProviderDisplaySettingsDialog(
+            state = state,
+            controller = controller,
+            provider = provider,
+            onDismissRequest = { configuringProvider = null },
         )
     }
 }
 
 @Composable
-private fun ProviderScopeChip(label: String, selected: Boolean, onSelected: (Boolean) -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = { onSelected(!selected) },
-        label = { Text(label) },
-        colors = settingsFilterChipColors(),
+private fun ProviderDisplaySettingsDialog(
+    state: ProviderCatalogUiState,
+    controller: ProviderCatalogFeatureController,
+    provider: ProviderInfo,
+    onDismissRequest: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(provider.providerName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
+                Text("显示范围", style = MaterialTheme.typography.bodyMedium)
+                listOf(
+                    ProviderDisplaySection.Search to "搜索",
+                    ProviderDisplaySection.Recommend to "推荐",
+                    ProviderDisplaySection.Explore to "探索",
+                    ProviderDisplaySection.Mine to "我的",
+                ).forEach { (section, label) ->
+                    val selected = providerShownIn(state, provider.providerId, section)
+                    SettingsRow(
+                        title = label,
+                        supportingText = if (selected) "已显示" else "已隐藏",
+                        enabled = !state.isLoading,
+                        trailingContent = {
+                            Icon(
+                                if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        onClick = {
+                            controller.setDisplayProviderEnabled(section, provider.providerId, !selected)
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismissRequest) { Text("完成") } },
     )
 }
+
+private fun providerShownIn(state: ProviderCatalogUiState, providerId: String, section: ProviderDisplaySection): Boolean =
+    providerId in when (section) {
+        ProviderDisplaySection.Search -> state.searchProviderIds
+        ProviderDisplaySection.Recommend -> state.recommendProviderIds
+        ProviderDisplaySection.Explore -> state.exploreProviderIds
+        ProviderDisplaySection.Mine -> state.mineProviderIds
+        ProviderDisplaySection.Replace -> state.replacementProviderIds
+    }
+
+private fun providerDisplaySummary(state: ProviderCatalogUiState, providerId: String): String =
+    listOf(
+        ProviderDisplaySection.Search to "搜索",
+        ProviderDisplaySection.Recommend to "推荐",
+        ProviderDisplaySection.Explore to "探索",
+        ProviderDisplaySection.Mine to "我的",
+    ).filter { (section, _) -> providerShownIn(state, providerId, section) }
+        .joinToString("、") { it.second }
+        .ifBlank { "未显示" }
 
 @Composable
 private fun PlaybackFeatureSettings(
@@ -644,6 +711,7 @@ private fun PlaybackFeatureSettings(
     providerCatalog: ProviderCatalogFeatureController,
 ) {
     val settings = state.settings
+    val busy = state.isBusy || catalog.isLoading
     SettingsGroup(title = "音质") {
         SettingsChoiceRow(
             title = "Wi‑Fi",
@@ -652,6 +720,7 @@ private fun PlaybackFeatureSettings(
             options = AudioQualityPolicy.entries,
             selected = settings.wifiAudioQualityPolicy,
             optionLabel = AudioQualityPolicy::label,
+            enabled = !busy,
             onSelect = settingsController::setWifiAudioQualityPolicy,
         )
         SettingsDivider()
@@ -662,6 +731,7 @@ private fun PlaybackFeatureSettings(
             options = AudioQualityPolicy.entries,
             selected = settings.cellularAudioQualityPolicy,
             optionLabel = AudioQualityPolicy::label,
+            enabled = !busy,
             onSelect = settingsController::setCellularAudioQualityPolicy,
         )
     }
@@ -671,24 +741,20 @@ private fun PlaybackFeatureSettings(
             title = "其他应用播放时自动暂停",
             supportingText = "检测到其他应用开始播放时暂停当前播放",
             checked = settings.pauseOnOtherAppPlayback,
+            enabled = !busy,
         ) { enabled -> settingsController.update { it.copy(pauseOnOtherAppPlayback = enabled) } }
         SettingsDivider(startPadding = FuoSpacing.lg)
         Column(
             modifier = Modifier.padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
         ) {
-            Text(
-                "资源不可用时",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("资源不可用时", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 UnavailablePlaybackPolicy.entries.forEachIndexed { index, policy ->
                     SegmentedButton(
                         selected = settings.unavailablePlaybackPolicy == policy,
-                        onClick = {
-                            settingsController.update { it.copy(unavailablePlaybackPolicy = policy) }
-                        },
+                        enabled = !busy,
+                        onClick = { settingsController.update { it.copy(unavailablePlaybackPolicy = policy) } },
                         shape = SegmentedButtonDefaults.itemShape(index, UnavailablePlaybackPolicy.entries.size),
                         colors = settingsSegmentedButtonColors(),
                     ) { Text(policy.label) }
@@ -697,32 +763,133 @@ private fun PlaybackFeatureSettings(
         }
     }
 
+    SmartReplacementFeatureSettings(
+        settings = settings,
+        catalog = catalog,
+        busy = busy,
+        settingsController = settingsController,
+        providerCatalog = providerCatalog,
+    )
+}
+
+@Composable
+private fun SmartReplacementFeatureSettings(
+    settings: AppSettings,
+    catalog: ProviderCatalogUiState,
+    busy: Boolean,
+    settingsController: SettingsFeatureController,
+    providerCatalog: ProviderCatalogFeatureController,
+) {
+    val enabled = settings.unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace
+    val providers = catalog.providers
+    val presets = listOf(
+        "宽松" to 0.45,
+        "平衡" to DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+        "严格" to 0.70,
+    )
+    fun isPreset(score: Double): Boolean = presets.any { (_, value) -> abs(score - value) < 0.001 }
+    var customExpanded by remember { mutableStateOf(!isPreset(settings.smartReplacementMinScore)) }
+    LaunchedEffect(settings.smartReplacementMinScore) {
+        if (!isPreset(settings.smartReplacementMinScore)) customExpanded = true
+    }
+
     SettingsGroup(title = "智能替换") {
-        catalog.providers.forEachIndexed { index, provider ->
-            SettingsToggleRow(
-                title = provider.providerName,
-                supportingText = "允许使用该音源查找替代资源",
-                checked = provider.providerId in settings.smartReplacementProviderIds,
-            ) { enabled ->
-                providerCatalog.setDisplayProviderEnabled(ProviderDisplaySection.Replace, provider.providerId, enabled)
-            }
-            if (index < catalog.providers.lastIndex) SettingsDivider(startPadding = FuoSpacing.lg)
-        }
-        if (catalog.providers.isNotEmpty()) SettingsDivider(startPadding = FuoSpacing.lg)
         Column(
             modifier = Modifier.padding(FuoSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
+            verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
         ) {
-            Text("最低匹配分 ${formatReplacementScore(settings.smartReplacementMinScore)}")
-            Slider(
-                value = settings.smartReplacementMinScore.toFloat(),
-                onValueChange = { value ->
-                    settingsController.update {
-                        it.copy(smartReplacementMinScore = value.toDouble().coerceIn(0.0, 1.0))
-                    }
+            Text(
+                if (enabled) {
+                    "原音源无法播放时，从所选音源中搜索并匹配可播放版本"
+                } else {
+                    "当前资源不可用策略不是“智能替换”，切换后以下设置生效"
                 },
-                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text("替换音源", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (providers.isEmpty()) {
+                Text("没有已启用的音源", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+                ) {
+                    providers.forEach { provider ->
+                        val selected = provider.providerId in settings.smartReplacementProviderIds
+                        FilterChip(
+                            selected = selected,
+                            enabled = enabled && !busy,
+                            onClick = {
+                                providerCatalog.setDisplayProviderEnabled(
+                                    ProviderDisplaySection.Replace,
+                                    provider.providerId,
+                                    !selected,
+                                )
+                            },
+                            label = { Text(provider.providerName) },
+                            colors = settingsFilterChipColors(),
+                        )
+                    }
+                }
+                Text(
+                    if (providers.size < 2) {
+                        "仅启用一个音源时无法跨源替换；播放时会自动排除歌曲自身来源"
+                    } else {
+                        "播放时会自动排除歌曲自身来源；候选音源顺序沿用上方音源排序"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text("匹配严格度", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+            ) {
+                presets.forEach { (label, score) ->
+                    FilterChip(
+                        selected = !customExpanded && abs(settings.smartReplacementMinScore - score) < 0.001,
+                        enabled = enabled && !busy,
+                        onClick = {
+                            customExpanded = false
+                            settingsController.update { it.copy(smartReplacementMinScore = score) }
+                        },
+                        label = { Text(label) },
+                        colors = settingsFilterChipColors(),
+                    )
+                }
+                FilterChip(
+                    selected = customExpanded,
+                    enabled = enabled && !busy,
+                    onClick = { customExpanded = true },
+                    label = { Text("自定义") },
+                    colors = settingsFilterChipColors(),
+                )
+            }
+            if (customExpanded) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("最低匹配分")
+                    Text(formatReplacementScore(settings.smartReplacementMinScore), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Slider(
+                    value = settings.smartReplacementMinScore.toFloat(),
+                    onValueChange = { value ->
+                        settingsController.update {
+                            it.copy(smartReplacementMinScore = roundReplacementScore(value.toDouble()))
+                        }
+                    },
+                    valueRange = 0f..1f,
+                    steps = 19,
+                    enabled = enabled && !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("分数越高匹配越严格", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -734,6 +901,7 @@ private fun AppearanceFeatureSettings(
     onOpenTheme: () -> Unit,
 ) {
     val settings = state.settings
+    val enabled = !state.isBusy
     SettingsGroup(title = "主题") {
         SettingsChoiceRow(
             title = "主题模式",
@@ -743,21 +911,15 @@ private fun AppearanceFeatureSettings(
             options = ThemeMode.entries,
             selected = settings.themeMode,
             optionLabel = ThemeMode::label,
+            enabled = enabled,
         ) { value -> controller.update { it.copy(themeMode = value) } }
         SettingsDivider()
         SettingsRow(
             title = "主题设置",
             supportingText = "${settings.themeColorScheme.label} · 调色板与色彩规范",
-            leadingContent = {
-                Icon(Icons.Filled.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            },
-            trailingContent = {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
+            enabled = enabled,
+            leadingContent = { Icon(Icons.Filled.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
             onClick = onOpenTheme,
         )
     }
@@ -767,15 +929,12 @@ private fun AppearanceFeatureSettings(
             modifier = Modifier.padding(horizontal = FuoSpacing.lg, vertical = FuoSpacing.md),
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
         ) {
-            Text(
-                "歌词字号",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("歌词字号", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 LyricFontSize.entries.forEachIndexed { index, size ->
                     SegmentedButton(
                         selected = settings.lyricFontSize == size,
+                        enabled = enabled,
                         onClick = { controller.update { it.copy(lyricFontSize = size) } },
                         shape = SegmentedButtonDefaults.itemShape(index, LyricFontSize.entries.size),
                         colors = settingsSegmentedButtonColors(),
@@ -789,6 +948,7 @@ private fun AppearanceFeatureSettings(
                 title = "状态栏歌词",
                 supportingText = "通过词幕在系统状态栏显示当前歌词",
                 checked = settings.statusBarLyricsEnabled,
+                enabled = enabled,
                 onCheckedChange = controller::setStatusBarLyricsEnabled,
             )
         }
@@ -802,6 +962,7 @@ private fun ThemeSettingsContent(
     predictiveBackPreference: PredictiveBackPreference,
 ) {
     val settings = state.settings
+    val enabled = !state.isBusy
     SettingsGroup(title = "颜色") {
         SettingsChoiceRow(
             title = "强调色",
@@ -810,6 +971,7 @@ private fun ThemeSettingsContent(
             options = ThemeColorScheme.entries,
             selected = settings.themeColorScheme,
             optionLabel = ThemeColorScheme::label,
+            enabled = enabled,
         ) { value -> controller.update { it.copy(themeColorScheme = value) } }
         SettingsDivider()
         SettingsChoiceRow(
@@ -819,6 +981,7 @@ private fun ThemeSettingsContent(
             options = ThemePaletteStyle.entries,
             selected = settings.themePaletteStyle,
             optionLabel = ThemePaletteStyle::label,
+            enabled = enabled,
             onSelect = controller::setThemePaletteStyle,
         )
         SettingsDivider()
@@ -829,6 +992,7 @@ private fun ThemeSettingsContent(
             options = ThemeColorSpec.entries,
             selected = settings.themeColorSpec,
             optionLabel = ThemeColorSpec::label,
+            enabled = enabled,
             onSelect = controller::setThemeColorSpec,
         )
     }
@@ -838,6 +1002,7 @@ private fun ThemeSettingsContent(
                 title = "预测性返回手势",
                 supportingText = "返回手势过程中预览上一页",
                 checked = predictiveBackPreference.enabled,
+                enabled = enabled,
                 onCheckedChange = predictiveBackPreference.onEnabledChange,
             )
         }
@@ -847,16 +1012,15 @@ private fun ThemeSettingsContent(
             title = "封面动态取色",
             supportingText = "播放时根据当前封面调整界面颜色",
             checked = settings.dynamicCoverColorEnabled,
-        ) { enabled -> controller.update { it.copy(dynamicCoverColorEnabled = enabled) } }
+            enabled = enabled,
+        ) { value -> controller.update { it.copy(dynamicCoverColorEnabled = value) } }
     }
 }
 
 @Composable
-private fun LocalMusicFeatureSettings(
-    state: SettingsFeatureUiState,
-    controller: SettingsFeatureController,
-) {
+private fun LocalMusicFeatureSettings(state: SettingsFeatureUiState, controller: SettingsFeatureController) {
     LaunchedEffect(Unit) { controller.refreshLocalMusicDirectories() }
+    val enabled = !state.isBusy
     SettingsGroup(title = "扫描设置") {
         SettingsChoiceRow(
             title = "忽略短音频",
@@ -865,6 +1029,7 @@ private fun LocalMusicFeatureSettings(
             options = listOf(0, 15, 30, 60, 120),
             selected = state.localMusic.minDurationSeconds,
             optionLabel = { if (it == 0) "不过滤" else "$it 秒" },
+            enabled = enabled,
             onSelect = controller::setLocalMusicMinDurationSeconds,
         )
     }
@@ -873,11 +1038,12 @@ private fun LocalMusicFeatureSettings(
             SettingsRow(title = "暂无可用目录", supportingText = "刷新本地音乐后将在这里显示媒体目录")
         } else {
             state.localMusic.directories.forEachIndexed { index, directory ->
-                val enabled = !isLocalMusicDirectoryExcluded(directory.id, state.localMusic.excludedDirectoryIds)
+                val directoryEnabled = !isLocalMusicDirectoryExcluded(directory.id, state.localMusic.excludedDirectoryIds)
                 SettingsToggleRow(
                     title = directory.name,
                     supportingText = "${directory.trackCount} 首",
-                    checked = enabled,
+                    checked = directoryEnabled,
+                    enabled = enabled,
                 ) { controller.setLocalMusicDirectoryEnabled(directory.id, it) }
                 if (index < state.localMusic.directories.lastIndex) SettingsDivider(startPadding = FuoSpacing.lg)
             }
@@ -886,23 +1052,16 @@ private fun LocalMusicFeatureSettings(
 }
 
 @Composable
-private fun StorageFeatureSettings(
-    state: SettingsFeatureUiState,
-    controller: SettingsFeatureController,
-) {
+private fun StorageFeatureSettings(state: SettingsFeatureUiState, controller: SettingsFeatureController) {
     val settings = state.settings
+    val enabled = !state.isBusy
     SettingsGroup(title = "下载") {
         SettingsRow(
             title = "下载管理",
             supportingText = "${state.downloadTasks.count { it.status == DownloadTaskStatus.Downloading }} 个下载中",
+            enabled = enabled,
             leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
-            trailingContent = {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
+            trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
             onClick = controller::openDownloadManager,
         )
         SettingsDivider()
@@ -913,10 +1072,10 @@ private fun StorageFeatureSettings(
             options = (1..5).toList(),
             selected = settings.downloadParallelism,
             optionLabel = { it.toString() },
+            enabled = enabled,
             onSelect = controller::setDownloadParallelism,
         )
     }
-
     SettingsGroup(title = "缓存") {
         SettingsChoiceRow(
             title = "音频缓存上限",
@@ -925,6 +1084,7 @@ private fun StorageFeatureSettings(
             options = listOf(128, 256, 512, 1024, 2048),
             selected = settings.audioCacheLimitMb,
             optionLabel = { "$it MB" },
+            enabled = enabled,
             onSelect = controller::setAudioCacheLimitMb,
         )
         SettingsDivider()
@@ -935,6 +1095,7 @@ private fun StorageFeatureSettings(
             options = listOf(64, 128, 256, 512),
             selected = settings.imageCacheLimitMb,
             optionLabel = { "$it MB" },
+            enabled = enabled,
             onSelect = controller::setImageCacheLimitMb,
         )
         SettingsDivider()
@@ -942,7 +1103,7 @@ private fun StorageFeatureSettings(
             title = "当前缓存",
             supportingText = formatCacheBytes(state.cacheUsage.totalBytes),
             trailingContent = {
-                OutlinedButton(onClick = controller::clearCache) {
+                OutlinedButton(onClick = controller::clearCache, enabled = enabled) {
                     Icon(Icons.Filled.Delete, contentDescription = null)
                     Spacer(Modifier.size(FuoSpacing.xs))
                     Text("清理")
@@ -996,14 +1157,9 @@ private fun AboutFeatureSettings(
             SettingsRow(
                 title = "应用日志",
                 supportingText = "查看调试日志与错误信息",
+                enabled = !state.isBusy,
                 leadingContent = { Icon(Icons.Filled.BugReport, contentDescription = null) },
-                trailingContent = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
+                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 onClick = controller::openDebugLogs,
             )
         }
@@ -1021,12 +1177,14 @@ private fun ProviderAccountSettings(
     onImportYtmusicOAuthFile: (() -> Unit)?,
     onStartYtmusicOAuth: (() -> Unit)?,
 ) {
+    val uriHandler = LocalUriHandler.current
     val auth = authController.authStateFor(provider)
     val busy = authController.isBusy(provider.providerId)
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
     var mode by remember(provider.providerId, modes) { mutableStateOf(modes.first()) }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
+    val oauthFlow = authUiState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
 
     SettingsGroup(title = "账号状态") {
         SettingsRow(
@@ -1049,12 +1207,11 @@ private fun ProviderAccountSettings(
     if (!auth.isLoggedIn) {
         SettingsGroup(title = "登录方式") {
             if (modes.size > 1) {
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
-                ) {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg)) {
                     modes.forEachIndexed { index, candidate ->
                         SegmentedButton(
                             selected = mode == candidate,
+                            enabled = !busy,
                             onClick = { mode = candidate },
                             shape = SegmentedButtonDefaults.itemShape(index, modes.size),
                             colors = settingsSegmentedButtonColors(),
@@ -1079,12 +1236,11 @@ private fun ProviderAccountSettings(
                         onValueChange = { authController.onCookiesChange(provider.providerId, it) },
                         label = { Text("Cookie / Cookie JSON") },
                         minLines = 3,
+                        enabled = !busy,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(
-                        onClick = {
-                            authController.loginWithCookies(provider.providerId, authController.cookieInput(provider.providerId))
-                        },
+                        onClick = { authController.loginWithCookies(provider.providerId, authController.cookieInput(provider.providerId)) },
                         enabled = !busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("使用 Cookie 登录") }
@@ -1098,6 +1254,7 @@ private fun ProviderAccountSettings(
                         onValueChange = { authController.onHeaderAuthorizationChange(provider.providerId, it) },
                         label = { Text("Authorization") },
                         visualTransformation = PasswordVisualTransformation(),
+                        enabled = !busy,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
@@ -1105,6 +1262,7 @@ private fun ProviderAccountSettings(
                         onValueChange = { authController.onHeaderCookieChange(provider.providerId, it) },
                         label = { Text("Cookie") },
                         minLines = 2,
+                        enabled = !busy,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(
@@ -1114,7 +1272,7 @@ private fun ProviderAccountSettings(
                     ) { Text("使用 Headers 登录") }
                     if (provider.providerId == "ytmusic") {
                         onImportYtmusicHeaderFile?.let { action ->
-                            OutlinedButton(onClick = action, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = action, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                                 Text("导入 ytmusic_header.json")
                             }
                         }
@@ -1124,10 +1282,16 @@ private fun ProviderAccountSettings(
                     modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
                     verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                 ) {
+                    Text(
+                        "使用 Google Cloud「TVs and Limited Input devices」类型的 OAuth 客户端，可导入 client_secret.json / oauth.json。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedTextField(
                         value = oauth.clientId,
                         onValueChange = { authController.onOAuthClientIdChange(provider.providerId, it) },
                         label = { Text("client_id") },
+                        enabled = !busy && oauthFlow == null,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
@@ -1135,27 +1299,56 @@ private fun ProviderAccountSettings(
                         onValueChange = { authController.onOAuthClientSecretChange(provider.providerId, it) },
                         label = { Text("client_secret") },
                         visualTransformation = PasswordVisualTransformation(),
+                        enabled = !busy && oauthFlow == null,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    onStartYtmusicOAuth?.let { action ->
-                        Button(onClick = action, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text("Google TV OAuth 登录")
+                    if (oauthFlow == null) {
+                        val startAction = onStartYtmusicOAuth ?: authController::startYtmusicTvOAuthLogin
+                        Button(onClick = startAction, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("使用 Google 登录（TV）")
                         }
-                    }
-                    onImportYtmusicOAuthFile?.let { action ->
-                        OutlinedButton(onClick = action, modifier = Modifier.fillMaxWidth()) {
-                            Text("导入 OAuth JSON")
+                        onImportYtmusicOAuthFile?.let { action ->
+                            OutlinedButton(onClick = action, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                Text("导入 client_secret.json / oauth.json")
+                            }
                         }
-                    }
-                    authUiState.ytmusicOAuthFlow?.let { flow ->
+                    } else {
+                        val verificationUrl = oauthFlow.verificationUrlWithCode.ifBlank { oauthFlow.verificationUrl }
+                        LaunchedEffect(oauthFlow.userCode, verificationUrl) {
+                            if (!oauthFlow.browserOpened && verificationUrl.isNotBlank()) {
+                                runCatching { uriHandler.openUri(verificationUrl) }
+                                    .onSuccess { authController.markYtmusicOAuthBrowserOpened() }
+                            }
+                        }
                         Text(
-                            "验证码 ${flow.userCode}\n${flow.verificationUrl}\n${flow.statusMessage}",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            if (oauthFlow.browserOpened) "浏览器已打开，请输入下方验证码" else oauthFlow.statusMessage,
+                            color = MaterialTheme.colorScheme.primary,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
-                            OutlinedButton(onClick = authController::copyYtmusicOAuthUserCode) { Text("复制验证码") }
-                            OutlinedButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消") }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.medium,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(FuoSpacing.lg),
+                                verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+                            ) {
+                                Text("设备验证码", style = MaterialTheme.typography.labelMedium)
+                                Text(oauthFlow.userCode, style = MaterialTheme.typography.headlineMedium)
+                                Row(horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
+                                    Button(onClick = authController::copyYtmusicOAuthUserCode) { Text("复制验证码") }
+                                    TextButton(
+                                        enabled = verificationUrl.isNotBlank(),
+                                        onClick = {
+                                            runCatching { uriHandler.openUri(verificationUrl) }
+                                                .onSuccess { authController.markYtmusicOAuthBrowserOpened() }
+                                        },
+                                    ) { Text("重新打开浏览器") }
+                                }
+                            }
                         }
+                        Text(verificationUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消授权") }
                     }
                 }
             }
@@ -1163,22 +1356,15 @@ private fun ProviderAccountSettings(
     }
 
     authController.authError(provider.providerId)?.let { error ->
-        SettingsGroup(title = "错误") {
-            SettingsRow(title = error, titleColor = MaterialTheme.colorScheme.error)
-        }
+        SettingsGroup(title = "错误") { SettingsRow(title = error, titleColor = MaterialTheme.colorScheme.error) }
     }
     authUiState.feedback?.let { feedback ->
-        SettingsGroup(title = "状态") {
-            SettingsRow(title = feedback)
-        }
+        SettingsGroup(title = "状态") { SettingsRow(title = feedback) }
     }
 }
 
 @Composable
-private fun SettingsGroup(
-    title: String? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
+private fun SettingsGroup(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
         title?.let {
             Text(
@@ -1192,9 +1378,7 @@ private fun SettingsGroup(
             modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = MaterialTheme.shapes.extraLarge,
-        ) {
-            Column(content = content)
-        }
+        ) { Column(content = content) }
     }
 }
 
@@ -1203,25 +1387,25 @@ private fun SettingsRow(
     title: String,
     supportingText: String? = null,
     selected: Boolean = false,
+    enabled: Boolean = true,
     titleColor: Color = MaterialTheme.colorScheme.onSurface,
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val clickableModifier = if (onClick != null) {
-        Modifier.clickable(role = Role.Button, onClick = onClick)
-    } else {
-        Modifier
-    }
+        Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+    } else Modifier
+    val contentAlpha = if (enabled) 1f else 0.55f
     ListItem(
         headlineContent = {
-            Text(title, color = titleColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, color = titleColor.copy(alpha = contentAlpha), maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = supportingText?.let { value ->
             {
                 Text(
                     value,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1241,14 +1425,14 @@ private fun SettingsToggleRow(
     title: String,
     supportingText: String? = null,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     SettingsRow(
         title = title,
         supportingText = supportingText,
-        trailingContent = {
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
-        },
+        enabled = enabled,
+        trailingContent = { Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange) },
         onClick = { onCheckedChange(!checked) },
     )
 }
@@ -1262,6 +1446,7 @@ private fun <T> SettingsChoiceRow(
     selected: T,
     optionLabel: (T) -> String,
     leadingContent: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
     onSelect: (T) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1270,15 +1455,16 @@ private fun <T> SettingsChoiceRow(
             title = title,
             supportingText = supportingText,
             leadingContent = leadingContent,
+            enabled = enabled,
             trailingContent = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null)
                 }
             },
-            onClick = { expanded = true },
+            onClick = { if (enabled) expanded = true },
         )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(optionLabel(option)) },
@@ -1297,10 +1483,7 @@ private fun <T> SettingsChoiceRow(
 
 @Composable
 private fun SettingsDivider(startPadding: Dp = 0.dp) {
-    HorizontalDivider(
-        modifier = Modifier.padding(start = startPadding),
-        color = MaterialTheme.colorScheme.outlineVariant,
-    )
+    HorizontalDivider(modifier = Modifier.padding(start = startPadding), color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 private fun categorySummary(
@@ -1316,8 +1499,7 @@ private fun categorySummary(
     }
     FeatureSettingsCategory.Playback ->
         "Wi‑Fi ${settings.settings.wifiAudioQualityPolicy.label} · ${settings.settings.unavailablePlaybackPolicy.label}"
-    FeatureSettingsCategory.Appearance ->
-        "${settings.settings.themeMode.label} · ${settings.settings.themeColorScheme.label}"
+    FeatureSettingsCategory.Appearance -> "${settings.settings.themeMode.label} · ${settings.settings.themeColorScheme.label}"
     FeatureSettingsCategory.LocalMusic -> "${settings.localMusic.directories.size} 个媒体目录"
     FeatureSettingsCategory.Storage -> "并行下载 ${settings.settings.downloadParallelism} · 缓存与清理"
     FeatureSettingsCategory.About -> appVersionInfo ?: "FuoEvolve"
@@ -1345,6 +1527,9 @@ private fun providerLoginModeLabel(mode: ProviderLoginMode): String = when (mode
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"
 }
+
+private fun roundReplacementScore(value: Double): Double =
+    ((value.coerceIn(0.0, 1.0) * 20.0 + 0.5).toInt() / 20.0).coerceIn(0.0, 1.0)
 
 private fun formatReplacementScore(value: Double): String {
     val hundredths = (value.coerceIn(0.0, 1.0) * 100.0 + 0.5).toInt()

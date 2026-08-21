@@ -87,6 +87,8 @@ fun P2AppRoot(
     val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
     val localPlaylistState by appViewModel.localPlaylistFeatureController.uiState.collectAsStateWithLifecycle()
     val playlistFeedback by appViewModel.playlistActionPort.feedback.collectAsStateWithLifecycle()
+    val playbackFeedback by appViewModel.playbackQueueUiPort.feedback.collectAsStateWithLifecycle()
+    val providerTrackFeedback by appViewModel.providerTrackActionPort.feedback.collectAsStateWithLifecycle()
     val downloadState by appViewModel.downloadActionPort.managerState.collectAsStateWithLifecycle()
     val sleepFeedback by appViewModel.playbackSleepTimerPort.feedback.collectAsStateWithLifecycle()
     val appFeedback by appViewModel.appFeedback.collectAsStateWithLifecycle()
@@ -126,6 +128,16 @@ fun P2AppRoot(
             val message = playlistFeedback ?: return@LaunchedEffect
             snackbar.showSnackbar(message)
             appViewModel.playlistActionPort.dismissFeedback(message)
+        }
+        LaunchedEffect(playbackFeedback) {
+            val message = playbackFeedback ?: return@LaunchedEffect
+            snackbar.showSnackbar(message)
+            appViewModel.playbackQueueUiPort.dismissFeedback(message)
+        }
+        LaunchedEffect(providerTrackFeedback) {
+            val message = providerTrackFeedback ?: return@LaunchedEffect
+            snackbar.showSnackbar(message)
+            appViewModel.providerTrackActionPort.dismissFeedback(message)
         }
         LaunchedEffect(downloadState.queueFeedback) {
             val message = downloadState.queueFeedback ?: return@LaunchedEffect
@@ -218,7 +230,7 @@ fun P2AppRoot(
                                                 )
                                                 AppRoute.DebugLogs -> DebugLogFeatureScreen(appViewModel.debugLogFeatureController, appViewModel::closeDebugLogs)
                                                 AppRoute.DownloadManager -> DownloadManagerScreen(appViewModel.downloadActionPort, appViewModel::closeDownloadManager)
-                                                is AppRoute.FeatureDetail -> ProviderFeatureDetailRoute(route.feature.toProviderFeature())
+                                                is AppRoute.FeatureDetail -> ProviderFeatureParityDetailRoute(route.feature.toProviderFeature())
                                                 is AppRoute.PlaylistDetail -> ProviderPlaylistDetailRoute(
                                                     playlist = route.playlist.toProviderPlaylist(),
                                                     category = route.category?.let { runCatching { ProviderFeatureCategory.valueOf(it) }.getOrNull() },
@@ -232,8 +244,11 @@ fun P2AppRoot(
                                                     playlist = localPlaylistState.selectedPlaylist,
                                                 )
                                                 AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen()
-                                                AppRoute.Feature, AppRoute.Playlist, AppRoute.Track, AppRoute.Video, AppRoute.MediaItem ->
-                                                    EmptyHomeSection(Modifier.fillMaxSize(), "内容已迁移，请返回重试")
+                                                AppRoute.Feature,
+                                                AppRoute.Playlist,
+                                                AppRoute.Track,
+                                                AppRoute.Video,
+                                                AppRoute.MediaItem -> LegacyProviderDetailRouteBridge(route, appViewModel)
                                             }
                                         }
                                     },

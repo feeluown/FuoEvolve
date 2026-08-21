@@ -24,6 +24,15 @@ internal fun handleIosLocalPlaylistImportResult(
     if (validFileName != null && validContent != null) onImport(validFileName, validContent) else onReadFailure()
 }
 
+internal fun handleIosJsonImportResult(
+    content: String?,
+    onImport: (String) -> Unit,
+    onReadFailure: () -> Unit,
+) {
+    val validContent = content?.takeIf { it.isNotBlank() }
+    if (validContent != null) onImport(validContent) else onReadFailure()
+}
+
 fun MainViewController(
     audioOutput: IosAudioOutput,
     videoOutput: IosVideoOutput,
@@ -70,6 +79,25 @@ private fun IosApp(
         onRequestMicrophonePermission = container::requestMicrophonePermission,
         onOpenProviderWebLogin = container::openProviderWebLogin,
         onLogoutProvider = container::logoutProvider,
+        onImportYtmusicHeaderFile = {
+            localPlaylistFileOutput.importFile { _, content ->
+                handleIosJsonImportResult(
+                    content = content,
+                    onImport = container.appViewModel.providerAuthFeatureController::loginYtmusicWithHeaderFile,
+                    onReadFailure = { container.appViewModel.showFeedback("无法读取 ytmusic_header.json") },
+                )
+            }
+        },
+        onImportYtmusicOAuthFile = {
+            localPlaylistFileOutput.importFile { _, content ->
+                handleIosJsonImportResult(
+                    content = content,
+                    onImport = container.appViewModel.providerAuthFeatureController::importYtmusicOAuthRelatedJson,
+                    onReadFailure = { container.appViewModel.showFeedback("无法读取 OAuth JSON") },
+                )
+            }
+        },
+        onStartYtmusicOAuth = container.appViewModel.providerAuthFeatureController::startYtmusicTvOAuthLogin,
         onImportLocalPlaylistFile = {
             localPlaylistFileOutput.importFile { fileName, content ->
                 handleIosLocalPlaylistImportResult(

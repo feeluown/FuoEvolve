@@ -38,7 +38,7 @@ private class DefaultSharedResourceActionController(
     private val providerRepository: ProviderMusicRepository,
     private val providerCatalog: ProviderCatalogFeatureController,
     private val providerDetails: ProviderDetailOwners,
-    private val searchController: SearchFeatureController,
+    @Suppress("UNUSED_PARAMETER") searchController: SearchFeatureController,
     private val settingsRepository: AppSettingsRepository,
     private val scope: CoroutineScope,
 ) : SharedResourceActionPort {
@@ -48,13 +48,7 @@ private class DefaultSharedResourceActionController(
     override fun open(text: String) {
         val resource = parseSharedResource(text)
         if (resource == null) {
-            val query = sharedSearchQuery(text)
-            if (query.isNullOrBlank()) {
-                mutableFeedback.value = "无法识别分享链接"
-            } else {
-                searchController.searchText(query, providerId = null)
-                mutableFeedback.value = "未识别为已支持音源链接，已按分享内容搜索"
-            }
+            mutableFeedback.value = "无法识别分享链接"
             return
         }
         scope.launch {

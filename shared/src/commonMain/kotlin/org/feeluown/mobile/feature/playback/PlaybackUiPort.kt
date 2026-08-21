@@ -60,6 +60,8 @@ interface PlaybackQueueUiPort {
     val repeatMode: RepeatMode
     val isFmQueueActive: Boolean
     val trackChangeDirection: TrackChangeDirection
+    val feedback: StateFlow<String?>
+        get() = EMPTY_FEEDBACK_FLOW
 
     /** Replace the active source queue and start the selected item through the queue owner. */
     fun playTracks(tracks: List<MusicTrack>, index: Int)
@@ -88,6 +90,7 @@ interface PlaybackQueueUiPort {
     fun removeFromQueue(track: MusicTrack)
     fun playPlaybackPart(index: Int)
     fun addToUpNext(track: MusicTrack)
+    fun dismissFeedback(feedback: String) = Unit
 }
 
 /** Sleep-timer state, commands and transient feedback owned by playback. */
@@ -142,6 +145,8 @@ interface PlaylistActionPort {
 interface ProviderTrackActionPort {
     val artistTargetPickerState: StateFlow<ArtistTargetPickerUiState>
         get() = EMPTY_ARTIST_TARGET_PICKER_FLOW
+    val feedback: StateFlow<String?>
+        get() = EMPTY_FEEDBACK_FLOW
 
     fun openTrackArtist(track: MusicTrack)
     fun closeArtistTargetPicker() = Unit
@@ -150,6 +155,7 @@ interface ProviderTrackActionPort {
     fun openOriginalTrackDetail(track: MusicTrack)
     fun canSetSongDisliked(track: MusicTrack): Boolean
     fun setSongDisliked(track: MusicTrack)
+    fun dismissFeedback(feedback: String) = Unit
 }
 
 /** Local-library actions surfaced from now playing. */

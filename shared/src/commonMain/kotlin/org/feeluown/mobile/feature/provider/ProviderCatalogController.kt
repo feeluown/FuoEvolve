@@ -77,9 +77,11 @@ private class DefaultProviderCatalogFeatureController(
                 providerRepository.initialize()
                 val settings = settingsRepository.awaitSettings()
                 catalogAvailable = providerRepository.availableProviders()
-                val availableIds = catalogAvailable.mapTo(mutableSetOf()) { it.providerId }
-                val enabled = settings.enabledProviderIds.filterTo(linkedSetOf(), availableIds::contains)
-                    .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS.filterTo(linkedSetOf(), availableIds::contains) }
+                val availableIds = catalogAvailable.map(ProviderInfo::providerId)
+                val enabled = normalizedEnabledProviderIds(settings.enabledProviderIds, availableIds)
+                if (settings.enabledProviderIds != enabled) {
+                    settingsRepository.update { current -> current.copy(enabledProviderIds = enabled) }
+                }
                 providerRepository.updateEnabledProviders(enabled)
                 catalogProviders = providerRepository.providers().sortedWith(providerComparator(settings.providerOrderIds))
                 sessionRepository.updateProviders(catalogProviders)
@@ -97,8 +99,14 @@ private class DefaultProviderCatalogFeatureController(
     override fun setProviderEnabled(providerId: String, enabled: Boolean) {
         scope.launch {
             settingsRepository.update { settings ->
-                val next = if (enabled) settings.enabledProviderIds + providerId else settings.enabledProviderIds - providerId
-                settings.copy(enabledProviderIds = next)
+                val availableIds = catalogAvailable.map(ProviderInfo::providerId)
+                val next = updatedEnabledProviderIds(
+                    current = settings.enabledProviderIds,
+                    providerId = providerId,
+                    enabled = enabled,
+                    availableProviderIds = availableIds,
+                )
+                if (next == settings.enabledProviderIds) settings else settings.copy(enabledProviderIds = next)
             }
             refresh()
         }
@@ -154,8 +162,8 @@ private class DefaultProviderCatalogFeatureController(
     private fun publish() {
         val settingsState = settingsRepository.state.value
         val settings = settingsState.settings
-        val availableIds = catalogAvailable.mapTo(mutableSetOf()) { it.providerId }
-        val enabled = settings.enabledProviderIds.filterTo(linkedSetOf(), availableIds::contains)
+        val availableIds = catalogAvailable.map(ProviderInfo::providerId)
+        val enabled = normalizedEnabledProviderIds(settings.enabledProviderIds, availableIds)
         val ordered = catalogProviders.sortedWith(providerComparator(settings.providerOrderIds))
         mutableUiState.value = ProviderCatalogUiState(
             availableProviders = catalogAvailable,
@@ -180,4 +188,41 @@ private class DefaultProviderCatalogFeatureController(
         return compareBy<ProviderInfo> { order[it.providerId] ?: Int.MAX_VALUE }
             .thenBy(ProviderInfo::providerName)
     }
+}
+
+/**
+ * Resolves the persisted provider selection against the currently available catalog.
+ * At least one available provider is always retained so UI state and repository state cannot
+ * disagree after a user disables providers or an installed provider disappears.
+ */
+internal fun normalizedEnabledProviderIds(
+    configuredProviderIds: Set<String>,
+    availableProviderIds: Collection<String>,
+): Set<String> {
+    val available = availableProviderIds.distinct()
+    if (available.isEmpty()) return emptySet()
+    val availableSet = available.toSet()
+    val configured = configuredProviderIds.filterTo(linkedSetOf(), availableSet::contains)
+    if (configured.isNotEmpty()) return configured
+    val defaults = DEFAULT_ENABLED_PROVIDER_IDS.filterTo(linkedSetOf(), availableSet::contains)
+    return defaults.ifEmpty { linkedSetOf(available.first()) }
+}
+
+/** Applies an enable/disable request while protecting the final available provider. */
+internal fun updatedEnabledProviderIds(
+    current: Set<String>,
+    providerId: String,
+    enabled: Boolean,
+    availableProviderIds: Collection<String>,
+): Set<String> {
+    val available = availableProviderIds.distinct()
+    if (available.isEmpty()) {
+        if (enabled) return current + providerId
+        return if (providerId in current && current.size <= 1) current else current - providerId
+    }
+    val normalized = normalizedEnabledProviderIds(current, available)
+    if (providerId !in available) return normalized
+    if (enabled) return normalized + providerId
+    if (providerId !in normalized || normalized.size <= 1) return normalized
+    return normalized - providerId
 }
