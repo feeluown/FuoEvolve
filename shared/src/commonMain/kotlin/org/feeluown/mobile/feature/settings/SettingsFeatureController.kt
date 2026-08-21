@@ -31,6 +31,9 @@ interface SettingsFeatureController {
     fun setDownloadParallelism(value: Int)
     fun setAudioCacheLimitMb(value: Int)
     fun setImageCacheLimitMb(value: Int)
+    fun refreshLocalMusicDirectories()
+    fun setLocalMusicDirectoryEnabled(directoryId: String, enabled: Boolean)
+    fun setLocalMusicMinDurationSeconds(value: Int)
     fun clearCache()
     fun refreshCacheUsage()
     fun openDownloadManager()
@@ -65,7 +68,7 @@ private class DefaultSettingsFeatureController(
     private val providerRepository: ProviderMusicRepository,
     private val downloadRepository: DownloadRepository,
     private val resourceCacheRepository: ResourceCacheRepository,
-    localMusicController: LocalMusicFeatureController,
+    private val localMusicController: LocalMusicFeatureController,
     debugLogViewerAvailable: Boolean,
     private val navigator: AppNavigator,
     private val scope: CoroutineScope,
@@ -146,6 +149,18 @@ private class DefaultSettingsFeatureController(
 
     override fun setImageCacheLimitMb(value: Int) {
         updateCacheLimits(audioMb = null, imageMb = value.coerceAtLeast(0))
+    }
+
+    override fun refreshLocalMusicDirectories() {
+        localMusicController.refreshDirectories()
+    }
+
+    override fun setLocalMusicDirectoryEnabled(directoryId: String, enabled: Boolean) {
+        localMusicController.onDirectoryEnabledChange(directoryId, enabled)
+    }
+
+    override fun setLocalMusicMinDurationSeconds(value: Int) {
+        localMusicController.onMinDurationChange(value)
     }
 
     override fun clearCache() {
