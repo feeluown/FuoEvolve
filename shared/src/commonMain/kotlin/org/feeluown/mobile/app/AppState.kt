@@ -186,6 +186,7 @@ class FuoAppViewModel(
     val providerCatalogFeatureController: ProviderCatalogFeatureController,
     val providerAuthFeatureController: ProviderAuthFeatureController,
     val settingsFeatureController: SettingsFeatureController,
+    val onboardingFeatureController: OnboardingFeatureController,
     val providerDetailOwners: ProviderDetailOwners,
     private val searchController: SearchFeatureController,
     private val recognitionController: RecognitionFeatureController,
