@@ -1,86 +1,89 @@
 # FuoEvolve architecture boundaries
 
-This document records the architecture boundaries used while the project migrates away from a flat `shared` source tree.
+This document records the compile-time and ownership boundaries after the P2 migration.
 
 ## Dependency direction
 
 The intended dependency direction is:
 
-`app -> feature -> core/api`
+`platform composition root -> app shell -> feature owner -> core/api`
 
-Platform hosts and adapters (`androidApp`, `iosMain`) implement or assemble dependencies required by shared code. Feature code must not become a platform service locator.
+Platform hosts (`androidApp`, iOS host/adapters) construct platform dependencies and feature owners. Feature implementations must not use a platform service locator or depend back on `:shared`.
 
-The first compile-time module boundaries are now explicit:
+The current compile-time modules are:
 
-- `:core:model` owns stable cross-feature model contracts used by architecture APIs.
-- `:playback:api` owns the app-scoped playback session contract and depends only on `:core:model` plus coroutines.
-- `:playback:runtime` owns the default `PlaybackSession` state/transport implementation and depends only on `:playback:api` plus coroutines.
-- `:provider:api` owns provider-neutral cross-feature capability contracts.
-- `:shared` consumes the playback/provider API contracts and contains the current feature implementations and legacy playback/provider contracts that are still being migrated.
-- `:androidApp` consumes `:shared` plus playback/core APIs and adapts the platform engine and playback-owned coordinators into `:playback:runtime`.
+- `:core:model`: stable cross-feature model contracts.
+- `:provider:api`: provider-neutral capability contracts.
+- `:playback:api`: app-scoped playback session contracts.
+- `:playback:runtime`: controller-free playback session state/transport implementation.
+- `:feature:recognition`: the first physical feature implementation module; it owns recognition contracts, state and controller tests and depends only on coroutines/Kotlin.
+- `:shared`: app shell, shared UI/design primitives, platform-neutral adapters and feature implementations whose lower-level contracts still live in the shared graph.
+- `:androidApp`: Android composition root and platform adapters.
 
-These modules intentionally start small. New cross-feature/platform contracts should move into the appropriate API/runtime module instead of expanding the flat shared contract surface. Feature implementation modules can be split later after their ownership boundaries are stable.
+Recognition is intentionally the first physical feature module because its dependency graph is already one-way. Search, Download, Local Music and other feature implementations remain logically owned inside `:shared` until their aggregate repository dependencies can be moved to lower-level API contracts. Creating modules that depend back on `:shared` is forbidden because that would only distribute the monolith instead of establishing a real boundary.
 
-## Shared source layout
+## P2 ownership result
 
-The first migration stage groups existing source files physically while keeping the current `org.feeluown.mobile` Kotlin package. Keeping the package stable makes the move behavior-neutral and preserves binary/source references while the public controller facade is reduced in later changes.
+`FuoPlayerController` has been retired. Production navigation, screens and platform composition no longer depend on a broad compatibility facade.
 
-- `app/`: app shell, navigation and app-scoped state.
-- `core/model/`: legacy shared models during migration; stable new architecture models belong in `:core:model`.
-- `core/ui/`: design system and cross-feature UI/platform abstractions.
-- `feature/<name>/`: feature-local controller, state and UI.
-- `feature/playback/`: playback composition, queue/start/lifecycle coordinators, playback UI owners and now-playing replacement behavior.
+App-scoped navigation is owned by `AppNavigator` / `FuoAppViewModel`. Feature state is owned by dedicated feature controllers/owners. Loading, errors and transient feedback are feature-local unless they are genuinely app-scoped.
 
-Provider protocol implementations remain under `provider/<provider>` because they already have a useful adapter boundary.
+Major migrated ownership boundaries include:
 
-## State ownership
+- Search and Recognition feature owners and app ports;
+- Debug log and Download manager owners;
+- Local Music and Local Playlist owners;
+- Settings, provider authentication and onboarding owners;
+- provider feature/playlist/track/media/video detail owners;
+- Home/provider-content owner;
+- playback queue/start/lifecycle/replacement/sleep-timer owners.
 
-Feature state should have one owner. New feature work should expose immutable UI state (preferably `StateFlow`) instead of adding new delegated properties to `FuoPlayerController`.
+Legacy Home, Settings, Onboarding, provider-detail and controller-backed player screens were deleted after their owner-based replacements became active.
 
-App-scoped navigation belongs to `AppNavigator` / `FuoAppViewModel`. Playback status, timing, current stable track reference, lyrics, queue identity/index, errors, transport policy and playback-end lifecycle policy belong to playback-owned contracts/owners. Avoid introducing new app-global `isLoading`, `message`, or error flags; loading and errors should be feature-local.
+## Playback
 
-Queue and start orchestration have explicit playback owners. `PlaybackQueueCoordinator` owns `startCurrent` / `previous` / `next`, up-next priority, repeat/part transitions, queue-index selection and controller-free source-queue selection for migrated cross-feature callers, while `PlaybackQueueController` remains the durable queue state holder. `PlaybackStartCoordinator` owns the prepare -> resolve/plan -> engine-start pipeline, including direct provider resolution on platforms that do not resolve resources inside the engine and `PlaybackPlan` construction for engines that do.
+Playback status, timing and transport come from `PlaybackSession`. Rich UI concerns use narrow contracts:
 
-Pre-engine start failures are published through `PlaybackStartFailureSource`. Android and iOS runtime adapters combine that playback-owned failure with engine state, so the old iOS compatibility path that read coordinator/controller `Error` state has been retired.
+- `PlaybackNavigationPort` — FullPlayer and queue visibility;
+- `PlaybackPresentationPort` — current presentation, seek, lyric/theme settings;
+- `PlaybackQueueUiPort` — queue display/edit, source selection, shuffle/repeat and transition direction;
+- `PlaybackSleepTimerPort` — sleep timer lifecycle;
+- `DownloadActionPort` — download actions;
+- `PlaylistActionPort` — playlist actions;
+- `ProviderTrackActionPort` — provider-track navigation/actions;
+- `LocalMusicActionPort` — local music actions;
+- `ReplacementActionPort` — smart replacement actions.
 
-`PlaybackLifecycleCoordinator` owns the Playing/Ended transition state machine that chooses between sleep-timer completion and queue auto-advance. `PlaybackSleepTimerController` owns sleep-timer state/commands and the end-of-track timer lifecycle contract. The controller engine collector publishes the current engine snapshot before executing the lifecycle action, preserving the historical state-observation ordering without owning the policy.
+`RuntimeMiniPlayer` and `RuntimeFullPlayer` consume these narrow contracts. Controller-backed `MiniPlayer`, `FullPlayer`, queue sheets and now-playing actions were removed together with `PlayerScreen.kt`; reusable player formatting, dialogs, lyrics and transport primitives live in controller-free files.
 
-MiniPlayer and FullPlayer read authoritative playback state/transport from `PlaybackSession`. Rich player UI concerns are split into narrow contracts:
+The retired broad `PlaybackUiPort` aggregate and all controller-backed playback compatibility adapters must not be reintroduced.
 
-- `PlaybackNavigationPort` owns FullPlayer / queue-overlay visibility.
-- `PlaybackPresentationPort` reads rich engine presentation plus lyric/theme settings and owns seek normalization.
-- `PlaybackQueueUiPort` is implemented by `PlaybackQueueCoordinator` and owns queue display/edit, source-queue selection, shuffle/repeat and transition direction for player/cross-feature UI.
-- `PlaybackSleepTimerPort` is implemented directly by `PlaybackSleepTimerController`.
-- `DownloadActionPort` is implemented by `DownloadController`.
-- `PlaylistActionPort` is implemented by `PlaylistActionController`.
-- `ProviderTrackActionPort` is implemented by `ProviderTrackActionController`.
-- `LocalMusicActionPort` is implemented by `LocalMusicController`.
-- `ReplacementActionPort` is implemented by `PlaybackReplacementController`.
+## Provider and feature dependencies
 
-The broad `PlaybackUiPort`, `ControllerPlaybackUiPort`, `ControllerNowPlayingActionPort`, `ControllerPlaybackSleepTimerPort`, and two-way playback-navigation mirror are retired. `PlaybackUiGraph` is only a composition-time dependency holder; it does not own business state or actions. `RuntimeFullPlayer` installs that graph into narrow `CompositionLocal` contracts and every player sub-surface consumes only the port it needs.
+New features should depend on narrow provider capability interfaces such as `ProviderSearchRepository`, `ProviderPlaybackRepository`, `ProviderAuthRepository` and provider-neutral API contracts instead of the aggregate `ProviderMusicRepository` wherever the boundary has already been extracted.
 
-`FuoPlayerController` may still expose compatibility facade methods to unmigrated sibling screens, but those methods delegate to the same feature/playback owner instances. New player UI must not route state or policy back through the facade.
-
-## Repository dependencies
-
-New features should depend on narrow provider capability interfaces (`ProviderSearchRepository`, `ProviderPlaybackRepository`, `ProviderAuthRepository`, and provider-neutral API contracts) rather than adding calls to the legacy aggregate `ProviderMusicRepository`.
+A feature may move to its own Gradle module only when all of its dependencies point to `core/api` or other lower-level modules. If moving it would require `feature -> shared`, leave it logically isolated in `:shared` and extract the missing contract first.
 
 ## Composition roots
 
-Platform dependency construction is isolated in platform containers. Android uses `AndroidAppContainer`; iOS uses `IosAppContainer`. `Application`, `UIViewController`, activities and services should remain thin hosts around those composition roots.
+Android uses `AndroidAppContainer`; iOS uses `IosAppContainer`. They compose feature owners, playback runtime and app ports directly. Neither platform constructs `FuoPlayerController` or platform-local forwarding versions of Search/Recognition app ports.
 
-Search and Recognition are composed through explicit `SearchAppPort` / `RecognitionAppPort` contracts. Their routes and feature UI no longer accept `FuoPlayerController`. Android and iOS use the same shared app-port adapters, which compose those routes from provider-session state plus narrow playback/download/playlist/provider/navigation owners instead of rebuilding per-platform controller forwarding objects.
+`AppRoot` installs the resulting app/feature/playback graphs and renders typed routes. It does not rebuild feature business state or controller compatibility bridges.
 
-Android playback uses `AndroidPlaybackRuntime.kt` and iOS uses `IosPlaybackRuntime.kt` as composition-edge adapters. Both receive `PlaybackTransportCoordinator` and `PlaybackStartFailureSource` explicitly; they no longer dispatch runtime transport through controller methods or inspect controller error state. Android/iOS composition roots inject the playback navigation, presentation, queue, sleep-timer, download, playlist, provider-track, local-music and replacement owners explicitly into `FuoAppViewModel`. `AppRoot` only installs the resulting composition graph; it does not construct controller-backed playback adapters.
+## Architecture fitness checks
 
-## Architecture fitness check
+`checkArchitectureBoundaries` is a P2 regression gate. It now:
 
-`checkArchitectureBoundaries` rejects new `FuoPlayerController` code dependencies inside migrated Search/Recognition boundaries, the entire `:playback:runtime` common source tree, Download/Local Music/Playlist/Provider Track now-playing owners, playback queue/start/lifecycle/replacement/sleep-timer owners, player composition contracts, controller-free MiniPlayer/FullPlayer implementations, app-port contracts/routes, and Android playback service/Lyricon integration.
+- scans all production Kotlin roots in `core`, `feature`, `playback`, `provider`, `shared` and `androidApp` and rejects any executable `FuoPlayerController` reference;
+- rejects reintroduction of the retired controller facade, monolithic controller test and legacy controller-backed screens/bridges;
+- rejects retired playback aggregate/compatibility adapters and controller transport calls;
+- rejects platform-local Search/Recognition forwarding bridges;
+- requires the physical `:feature:recognition` boundary to remain present.
 
-It also rejects reintroduction of retired Search/Recognition route shims, `ControllerPlaybackSession`, `ControllerPlaybackUiPort`, and `ControllerPlaybackCompatibilityPorts`; rejects any new `PlaybackUiPort` aggregate declaration; rejects legacy `MiniPlayer(controller)` callers; rejects platform-local Search/Recognition app-port forwarding objects; and rejects direct `controller.toggle()/previous()/next()` calls in platform playback runtime adapters.
+Android and iOS CI both run `:feature:recognition:allTests` in addition to playback/shared tests and the architecture gate.
 
 ## Migration rule
 
-Architecture migration should be incremental and behavior-preserving. Move ownership first, introduce narrow ports at cross-feature boundaries, and remove legacy facades only after callers have migrated and tests cover the new boundary.
+Architecture changes remain behavior-preserving and independently reviewable: move ownership first, introduce narrow ports at cross-feature boundaries, then remove compatibility surfaces only after the last production caller has migrated. Physical module extraction is the final step for a feature, not a substitute for ownership isolation.
 
-The post-P1 migration order and exit criteria are tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md).
+The P2 sequencing and closeout criteria are tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md).
