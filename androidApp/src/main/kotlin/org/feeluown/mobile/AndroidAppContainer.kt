@@ -96,6 +96,10 @@ internal class AndroidAppContainer(
 
     private val navigator by lazy { AppNavigator() }
 
+    private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant by lazy {
+        AndroidOAuthDeviceCodeAssistant(context)
+    }
+
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
         createSearchFeatureController(
@@ -179,11 +183,66 @@ internal class AndroidAppContainer(
             resourceCacheRepository = resourceCacheRepository,
             debugLogRepository = debugLogRepository,
             audioRecognitionRepository = audioRecognitionRepository,
-            oauthDeviceCodeAssistant = AndroidOAuthDeviceCodeAssistant(context),
+            oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
             scope = appScope,
             searchFeatureController = searchController,
             recognitionFeatureController = recognitionController,
         ).also(::wireController)
+    }
+
+    private val localMusicFeatureController: LocalMusicFeatureController by lazy {
+        controller.localMusicActionPort as? LocalMusicFeatureController
+            ?: error("Local Music feature owner is not installed")
+    }
+
+    private val providerCatalogFeatureController: ProviderCatalogFeatureController by lazy {
+        createProviderCatalogFeatureController(
+            providerRepository = providerRepository,
+            sessionRepository = providerSessionRepository,
+            settingsRepository = settingsRepository,
+            scope = appScope,
+        )
+    }
+
+    private val providerAuthFeatureController: ProviderAuthFeatureController by lazy {
+        createProviderAuthFeatureController(
+            providerRepository = providerRepository,
+            sessionRepository = providerSessionRepository,
+            oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
+            scope = appScope,
+            providerName = { providerId ->
+                providerCatalogFeatureController.uiState.value.availableProviders
+                    .firstOrNull { it.providerId == providerId }
+                    ?.providerName
+                    ?: providerId
+            },
+            onSessionChanged = { controller.refreshHomeContent() },
+        )
+    }
+
+    private val settingsFeatureController: SettingsFeatureController by lazy {
+        createSettingsFeatureController(
+            settingsRepository = settingsRepository,
+            providerRepository = providerRepository,
+            downloadRepository = downloadRepository,
+            resourceCacheRepository = resourceCacheRepository,
+            localMusicController = localMusicFeatureController,
+            debugLogViewerAvailable = debugLogFeatureController.isAvailable,
+            navigator = navigator,
+            scope = appScope,
+        )
+    }
+
+    private val providerDetailOwners: ProviderDetailOwners by lazy {
+        createProviderDetailOwners(
+            providerRepository = providerRepository,
+            playbackQueue = controller.playbackQueueUiPort,
+            settingsRepository = settingsRepository,
+            providerCatalog = providerCatalogFeatureController,
+            navigator = navigator,
+            scope = appScope,
+            onProviderMutation = { controller.refreshHomeContent() },
+        )
     }
 
     private val searchAppPort: SearchAppPort by lazy {
@@ -230,9 +289,13 @@ internal class AndroidAppContainer(
             downloadActionPort = wiredController.downloadActionPort,
             playlistActionPort = wiredController.playlistActionPort,
             providerTrackActionPort = wiredController.providerTrackActionPort,
-            localMusicActionPort = wiredController.localMusicActionPort,
+            localMusicActionPort = localMusicFeatureController,
             replacementActionPort = wiredController.replacementActionPort,
             debugLogFeatureController = debugLogFeatureController,
+            providerCatalogFeatureController = providerCatalogFeatureController,
+            providerAuthFeatureController = providerAuthFeatureController,
+            settingsFeatureController = settingsFeatureController,
+            providerDetailOwners = providerDetailOwners,
             searchController = searchController,
             recognitionController = recognitionController,
             searchAppPort = searchAppPort,
