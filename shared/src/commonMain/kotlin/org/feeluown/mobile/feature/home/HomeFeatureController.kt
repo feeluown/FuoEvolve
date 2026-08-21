@@ -233,28 +233,72 @@ private class DefaultHomeFeatureController(
     }
 
     override fun playAllFeature(section: ProviderContentSection) {
+        val feature = section.feature
+        if (feature.isDynamicQueueFeature()) {
+            if (section.tracks.isNotEmpty()) {
+                playbackQueue.playFeatureTracks(section.tracks, 0, feature)
+            } else {
+                loadDynamicFeatureAndPlay(feature)
+            }
+            return
+        }
         if (section.tracks.isEmpty()) return
-        if (section.feature.isDynamicQueueFeature() || !section.hasMore) {
-            playbackQueue.playFeatureTracks(section.tracks, 0, section.feature)
+        if (!section.hasMore) {
+            playbackQueue.playFeatureTracks(section.tracks, 0, feature)
             return
         }
         scope.launch {
-            publishLoading("正在加载${section.feature.title}")
+            publishLoading("正在加载${feature.title}")
             runCatching {
-                loadAllHomeFeatureTracks(section) { feature, offset ->
+                loadAllHomeFeatureTracks(section) { pageFeature, offset ->
                     withTimeout(HOME_PROVIDER_TIMEOUT_MS) {
-                        providerRepository.loadFeaturePage(feature, offset)
+                        providerRepository.loadFeaturePage(pageFeature, offset)
                     }
                 }
             }.onSuccess { tracks ->
                 if (tracks.isEmpty()) {
                     finishLoading("暂无可播放歌曲")
                 } else {
-                    playbackQueue.playFeatureTracks(tracks, 0, section.feature)
+                    playbackQueue.playFeatureTracks(tracks, 0, feature)
                     finishLoading("已加载全部歌曲")
                 }
             }.onFailure(::publishError)
         }
+    }
+
+    private fun loadDynamicFeatureAndPlay(feature: ProviderFeature) {
+        scope.launch {
+            publishLoading("正在加载${feature.title}")
+            runCatching {
+                withTimeout(HOME_PROVIDER_TIMEOUT_MS) {
+                    providerRepository.loadFeaturePage(feature, offset = 0)
+                }
+            }.onSuccess { loadedSection ->
+                updateHomeFeatureSection(loadedSection)
+                when {
+                    !loadedSection.errorMessage.isNullOrBlank() ->
+                        finishLoading(loadedSection.errorMessage.orEmpty(), asError = true)
+                    loadedSection.tracks.isEmpty() -> finishLoading("暂无可播放歌曲")
+                    else -> {
+                        playbackQueue.playFeatureTracks(loadedSection.tracks, 0, feature)
+                        finishLoading("正在播放${feature.title}")
+                    }
+                }
+            }.onFailure(::publishError)
+        }
+    }
+
+    private fun updateHomeFeatureSection(section: ProviderContentSection) {
+        val current = uiState.value
+        fun replace(sections: List<ProviderContentSection>): List<ProviderContentSection> =
+            sections.map { existing -> if (existing.feature.id == section.feature.id) section else existing }
+        mutableUiState.value = current.copy(
+            recommendSections = replace(current.recommendSections),
+            exploreSections = replace(current.exploreSections),
+            mineSections = replace(current.mineSections),
+            minePlaylistSections = replace(current.minePlaylistSections),
+            mineFavoritePlaylistSections = replace(current.mineFavoritePlaylistSections),
+        )
     }
 
     override fun creatablePlaylistProviders(): List<ProviderInfo> {
@@ -388,7 +432,7 @@ private class DefaultHomeFeatureController(
         val updates = Channel<ProviderContentSection>(Channel.UNLIMITED)
         loadingFeatures.forEach { feature ->
             scope.launch {
-                val section = runCatching {
+                val loadedSection = runCatching {
                     withTimeout(HOME_PROVIDER_TIMEOUT_MS) { providerRepository.loadFeaturePage(feature, offset = 0) }
                 }.getOrElse { throwable ->
                     ProviderContentSection(
@@ -396,7 +440,7 @@ private class DefaultHomeFeatureController(
                         errorMessage = providerHomeError(throwable, feature.providerId),
                     )
                 }
-                updates.send(section)
+                updates.send(loadedSection)
             }
         }
         repeat(loadingFeatures.size) {

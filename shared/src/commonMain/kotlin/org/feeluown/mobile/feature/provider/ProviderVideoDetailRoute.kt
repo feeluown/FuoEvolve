@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun ProviderVideoDetailRoute(video: ProviderVideo) {
     val graph = LocalProviderDetailUiGraph.current
     val owner = graph.owners.video
+    val musicPlaybackSession = LocalPlaybackSession.current
     val state by owner.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(video.id) { owner.activate(video) }
     val displayVideo = state.video ?: video
@@ -61,6 +62,9 @@ fun ProviderVideoDetailRoute(video: ProviderVideo) {
 
     LaunchedEffect(displayVideo.id) {
         metadata = ProviderVideoMetadataRepository.load(displayVideo)
+    }
+    LaunchedEffect(playbackState.isPlaying) {
+        if (playbackState.isPlaying) musicPlaybackSession.pause()
     }
 
     val metadataWidth = metadata?.width ?: 0

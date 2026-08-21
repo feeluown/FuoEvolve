@@ -119,9 +119,7 @@ fun ProviderContentHomeFeatureSection(
                                 sections = forYouSections,
                                 enabled = !state.isLoading,
                                 onFeatureClick = home::openFeature,
-                                onPrivateFmClick = { content ->
-                                    if (content.tracks.isNotEmpty()) home.playFeature(content, 0) else home.openFeature(content.feature)
-                                },
+                                onPrivateFmClick = home::playAllFeature,
                             )
                         }
                     }
