@@ -16,8 +16,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,22 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.io.File
 
-private data class PendingLocalPlaylistExport(
-    val fileName: String,
-    val content: String,
-)
-
-private data class PendingLocalPlaylistImport(
-    val fileName: String,
-    val content: String,
-)
-
+private data class PendingLocalPlaylistExport(val fileName: String, val content: String)
+private data class PendingLocalPlaylistImport(val fileName: String, val content: String)
 private const val LOCAL_PLAYLIST_MIME_TYPE = "application/x-fuo"
 private const val CONTENT_URI_SCHEME = "content"
 private const val FILE_URI_SCHEME = "file"
@@ -62,17 +54,15 @@ class MainActivity : ComponentActivity() {
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val appViewModel = fuoApplication.appViewModel
             val controller = appViewModel.controller
-            remember {
-                AndroidPredictiveBackPreference.initialize(this@MainActivity)
-                Unit
-            }
+            remember { AndroidPredictiveBackPreference.initialize(this@MainActivity); Unit }
             val predictiveBackEnabled by AndroidPredictiveBackPreference.enabled
+
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
-            ) { permissionResult ->
-                hasAudioPermission = hasPermissions(permissionResult, audioPermissions())
-                hasImagePermission = hasPermissions(permissionResult, imagePermissions())
-                controller.onLocalMusicPermissionChange(hasAudioPermission)
+            ) { result ->
+                hasAudioPermission = hasPermissions(result, audioPermissions())
+                hasImagePermission = hasPermissions(result, imagePermissions())
+                appViewModel.localMusicFeatureController.onPermissionChange(hasAudioPermission)
             }
             val microphonePermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
@@ -82,98 +72,58 @@ class MainActivity : ComponentActivity() {
             }
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
-            ) {
-                controller.startYtmusicTvOAuthLogin()
-            }
+            ) { controller.startYtmusicTvOAuthLogin() }
+
             val lifecycleOwner = LocalLifecycleOwner.current
             val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
-            val systemDark = LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-                Configuration.UI_MODE_NIGHT_YES
-            val darkTheme = resolveDarkTheme(appUiState.settings.settings.themeMode, systemDark)
-            SideEffect {
-                configureSystemBars(darkTheme)
-            }
+            val systemDark = LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            SideEffect { configureSystemBars(resolveDarkTheme(appUiState.settings.settings.themeMode, systemDark)) }
             DisposableEffect(lifecycleOwner) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
-                        val audioPermission = hasAudioPermission()
-                        val imagePermission = hasImagePermission()
-                        val microphonePermission = hasMicrophonePermission()
-                        hasAudioPermission = audioPermission
-                        hasImagePermission = imagePermission
-                        hasMicrophonePermission = microphonePermission
-                        controller.onLocalMusicPermissionChange(audioPermission)
-                        appViewModel.onMicrophonePermissionChange(microphonePermission)
+                        hasAudioPermission = hasAudioPermission()
+                        hasImagePermission = hasImagePermission()
+                        hasMicrophonePermission = hasMicrophonePermission()
+                        appViewModel.localMusicFeatureController.onPermissionChange(hasAudioPermission)
+                        appViewModel.onMicrophonePermissionChange(hasMicrophonePermission)
                     }
                 }
                 lifecycleOwner.lifecycle.addObserver(observer)
                 onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
             }
+
             var pendingWebLoginProviderId by rememberSaveable { mutableStateOf<String?>(null) }
             val webLoginLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.StartActivityForResult(),
             ) { result ->
-                val returnedProviderId = result.data
-                    ?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID)
-                    .orEmpty()
-                val providerId = returnedProviderId.ifBlank { pendingWebLoginProviderId.orEmpty() }
+                val providerId = result.data?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID).orEmpty()
+                    .ifBlank { pendingWebLoginProviderId.orEmpty() }
                 if (result.resultCode == RESULT_OK) {
-                    val cookiesJson = result.data
-                        ?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON)
-                        .orEmpty()
-                    if (providerId.isNotBlank() && cookiesJson.isNotBlank()) {
-                        controller.loginProviderWithCookies(providerId, cookiesJson)
+                    val cookies = result.data?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON).orEmpty()
+                    if (providerId.isNotBlank() && cookies.isNotBlank()) {
+                        appViewModel.providerAuthFeatureController.loginWithCookies(providerId, cookies)
                     }
                 }
                 pendingWebLoginProviderId = null
             }
-            val ytmusicHeaderFileLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument(),
-            ) { uri ->
+            val ytmusicHeaderFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
-                    val headerFileJson = runCatching {
-                        contentResolver.openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
-                            .orEmpty()
-                    }.getOrDefault("")
-                    controller.loginYtmusicWithHeaderFile(headerFileJson)
+                    val json = readText(uri)
+                    appViewModel.providerAuthFeatureController.loginWithYtmusicHeaderFile(json)
                 }
             }
-            val ytmusicOAuthFileLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument(),
-            ) { uri ->
+            val ytmusicOAuthFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
-                    val oauthJson = runCatching {
-                        contentResolver.openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
-                            .orEmpty()
-                    }.getOrDefault("")
-                    controller.importYtmusicOAuthRelatedJson(oauthJson)
+                    appViewModel.providerAuthFeatureController.loginWithYtmusicOAuthJson(readText(uri))
                 }
             }
-            var pendingLocalPlaylistExport by remember {
-                mutableStateOf<PendingLocalPlaylistExport?>(null)
-            }
-            val localPlaylistFileLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument(),
-            ) { uri ->
+
+            var pendingLocalPlaylistExport by remember { mutableStateOf<PendingLocalPlaylistExport?>(null) }
+            val localPlaylistFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
-                    val content = runCatching {
-                        contentResolver.openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
-                            .orEmpty()
-                    }.getOrDefault("")
-                    if (content.isBlank()) {
-                        controller.showMessage("无法读取本地歌单文件")
-                    } else {
-                        controller.prepareLocalPlaylistImport(
-                            fileName = displayNameFor(uri),
-                            content = content,
-                        )
-                    }
+                    val content = readText(uri)
+                    if (content.isBlank()) controller.showMessage("无法读取本地歌单文件")
+                    else appViewModel.localPlaylistFeatureController.prepareImport(displayNameFor(uri), content)
                 }
             }
             val localPlaylistExportLauncher = rememberLauncherForActivityResult(
@@ -182,28 +132,19 @@ class MainActivity : ComponentActivity() {
                 val pending = pendingLocalPlaylistExport
                 if (uri != null && pending != null) {
                     runCatching {
-                        contentResolver.openOutputStream(uri)?.use { output ->
-                            output.write(pending.content.toByteArray(Charsets.UTF_8))
-                        } ?: error("无法打开导出目标")
-                    }.onFailure {
-                        controller.showMessage(it.message ?: "导出本地歌单失败")
-                    }
+                        contentResolver.openOutputStream(uri)?.use { it.write(pending.content.toByteArray(Charsets.UTF_8)) }
+                            ?: error("无法打开导出目标")
+                    }.onFailure { controller.showMessage(it.message ?: "导出本地歌单失败") }
                 }
                 pendingLocalPlaylistExport = null
             }
 
             val controllerHandlesBack = appViewModel.playbackUiPort.isFullPlayerOpen ||
-                controller.isVideoFullscreen ||
-                controller.settingsLoginProviderId != null ||
-                controller.selectedLocalMusicCollection != null ||
-                controller.selectedLocalMusicDirectoryId != null
-            val useLegacyPageBack = AndroidPredictiveBackPreference.isSupported &&
-                !predictiveBackEnabled &&
-                appUiState.backStack.size > 1 &&
-                appUiState.backStack.lastOrNull() != AppRoute.Settings
-            BackHandler(
-                enabled = controllerHandlesBack || useLegacyPageBack,
-            ) {
+                controller.isVideoFullscreen || controller.settingsLoginProviderId != null ||
+                controller.selectedLocalMusicCollection != null || controller.selectedLocalMusicDirectoryId != null
+            val useLegacyPageBack = AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
+                appUiState.backStack.size > 1 && appUiState.backStack.lastOrNull() != AppRoute.Settings
+            BackHandler(enabled = controllerHandlesBack || useLegacyPageBack) {
                 appViewModel.dispatch(AppIntent.NavigateBack)
             }
 
@@ -212,21 +153,15 @@ class MainActivity : ComponentActivity() {
                 launchSharedText?.let(controller::openSharedResource)
             }
 
-            AppRoot(
+            P2AppRoot(
                 appViewModel = appViewModel,
                 hasAudioPermission = hasAudioPermission,
                 hasImagePermission = hasImagePermission,
                 appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                onRequestAudioPermission = {
-                    permissionLauncher.launch(mediaPermissions())
-                },
-                onRequestImagePermission = {
-                    permissionLauncher.launch(imagePermissions())
-                },
+                onRequestAudioPermission = { permissionLauncher.launch(mediaPermissions()) },
+                onRequestImagePermission = { permissionLauncher.launch(imagePermissions()) },
                 hasMicrophonePermission = hasMicrophonePermission,
-                onRequestMicrophonePermission = {
-                    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                },
+                onRequestMicrophonePermission = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                 onOpenProviderWebLogin = { provider ->
                     if (provider.loginConfig != null) {
                         pendingWebLoginProviderId = provider.providerId
@@ -235,32 +170,22 @@ class MainActivity : ComponentActivity() {
                 },
                 onLogoutProvider = { provider ->
                     ProviderWebLoginActivity.clearWebLoginState()
-                    controller.logoutProvider(provider.providerId)
+                    appViewModel.providerAuthFeatureController.logout(provider.providerId)
                 },
-                onImportYtmusicHeaderFile = {
-                    ytmusicHeaderFileLauncher.launch(arrayOf("application/json"))
-                },
-                onImportYtmusicOAuthFile = {
-                    ytmusicOAuthFileLauncher.launch(arrayOf("application/json"))
-                },
+                onImportYtmusicHeaderFile = { ytmusicHeaderFileLauncher.launch(arrayOf("application/json")) },
+                onImportYtmusicOAuthFile = { ytmusicOAuthFileLauncher.launch(arrayOf("application/json")) },
                 onStartYtmusicOAuth = {
-                    val oauthInput = controller.providerOAuthInputFor("ytmusic")
-                    val hasCredentials = oauthInput.clientId.isNotBlank() && oauthInput.clientSecret.isNotBlank()
+                    val oauthInput = appViewModel.providerAuthFeatureController.oauthInput("ytmusic")
                     val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(
-                            this@MainActivity,
-                            Manifest.permission.POST_NOTIFICATIONS,
-                        ) != PackageManager.PERMISSION_GRANTED
-                    if (hasCredentials && needsPermission) {
+                        ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    if (oauthInput.clientId.isNotBlank() && oauthInput.clientSecret.isNotBlank() && needsPermission) {
                         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
-                        controller.startYtmusicTvOAuthLogin()
+                        appViewModel.providerAuthFeatureController.startYtmusicTvOAuthLogin()
                     }
                 },
                 onImportLocalPlaylistFile = {
-                    localPlaylistFileLauncher.launch(
-                        arrayOf("text/plain", "application/octet-stream", "application/x-fuo", "*/*"),
-                    )
+                    localPlaylistFileLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-fuo", "*/*"))
                 },
                 onExportLocalPlaylistFile = { fileName, content ->
                     pendingLocalPlaylistExport = PendingLocalPlaylistExport(fileName, content)
@@ -271,137 +196,78 @@ class MainActivity : ComponentActivity() {
             )
 
             BackHandler(
-                enabled = !controllerHandlesBack &&
-                    AndroidPredictiveBackPreference.isSupported &&
-                    !predictiveBackEnabled &&
+                enabled = !controllerHandlesBack && AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
                     appUiState.backStack.lastOrNull() != AppRoute.Settings,
             ) {
-                if (appUiState.backStack.size > 1) {
-                    appViewModel.dispatch(AppIntent.NavigateBack)
-                } else {
-                    finish()
-                }
+                if (appUiState.backStack.size > 1) appViewModel.dispatch(AppIntent.NavigateBack) else finish()
             }
         }
     }
 
     override fun onStop() {
-        val appViewModel = (application as FuoEvolveApplication).appViewModel
-        appViewModel.onAppBackgrounded()
+        (application as FuoEvolveApplication).appViewModel.onAppBackgrounded()
         super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (handleOAuthUserCodeCopyIntent(intent)) {
-            return
-        }
-        val localPlaylistImport = localPlaylistImportFromIntent(intent)
-        if (localPlaylistImport != null) {
-            handleLocalPlaylistImport(localPlaylistImport)
-            return
-        }
-        sharedTextFromIntent(intent)?.let {
-            (application as FuoEvolveApplication).controller.openSharedResource(it)
-        }
+        if (handleOAuthUserCodeCopyIntent(intent)) return
+        localPlaylistImportFromIntent(intent)?.let { handleLocalPlaylistImport(it); return }
+        sharedTextFromIntent(intent)?.let { (application as FuoEvolveApplication).controller.openSharedResource(it) }
     }
 
     private fun handleOAuthUserCodeCopyIntent(intent: Intent?): Boolean {
-        if (intent?.action != AndroidOAuthDeviceCodeAssistant.ACTION_COPY_OAUTH_USER_CODE) {
-            return false
-        }
-        val userCode = intent.getStringExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)
-            ?.takeIf { it.isNotBlank() }
-            ?: return true
-        val controller = (application as FuoEvolveApplication).controller
-        AndroidOAuthDeviceCodeAssistant.copyToClipboard(this, userCode)
-        controller.showMessage("验证码已复制：$userCode")
+        if (intent?.action != AndroidOAuthDeviceCodeAssistant.ACTION_COPY_OAUTH_USER_CODE) return false
+        val code = intent.getStringExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)?.takeIf { it.isNotBlank() } ?: return true
+        AndroidOAuthDeviceCodeAssistant.copyToClipboard(this, code)
+        (application as FuoEvolveApplication).controller.showMessage("验证码已复制：$code")
         intent.action = null
         intent.removeExtra(AndroidOAuthDeviceCodeAssistant.EXTRA_OAUTH_USER_CODE)
         return true
     }
 
-    private fun hasAudioPermission(): Boolean {
-        return audioPermissions().all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
+    private fun readText(uri: Uri): String = runCatching {
+        contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+    }.getOrDefault("")
+
+    private fun hasAudioPermission() = audioPermissions().all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+    private fun hasImagePermission() = imagePermissions().all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+    private fun mediaPermissions() = (audioPermissions().toList() + imagePermissions()).distinct().toTypedArray()
+    private fun imagePermissions() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+    } else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    private fun audioPermissions() = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        Build.VERSION.SDK_INT <= Build.VERSION_CODES.P -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
-
-    private fun hasImagePermission(): Boolean {
-        return imagePermissions().all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    private fun mediaPermissions(): Array<String> = (audioPermissions().toList() + imagePermissions()).distinct().toTypedArray()
-
-    private fun imagePermissions(): Array<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
-        } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-    }
-
-    private fun audioPermissions(): Array<String> {
-        return when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
-            Build.VERSION.SDK_INT <= Build.VERSION_CODES.P -> arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            )
-            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-    }
-
-    private fun hasMicrophonePermission(): Boolean =
-        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-
-    private fun hasPermissions(
-        permissionResult: Map<String, Boolean>,
-        permissions: Array<String>,
-    ): Boolean = permissions.all { permission ->
-        permissionResult[permission] ?: ContextCompat.checkSelfPermission(this, permission) ==
-            PackageManager.PERMISSION_GRANTED
+    private fun hasMicrophonePermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    private fun hasPermissions(result: Map<String, Boolean>, permissions: Array<String>) = permissions.all { permission ->
+        result[permission] ?: (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED)
     }
 
     private fun shareText(text: String) {
-        val sendIntent = Intent(Intent.ACTION_SEND)
-            .setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT, text)
-        startActivity(Intent.createChooser(sendIntent, "分享"))
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "分享"))
     }
 
     private fun shareLocalPlaylistFile(fileName: String, content: String) {
-        val shareDirectory = File(cacheDir, "local-playlists")
-        if (!shareDirectory.exists()) shareDirectory.mkdirs()
-        val safeName = File(fileName).name.ifBlank { "playlist.fuo" }
-        val file = File(shareDirectory, safeName)
+        val dir = File(cacheDir, "local-playlists").also { if (!it.exists()) it.mkdirs() }
+        val file = File(dir, File(fileName).name.ifBlank { "playlist.fuo" })
         runCatching {
             file.writeText(content, Charsets.UTF_8)
             val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-            val sendIntent = Intent(Intent.ACTION_SEND)
-                .setType(LOCAL_PLAYLIST_MIME_TYPE)
-                .putExtra(Intent.EXTRA_STREAM, uri)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(Intent.createChooser(sendIntent, "分享本地歌单文件"))
-        }.onFailure {
-            (application as FuoEvolveApplication).controller.showMessage(it.message ?: "分享本地歌单失败")
-        }
+            val intent = Intent(Intent.ACTION_SEND).setType(LOCAL_PLAYLIST_MIME_TYPE)
+                .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(intent, "分享本地歌单文件"))
+        }.onFailure { (application as FuoEvolveApplication).controller.showMessage(it.message ?: "分享本地歌单失败") }
     }
 
     private fun displayNameFor(uri: Uri): String {
         val queried = runCatching {
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                ?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
-                    } else {
-                        null
-                    }
-                }
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
+            }
         }.getOrNull()
         return queried?.takeIf { it.isNotBlank() }
             ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
@@ -413,29 +279,16 @@ class MainActivity : ComponentActivity() {
         val uri = intent.data ?: return null
         if (uri.scheme != CONTENT_URI_SCHEME && uri.scheme != FILE_URI_SCHEME) return null
         val fileName = displayNameFor(uri)
-        val mimeType = runCatching { contentResolver.getType(uri) }.getOrNull()
-        val supportedMimeType = mimeType == LOCAL_PLAYLIST_MIME_TYPE ||
-            mimeType == "application/octet-stream" ||
-            mimeType == "text/plain"
-        if (!fileName.endsWith(".fuo", ignoreCase = true) && !supportedMimeType) {
-            return null
-        }
-        val content = runCatching {
-            contentResolver.openInputStream(uri)
-                ?.bufferedReader()
-                ?.use { it.readText() }
-                .orEmpty()
-        }.getOrDefault("")
-        return PendingLocalPlaylistImport(fileName, content)
+        val mime = runCatching { contentResolver.getType(uri) }.getOrNull()
+        val supported = mime == LOCAL_PLAYLIST_MIME_TYPE || mime == "application/octet-stream" || mime == "text/plain"
+        if (!fileName.endsWith(".fuo", ignoreCase = true) && !supported) return null
+        return PendingLocalPlaylistImport(fileName, readText(uri))
     }
 
     private fun handleLocalPlaylistImport(pending: PendingLocalPlaylistImport) {
-        val controller = (application as FuoEvolveApplication).controller
-        if (pending.content.isBlank()) {
-            controller.showMessage("无法读取本地歌单文件")
-        } else {
-            controller.prepareLocalPlaylistImport(pending.fileName, pending.content)
-        }
+        val vm = (application as FuoEvolveApplication).appViewModel
+        if (pending.content.isBlank()) (application as FuoEvolveApplication).controller.showMessage("无法读取本地歌单文件")
+        else vm.localPlaylistFeatureController.prepareImport(pending.fileName, pending.content)
     }
 
     private fun configureSystemBars(darkTheme: Boolean) {
@@ -445,21 +298,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun resolveDarkTheme(themeMode: ThemeMode, systemDark: Boolean): Boolean {
-        return when (themeMode) {
-            ThemeMode.System -> systemDark
-            ThemeMode.Light -> false
-            ThemeMode.Dark -> true
-        }
+    private fun resolveDarkTheme(themeMode: ThemeMode, systemDark: Boolean) = when (themeMode) {
+        ThemeMode.System -> systemDark
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
     }
 
-    private fun sharedTextFromIntent(intent: Intent?): String? {
-        return when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-                ?.takeUnless { it.scheme == CONTENT_URI_SCHEME || it.scheme == FILE_URI_SCHEME }
-                ?.toString()
-            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
-            else -> null
-        }?.takeIf { it.isNotBlank() }
-    }
+    private fun sharedTextFromIntent(intent: Intent?): String? = when (intent?.action) {
+        Intent.ACTION_VIEW -> intent.data?.takeUnless { it.scheme == CONTENT_URI_SCHEME || it.scheme == FILE_URI_SCHEME }?.toString()
+        Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        else -> null
+    }?.takeIf { it.isNotBlank() }
 }
