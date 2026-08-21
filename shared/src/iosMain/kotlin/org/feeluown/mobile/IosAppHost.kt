@@ -109,6 +109,10 @@ private class IosAppContainer(
     private val providerSessionRepository = DefaultProviderSessionRepository(providerRepository)
     private val navigator = AppNavigator()
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant = IosOAuthDeviceCodeAssistant(oauthDeviceCodeOutput)
+    private val playbackQueueStore = IosPlaybackQueueStore()
+    private val resourceCacheRepository = IosResourceCacheRepository()
+    private val debugLogFeatureController by lazy { createDebugLogFeatureController(NoOpDebugLogRepository, scope) }
+    private val audioRecognitionRepository = IosAudioRecognitionRepository(audioRecognitionOutput)
 
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
@@ -133,10 +137,7 @@ private class IosAppContainer(
             ),
         )
     }
-    private val playbackQueueStore = IosPlaybackQueueStore()
-    private val resourceCacheRepository = IosResourceCacheRepository()
-    private val debugLogFeatureController by lazy { createDebugLogFeatureController(NoOpDebugLogRepository, scope) }
-    private val audioRecognitionRepository = IosAudioRecognitionRepository(audioRecognitionOutput)
+
     private val recognitionController by lazy {
         createRecognitionFeatureController(
             repository = audioRecognitionRepository,
@@ -145,35 +146,12 @@ private class IosAppContainer(
             pausePlayback = playbackEngine::pause,
         )
     }
-    var hasMicrophonePermission by mutableStateOf(audioRecognitionOutput.hasPermission())
-        private set
 
-    val controller = FuoPlayerController(
-        providerRepository = providerRepository,
-        localRepository = localRepository,
-        localPlaylistRepository = localPlaylistRepository,
-        downloadRepository = downloadRepository,
-        playbackEngine = playbackEngine,
-        settingsRepository = settingsRepository,
-        providerSessionRepository = providerSessionRepository,
-        navigator = navigator,
-        playbackQueueStore = playbackQueueStore,
-        resourceCacheRepository = resourceCacheRepository,
-        audioRecognitionRepository = audioRecognitionRepository,
-        oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
-        scope = scope,
-        searchFeatureController = searchController,
-        recognitionFeatureController = recognitionController,
-    )
-
-    private val localMusicFeatureController by lazy {
-        controller.localMusicActionPort as? LocalMusicFeatureController
-            ?: error("Local Music feature owner is not installed")
-    }
     private val providerCatalogFeatureController by lazy {
         createProviderCatalogFeatureController(providerRepository, providerSessionRepository, settingsRepository, scope)
     }
-    private val localPlaylistFeatureController by lazy {
+
+    private val localPlaylistFeatureController: LocalPlaylistFeatureOwner by lazy {
         createLocalPlaylistFeatureController(
             repository = localPlaylistRepository,
             navigator = navigator,
@@ -181,6 +159,100 @@ private class IosAppContainer(
             providers = { providerCatalogFeatureController.uiState.value.providers },
         )
     }
+
+    private val localMusicFeatureController: LocalMusicFeatureController by lazy {
+        createLocalMusicFeatureController(
+            repository = localRepository,
+            providerRepository = providerRepository,
+            navigator = navigator,
+            settingsRepository = settingsRepository,
+            providers = { providerCatalogFeatureController.uiState.value.providers },
+            isLocalMusicSectionActive = {
+                val state = homeFeatureController.uiState.value
+                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+            },
+            scope = scope,
+            onTrackUpdated = { trackId, track -> playbackFeatureOwner.updateTrackCopies(trackId, track) },
+        )
+    }
+
+    private val downloadActionPort: DownloadActionPort by lazy {
+        createDownloadActionPort(
+            providerRepository = providerRepository,
+            downloadRepository = downloadRepository,
+            localRepository = localRepository,
+            localMusicController = localMusicFeatureController,
+            settingsRepository = settingsRepository,
+            scope = scope,
+            isLocalMusicSectionActive = {
+                val state = homeFeatureController.uiState.value
+                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+            },
+        )
+    }
+
+    private val playbackFeatureOwner: PlaybackFeatureOwner by lazy {
+        createPlaybackFeatureOwner(
+            providerRepository = providerRepository,
+            playbackEngine = playbackEngine,
+            playbackQueueStore = playbackQueueStore,
+            settingsRepository = settingsRepository,
+            downloadActions = downloadActionPort,
+            scope = scope,
+            openTrackDetail = { track -> providerDetailOwners.track.open(track) },
+        )
+    }
+
+    private val providerDetailOwners: ProviderDetailOwners by lazy {
+        createProviderDetailOwners(
+            providerRepository = providerRepository,
+            playbackQueue = playbackFeatureOwner.transport,
+            settingsRepository = settingsRepository,
+            providerCatalog = providerCatalogFeatureController,
+            navigator = navigator,
+            scope = scope,
+            onProviderMutation = { homeFeatureController.refreshMine() },
+        )
+    }
+
+    private val homeFeatureController: HomeFeatureController by lazy {
+        createHomeFeatureController(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            playbackQueue = playbackFeatureOwner.transport,
+            localPlaylist = localPlaylistFeatureController,
+            localMusic = localMusicFeatureController,
+            settingsRepository = settingsRepository,
+            navigator = navigator,
+            scope = scope,
+        )
+    }
+
+    private val playlistActionPort: PlaylistActionPort by lazy {
+        createPlaylistActionPort(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            localPlaylist = localPlaylistFeatureController,
+            scope = scope,
+            onProviderMutation = { homeFeatureController.refreshMine() },
+        )
+    }
+
+    private val providerTrackActionPort: ProviderTrackActionPort by lazy {
+        createProviderTrackActionPort(
+            providerRepository = providerRepository,
+            providerCatalog = providerCatalogFeatureController,
+            providerDetails = providerDetailOwners,
+            searchController = searchController,
+            playbackNavigation = playbackFeatureOwner.navigation,
+            playbackQueue = playbackFeatureOwner.transport,
+            scope = scope,
+            refreshMineContent = homeFeatureController::refreshMine,
+        )
+    }
+
     private val providerAuthFeatureController by lazy {
         createProviderAuthFeatureController(
             providerRepository = providerRepository,
@@ -198,6 +270,7 @@ private class IosAppContainer(
             },
         )
     }
+
     private val settingsFeatureController by lazy {
         createSettingsFeatureController(
             settingsRepository = settingsRepository,
@@ -210,6 +283,7 @@ private class IosAppContainer(
             scope = scope,
         )
     }
+
     private val onboardingFeatureController: OnboardingFeatureController by lazy {
         createOnboardingFeatureController(
             providerRepository = providerRepository,
@@ -218,30 +292,7 @@ private class IosAppContainer(
             scope = scope,
         )
     }
-    private val providerDetailOwners: ProviderDetailOwners by lazy {
-        createProviderDetailOwners(
-            providerRepository = providerRepository,
-            playbackQueue = controller.playbackQueueUiPort,
-            settingsRepository = settingsRepository,
-            providerCatalog = providerCatalogFeatureController,
-            navigator = navigator,
-            scope = scope,
-            onProviderMutation = { homeFeatureController.refreshMine() },
-        )
-    }
-    private val homeFeatureController: HomeFeatureController by lazy {
-        createHomeFeatureController(
-            providerRepository = providerRepository,
-            providerCatalog = providerCatalogFeatureController,
-            providerDetails = providerDetailOwners,
-            playbackQueue = controller.playbackQueueUiPort,
-            localPlaylist = localPlaylistFeatureController,
-            localMusic = localMusicFeatureController,
-            settingsRepository = settingsRepository,
-            navigator = navigator,
-            scope = scope,
-        )
-    }
+
     private val sharedResourceActionPort: SharedResourceActionPort by lazy {
         createSharedResourceActionPort(
             providerRepository = providerRepository,
@@ -252,26 +303,29 @@ private class IosAppContainer(
             scope = scope,
         )
     }
+
     private val playbackSession by lazy {
         createIosPlaybackRuntimeSession(
-            controller = controller,
+            playbackState = playbackFeatureOwner.playbackState,
             playbackEngine = playbackEngine,
-            transportCoordinator = controller.playbackTransportCoordinator,
-            startFailureSource = controller.playbackStartFailureSource,
+            transportCoordinator = playbackFeatureOwner.transport,
+            startFailureSource = playbackFeatureOwner.startFailureSource,
             scope = scope,
         )
     }
+
     private val searchAppPort by lazy {
         DefaultSearchAppPort(
             searchController = searchController,
             providerSessions = { providerSessionRepository.state.value },
-            playbackQueue = controller.playbackQueueUiPort,
-            downloads = controller.downloadActionPort,
-            playlists = controller.playlistActionPort,
-            providerTrackActions = controller.providerTrackActionPort,
+            playbackQueue = playbackFeatureOwner.transport,
+            downloads = downloadActionPort,
+            playlists = playlistActionPort,
+            providerTrackActions = providerTrackActionPort,
             navigator = navigator,
         )
     }
+
     private val recognitionAppPort by lazy {
         DefaultRecognitionAppPort(
             isProviderEnabled = { id -> providerSessionRepository.state.value.providers.any { it.providerId == id } },
@@ -279,22 +333,22 @@ private class IosAppContainer(
             navigator = navigator,
         )
     }
+
     private val playbackPresentationPort by lazy {
-        DefaultPlaybackPresentationPort(playbackEngine, controller.playbackQueueUiPort, settingsRepository, scope)
+        DefaultPlaybackPresentationPort(playbackEngine, playbackFeatureOwner.transport, settingsRepository, scope)
     }
 
     val appViewModel = FuoAppViewModel(
-        controller = controller,
         playbackSession = playbackSession,
-        playbackNavigationPort = controller.playbackNavigationPort,
+        playbackNavigationPort = playbackFeatureOwner.navigation,
         playbackPresentationPort = playbackPresentationPort,
-        playbackQueueUiPort = controller.playbackQueueUiPort,
-        playbackSleepTimerPort = controller.playbackSleepTimerPort,
-        downloadActionPort = controller.downloadActionPort,
-        playlistActionPort = controller.playlistActionPort,
-        providerTrackActionPort = controller.providerTrackActionPort,
+        playbackQueueUiPort = playbackFeatureOwner.transport,
+        playbackSleepTimerPort = playbackFeatureOwner.sleepTimer,
+        downloadActionPort = downloadActionPort,
+        playlistActionPort = playlistActionPort,
+        providerTrackActionPort = providerTrackActionPort,
         localMusicActionPort = localMusicFeatureController,
-        replacementActionPort = controller.replacementActionPort,
+        replacementActionPort = playbackFeatureOwner.replacement,
         debugLogFeatureController = debugLogFeatureController,
         providerCatalogFeatureController = providerCatalogFeatureController,
         providerAuthFeatureController = providerAuthFeatureController,
@@ -313,6 +367,9 @@ private class IosAppContainer(
         providerSessionRepository = providerSessionRepository,
         navigator = navigator,
     )
+
+    var hasMicrophonePermission by mutableStateOf(audioRecognitionOutput.hasPermission())
+        private set
 
     val hasAudioPermission: Boolean get() = localRepository.hasPermission
 
