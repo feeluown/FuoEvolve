@@ -329,7 +329,7 @@ private fun PlaybackFeatureSettings(
                 }
             }
             Text(
-                "最低匹配分 ${"%.2f".format(settings.smartReplacementMinScore)}",
+                "最低匹配分 ${formatReplacementScore(settings.smartReplacementMinScore)}",
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             Slider(
@@ -370,7 +370,11 @@ private fun AppearanceFeatureSettings(
                 controller.update { it.copy(dynamicCoverColorEnabled = enabled) }
             }
             if (state.statusBarLyricsAvailable) {
-                SettingsToggle("状态栏歌词", settings.statusBarLyricsEnabled, controller::setStatusBarLyricsEnabled)
+                SettingsToggle(
+                    title = "状态栏歌词",
+                    checked = settings.statusBarLyricsEnabled,
+                    onChange = controller::setStatusBarLyricsEnabled,
+                )
             }
         }
     }
@@ -680,6 +684,11 @@ private fun providerLoginModeLabel(mode: ProviderLoginMode): String = when (mode
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"
+}
+
+private fun formatReplacementScore(value: Double): String {
+    val hundredths = (value.coerceIn(0.0, 1.0) * 100.0 + 0.5).toInt()
+    return "${hundredths / 100}.${(hundredths % 100).toString().padStart(2, '0')}"
 }
 
 private fun formatCacheBytes(bytes: Long): String = when {
