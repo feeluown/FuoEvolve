@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
-import androidx.compose.runtime.snapshotFlow
 import io.github.proify.lyricon.lyric.model.LyricWord as LyriconLyricWord
 import io.github.proify.lyricon.lyric.model.RichLyricLine as LyriconRichLyricLine
 import io.github.proify.lyricon.lyric.model.Song as LyriconSong
@@ -13,6 +12,7 @@ import io.github.proify.lyricon.provider.LyriconProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -31,7 +31,7 @@ internal fun isLyriconInstalled(context: Context): Boolean = runCatching {
 internal class LyriconLyricsPublisher(
     context: Context,
     private val playbackSession: PlaybackSession,
-    private val statusBarLyricsEnabled: () -> Boolean,
+    private val statusBarLyricsEnabled: Flow<Boolean>,
     private val scope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -75,7 +75,7 @@ internal class LyriconLyricsPublisher(
         collectJob = scope.launch {
             combine(
                 playbackSession.state,
-                snapshotFlow { statusBarLyricsEnabled() }.distinctUntilChanged(),
+                statusBarLyricsEnabled.distinctUntilChanged(),
             ) { state, enabled ->
                 Snapshot(
                     enabled = enabled,
