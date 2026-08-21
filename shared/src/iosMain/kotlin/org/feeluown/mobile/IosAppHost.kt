@@ -283,7 +283,6 @@ private class IosAppContainer(
     }
 
     val appViewModel = FuoAppViewModel(
-        controller = controller,
         playbackSession = playbackSession,
         playbackNavigationPort = controller.playbackNavigationPort,
         playbackPresentationPort = playbackPresentationPort,
