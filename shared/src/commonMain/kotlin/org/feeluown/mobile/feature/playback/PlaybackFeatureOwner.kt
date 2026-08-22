@@ -434,7 +434,7 @@ private class DefaultPlaybackFeatureOwner(
     }
 
     private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
-        queueState.restore(snapshot)
+        if (!queueState.restore(snapshot)) return
         playbackParts = emptyList()
         currentPartIndex = -1
         updatePlaybackState { current ->
