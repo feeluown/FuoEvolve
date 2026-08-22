@@ -70,7 +70,7 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
 
       - name: Run feature, playback runtime, shared tests and architecture checks
-        run: ./gradlew checkArchitectureBoundaries :feature:recognition:allTests :feature:search:allTests :feature:localplaylist:allTests :feature:localmusic:allTests :feature:download:allTests :feature:providercatalog:allTests :feature:providerauth:allTests :playback:runtime:allTests :shared:allTests
+        run: ./gradlew checkArchitectureBoundaries :feature:recognition:allTests :feature:search:allTests :feature:localplaylist:allTests :feature:localmusic:allTests :feature:download:allTests :feature:providercatalog:allTests :feature:providerauth:allTests :feature:providerdetail:allTests :playback:runtime:allTests :shared:allTests
 
   build-debug-simulator:
     name: Build debug iOS simulator app
