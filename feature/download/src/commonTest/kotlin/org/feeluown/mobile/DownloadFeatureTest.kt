@@ -19,7 +19,7 @@ class DownloadFeatureTest {
             },
             localLibrary = localLibrary,
             operations = Operations,
-            scope = this,
+            scope = backgroundScope,
             shouldShowLocalMusicLoading = { true },
             persistParallelism = {},
         )
