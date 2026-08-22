@@ -303,7 +303,9 @@ private class BoundProviderFeatureDetailPort(
     override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
         providerDetailError(throwable, fallback, providerId)
     override fun open(feature: ProviderFeature) = navigator.navigate(AppRoute.FeatureDetail(feature.toNavigationFeature()))
-    override fun close() = navigator.pop(AppRoute.Feature)
+    override fun close() {
+        navigator.pop(AppRoute.Feature)
+    }
     override fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, feature: ProviderFeature) =
         playbackQueue.playFeatureTracks(tracks, index, feature)
     override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
@@ -375,7 +377,9 @@ private class BoundProviderPlaylistDetailPort(
             category = category?.name,
         )
     )
-    override fun close() = navigator.pop(AppRoute.Playlist)
+    override fun close() {
+        navigator.pop(AppRoute.Playlist)
+    }
     override fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, playlistId: String) =
         playbackQueue.playPlaylistTracks(tracks, index, playlistId)
     override fun playAllPlaylistTracks(tracks: List<MusicTrack>, playlistId: String) =
@@ -404,7 +408,9 @@ private class BoundProviderTrackDetailPort(
     override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
         providerDetailError(throwable, fallback, providerId)
     override fun open(track: MusicTrack) = navigator.navigate(AppRoute.TrackDetail(track.toNavigationTrack()))
-    override fun close() = navigator.pop(AppRoute.Track)
+    override fun close() {
+        navigator.pop(AppRoute.Track)
+    }
     override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
     override fun openVideo(video: ProviderVideo) = videoController.open(video)
 }
@@ -438,7 +444,9 @@ private class BoundProviderMediaItemDetailPort(
     override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
         providerDetailError(throwable, fallback, providerId)
     override fun open(item: ProviderMediaItem) = navigator.navigate(AppRoute.MediaItemDetail(item.toNavigationMediaItem()))
-    override fun close() = navigator.pop(AppRoute.MediaItem)
+    override fun close() {
+        navigator.pop(AppRoute.MediaItem)
+    }
     override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
 }
 
@@ -456,7 +464,9 @@ private class BoundProviderVideoDetailPort(
     override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
         providerDetailError(throwable, fallback, providerId)
     override fun open(video: ProviderVideo) = navigator.navigate(AppRoute.VideoDetail(video.toNavigationVideo()))
-    override fun close() = navigator.pop(AppRoute.Video)
+    override fun close() {
+        navigator.pop(AppRoute.Video)
+    }
 }
 
 private fun CoreFeatureState<ProviderFeature, ProviderContentSection, MusicTrack>.toUiState() = ProviderFeatureDetailUiState(
