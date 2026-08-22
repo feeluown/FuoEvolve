@@ -2,8 +2,12 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.feature.localplaylist.LocalPlaylistFeatureOperations
+import org.feeluown.mobile.feature.localplaylist.LocalPlaylistFeatureOwner as CoreLocalPlaylistFeatureOwner
+import org.feeluown.mobile.feature.localplaylist.LocalPlaylistFeatureState
+import org.feeluown.mobile.feature.localplaylist.createLocalPlaylistFeatureOwner as createCoreLocalPlaylistFeatureOwner
 
-typealias LocalPlaylistFeatureController = LocalPlaylistFeatureOwner<
+typealias LocalPlaylistFeatureOwner = CoreLocalPlaylistFeatureOwner<
     MusicTrack,
     LocalPlaylist,
     LocalPlaylistImportPreview,
@@ -11,7 +15,8 @@ typealias LocalPlaylistFeatureController = LocalPlaylistFeatureOwner<
     LocalPlaylistFile,
     LocalPlaylistOperationResult
 >
-typealias LocalPlaylistController = LocalPlaylistFeatureController
+typealias LocalPlaylistFeatureController = LocalPlaylistFeatureOwner
+typealias LocalPlaylistController = LocalPlaylistFeatureOwner
 typealias LocalPlaylistUiState = LocalPlaylistFeatureState<MusicTrack, LocalPlaylist, LocalPlaylistImportPreview>
 
 @Suppress("FunctionName")
@@ -130,7 +135,7 @@ fun createLocalPlaylistFeatureController(
             LocalPlaylistOperationResult(success = false, message = message)
     }
 
-    val owner = createLocalPlaylistFeatureOwner(
+    val owner = createCoreLocalPlaylistFeatureOwner(
         operations = operations,
         scope = scope,
         openPlaylist = { navigator.navigate(AppRoute.LocalPlaylist) },
