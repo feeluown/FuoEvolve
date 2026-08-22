@@ -64,7 +64,9 @@ internal class PlaybackQueueCoordinator(
         get() = queueState.isFmQueue
 
     override fun startCurrent() {
-        (queueState.currentTrack() ?: fallbackTrack())?.let { startPlayback(it, 0, null) }
+        (queueState.currentTrack() ?: fallbackTrack())?.let { track ->
+            startTrack(track, 0, null, PlaybackStartReason.RESUME)
+        }
     }
 
     override fun playTracks(tracks: List<MusicTrack>, index: Int) {
@@ -125,7 +127,9 @@ internal class PlaybackQueueCoordinator(
         updateTrackChangeDirection(TrackChangeDirection.Next)
         if (queueState.repeatMode == RepeatMode.SINGLE) {
             if (playPlaybackPartOffset(1, wrap = true)) return
-            startCurrent()
+            (queueState.currentTrack() ?: fallbackTrack())?.let { track ->
+                startTrack(track, 0, null, PlaybackStartReason.AUTO_NEXT)
+            }
             return
         }
         if (playPlaybackPartOffset(1)) return
@@ -169,7 +173,9 @@ internal class PlaybackQueueCoordinator(
         updateTrackChangeDirection(TrackChangeDirection.Previous)
         if (queueState.repeatMode == RepeatMode.SINGLE) {
             if (playPlaybackPartOffset(-1, wrap = true)) return
-            startCurrent()
+            (queueState.currentTrack() ?: fallbackTrack())?.let { track ->
+                startTrack(track, 0, null, PlaybackStartReason.AUTO_NEXT)
+            }
             return
         }
         if (playPlaybackPartOffset(-1)) return
@@ -197,14 +203,20 @@ internal class PlaybackQueueCoordinator(
         updateTrackChangeDirection(TrackChangeDirection.Next)
         val currentOffset = if (queueState.currentTrack() != null) 1 else 0
         if (index == 0 && currentOffset == 1) {
-            startCurrent()
+            queueState.currentTrack()?.let { track ->
+                startTrack(track, 0, null, PlaybackStartReason.USER_SELECTION)
+            }
             return
         }
         val pendingOffset = currentOffset
         val pendingEnd = pendingOffset + queueState.upNextQueue.size
         when {
             index in pendingOffset until pendingEnd -> {
-                playUpNextIndexInternal(index - pendingOffset, TrackChangeDirection.Next)
+                playUpNextIndexInternal(
+                    index - pendingOffset,
+                    TrackChangeDirection.Next,
+                    PlaybackStartReason.USER_SELECTION,
+                )
             }
             else -> {
                 val mainStartIndex = when {
@@ -213,7 +225,12 @@ internal class PlaybackQueueCoordinator(
                     else -> 0
                 }
                 val mainIndex = mainStartIndex + (index - pendingEnd)
-                playMainIndexInternal(mainIndex, 0, TrackChangeDirection.Next)
+                playMainIndexInternal(
+                    mainIndex,
+                    0,
+                    TrackChangeDirection.Next,
+                    PlaybackStartReason.USER_SELECTION,
+                )
             }
         }
     }
@@ -221,7 +238,9 @@ internal class PlaybackQueueCoordinator(
     override fun playPlaybackPart(index: Int) {
         val parts = playbackParts()
         if (index !in parts.indices) return
-        queueState.currentTrack()?.let { startPlayback(it, 0, index) }
+        queueState.currentTrack()?.let { track ->
+            startTrack(track, 0, index, PlaybackStartReason.USER_SELECTION)
+        }
     }
 
     override fun removeFromQueue(track: MusicTrack) {
@@ -320,7 +339,9 @@ internal class PlaybackQueueCoordinator(
         } else {
             nextPartIndex.takeIf { it in parts.indices } ?: return false
         }
-        queueState.currentTrack()?.let { startPlayback(it, 0, targetPartIndex) } ?: return false
+        queueState.currentTrack()?.let { track ->
+            startTrack(track, 0, targetPartIndex, PlaybackStartReason.AUTO_NEXT)
+        } ?: return false
         return true
     }
 
@@ -360,30 +381,50 @@ internal class PlaybackQueueCoordinator(
             }
         }
         publishQueueMutation()
-        playMainIndexInternal(queueState.mainQueueIndex, 0, TrackChangeDirection.Next)
+        playMainIndexInternal(
+            queueState.mainQueueIndex,
+            0,
+            TrackChangeDirection.Next,
+            if (keepSelectedTrack) PlaybackStartReason.USER_SELECTION else PlaybackStartReason.PLAYLIST_REPLACE,
+        )
     }
 
     private fun playMainIndexInternal(
         index: Int,
         skippedUnavailableCount: Int,
         direction: TrackChangeDirection,
+        reason: PlaybackStartReason = PlaybackStartReason.AUTO_NEXT,
     ) {
         val track = queueState.mainQueue.getOrNull(index) ?: return
         updateTrackChangeDirection(direction)
         queueState.currentUpNextTrack = null
         queueState.currentIsUpNext = false
         queueState.mainQueueIndex = index
-        startPlayback(track, skippedUnavailableCount, null)
+        startTrack(track, skippedUnavailableCount, null, reason)
     }
 
-    private fun playUpNextIndexInternal(index: Int, direction: TrackChangeDirection) {
+    private fun playUpNextIndexInternal(
+        index: Int,
+        direction: TrackChangeDirection,
+        reason: PlaybackStartReason = PlaybackStartReason.AUTO_NEXT,
+    ) {
         val track = queueState.upNextQueue.getOrNull(index) ?: return
         updateTrackChangeDirection(direction)
         queueState.upNextQueue = queueState.upNextQueue.filterIndexed { itemIndex, _ -> itemIndex != index }
         queueState.currentUpNextTrack = track
         queueState.currentIsUpNext = true
         publishQueueMutation()
-        startPlayback(track, 0, null)
+        startTrack(track, 0, null, reason)
+    }
+
+    private fun startTrack(
+        track: MusicTrack,
+        skippedUnavailableCount: Int,
+        requestedPartIndex: Int?,
+        reason: PlaybackStartReason,
+    ) {
+        queueState.markNextPlaybackStart(reason)
+        startPlayback(track, skippedUnavailableCount, requestedPartIndex)
     }
 
     private fun updateTrackChangeDirection(direction: TrackChangeDirection) {
