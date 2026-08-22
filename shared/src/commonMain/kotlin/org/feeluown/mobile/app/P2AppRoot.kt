@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -27,9 +29,36 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
+
+private data class SnackbarFeedbackEvent(
+    val message: String,
+    val dismiss: () -> Unit,
+)
+
+private fun Flow<String?>.toSnackbarFeedbackEvents(
+    lifecycle: Lifecycle,
+    dismissFeedback: (String) -> Unit,
+): Flow<SnackbarFeedbackEvent> = mapNotNull { message ->
+    if (message == null) {
+        null
+    } else if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+        SnackbarFeedbackEvent(message) { dismissFeedback(message) }
+    } else {
+        dismissFeedback(message)
+        null
+    }
+}
 
 private fun p2PageTransition(
     initialOffsetX: (Int) -> Int,
@@ -86,13 +115,6 @@ fun P2AppRoot(
 ) {
     val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
     val localPlaylistState by appViewModel.localPlaylistFeatureController.uiState.collectAsStateWithLifecycle()
-    val playlistFeedback by appViewModel.playlistActionPort.feedback.collectAsStateWithLifecycle()
-    val playbackFeedback by appViewModel.playbackQueueUiPort.feedback.collectAsStateWithLifecycle()
-    val providerTrackFeedback by appViewModel.providerTrackActionPort.feedback.collectAsStateWithLifecycle()
-    val downloadState by appViewModel.downloadActionPort.managerState.collectAsStateWithLifecycle()
-    val sleepFeedback by appViewModel.playbackSleepTimerPort.feedback.collectAsStateWithLifecycle()
-    val appFeedback by appViewModel.appFeedback.collectAsStateWithLifecycle()
-    val sharedResourceFeedback by appViewModel.sharedResourceActionPort.feedback.collectAsStateWithLifecycle()
     val playbackGraph = appViewModel.playbackUiPort
 
     FuoTheme(
@@ -124,40 +146,49 @@ fun P2AppRoot(
         }
 
         val snackbar = remember { SnackbarHostState() }
-        LaunchedEffect(playlistFeedback) {
-            val message = playlistFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.playlistActionPort.dismissFeedback(message)
+        val lifecycle = LocalLifecycleOwner.current.lifecycle
+        val snackbarFeedbackEvents = remember(appViewModel, lifecycle) {
+            merge(
+                appViewModel.playlistActionPort.feedback.toSnackbarFeedbackEvents(
+                    lifecycle,
+                    appViewModel.playlistActionPort::dismissFeedback,
+                ),
+                appViewModel.playbackQueueUiPort.feedback.toSnackbarFeedbackEvents(
+                    lifecycle,
+                    appViewModel.playbackQueueUiPort::dismissFeedback,
+                ),
+                appViewModel.providerTrackActionPort.feedback.toSnackbarFeedbackEvents(
+                    lifecycle,
+                    appViewModel.providerTrackActionPort::dismissFeedback,
+                ),
+                appViewModel.downloadActionPort.managerState
+                    .map { it.queueFeedback }
+                    .distinctUntilChanged()
+                    .toSnackbarFeedbackEvents(lifecycle, appViewModel.downloadActionPort::dismissQueueFeedback),
+                appViewModel.playbackSleepTimerPort.feedback.toSnackbarFeedbackEvents(
+                    lifecycle,
+                    appViewModel.playbackSleepTimerPort::dismissFeedback,
+                ),
+                appViewModel.appFeedback.toSnackbarFeedbackEvents(lifecycle, appViewModel::dismissFeedback),
+                appViewModel.sharedResourceActionPort.feedback.toSnackbarFeedbackEvents(
+                    lifecycle,
+                    appViewModel.sharedResourceActionPort::dismissFeedback,
+                ),
+            )
         }
-        LaunchedEffect(playbackFeedback) {
-            val message = playbackFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.playbackQueueUiPort.dismissFeedback(message)
+        LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+            snackbar.currentSnackbarData?.dismiss()
         }
-        LaunchedEffect(providerTrackFeedback) {
-            val message = providerTrackFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.providerTrackActionPort.dismissFeedback(message)
-        }
-        LaunchedEffect(downloadState.queueFeedback) {
-            val message = downloadState.queueFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.downloadActionPort.dismissQueueFeedback(message)
-        }
-        LaunchedEffect(sleepFeedback) {
-            val message = sleepFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.playbackSleepTimerPort.dismissFeedback(message)
-        }
-        LaunchedEffect(appFeedback) {
-            val message = appFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.dismissFeedback(message)
-        }
-        LaunchedEffect(sharedResourceFeedback) {
-            val message = sharedResourceFeedback ?: return@LaunchedEffect
-            snackbar.showSnackbar(message)
-            appViewModel.sharedResourceActionPort.dismissFeedback(message)
+        LaunchedEffect(snackbarFeedbackEvents, lifecycle, snackbar) {
+            snackbarFeedbackEvents.collect { event ->
+                try {
+                    if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                        snackbar.showSnackbar(event.message)
+                    }
+                } finally {
+                    event.dismiss()
+                }
+            }
         }
 
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -268,7 +299,13 @@ fun P2AppRoot(
                                 SnackbarHost(
                                     hostState = snackbar,
                                     modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp),
-                                )
+                                ) { data ->
+                                    Snackbar(
+                                        snackbarData = data,
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
                             }
                         }
                     }

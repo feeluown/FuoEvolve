@@ -397,7 +397,14 @@ private class DefaultProviderPlaylistDetailController(
         startPlaybackPagination(playlist)
     }
 
-    override fun playAll() = play(0)
+    override fun playAll() {
+        val state = uiState.value
+        val playlist = state.playlist ?: return
+        if (state.tracks.isEmpty()) return
+        recordPlayback(playlist)
+        playbackQueue.playAllPlaylistTracks(state.tracks, playlist.id)
+        startPlaybackPagination(playlist)
+    }
 
     override fun canRemove(track: MusicTrack): Boolean {
         val state = uiState.value
