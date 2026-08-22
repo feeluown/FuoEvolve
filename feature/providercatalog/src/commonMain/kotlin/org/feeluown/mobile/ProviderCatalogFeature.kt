@@ -44,6 +44,7 @@ data class ProviderCatalogFeatureState<Provider, Feature, Capability, Session>(
     val exploreProviderIds: Set<String> = emptySet(),
     val mineProviderIds: Set<String> = emptySet(),
     val replacementProviderIds: Set<String> = emptySet(),
+    val isInitialized: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -114,6 +115,7 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
     private var catalogProviders: List<Provider> = emptyList()
     private var catalogFeatures: List<Feature> = emptyList()
     private var catalogCapabilities: Map<String, Capability> = emptyMap()
+    private var initialized = false
     private var loading = false
     private var error: String? = null
 
@@ -152,6 +154,7 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
             }.onFailure { throwable ->
                 error = throwable.message ?: throwable::class.simpleName
             }
+            initialized = true
             loading = false
             publish()
         }
@@ -240,6 +243,7 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
             exploreProviderIds = settings.exploreProviderIds,
             mineProviderIds = settings.mineProviderIds,
             replacementProviderIds = settings.replacementProviderIds,
+            isInitialized = initialized,
             isLoading = loading || !preferencesState.isLoaded,
             errorMessage = error ?: preferencesState.errorMessage,
         )
