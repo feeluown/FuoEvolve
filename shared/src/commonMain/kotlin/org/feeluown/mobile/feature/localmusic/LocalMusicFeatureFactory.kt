@@ -21,41 +21,6 @@ typealias LocalMusicUiState = LocalMusicFeatureState<
     LocalMusicCollectionSelection
 >
 
-@Suppress("FunctionName")
-fun LocalMusicUiState(
-    tracks: List<MusicTrack> = emptyList(),
-    viewMode: LocalMusicViewMode = LocalMusicViewMode.All,
-    directories: List<LocalMusicDirectory> = emptyList(),
-    selectedDirectoryId: String? = null,
-    selectedCollection: LocalMusicCollectionSelection? = null,
-    excludedDirectoryIds: Set<String> = emptySet(),
-    minDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
-    metadataEditorTrack: MusicTrack? = null,
-    metadataProviders: List<ProviderInfo> = emptyList(),
-    selectedMetadataProviderId: String? = null,
-    metadataSearchResults: List<MusicTrack> = emptyList(),
-    metadataSearchMessage: String? = null,
-    isLoading: Boolean = false,
-    message: String? = null,
-    errorMessage: String? = null,
-): LocalMusicUiState = LocalMusicFeatureState(
-    tracks = tracks,
-    viewMode = viewMode,
-    directories = directories,
-    selectedDirectoryId = selectedDirectoryId,
-    selectedCollection = selectedCollection,
-    excludedDirectoryIds = excludedDirectoryIds,
-    minDurationSeconds = minDurationSeconds,
-    metadataEditorTrack = metadataEditorTrack,
-    metadataProviders = metadataProviders,
-    selectedMetadataProviderId = selectedMetadataProviderId,
-    metadataSearchResults = metadataSearchResults,
-    metadataSearchMessage = metadataSearchMessage,
-    isLoading = isLoading,
-    message = message,
-    errorMessage = errorMessage,
-)
-
 fun createLocalMusicFeatureController(
     repository: LocalMusicRepository,
     providerRepository: ProviderMusicRepository,
