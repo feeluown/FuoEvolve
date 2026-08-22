@@ -1,4 +1,4 @@
-package org.feeluown.mobile
+package org.feeluown.mobile.feature.localplaylist
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,7 +65,6 @@ interface LocalPlaylistFeatureOwner<Track, Playlist, Preview, Mode, Export, Resu
     fun canAddTrack(track: Track): Boolean
     suspend fun addTrack(playlist: Playlist, track: Track): Result
 
-    // Compatibility surface for the retired shared playlist-action controller.
     fun openTargetPicker(track: Track)
     fun closeTargetPicker()
     fun addTargetTrackTo(playlist: Playlist)
