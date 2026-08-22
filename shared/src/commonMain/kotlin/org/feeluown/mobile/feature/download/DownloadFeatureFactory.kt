@@ -1,8 +1,12 @@
 package org.feeluown.mobile
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -98,12 +102,25 @@ fun createDownloadActionPort(
     return BoundDownloadActionPort(owner, scope)
 }
 
+internal class ObservableDownloadStates<T>(initialValue: Map<String, T>) {
+    private var snapshotValue by mutableStateOf(initialValue)
+
+    val value: Map<String, T>
+        get() = snapshotValue
+
+    fun update(value: Map<String, T>) {
+        snapshotValue = value
+    }
+}
+
 private class BoundDownloadActionPort(
     private val owner: DownloadFeatureOwner<MusicTrack, DownloadTask, DownloadState>,
     scope: CoroutineScope,
 ) : DownloadActionPort {
+    private val observableDownloadStates = ObservableDownloadStates(owner.state.value.states)
+
     override val downloadStates: Map<String, DownloadState>
-        get() = owner.state.value.states
+        get() = observableDownloadStates.value
 
     override val managerState: StateFlow<DownloadManagerUiState> = owner.state
         .map { state -> DownloadManagerUiState(tasks = state.tasks, queueFeedback = state.queueFeedback) }
@@ -112,6 +129,15 @@ private class BoundDownloadActionPort(
             started = SharingStarted.Eagerly,
             initialValue = DownloadManagerUiState(),
         )
+
+    init {
+        scope.launch {
+            owner.state
+                .map { it.states }
+                .distinctUntilChanged()
+                .collect(observableDownloadStates::update)
+        }
+    }
 
     override fun download(track: MusicTrack) = owner.download(track)
     override fun deleteDownload(track: MusicTrack) = owner.deleteDownload(track)
