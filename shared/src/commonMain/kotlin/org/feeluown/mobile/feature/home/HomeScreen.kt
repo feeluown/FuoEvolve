@@ -76,7 +76,6 @@ fun HomeScreen(
     val layoutInfo = LocalAppLayoutInfo.current
     val playbackUiPort = LocalPlaybackUiPort.current
     val state = home.uiState.collectAsStateWithLifecycle().value
-    LaunchedEffect(Unit) { home.ensureInitialContent() }
     Scaffold(
         topBar = {
             if (!layoutInfo.useWideLayout) {
@@ -290,8 +289,8 @@ fun HomeSectionRail(
     }
 }
 
-@Composable
 @Suppress("DEPRECATION")
+@Composable
 fun HomeSectionTabs(
     sections: List<Pair<HomeSection, String>>,
     selectedIndex: Int,
