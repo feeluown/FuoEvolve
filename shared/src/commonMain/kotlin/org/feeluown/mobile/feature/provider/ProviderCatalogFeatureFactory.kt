@@ -28,6 +28,7 @@ data class ProviderCatalogUiState(
     val exploreProviderIds: Set<String> = emptySet(),
     val mineProviderIds: Set<String> = emptySet(),
     val replacementProviderIds: Set<String> = emptySet(),
+    val isInitialized: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -160,6 +161,7 @@ private fun CoreProviderCatalogFeatureState<
     exploreProviderIds = exploreProviderIds,
     mineProviderIds = mineProviderIds,
     replacementProviderIds = replacementProviderIds,
+    isInitialized = isInitialized,
     isLoading = isLoading,
     errorMessage = errorMessage,
 )
