@@ -34,6 +34,36 @@ class ProviderCatalogFeatureTest {
         assertEquals(listOf("netease", "qqmusic"), owner.state.value.providers.map { it.id })
         assertEquals(listOf("netease", "qqmusic"), sessions.refreshed)
         assertTrue(preferences.state.value.settings.enabledProviderIds == setOf("netease"))
+        assertTrue(owner.state.value.isInitialized)
+    }
+
+    @Test
+    fun initializationCompletionIsPublishedWhenCatalogHasNoFeatures() = runTest {
+        val owner = createProviderCatalogFeatureOwner(
+            repository = FakeRepository(featureValues = emptyList()),
+            preferences = FakePreferences(ProviderCatalogPreferences()),
+            sessions = FakeSessions(),
+            scope = backgroundScope,
+            defaultEnabledProviderIds = setOf("netease"),
+        )
+        runCurrent()
+
+        assertTrue(owner.state.value.features.isEmpty())
+        assertTrue(owner.state.value.isInitialized)
+    }
+
+    @Test
+    fun initializationCompletionIsPublishedAfterFailure() = runTest {
+        val owner = createProviderCatalogFeatureOwner(
+            repository = FakeRepository(initializeFailure = IllegalStateException("catalog failed")),
+            preferences = FakePreferences(ProviderCatalogPreferences()),
+            sessions = FakeSessions(),
+            scope = backgroundScope,
+        )
+        runCurrent()
+
+        assertEquals("catalog failed", owner.state.value.errorMessage)
+        assertTrue(owner.state.value.isInitialized)
     }
 
     @Test
@@ -53,16 +83,22 @@ class ProviderCatalogFeatureTest {
     private data class Provider(val id: String, val name: String)
     private data class Capability(val providerId: String)
 
-    private class FakeRepository : ProviderCatalogRepositoryPort<Provider, String, Capability> {
+    private class FakeRepository(
+        private val featureValues: List<String> = listOf("recommend"),
+        private val initializeFailure: Throwable? = null,
+    ) : ProviderCatalogRepositoryPort<Provider, String, Capability> {
         var enabled: Set<String> = emptySet()
 
-        override suspend fun initialize() = Unit
+        override suspend fun initialize() {
+            initializeFailure?.let { throw it }
+        }
+
         override suspend fun availableProviders(): List<Provider> = listOf(
             Provider("netease", "NetEase"),
             Provider("qqmusic", "QQ Music"),
         )
         override suspend fun providers(): List<Provider> = availableProviders()
-        override suspend fun features(): List<String> = listOf("recommend")
+        override suspend fun features(): List<String> = featureValues
         override suspend fun capabilities(): List<Capability> = listOf(Capability("netease"))
         override suspend fun updateEnabledProviders(providerIds: Set<String>) {
             enabled = providerIds
