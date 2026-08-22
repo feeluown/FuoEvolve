@@ -8,6 +8,26 @@ import kotlinx.coroutines.launch
 
 private const val PLAYBACK_START_PLAN_LOOKAHEAD = 8
 
+enum class PlaybackStartReason {
+    USER_SELECTION,
+    PLAYLIST_REPLACE,
+    AUTO_NEXT,
+    RESUME,
+    RESTORE_SESSION,
+    ;
+
+    val isActiveSelection: Boolean
+        get() = this == USER_SELECTION || this == PLAYLIST_REPLACE
+
+    val mayResumePausedSession: Boolean
+        get() = this == RESUME || this == RESTORE_SESSION
+}
+
+/** Optional engine capability for distinguishing a fresh selection from session resume. */
+interface PlaybackStartReasonAwareEngine {
+    fun prepareLoading(track: MusicTrack, reason: PlaybackStartReason)
+}
+
 data class PlaybackStartFailure(
     val trackId: String,
     val message: String,
@@ -59,6 +79,7 @@ internal class PlaybackStartCoordinator(
         messageAfterStart: String? = null,
         suppressPlaybackRecovery: Boolean = false,
     ) {
+        val startReason = queue.consumePlaybackStartReason()
         prepareSleepTimer(track.id)
         val serial = nextRequestSerial()
         _startFailure.value = null
@@ -90,7 +111,12 @@ internal class PlaybackStartCoordinator(
             )
         )
         persistQueue()
-        playbackEngine.prepareLoading(playbackTrack)
+        val reasonAwareEngine = playbackEngine as? PlaybackStartReasonAwareEngine
+        if (reasonAwareEngine != null) {
+            reasonAwareEngine.prepareLoading(playbackTrack, startReason)
+        } else {
+            playbackEngine.prepareLoading(playbackTrack)
+        }
         setLoading(true)
         setMessage(messageAfterStart ?: "正在播放：${track.title}")
 
