@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -26,6 +27,7 @@ class DownloadFeatureBindingTest {
         runCurrent()
 
         states.update(mapOf("track" to "downloading"))
+        Snapshot.sendApplyNotifications()
         runCurrent()
 
         assertEquals(
