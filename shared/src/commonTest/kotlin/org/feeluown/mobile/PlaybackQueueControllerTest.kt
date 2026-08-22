@@ -22,9 +22,8 @@ class PlaybackQueueControllerTest {
             shuffleBeforeFm = false
         }
 
-        val restored = PlaybackQueueController().apply {
-            restore(source.snapshot())
-        }
+        val restored = PlaybackQueueController()
+        assertTrue(restored.restore(source.snapshot()))
 
         assertEquals(listOf(first, second), restored.mainQueue)
         assertEquals(listOf(second, first), restored.originalMainQueue)
@@ -53,7 +52,7 @@ class PlaybackQueueControllerTest {
             markNextPlaybackStart(PlaybackStartReason.PLAYLIST_REPLACE)
         }
 
-        controller.restore(oldSnapshot)
+        assertFalse(controller.restore(oldSnapshot))
 
         assertEquals(listOf(firstNew, secondNew), controller.mainQueue)
         assertEquals(firstNew, controller.currentTrack())
@@ -72,11 +71,45 @@ class PlaybackQueueControllerTest {
             repeatMode = RepeatMode.OFF
         }
 
-        controller.restore(oldSnapshot)
+        assertFalse(controller.restore(oldSnapshot))
 
         assertTrue(controller.mainQueue.isEmpty())
         assertEquals(-1, controller.mainQueueIndex)
         assertEquals(RepeatMode.OFF, controller.repeatMode)
+    }
+
+    @Test
+    fun mutationReturnedToDefaultStillRejectsDelayedStartupRestore() {
+        val restoredTrack = track("netease:old", "Restored")
+        val oldSnapshot = PlaybackQueueController().apply {
+            mainQueue = listOf(restoredTrack)
+            mainQueueIndex = 0
+        }.snapshot()
+        val controller = PlaybackQueueController().apply {
+            shuffleEnabled = true
+            shuffleEnabled = false
+        }
+
+        assertFalse(controller.restore(oldSnapshot))
+        assertTrue(controller.mainQueue.isEmpty())
+        assertFalse(controller.shuffleEnabled)
+    }
+
+    @Test
+    fun noOpQueueClearMutationStillRejectsDelayedStartupRestore() {
+        val restoredTrack = track("netease:old", "Restored")
+        val oldSnapshot = PlaybackQueueController().apply {
+            mainQueue = listOf(restoredTrack)
+            mainQueueIndex = 0
+        }.snapshot()
+        val controller = PlaybackQueueController().apply {
+            mainQueue = emptyList()
+            mainQueueIndex = -1
+        }
+
+        assertFalse(controller.restore(oldSnapshot))
+        assertTrue(controller.mainQueue.isEmpty())
+        assertEquals(-1, controller.mainQueueIndex)
     }
 
     @Test
@@ -90,7 +123,7 @@ class PlaybackQueueControllerTest {
             markNextPlaybackStart(PlaybackStartReason.RESUME)
         }
 
-        controller.restore(oldSnapshot)
+        assertTrue(controller.restore(oldSnapshot))
 
         assertEquals(listOf(restoredTrack), controller.mainQueue)
         assertEquals(restoredTrack, controller.currentTrack())
