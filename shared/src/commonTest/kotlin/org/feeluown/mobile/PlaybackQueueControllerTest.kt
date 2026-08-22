@@ -80,6 +80,24 @@ class PlaybackQueueControllerTest {
     }
 
     @Test
+    fun resumeIntentStillAllowsStartupQueueRestore() {
+        val restoredTrack = track("netease:old", "Restored")
+        val oldSnapshot = PlaybackQueueController().apply {
+            mainQueue = listOf(restoredTrack)
+            mainQueueIndex = 0
+        }.snapshot()
+        val controller = PlaybackQueueController().apply {
+            markNextPlaybackStart(PlaybackStartReason.RESUME)
+        }
+
+        controller.restore(oldSnapshot)
+
+        assertEquals(listOf(restoredTrack), controller.mainQueue)
+        assertEquals(restoredTrack, controller.currentTrack())
+        assertEquals(PlaybackStartReason.AUTO_NEXT, controller.consumePlaybackStartReason())
+    }
+
+    @Test
     fun displayQueueKeepsCurrentThenUpNextThenRemainingMainQueue() {
         val first = track("netease:1", "First")
         val second = track("netease:2", "Second")
