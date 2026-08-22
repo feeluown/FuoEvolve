@@ -105,7 +105,7 @@ private class DefaultHomeFeatureController(
                         playlistPlaybackStats = settings.playlistPlaybackStats,
                         errorMessage = mutableUiState.value.errorMessage ?: catalog.errorMessage ?: settingsState.errorMessage,
                     )
-                    if (settingsState.isLoaded && catalog.features.isNotEmpty()) ensureInitialContent()
+                    if (settingsState.isLoaded && catalog.isInitialized) ensureInitialContent()
                 }
         }
     }
