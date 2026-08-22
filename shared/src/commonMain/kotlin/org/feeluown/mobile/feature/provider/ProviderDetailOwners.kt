@@ -1,19 +1,34 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
+import org.feeluown.mobile.feature.providerdetail.ProviderDetailMutationResult
+import org.feeluown.mobile.feature.providerdetail.ProviderFeatureDetailFeatureOwner as CoreFeatureOwner
+import org.feeluown.mobile.feature.providerdetail.ProviderFeatureDetailFeatureState as CoreFeatureState
+import org.feeluown.mobile.feature.providerdetail.ProviderFeatureDetailPort as CoreFeaturePort
+import org.feeluown.mobile.feature.providerdetail.ProviderMediaItemDetailFeatureOwner as CoreMediaItemOwner
+import org.feeluown.mobile.feature.providerdetail.ProviderMediaItemDetailFeatureState as CoreMediaItemState
+import org.feeluown.mobile.feature.providerdetail.ProviderMediaItemDetailPage as CoreMediaItemPage
+import org.feeluown.mobile.feature.providerdetail.ProviderMediaItemDetailPort as CoreMediaItemPort
+import org.feeluown.mobile.feature.providerdetail.ProviderPlaylistDetailFeatureOwner as CorePlaylistOwner
+import org.feeluown.mobile.feature.providerdetail.ProviderPlaylistDetailFeatureState as CorePlaylistState
+import org.feeluown.mobile.feature.providerdetail.ProviderPlaylistDetailPage as CorePlaylistPage
+import org.feeluown.mobile.feature.providerdetail.ProviderPlaylistDetailPort as CorePlaylistPort
+import org.feeluown.mobile.feature.providerdetail.ProviderTrackDetailFeatureOwner as CoreTrackOwner
+import org.feeluown.mobile.feature.providerdetail.ProviderTrackDetailFeatureState as CoreTrackState
+import org.feeluown.mobile.feature.providerdetail.ProviderTrackDetailPort as CoreTrackPort
+import org.feeluown.mobile.feature.providerdetail.ProviderVideoDetailFeatureOwner as CoreVideoOwner
+import org.feeluown.mobile.feature.providerdetail.ProviderVideoDetailFeatureState as CoreVideoState
+import org.feeluown.mobile.feature.providerdetail.ProviderVideoDetailPort as CoreVideoPort
+import org.feeluown.mobile.feature.providerdetail.ProviderVideoPlaybackResult
+import org.feeluown.mobile.feature.providerdetail.createProviderFeatureDetailFeatureOwner
+import org.feeluown.mobile.feature.providerdetail.createProviderMediaItemDetailFeatureOwner
+import org.feeluown.mobile.feature.providerdetail.createProviderPlaylistDetailFeatureOwner
+import org.feeluown.mobile.feature.providerdetail.createProviderTrackDetailFeatureOwner
+import org.feeluown.mobile.feature.providerdetail.createProviderVideoDetailFeatureOwner
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
-private const val PROVIDER_DETAIL_TIMEOUT_MS = 30_000L
-private const val PROVIDER_VIDEO_TIMEOUT_MS = 25_000L
-private const val PROVIDER_LIST_PREFETCH_REMAINING = 8
-private const val PROVIDER_PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS = 3_000L
 private const val MAX_PROVIDER_PLAYLIST_PLAYBACK_STATS = 500
 private const val PROVIDER_PLAYLIST_PLAYBACK_STATS_VERSION = 1
 
@@ -150,734 +165,375 @@ fun createProviderDetailOwners(
     onProviderMutation: (String) -> Unit = {},
     nowMillis: () -> Long = ::currentTimeMillis,
 ): ProviderDetailOwners {
-    val video = DefaultProviderVideoDetailController(
-        providerRepository = providerRepository,
-        navigator = navigator,
+    val videoCore = createProviderVideoDetailFeatureOwner(
+        port = BoundProviderVideoDetailPort(providerRepository, navigator),
         scope = scope,
     )
+    val video = BoundProviderVideoDetailController(videoCore)
     return ProviderDetailOwners(
-        feature = DefaultProviderFeatureDetailController(
-            providerRepository = providerRepository,
-            playbackQueue = playbackQueue,
-            navigator = navigator,
-            scope = scope,
+        feature = BoundProviderFeatureDetailController(
+            createProviderFeatureDetailFeatureOwner(
+                port = BoundProviderFeatureDetailPort(providerRepository, playbackQueue, navigator),
+                scope = scope,
+            ),
         ),
-        playlist = DefaultProviderPlaylistDetailController(
-            providerRepository = providerRepository,
-            playbackQueue = playbackQueue,
-            settingsRepository = settingsRepository,
-            providerCatalog = providerCatalog,
-            navigator = navigator,
-            scope = scope,
-            onProviderMutation = onProviderMutation,
-            nowMillis = nowMillis,
+        playlist = BoundProviderPlaylistDetailController(
+            createProviderPlaylistDetailFeatureOwner(
+                port = BoundProviderPlaylistDetailPort(
+                    providerRepository = providerRepository,
+                    playbackQueue = playbackQueue,
+                    settingsRepository = settingsRepository,
+                    providerCatalog = providerCatalog,
+                    navigator = navigator,
+                    onProviderMutation = onProviderMutation,
+                    nowMillis = nowMillis,
+                ),
+                scope = scope,
+            ),
         ),
-        track = DefaultProviderTrackDetailController(
-            providerRepository = providerRepository,
-            playbackQueue = playbackQueue,
-            videoController = video,
-            navigator = navigator,
-            scope = scope,
+        track = BoundProviderTrackDetailController(
+            createProviderTrackDetailFeatureOwner(
+                port = BoundProviderTrackDetailPort(
+                    providerRepository = providerRepository,
+                    playbackQueue = playbackQueue,
+                    videoController = video,
+                    navigator = navigator,
+                ),
+                scope = scope,
+            ),
         ),
-        mediaItem = DefaultProviderMediaItemDetailController(
-            providerRepository = providerRepository,
-            playbackQueue = playbackQueue,
-            navigator = navigator,
-            scope = scope,
+        mediaItem = BoundProviderMediaItemDetailController(
+            createProviderMediaItemDetailFeatureOwner(
+                port = BoundProviderMediaItemDetailPort(providerRepository, playbackQueue, navigator),
+                scope = scope,
+            ),
         ),
         video = video,
     )
 }
 
-private class DefaultProviderFeatureDetailController(
+private class BoundProviderFeatureDetailController(
+    private val owner: CoreFeatureOwner<ProviderFeature, ProviderContentSection, MusicTrack>,
+) : ProviderFeatureDetailController {
+    override val uiState = owner.state.mapState(CoreFeatureState<ProviderFeature, ProviderContentSection, MusicTrack>::toUiState)
+    override fun open(feature: ProviderFeature) = owner.open(feature)
+    override fun activate(feature: ProviderFeature) = owner.activate(feature)
+    override fun close() = owner.close()
+    override fun refresh() = owner.refresh()
+    override fun loadMore() = owner.loadMore()
+    override fun prefetchIfNeeded(visibleIndex: Int) = owner.prefetchIfNeeded(visibleIndex)
+    override fun play(index: Int) = owner.play(index)
+    override fun playAll() = owner.playAll()
+}
+
+private class BoundProviderPlaylistDetailController(
+    private val owner: CorePlaylistOwner<ProviderPlaylist, ProviderFeatureCategory, MusicTrack>,
+) : ProviderPlaylistDetailController {
+    override val uiState = owner.state.mapState(CorePlaylistState<ProviderPlaylist, ProviderFeatureCategory, MusicTrack>::toUiState)
+    override fun open(playlist: ProviderPlaylist, category: ProviderFeatureCategory?) = owner.open(playlist, category)
+    override fun activate(playlist: ProviderPlaylist, category: ProviderFeatureCategory?) = owner.activate(playlist, category)
+    override fun close() = owner.close()
+    override fun refresh() = owner.refresh()
+    override fun loadMore() = owner.loadMore()
+    override fun prefetchIfNeeded(visibleIndex: Int) = owner.prefetchIfNeeded(visibleIndex)
+    override fun play(index: Int) = owner.play(index)
+    override fun playAll() = owner.playAll()
+    override fun canRemove(track: MusicTrack) = owner.canRemove(track)
+    override fun remove(track: MusicTrack) = owner.remove(track)
+    override fun canDelete() = owner.canDelete()
+    override fun delete() = owner.delete()
+}
+
+private class BoundProviderTrackDetailController(
+    private val owner: CoreTrackOwner<MusicTrack, ProviderComment, ProviderVideo>,
+) : ProviderTrackDetailController {
+    override val uiState = owner.state.mapState(CoreTrackState<MusicTrack, ProviderComment, ProviderVideo>::toUiState)
+    override fun open(track: MusicTrack) = owner.open(track)
+    override fun activate(track: MusicTrack) = owner.activate(track)
+    override fun close() = owner.close()
+    override fun refresh() = owner.refresh()
+    override fun play() = owner.play()
+    override fun playSimilar(index: Int) = owner.playSimilar(index)
+    override fun openVideo() = owner.openVideo()
+}
+
+private class BoundProviderMediaItemDetailController(
+    private val owner: CoreMediaItemOwner<ProviderMediaItem, MusicTrack>,
+) : ProviderMediaItemDetailController {
+    override val uiState = owner.state.mapState(CoreMediaItemState<ProviderMediaItem, MusicTrack>::toUiState)
+    override fun open(item: ProviderMediaItem) = owner.open(item)
+    override fun activate(item: ProviderMediaItem) = owner.activate(item)
+    override fun close() = owner.close()
+    override fun refresh() = owner.refresh()
+    override fun prefetchTracksIfNeeded(visibleIndex: Int) = owner.prefetchTracksIfNeeded(visibleIndex)
+    override fun prefetchAlbumsIfNeeded(visibleIndex: Int) = owner.prefetchAlbumsIfNeeded(visibleIndex)
+    override fun play(index: Int) = owner.play(index)
+    override fun playAll() = owner.playAll()
+}
+
+private class BoundProviderVideoDetailController(
+    private val owner: CoreVideoOwner<ProviderVideo, VideoPlaybackPayload>,
+) : ProviderVideoDetailController {
+    override val uiState = owner.state.mapState(CoreVideoState<ProviderVideo, VideoPlaybackPayload>::toUiState)
+    override fun open(video: ProviderVideo) = owner.open(video)
+    override fun activate(video: ProviderVideo) = owner.activate(video)
+    override fun close() = owner.close()
+    override fun refresh() = owner.refresh()
+    override fun toggleFullscreen() = owner.toggleFullscreen()
+}
+
+private class BoundProviderFeatureDetailPort(
     private val providerRepository: ProviderMusicRepository,
     private val playbackQueue: PlaybackQueueUiPort,
     private val navigator: AppNavigator,
-    private val scope: CoroutineScope,
-) : ProviderFeatureDetailController {
-    private val mutableUiState = MutableStateFlow(ProviderFeatureDetailUiState())
-    override val uiState: StateFlow<ProviderFeatureDetailUiState> = mutableUiState.asStateFlow()
-    private var loadJob: Job? = null
-
-    override fun open(feature: ProviderFeature) {
-        navigator.navigate(AppRoute.FeatureDetail(feature.toNavigationFeature()))
-        activate(feature)
-    }
-
-    override fun activate(feature: ProviderFeature) {
-        if (uiState.value.feature?.id == feature.id && (uiState.value.content != null || uiState.value.isLoading)) return
-        load(feature, reset = true)
-    }
-
-    override fun close() {
-        loadJob?.cancel()
-        mutableUiState.value = ProviderFeatureDetailUiState()
-        navigator.pop(AppRoute.Feature)
-    }
-
-    override fun refresh() {
-        uiState.value.feature?.let { load(it, reset = true) }
-    }
-
-    override fun loadMore() {
-        val state = uiState.value
-        val feature = state.feature ?: return
-        if (state.isLoading || !state.hasMore || feature.isDynamicQueueFeature()) return
-        load(feature, reset = false)
-    }
-
-    override fun prefetchIfNeeded(visibleIndex: Int) {
-        val state = uiState.value
-        val count = state.content?.contentCountSnapshot() ?: state.tracks.size
-        if (count - visibleIndex <= PROVIDER_LIST_PREFETCH_REMAINING) loadMore()
-    }
-
-    override fun play(index: Int) {
-        val state = uiState.value
-        val feature = state.feature ?: return
-        if (index !in state.tracks.indices) return
-        playbackQueue.playFeatureTracks(state.tracks, index, feature)
-    }
-
-    override fun playAll() {
-        val state = uiState.value
-        val feature = state.feature ?: return
-        if (state.tracks.isEmpty()) return
-        if (feature.isDynamicQueueFeature()) {
-            playbackQueue.playFeatureTracks(state.tracks, 0, feature)
-            return
-        }
-        scope.launch {
-            ensureAllPages()
-            val current = uiState.value
-            if (current.feature?.id == feature.id && current.tracks.isNotEmpty()) {
-                playbackQueue.playTracks(current.tracks, 0)
-            }
-        }
-    }
-
-    private fun load(feature: ProviderFeature, reset: Boolean) {
-        if (reset) loadJob?.cancel()
-        loadJob = scope.launch {
-            val before = uiState.value
-            val offset = if (reset) 0 else before.nextOffset
-            mutableUiState.value = if (reset) {
-                ProviderFeatureDetailUiState(
-                    feature = feature,
-                    isLoading = true,
-                    message = "正在加载：${feature.title}",
-                )
-            } else {
-                before.copy(isLoading = true, errorMessage = null)
-            }
-            runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.loadFeaturePage(feature, offset)
-                }
-            }.onSuccess { page ->
-                if (uiState.value.feature?.id != feature.id) return@onSuccess
-                val merged = if (reset) page else mergeFeaturePage(uiState.value.content, page)
-                mutableUiState.value = uiState.value.copy(
-                    content = merged,
-                    tracks = merged.tracks,
-                    nextOffset = merged.nextOffset,
-                    hasMore = merged.hasMore,
-                    isLoading = false,
-                    message = when {
-                        merged.isLoginRequired -> "登录后显示 ${merged.feature.providerName} 的个性化内容"
-                        merged.errorMessage != null -> merged.errorMessage
-                        merged.contentCountSnapshot() == 0 -> "${feature.title} 暂无内容"
-                        else -> "${feature.title} · ${merged.contentCountSnapshot()} 项"
-                    },
-                    errorMessage = when {
-                        merged.isLoginRequired -> "登录后显示 ${merged.feature.providerName} 的个性化内容"
-                        else -> merged.errorMessage
-                    },
-                )
-            }.onFailure { throwable ->
-                if (uiState.value.feature?.id == feature.id) {
-                    mutableUiState.value = uiState.value.copy(
-                        isLoading = false,
-                        message = providerDetailError(throwable, "加载失败", feature.providerId),
-                        errorMessage = providerDetailError(throwable, "加载失败", feature.providerId),
-                    )
-                }
-            }
-        }
-    }
-
-    private suspend fun ensureAllPages() {
-        while (uiState.value.hasMore) {
-            val state = uiState.value
-            val feature = state.feature ?: return
-            if (feature.isDynamicQueueFeature()) return
-            val offset = state.nextOffset
-            val page = runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.loadFeaturePage(feature, offset)
-                }
-            }.getOrElse {
-                mutableUiState.value = state.copy(errorMessage = providerDetailError(it, "加载失败", feature.providerId))
-                return
-            }
-            if (uiState.value.feature?.id != feature.id) return
-            val merged = mergeFeaturePage(uiState.value.content, page)
-            mutableUiState.value = uiState.value.copy(
-                content = merged,
-                tracks = merged.tracks,
-                nextOffset = merged.nextOffset,
-                hasMore = merged.hasMore,
-            )
-            if (merged.nextOffset == offset && page.contentCountSnapshot() == 0) return
-        }
-    }
+) : CoreFeaturePort<ProviderFeature, ProviderContentSection, MusicTrack> {
+    override suspend fun loadPage(feature: ProviderFeature, offset: Int) = providerRepository.loadFeaturePage(feature, offset)
+    override fun featureId(feature: ProviderFeature) = feature.id
+    override fun featureTitle(feature: ProviderFeature) = feature.title
+    override fun featureProviderId(feature: ProviderFeature) = feature.providerId
+    override fun isDynamicQueueFeature(feature: ProviderFeature) = feature.isDynamicQueueFeature()
+    override fun contentTracks(content: ProviderContentSection) = content.tracks
+    override fun contentNextOffset(content: ProviderContentSection) = content.nextOffset
+    override fun contentHasMore(content: ProviderContentSection) = content.hasMore
+    override fun contentIsLoginRequired(content: ProviderContentSection) = content.isLoginRequired
+    override fun contentErrorMessage(content: ProviderContentSection) = content.errorMessage
+    override fun contentProviderName(content: ProviderContentSection) = content.feature.providerName
+    override fun contentCount(content: ProviderContentSection) = content.contentCountSnapshot()
+    override fun mergeContent(current: ProviderContentSection?, page: ProviderContentSection) = mergeFeaturePage(current, page)
+    override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
+        providerDetailError(throwable, fallback, providerId)
+    override fun open(feature: ProviderFeature) = navigator.navigate(AppRoute.FeatureDetail(feature.toNavigationFeature()))
+    override fun close() = navigator.pop(AppRoute.Feature)
+    override fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, feature: ProviderFeature) =
+        playbackQueue.playFeatureTracks(tracks, index, feature)
+    override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
 }
 
-private class DefaultProviderPlaylistDetailController(
+private class BoundProviderPlaylistDetailPort(
     private val providerRepository: ProviderMusicRepository,
     private val playbackQueue: PlaybackQueueUiPort,
     private val settingsRepository: AppSettingsRepository,
     private val providerCatalog: ProviderCatalogFeatureController,
     private val navigator: AppNavigator,
-    private val scope: CoroutineScope,
     private val onProviderMutation: (String) -> Unit,
     private val nowMillis: () -> Long,
-) : ProviderPlaylistDetailController {
-    private val mutableUiState = MutableStateFlow(ProviderPlaylistDetailUiState())
-    override val uiState: StateFlow<ProviderPlaylistDetailUiState> = mutableUiState.asStateFlow()
-    private var loadJob: Job? = null
-    private var playbackPaginationJob: Job? = null
-
-    override fun open(playlist: ProviderPlaylist, category: ProviderFeatureCategory?) {
-        navigator.navigate(
-            AppRoute.PlaylistDetail(
-                playlist = playlist.toNavigationPlaylist(),
-                category = category?.name,
-            )
+) : CorePlaylistPort<ProviderPlaylist, ProviderFeatureCategory, MusicTrack> {
+    override suspend fun loadPage(playlist: ProviderPlaylist, offset: Int): CorePlaylistPage<ProviderPlaylist, MusicTrack> {
+        val detail = providerRepository.playlistDetailPage(playlist, offset)
+        return CorePlaylistPage(
+            playlist = detail.playlist,
+            tracks = detail.tracks,
+            nextOffset = detail.tracksNextOffset,
+            hasMore = detail.tracksHasMore,
         )
-        activate(playlist, category)
     }
 
-    override fun activate(playlist: ProviderPlaylist, category: ProviderFeatureCategory?) {
-        val current = uiState.value
-        if (current.playlist?.id == playlist.id && current.category == category && (current.tracks.isNotEmpty() || current.isLoading)) return
-        load(playlist, category, reset = true)
-    }
+    override suspend fun removeTrack(playlist: ProviderPlaylist, track: MusicTrack): ProviderDetailMutationResult =
+        providerRepository.removeTrackFromPlaylist(playlist, track).let { ProviderDetailMutationResult(it.success, it.message) }
 
-    override fun close() {
-        loadJob?.cancel()
-        playbackPaginationJob?.cancel()
-        mutableUiState.value = ProviderPlaylistDetailUiState()
-        navigator.pop(AppRoute.Playlist)
-    }
+    override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderDetailMutationResult =
+        providerRepository.deletePlaylist(playlist).let { ProviderDetailMutationResult(it.success, it.message) }
 
-    override fun refresh() {
-        val state = uiState.value
-        state.playlist?.let { load(it, state.category, reset = true) }
-    }
-
-    override fun loadMore() {
-        val state = uiState.value
-        val playlist = state.playlist ?: return
-        if (state.isLoading || !state.hasMore) return
-        load(playlist, state.category, reset = false)
-    }
-
-    override fun prefetchIfNeeded(visibleIndex: Int) {
-        val state = uiState.value
-        if (state.tracks.size - visibleIndex <= PROVIDER_LIST_PREFETCH_REMAINING) loadMore()
-    }
-
-    override fun play(index: Int) {
-        val state = uiState.value
-        val playlist = state.playlist ?: return
-        if (index !in state.tracks.indices) return
-        recordPlayback(playlist)
-        playbackQueue.playPlaylistTracks(state.tracks, index, playlist.id)
-        startPlaybackPagination(playlist)
-    }
-
-    override fun playAll() {
-        val state = uiState.value
-        val playlist = state.playlist ?: return
-        if (state.tracks.isEmpty()) return
-        recordPlayback(playlist)
-        playbackQueue.playAllPlaylistTracks(state.tracks, playlist.id)
-        startPlaybackPagination(playlist)
-    }
-
-    override fun canRemove(track: MusicTrack): Boolean {
-        val state = uiState.value
-        val playlist = state.playlist ?: return false
-        val catalog = providerCatalog.uiState.value
-        return state.category == ProviderFeatureCategory.MinePlaylists &&
-            track.sourceType == TrackSourceType.Provider &&
-            track.source == playlist.providerId &&
-            catalog.sessions.authStates[playlist.providerId]?.isLoggedIn == true &&
-            catalog.capabilities[playlist.providerId]?.canRemoveSongFromPlaylist == true
-    }
-
-    override fun remove(track: MusicTrack) {
-        val playlist = uiState.value.playlist ?: return
-        if (!canRemove(track)) return
-        scope.launch {
-            runCatching { providerRepository.removeTrackFromPlaylist(playlist, track) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        mutableUiState.value = uiState.value.copy(
-                            tracks = uiState.value.tracks.filterNot { it.id == track.id },
-                            message = result.message.ifBlank { "已从歌单移除：${track.title}" },
-                            errorMessage = null,
-                        )
-                        onProviderMutation(playlist.providerId)
-                    } else {
-                        mutableUiState.value = uiState.value.copy(errorMessage = result.message.ifBlank { "移除失败" })
-                    }
-                }
-                .onFailure {
-                    mutableUiState.value = uiState.value.copy(
-                        errorMessage = providerDetailError(it, "移除失败", playlist.providerId),
-                    )
-                }
-        }
-    }
-
-    override fun canDelete(): Boolean {
-        val state = uiState.value
-        val playlist = state.playlist ?: return false
-        val catalog = providerCatalog.uiState.value
-        return state.category == ProviderFeatureCategory.MinePlaylists &&
-            catalog.sessions.authStates[playlist.providerId]?.isLoggedIn == true &&
-            catalog.capabilities[playlist.providerId]?.canDeletePlaylist == true
-    }
-
-    override fun delete() {
-        val playlist = uiState.value.playlist ?: return
-        if (!canDelete()) return
-        scope.launch {
-            mutableUiState.value = uiState.value.copy(isLoading = true, message = "正在删除歌单", errorMessage = null)
-            runCatching { providerRepository.deletePlaylist(playlist) }
-                .onSuccess { result ->
-                    if (result.success) {
-                        onProviderMutation(playlist.providerId)
-                        close()
-                    } else {
-                        mutableUiState.value = uiState.value.copy(
-                            isLoading = false,
-                            message = result.message.ifBlank { "删除歌单失败" },
-                            errorMessage = result.message.ifBlank { "删除歌单失败" },
-                        )
-                    }
-                }
-                .onFailure {
-                    mutableUiState.value = uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = providerDetailError(it, "删除歌单失败", playlist.providerId),
-                    )
-                }
-        }
-    }
-
-    private fun load(playlist: ProviderPlaylist, category: ProviderFeatureCategory?, reset: Boolean) {
-        if (reset) loadJob?.cancel()
-        loadJob = scope.launch {
-            val before = uiState.value
-            val offset = if (reset) 0 else before.nextOffset
-            mutableUiState.value = if (reset) {
-                ProviderPlaylistDetailUiState(
-                    playlist = playlist,
-                    category = category,
-                    isLoading = true,
-                    message = "正在加载：${playlist.title}",
+    override suspend fun recordPlayback(playlist: ProviderPlaylist) {
+        settingsRepository.update { settings ->
+            val key = minePlaylistPlaybackStatsKey(playlist)
+            val previous = settings.playlistPlaybackStats[key] ?: PlaylistPlaybackStat()
+            val updated = (settings.playlistPlaybackStats + (
+                key to previous.copy(
+                    playCount = (previous.playCount + 1).coerceAtMost(1_000_000_000L),
+                    lastPlayedAtMillis = nowMillis(),
                 )
-            } else before.copy(isLoading = true, errorMessage = null)
-            runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.playlistDetailPage(playlist, offset)
-                }
-            }.onSuccess { detail ->
-                if (uiState.value.playlist?.id != playlist.id) return@onSuccess
-                val tracks = if (reset) detail.tracks else mergeTracks(uiState.value.tracks, detail.tracks)
-                mutableUiState.value = uiState.value.copy(
-                    playlist = detail.playlist,
-                    tracks = tracks,
-                    nextOffset = detail.tracksNextOffset,
-                    hasMore = detail.tracksHasMore,
-                    isLoading = false,
-                    message = if (tracks.isEmpty()) "歌单暂无歌曲" else "${detail.playlist.title} · ${tracks.size} 首",
-                    errorMessage = null,
-                )
-            }.onFailure { throwable ->
-                if (uiState.value.playlist?.id == playlist.id) {
-                    mutableUiState.value = uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = providerDetailError(throwable, "加载失败", playlist.providerId),
-                    )
-                }
-            }
+            )).entries
+                .sortedByDescending { it.value.lastPlayedAtMillis }
+                .take(MAX_PROVIDER_PLAYLIST_PLAYBACK_STATS)
+                .associate { it.toPair() }
+            settings.copy(
+                playlistPlaybackStatsVersion = PROVIDER_PLAYLIST_PLAYBACK_STATS_VERSION,
+                playlistPlaybackStats = updated,
+            )
         }
     }
 
-    private fun startPlaybackPagination(playlist: ProviderPlaylist) {
-        playbackPaginationJob?.cancel()
-        if (!uiState.value.hasMore) return
-        playbackPaginationJob = scope.launch {
-            while (uiState.value.playlist?.id == playlist.id && uiState.value.hasMore) {
-                delay(PROVIDER_PLAYLIST_BACKGROUND_PAGE_INTERVAL_MS)
-                val before = uiState.value
-                val offset = before.nextOffset
-                val detail = runCatching {
-                    withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                        providerRepository.playlistDetailPage(playlist, offset)
-                    }
-                }.getOrElse { return@launch }
-                if (uiState.value.playlist?.id != playlist.id) return@launch
-                val newTracks = detail.tracks.filterNot { pageTrack -> before.tracks.any { it.id == pageTrack.id } }
-                val tracks = before.tracks + newTracks
-                mutableUiState.value = before.copy(
-                    playlist = detail.playlist,
-                    tracks = tracks,
-                    nextOffset = detail.tracksNextOffset,
-                    hasMore = detail.tracksHasMore,
-                )
-                playbackQueue.appendPlaylistTracks(playlist.id, newTracks)
-                if (detail.tracksNextOffset == offset && newTracks.isEmpty()) return@launch
-            }
-        }
-    }
-
-    private fun recordPlayback(playlist: ProviderPlaylist) {
-        scope.launch {
-            settingsRepository.update { settings ->
-                val key = minePlaylistPlaybackStatsKey(playlist)
-                val previous = settings.playlistPlaybackStats[key] ?: PlaylistPlaybackStat()
-                val updated = (settings.playlistPlaybackStats + (
-                    key to previous.copy(
-                        playCount = (previous.playCount + 1).coerceAtMost(1_000_000_000L),
-                        lastPlayedAtMillis = nowMillis(),
-                    )
-                )).entries
-                    .sortedByDescending { it.value.lastPlayedAtMillis }
-                    .take(MAX_PROVIDER_PLAYLIST_PLAYBACK_STATS)
-                    .associate { it.toPair() }
-                settings.copy(
-                    playlistPlaybackStatsVersion = PROVIDER_PLAYLIST_PLAYBACK_STATS_VERSION,
-                    playlistPlaybackStats = updated,
-                )
-            }
-        }
-    }
+    override fun playlistId(playlist: ProviderPlaylist) = playlist.id
+    override fun playlistTitle(playlist: ProviderPlaylist) = playlist.title
+    override fun playlistProviderId(playlist: ProviderPlaylist) = playlist.providerId
+    override fun trackId(track: MusicTrack) = track.id
+    override fun trackTitle(track: MusicTrack) = track.title
+    override fun trackBelongsToProvider(track: MusicTrack, providerId: String) =
+        track.sourceType == TrackSourceType.Provider && track.source == providerId
+    override fun isMinePlaylistCategory(category: ProviderFeatureCategory?) = category == ProviderFeatureCategory.MinePlaylists
+    override fun isLoggedIn(providerId: String) = providerCatalog.uiState.value.sessions.authStates[providerId]?.isLoggedIn == true
+    override fun canRemoveSongFromPlaylist(providerId: String) =
+        providerCatalog.uiState.value.capabilities[providerId]?.canRemoveSongFromPlaylist == true
+    override fun canDeletePlaylist(providerId: String) =
+        providerCatalog.uiState.value.capabilities[providerId]?.canDeletePlaylist == true
+    override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
+        providerDetailError(throwable, fallback, providerId)
+    override fun open(playlist: ProviderPlaylist, category: ProviderFeatureCategory?) = navigator.navigate(
+        AppRoute.PlaylistDetail(
+            playlist = playlist.toNavigationPlaylist(),
+            category = category?.name,
+        )
+    )
+    override fun close() = navigator.pop(AppRoute.Playlist)
+    override fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, playlistId: String) =
+        playbackQueue.playPlaylistTracks(tracks, index, playlistId)
+    override fun playAllPlaylistTracks(tracks: List<MusicTrack>, playlistId: String) =
+        playbackQueue.playAllPlaylistTracks(tracks, playlistId)
+    override fun appendPlaylistTracks(playlistId: String, tracks: List<MusicTrack>) =
+        playbackQueue.appendPlaylistTracks(playlistId, tracks)
+    override fun onProviderMutation(providerId: String) = onProviderMutation.invoke(providerId)
 }
 
-private class DefaultProviderTrackDetailController(
+private class BoundProviderTrackDetailPort(
     private val providerRepository: ProviderMusicRepository,
     private val playbackQueue: PlaybackQueueUiPort,
     private val videoController: ProviderVideoDetailController,
     private val navigator: AppNavigator,
-    private val scope: CoroutineScope,
-) : ProviderTrackDetailController {
-    private val mutableUiState = MutableStateFlow(ProviderTrackDetailUiState())
-    override val uiState: StateFlow<ProviderTrackDetailUiState> = mutableUiState.asStateFlow()
-    private var loadJob: Job? = null
-
-    override fun open(track: MusicTrack) {
-        if (track.sourceType != TrackSourceType.Provider) return
-        navigator.navigate(AppRoute.TrackDetail(track.toNavigationTrack()))
-        activate(track)
-    }
-
-    override fun activate(track: MusicTrack) {
-        if (track.sourceType != TrackSourceType.Provider) return
-        if (uiState.value.track?.id == track.id && (uiState.value.similarTracks.isNotEmpty() || uiState.value.isLoading)) return
-        mutableUiState.value = ProviderTrackDetailUiState(track = track)
-        refresh()
-    }
-
-    override fun close() {
-        loadJob?.cancel()
-        mutableUiState.value = ProviderTrackDetailUiState()
-        navigator.pop(AppRoute.Track)
-    }
-
-    override fun refresh() {
-        val baseTrack = uiState.value.track ?: return
-        loadJob?.cancel()
-        loadJob = scope.launch {
-            mutableUiState.value = uiState.value.copy(isLoading = true, message = "正在加载：${baseTrack.title}")
-            val detailTrack = runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.trackDetail(baseTrack.providerId?.takeIf { it.isNotBlank() } ?: baseTrack.id)
-                }
-            }.getOrDefault(baseTrack)
-            if (uiState.value.track?.id != baseTrack.id) return@launch
-            mutableUiState.value = uiState.value.copy(track = detailTrack)
-
-            val similar = runCatching { providerRepository.similarTracks(detailTrack) }
-            val comments = runCatching { providerRepository.hotComments(detailTrack) }
-            val video = runCatching { providerRepository.trackVideo(detailTrack) }
-            if (uiState.value.track?.id != detailTrack.id && uiState.value.track?.id != baseTrack.id) return@launch
-            val relatedFailures = listOf(similar, comments, video).mapNotNull { it.exceptionOrNull() }
-            mutableUiState.value = uiState.value.copy(
-                track = detailTrack,
-                similarTracks = similar.getOrDefault(emptyList()),
-                comments = comments.getOrDefault(emptyList()),
-                video = video.getOrNull(),
-                relatedErrorMessage = relatedFailures.firstOrNull()?.let {
-                    providerDetailError(it, "相关内容加载失败", detailTrack.source)
-                },
-                isLoading = false,
-                message = detailTrack.title.ifBlank { "歌曲已加载" },
-                errorMessage = null,
-            )
-        }
-    }
-
-    override fun play() {
-        uiState.value.track?.let { playbackQueue.playTracks(listOf(it), 0) }
-    }
-
-    override fun playSimilar(index: Int) {
-        val tracks = uiState.value.similarTracks
-        if (index in tracks.indices) playbackQueue.playTracks(tracks, index)
-    }
-
-    override fun openVideo() {
-        uiState.value.video?.let(videoController::open)
-    }
+) : CoreTrackPort<MusicTrack, ProviderComment, ProviderVideo> {
+    override suspend fun loadTrackDetail(track: MusicTrack) =
+        providerRepository.trackDetail(track.providerId?.takeIf { it.isNotBlank() } ?: track.id)
+    override suspend fun similarTracks(track: MusicTrack) = providerRepository.similarTracks(track)
+    override suspend fun hotComments(track: MusicTrack) = providerRepository.hotComments(track)
+    override suspend fun trackVideo(track: MusicTrack) = providerRepository.trackVideo(track)
+    override fun isProviderTrack(track: MusicTrack) = track.sourceType == TrackSourceType.Provider
+    override fun trackId(track: MusicTrack) = track.id
+    override fun trackTitle(track: MusicTrack) = track.title
+    override fun trackDetailId(track: MusicTrack) = track.providerId?.takeIf { it.isNotBlank() } ?: track.id
+    override fun trackProviderId(track: MusicTrack) = track.source
+    override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
+        providerDetailError(throwable, fallback, providerId)
+    override fun open(track: MusicTrack) = navigator.navigate(AppRoute.TrackDetail(track.toNavigationTrack()))
+    override fun close() = navigator.pop(AppRoute.Track)
+    override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
+    override fun openVideo(video: ProviderVideo) = videoController.open(video)
 }
 
-private class DefaultProviderMediaItemDetailController(
+private class BoundProviderMediaItemDetailPort(
     private val providerRepository: ProviderMusicRepository,
     private val playbackQueue: PlaybackQueueUiPort,
     private val navigator: AppNavigator,
-    private val scope: CoroutineScope,
-) : ProviderMediaItemDetailController {
-    private val mutableUiState = MutableStateFlow(ProviderMediaItemDetailUiState())
-    override val uiState: StateFlow<ProviderMediaItemDetailUiState> = mutableUiState.asStateFlow()
-    private var tracksJob: Job? = null
-    private var albumsJob: Job? = null
-
-    override fun open(item: ProviderMediaItem) {
-        navigator.navigate(AppRoute.MediaItemDetail(item.toNavigationMediaItem()))
-        activate(item)
+) : CoreMediaItemPort<ProviderMediaItem, MusicTrack> {
+    override suspend fun loadPage(
+        item: ProviderMediaItem,
+        tracksOffset: Int,
+        albumsOffset: Int,
+    ): CoreMediaItemPage<ProviderMediaItem, MusicTrack> {
+        val detail = providerRepository.mediaItemDetailPage(item, tracksOffset, albumsOffset)
+        return CoreMediaItemPage(
+            item = detail.item,
+            tracks = detail.tracks,
+            albums = detail.albums,
+            tracksNextOffset = detail.tracksNextOffset,
+            tracksHasMore = detail.tracksHasMore,
+            albumsNextOffset = detail.albumsNextOffset,
+            albumsHasMore = detail.albumsHasMore,
+        )
     }
 
-    override fun activate(item: ProviderMediaItem) {
-        if (uiState.value.item?.id == item.id && (uiState.value.tracks.isNotEmpty() || uiState.value.albums.isNotEmpty() || uiState.value.isLoading)) return
-        loadInitial(item)
-    }
-
-    override fun close() {
-        tracksJob?.cancel()
-        albumsJob?.cancel()
-        mutableUiState.value = ProviderMediaItemDetailUiState()
-        navigator.pop(AppRoute.MediaItem)
-    }
-
-    override fun refresh() {
-        uiState.value.item?.let(::loadInitial)
-    }
-
-    override fun prefetchTracksIfNeeded(visibleIndex: Int) {
-        val state = uiState.value
-        if (state.tracks.size - visibleIndex <= PROVIDER_LIST_PREFETCH_REMAINING) loadMoreTracks()
-    }
-
-    override fun prefetchAlbumsIfNeeded(visibleIndex: Int) {
-        val state = uiState.value
-        if (state.albums.size - visibleIndex <= PROVIDER_LIST_PREFETCH_REMAINING) loadMoreAlbums()
-    }
-
-    override fun play(index: Int) {
-        val tracks = uiState.value.tracks
-        if (index in tracks.indices) playbackQueue.playTracks(tracks, index)
-    }
-
-    override fun playAll() {
-        val item = uiState.value.item ?: return
-        scope.launch {
-            ensureAllTracks(item)
-            val state = uiState.value
-            if (state.item?.id == item.id && state.tracks.isNotEmpty()) playbackQueue.playTracks(state.tracks, 0)
-        }
-    }
-
-    private fun loadInitial(item: ProviderMediaItem) {
-        tracksJob?.cancel()
-        albumsJob?.cancel()
-        tracksJob = scope.launch {
-            mutableUiState.value = ProviderMediaItemDetailUiState(
-                item = item,
-                isLoading = true,
-                message = "正在加载：${item.title}",
-            )
-            runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.mediaItemDetailPage(item, tracksOffset = 0, albumsOffset = 0)
-                }
-            }.onSuccess { detail ->
-                if (uiState.value.item?.id != item.id) return@onSuccess
-                mutableUiState.value = ProviderMediaItemDetailUiState(
-                    item = detail.item,
-                    tracks = detail.tracks,
-                    albums = detail.albums,
-                    tracksNextOffset = detail.tracksNextOffset,
-                    tracksHasMore = detail.tracksHasMore,
-                    albumsNextOffset = detail.albumsNextOffset,
-                    albumsHasMore = detail.albumsHasMore,
-                    isLoading = false,
-                    message = buildList {
-                        if (detail.tracks.isNotEmpty()) add("${detail.tracks.size} 首")
-                        if (detail.albums.isNotEmpty()) add("${detail.albums.size} 张专辑")
-                    }.joinToString(" · ").ifBlank { "${detail.item.title} 暂无内容" },
-                )
-            }.onFailure {
-                if (uiState.value.item?.id == item.id) {
-                    mutableUiState.value = uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = providerDetailError(it, "加载失败", item.providerId),
-                    )
-                }
-            }
-        }
-    }
-
-    private fun loadMoreTracks() {
-        val state = uiState.value
-        val item = state.item ?: return
-        if (!state.tracksHasMore || tracksJob?.isActive == true) return
-        tracksJob = scope.launch {
-            val offset = state.tracksNextOffset
-            val detail = runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.mediaItemDetailPage(item, offset, state.albumsNextOffset)
-                }
-            }.getOrElse {
-                mutableUiState.value = uiState.value.copy(errorMessage = providerDetailError(it, "加载失败", item.providerId))
-                return@launch
-            }
-            if (uiState.value.item?.id != item.id) return@launch
-            mutableUiState.value = uiState.value.copy(
-                item = detail.item,
-                tracks = mergeTracks(uiState.value.tracks, detail.tracks),
-                tracksNextOffset = detail.tracksNextOffset,
-                tracksHasMore = detail.tracksHasMore,
-                errorMessage = null,
-            )
-        }
-    }
-
-    private fun loadMoreAlbums() {
-        val state = uiState.value
-        val item = state.item ?: return
-        if (!state.albumsHasMore || albumsJob?.isActive == true) return
-        albumsJob = scope.launch {
-            val offset = state.albumsNextOffset
-            val detail = runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.mediaItemDetailPage(item, state.tracksNextOffset, offset)
-                }
-            }.getOrElse {
-                mutableUiState.value = uiState.value.copy(errorMessage = providerDetailError(it, "加载失败", item.providerId))
-                return@launch
-            }
-            if (uiState.value.item?.id != item.id) return@launch
-            mutableUiState.value = uiState.value.copy(
-                item = detail.item,
-                albums = mergeMediaItems(uiState.value.albums, detail.albums),
-                albumsNextOffset = detail.albumsNextOffset,
-                albumsHasMore = detail.albumsHasMore,
-                errorMessage = null,
-            )
-        }
-    }
-
-    private suspend fun ensureAllTracks(item: ProviderMediaItem) {
-        tracksJob?.join()
-        while (uiState.value.item?.id == item.id && uiState.value.tracksHasMore) {
-            val before = uiState.value
-            val offset = before.tracksNextOffset
-            val detail = runCatching {
-                withTimeout(PROVIDER_DETAIL_TIMEOUT_MS) {
-                    providerRepository.mediaItemDetailPage(item, offset, before.albumsNextOffset)
-                }
-            }.getOrElse { return }
-            val tracks = mergeTracks(before.tracks, detail.tracks)
-            mutableUiState.value = before.copy(
-                item = detail.item,
-                tracks = tracks,
-                tracksNextOffset = detail.tracksNextOffset,
-                tracksHasMore = detail.tracksHasMore,
-            )
-            if (detail.tracksNextOffset == offset && tracks.size == before.tracks.size) return
-        }
-    }
+    override fun itemId(item: ProviderMediaItem) = item.id
+    override fun itemTitle(item: ProviderMediaItem) = item.title
+    override fun itemProviderId(item: ProviderMediaItem) = item.providerId
+    override fun trackId(track: MusicTrack) = track.id
+    override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
+        providerDetailError(throwable, fallback, providerId)
+    override fun open(item: ProviderMediaItem) = navigator.navigate(AppRoute.MediaItemDetail(item.toNavigationMediaItem()))
+    override fun close() = navigator.pop(AppRoute.MediaItem)
+    override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
 }
 
-private class DefaultProviderVideoDetailController(
+private class BoundProviderVideoDetailPort(
     private val providerRepository: ProviderMusicRepository,
     private val navigator: AppNavigator,
-    private val scope: CoroutineScope,
-) : ProviderVideoDetailController {
-    private val mutableUiState = MutableStateFlow(ProviderVideoDetailUiState())
-    override val uiState: StateFlow<ProviderVideoDetailUiState> = mutableUiState.asStateFlow()
-    private var loadJob: Job? = null
-
-    override fun open(video: ProviderVideo) {
-        navigator.navigate(AppRoute.VideoDetail(video.toNavigationVideo()))
-        activate(video)
+) : CoreVideoPort<ProviderVideo, VideoPlaybackPayload> {
+    override suspend fun loadPlayback(video: ProviderVideo): ProviderVideoPlaybackResult<ProviderVideo, VideoPlaybackPayload> {
+        val payload = providerRepository.videoPlaybackPayload(video)
+        return ProviderVideoPlaybackResult(payload.video, payload)
     }
-
-    override fun activate(video: ProviderVideo) {
-        if (uiState.value.video?.id == video.id && (uiState.value.payload != null || uiState.value.isLoading)) return
-        mutableUiState.value = ProviderVideoDetailUiState(video = video)
-        refresh()
-    }
-
-    override fun close() {
-        loadJob?.cancel()
-        mutableUiState.value = ProviderVideoDetailUiState()
-        navigator.pop(AppRoute.Video)
-    }
-
-    override fun refresh() {
-        val video = uiState.value.video ?: return
-        loadJob?.cancel()
-        loadJob = scope.launch {
-            mutableUiState.value = uiState.value.copy(
-                isLoading = true,
-                message = "正在加载视频：${video.title}",
-                errorMessage = null,
-            )
-            runCatching {
-                withTimeout(PROVIDER_VIDEO_TIMEOUT_MS) {
-                    providerRepository.videoPlaybackPayload(video)
-                }
-            }.onSuccess { payload ->
-                if (uiState.value.video?.id != video.id) return@onSuccess
-                mutableUiState.value = uiState.value.copy(
-                    video = payload.video,
-                    payload = payload,
-                    isLoading = false,
-                    message = "正在播放视频：${payload.video.title}",
-                    errorMessage = null,
-                )
-            }.onFailure {
-                if (uiState.value.video?.id == video.id) {
-                    mutableUiState.value = uiState.value.copy(
-                        isLoading = false,
-                        message = "视频加载失败",
-                        errorMessage = providerDetailError(it, "视频加载失败", video.providerId),
-                    )
-                }
-            }
-        }
-    }
-
-    override fun toggleFullscreen() {
-        mutableUiState.value = uiState.value.copy(isFullscreen = !uiState.value.isFullscreen)
-    }
+    override fun videoId(video: ProviderVideo) = video.id
+    override fun videoTitle(video: ProviderVideo) = video.title
+    override fun videoProviderId(video: ProviderVideo) = video.providerId
+    override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) =
+        providerDetailError(throwable, fallback, providerId)
+    override fun open(video: ProviderVideo) = navigator.navigate(AppRoute.VideoDetail(video.toNavigationVideo()))
+    override fun close() = navigator.pop(AppRoute.Video)
 }
+
+private fun CoreFeatureState<ProviderFeature, ProviderContentSection, MusicTrack>.toUiState() = ProviderFeatureDetailUiState(
+    feature = feature,
+    content = content,
+    tracks = tracks,
+    nextOffset = nextOffset,
+    hasMore = hasMore,
+    isLoading = isLoading,
+    message = message,
+    errorMessage = errorMessage,
+)
+
+private fun CorePlaylistState<ProviderPlaylist, ProviderFeatureCategory, MusicTrack>.toUiState() = ProviderPlaylistDetailUiState(
+    playlist = playlist,
+    category = category,
+    tracks = tracks,
+    nextOffset = nextOffset,
+    hasMore = hasMore,
+    isLoading = isLoading,
+    message = message,
+    errorMessage = errorMessage,
+)
+
+private fun CoreTrackState<MusicTrack, ProviderComment, ProviderVideo>.toUiState() = ProviderTrackDetailUiState(
+    track = track,
+    similarTracks = similarTracks,
+    comments = comments,
+    video = video,
+    relatedErrorMessage = relatedErrorMessage,
+    isLoading = isLoading,
+    message = message,
+    errorMessage = errorMessage,
+)
+
+private fun CoreMediaItemState<ProviderMediaItem, MusicTrack>.toUiState() = ProviderMediaItemDetailUiState(
+    item = item,
+    tracks = tracks,
+    albums = albums,
+    tracksNextOffset = tracksNextOffset,
+    tracksHasMore = tracksHasMore,
+    albumsNextOffset = albumsNextOffset,
+    albumsHasMore = albumsHasMore,
+    isLoading = isLoading,
+    message = message,
+    errorMessage = errorMessage,
+)
+
+private fun CoreVideoState<ProviderVideo, VideoPlaybackPayload>.toUiState() = ProviderVideoDetailUiState(
+    video = video,
+    payload = payload,
+    isFullscreen = isFullscreen,
+    isLoading = isLoading,
+    message = message,
+    errorMessage = errorMessage,
+)
+
+private class MappedStateFlow<Source, Target>(
+    private val source: StateFlow<Source>,
+    private val transform: (Source) -> Target,
+) : StateFlow<Target> {
+    override val value: Target
+        get() = transform(source.value)
+    override val replayCache: List<Target>
+        get() = listOf(value)
+
+    override suspend fun collect(collector: FlowCollector<Target>): Nothing = source.collect(
+        object : FlowCollector<Source> {
+            override suspend fun emit(value: Source) {
+                collector.emit(transform(value))
+            }
+        },
+    )
+}
+
+private fun <Source, Target> StateFlow<Source>.mapState(transform: (Source) -> Target): StateFlow<Target> =
+    MappedStateFlow(this, transform)
 
 private fun mergeFeaturePage(current: ProviderContentSection?, page: ProviderContentSection): ProviderContentSection {
     if (current == null || current.feature.id != page.feature.id) return page
