@@ -1,28 +1,92 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-interface LocalPlaylistFeatureOwner : LocalPlaylistFeatureController {
-    fun canAddTrack(track: MusicTrack): Boolean
-    suspend fun addTrack(playlist: LocalPlaylist, track: MusicTrack): LocalPlaylistOperationResult
-}
+typealias LocalPlaylistFeatureController = LocalPlaylistFeatureOwner<
+    MusicTrack,
+    LocalPlaylist,
+    LocalPlaylistImportPreview,
+    LocalPlaylistImportMode,
+    LocalPlaylistFile,
+    LocalPlaylistOperationResult
+>
+typealias LocalPlaylistController = LocalPlaylistFeatureController
+typealias LocalPlaylistUiState = LocalPlaylistFeatureState<MusicTrack, LocalPlaylist, LocalPlaylistImportPreview>
+
+@Suppress("FunctionName")
+fun LocalPlaylistUiState(
+    playlists: List<LocalPlaylist> = emptyList(),
+    selectedPlaylist: LocalPlaylist? = null,
+    selectedTracks: List<MusicTrack> = emptyList(),
+    selectedError: String? = null,
+    operationError: String? = null,
+    importPreview: LocalPlaylistImportPreview? = null,
+    isLoading: Boolean = false,
+    message: String? = null,
+    errorMessage: String? = null,
+): LocalPlaylistUiState = LocalPlaylistFeatureState(
+    playlists = playlists,
+    selectedPlaylist = selectedPlaylist,
+    selectedTracks = selectedTracks,
+    selectedError = selectedError,
+    operationError = operationError,
+    importPreview = importPreview,
+    isLoading = isLoading,
+    message = message,
+    errorMessage = errorMessage,
+)
 
 fun createLocalPlaylistFeatureController(
     repository: LocalPlaylistRepository,
     navigator: AppNavigator,
     scope: CoroutineScope,
     providers: () -> List<ProviderInfo>,
-): LocalPlaylistFeatureOwner {
-    val controller = LocalPlaylistController(
-        repository = repository,
-        navigator = navigator,
-        scope = scope,
-        state = PlaylistControllerState(),
-        toMusicTracks = { playlist ->
+): LocalPlaylistFeatureController {
+    val operations = object : LocalPlaylistFeatureOperations<
+        MusicTrack,
+        LocalPlaylist,
+        LocalPlaylistImportPreview,
+        LocalPlaylistImportMode,
+        LocalPlaylistFile,
+        LocalPlaylistOperationResult
+    > {
+        override suspend fun list(): List<LocalPlaylist> = repository.list()
+        override suspend fun create(title: String): LocalPlaylistOperationResult = repository.create(title)
+        override suspend fun delete(playlist: LocalPlaylist): LocalPlaylistOperationResult = repository.delete(playlist)
+
+        override suspend fun addTrack(
+            playlist: LocalPlaylist,
+            track: MusicTrack,
+        ): LocalPlaylistOperationResult {
+            val localTrack = track.toLocalPlaylistTrackForFeature()
+                ?: return LocalPlaylistOperationResult(false, "当前歌曲无法添加到本地歌单")
+            return repository.addTrack(playlist, localTrack)
+        }
+
+        override suspend fun removeTrack(
+            playlist: LocalPlaylist,
+            track: MusicTrack,
+        ): LocalPlaylistOperationResult {
+            val localTrack = track.toLocalPlaylistTrackForFeature()
+                ?: return LocalPlaylistOperationResult(false, "当前歌曲无法从本地歌单移除")
+            return repository.removeTrack(playlist, localTrack.uri)
+        }
+
+        override suspend fun importPlaylist(
+            preview: LocalPlaylistImportPreview,
+            mode: LocalPlaylistImportMode,
+            replacePlaylist: LocalPlaylist?,
+        ): LocalPlaylistOperationResult = repository.importPlaylist(preview, mode, replacePlaylist)
+
+        override suspend fun export(playlist: LocalPlaylist): LocalPlaylistFile = repository.export(playlist)
+
+        override fun decode(fileName: String, content: String): LocalPlaylistImportPreview =
+            LocalPlaylistFileCodec.decode(fileName, content)
+
+        override fun tracks(playlist: LocalPlaylist): List<MusicTrack> {
             val knownProviders = providers().associateBy(ProviderInfo::providerId)
-            playlist.tracks.map { localTrack ->
+            return playlist.tracks.map { localTrack ->
                 val provider = knownProviders[localTrack.providerId]
                 val trackId = "${localTrack.providerId}:${localTrack.identifier}"
                 MusicTrack(
@@ -38,43 +102,42 @@ fun createLocalPlaylistFeatureController(
                     isUnavailable = provider == null,
                 )
             }
-        },
-        toLocalPlaylistTrack = { track -> track.toLocalPlaylistTrackForFeature() },
-        setLoading = {},
-        setMessage = {},
-        onError = {},
-    )
-    scope.launch { controller.refreshInternal(showMessage = false) }
-    return object : LocalPlaylistFeatureOwner {
-        override val uiState: StateFlow<LocalPlaylistUiState> = controller.uiState
-
-        override fun refresh() = controller.refresh()
-        override fun create(title: String) = controller.create(title)
-        override fun open(playlist: LocalPlaylist) = controller.open(playlist)
-        override fun close() = controller.close()
-        override fun canRemove(track: MusicTrack): Boolean = controller.canRemove(track)
-        override fun remove(track: MusicTrack) = controller.remove(track)
-        override fun canDeleteSelected(): Boolean = controller.canDeleteSelected()
-        override fun deleteSelected() = controller.deleteSelected()
-        override fun prepareImport(fileName: String, content: String) = controller.prepareImport(fileName, content)
-        override fun existingForImport(preview: LocalPlaylistImportPreview): LocalPlaylist? =
-            controller.existingForImport(preview)
-        override fun cancelImport() = controller.cancelImport()
-        override fun importPlaylist(mode: LocalPlaylistImportMode, replacePlaylistId: String?) =
-            controller.importPlaylist(mode, replacePlaylistId)
-        override fun exportSelected(onReady: (LocalPlaylistFile) -> Unit) = controller.exportSelected(onReady)
-
-        override fun canAddTrack(track: MusicTrack): Boolean = controller.canAddTrack(track)
-
-        override suspend fun addTrack(playlist: LocalPlaylist, track: MusicTrack): LocalPlaylistOperationResult {
-            if (!controller.canAddTrack(track)) {
-                return LocalPlaylistOperationResult(success = false, message = "当前歌曲无法添加到本地歌单")
-            }
-            controller.openTargetPicker(track)
-            return controller.addTargetTrackToAwait(playlist)
-                ?: LocalPlaylistOperationResult(success = false, message = "添加失败")
         }
+
+        override fun canAddTrack(track: MusicTrack): Boolean = track.toLocalPlaylistTrackForFeature() != null
+
+        override fun containsTrack(playlist: LocalPlaylist, track: MusicTrack): Boolean {
+            val localTrack = track.toLocalPlaylistTrackForFeature() ?: return false
+            return playlist.tracks.any { it.uri == localTrack.uri }
+        }
+
+        override fun removeTrackLocally(playlist: LocalPlaylist, track: MusicTrack): LocalPlaylist {
+            val uri = track.toLocalPlaylistTrackForFeature()?.uri ?: return playlist
+            return playlist.copy(tracks = playlist.tracks.filterNot { it.uri == uri })
+        }
+
+        override fun playlistId(playlist: LocalPlaylist): String = playlist.id
+        override fun playlistTitle(playlist: LocalPlaylist): String = playlist.title
+        override fun previewTitle(preview: LocalPlaylistImportPreview): String = preview.title
+        override fun previewTrackCount(preview: LocalPlaylistImportPreview): Int = preview.tracks.size
+        override fun previewSkippedLineCount(preview: LocalPlaylistImportPreview): Int = preview.skippedLineCount
+        override fun resultSuccess(result: LocalPlaylistOperationResult): Boolean = result.success
+        override fun resultMessage(result: LocalPlaylistOperationResult): String = result.message
+        override fun resultPlaylist(result: LocalPlaylistOperationResult): LocalPlaylist? = result.playlist
+        override fun withResultMessage(result: LocalPlaylistOperationResult, message: String): LocalPlaylistOperationResult =
+            result.copy(message = message)
+        override fun failureResult(message: String): LocalPlaylistOperationResult =
+            LocalPlaylistOperationResult(success = false, message = message)
     }
+
+    val owner = createLocalPlaylistFeatureOwner(
+        operations = operations,
+        scope = scope,
+        openPlaylist = { navigator.navigate(AppRoute.LocalPlaylist) },
+        closePlaylist = { navigator.pop(AppRoute.LocalPlaylist) },
+    )
+    scope.launch { owner.loadForContent() }
+    return owner
 }
 
 private fun MusicTrack.toLocalPlaylistTrackForFeature(): LocalPlaylistTrack? {
