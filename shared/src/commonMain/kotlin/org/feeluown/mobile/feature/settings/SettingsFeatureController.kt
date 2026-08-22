@@ -11,7 +11,7 @@ data class SettingsFeatureUiState(
     val settingsState: SettingsState = SettingsState(),
     val cacheUsage: CacheUsage = CacheUsage(),
     val downloadTasks: List<DownloadTask> = emptyList(),
-    val localMusic: LocalMusicUiState = LocalMusicUiState(),
+    val localMusic: LocalMusicUiState = LocalMusicUiState(viewMode = LocalMusicViewMode.All),
     val statusBarLyricsAvailable: Boolean = false,
     val debugLogViewerAvailable: Boolean = false,
     val isBusy: Boolean = false,
