@@ -38,6 +38,48 @@ class PlaybackQueueControllerTest {
     }
 
     @Test
+    fun delayedStartupRestoreDoesNotOverwriteNewPlaylistSelection() {
+        val restoredTrack = track("netease:old", "Restored")
+        val oldSnapshot = PlaybackQueueController().apply {
+            mainQueue = listOf(restoredTrack)
+            mainQueueIndex = 0
+        }.snapshot()
+        val firstNew = track("qqmusic:new-1", "New 1")
+        val secondNew = track("qqmusic:new-2", "New 2")
+        val controller = PlaybackQueueController().apply {
+            mainQueue = listOf(firstNew, secondNew)
+            mainQueueIndex = 0
+            queuePlaylistId = "playlist:new"
+            markNextPlaybackStart(PlaybackStartReason.PLAYLIST_REPLACE)
+        }
+
+        controller.restore(oldSnapshot)
+
+        assertEquals(listOf(firstNew, secondNew), controller.mainQueue)
+        assertEquals(firstNew, controller.currentTrack())
+        assertEquals("playlist:new", controller.queuePlaylistId)
+        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, controller.consumePlaybackStartReason())
+    }
+
+    @Test
+    fun delayedStartupRestoreDoesNotOverwriteQueuePolicyMutation() {
+        val restoredTrack = track("netease:old", "Restored")
+        val oldSnapshot = PlaybackQueueController().apply {
+            mainQueue = listOf(restoredTrack)
+            mainQueueIndex = 0
+        }.snapshot()
+        val controller = PlaybackQueueController().apply {
+            repeatMode = RepeatMode.OFF
+        }
+
+        controller.restore(oldSnapshot)
+
+        assertTrue(controller.mainQueue.isEmpty())
+        assertEquals(-1, controller.mainQueueIndex)
+        assertEquals(RepeatMode.OFF, controller.repeatMode)
+    }
+
+    @Test
     fun displayQueueKeepsCurrentThenUpNextThenRemainingMainQueue() {
         val first = track("netease:1", "First")
         val second = track("netease:2", "Second")
