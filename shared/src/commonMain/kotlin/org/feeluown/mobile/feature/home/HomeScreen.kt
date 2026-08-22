@@ -289,8 +289,8 @@ fun HomeSectionRail(
     }
 }
 
-@Suppress("DEPRECATION")
 @Composable
+@Suppress("DEPRECATION")
 fun HomeSectionTabs(
     sections: List<Pair<HomeSection, String>>,
     selectedIndex: Int,
