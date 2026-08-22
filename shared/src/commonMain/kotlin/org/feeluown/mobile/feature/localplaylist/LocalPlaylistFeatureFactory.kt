@@ -19,29 +19,6 @@ typealias LocalPlaylistFeatureController = LocalPlaylistFeatureOwner
 typealias LocalPlaylistController = LocalPlaylistFeatureOwner
 typealias LocalPlaylistUiState = LocalPlaylistFeatureState<MusicTrack, LocalPlaylist, LocalPlaylistImportPreview>
 
-@Suppress("FunctionName")
-fun LocalPlaylistUiState(
-    playlists: List<LocalPlaylist> = emptyList(),
-    selectedPlaylist: LocalPlaylist? = null,
-    selectedTracks: List<MusicTrack> = emptyList(),
-    selectedError: String? = null,
-    operationError: String? = null,
-    importPreview: LocalPlaylistImportPreview? = null,
-    isLoading: Boolean = false,
-    message: String? = null,
-    errorMessage: String? = null,
-): LocalPlaylistUiState = LocalPlaylistFeatureState(
-    playlists = playlists,
-    selectedPlaylist = selectedPlaylist,
-    selectedTracks = selectedTracks,
-    selectedError = selectedError,
-    operationError = operationError,
-    importPreview = importPreview,
-    isLoading = isLoading,
-    message = message,
-    errorMessage = errorMessage,
-)
-
 fun createLocalPlaylistFeatureController(
     repository: LocalPlaylistRepository,
     navigator: AppNavigator,
