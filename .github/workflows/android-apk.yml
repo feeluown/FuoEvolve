@@ -66,7 +66,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Run architecture checks, feature/playback runtime tests, shared tests and coverage
-        run: ./gradlew checkArchitectureBoundaries :feature:recognition:allTests :feature:search:allTests :playback:runtime:allTests :shared:allTests :shared:koverXmlReportDebug
+        run: ./gradlew checkArchitectureBoundaries :feature:recognition:allTests :feature:search:allTests :feature:localplaylist:allTests :feature:localmusic:allTests :feature:download:allTests :playback:runtime:allTests :shared:allTests :shared:koverXmlReportDebug
 
   build-release-apks:
     name: Build signed multi-ABI release APK
