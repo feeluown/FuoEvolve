@@ -1,12 +1,14 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class DownloadFeatureTest {
     @Test
     fun completedTaskRefreshesLocalLibraryAndDownloadUsesResolver() = runTest {
@@ -25,12 +27,14 @@ class DownloadFeatureTest {
         )
 
         owner.start()
+        runCurrent()
+
         owner.download(Track("1", "Song", provider = true))
-        advanceUntilIdle()
+        runCurrent()
         assertEquals("payload:1", repository.lastPayload)
 
         repository.tasks.value = listOf(Task("task", completed = true))
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(1, localLibrary.refreshCount)
         assertEquals("已加入下载队列：Song", owner.state.value.queueFeedback)
     }
