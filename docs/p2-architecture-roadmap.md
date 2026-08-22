@@ -103,12 +103,29 @@ Provider catalog and authentication remain separate owners/modules even though t
 
 Android and iOS CI run both provider feature suites alongside shared tests.
 
+### P3-D: Provider Detail
+
+Completed as one physical feature module with destination-specific owners rather than a provider-detail mega-owner.
+
+`:feature:providerdetail` owns five independent state/orchestration boundaries:
+
+- feature detail paging, merge/prefetch and complete-queue playback;
+- playlist detail paging, playback-background pagination, remove/delete policy and mutation orchestration;
+- track detail plus similar-track/comment/video related-content loading;
+- media-item track/album pagination and complete-track playback;
+- video payload loading and fullscreen state.
+
+Each destination consumes its own feature-owned capability port. The module is generic over provider/application models and does not depend on `ProviderMusicRepository`, `PlaybackQueueUiPort`, `AppSettingsRepository`, `ProviderCatalogFeatureController`, `AppNavigator`, `MusicTrack` or concrete provider detail models.
+
+`:shared` keeps navigation, playback queue, repository, settings/playback-stat persistence, provider-session/capability lookup and provider-failure adaptation. Existing `ProviderFeatureDetailUiState`, `ProviderPlaylistDetailUiState`, `ProviderTrackDetailUiState`, `ProviderMediaItemDetailUiState`, `ProviderVideoDetailUiState`, controller interfaces and `createProviderDetailOwners(...)` remain concrete compatibility APIs in their stable package.
+
+The Provider Detail fitness check rejects `feature -> shared` dependencies, concrete app/provider types leaking into the physical module, reintroduction of the previous shared `DefaultProvider*DetailController` owners, and accidental conversion of the five stable UiState classes to typealiases. Android and iOS CI run `:feature:providerdetail:allTests` alongside shared characterization coverage.
+
 ### Follow-up module candidates
 
-Recommended order after Provider Catalog/Auth:
+Recommended order after Provider Detail:
 
-1. provider detail as one physical feature module containing destination-specific owners;
-2. Settings/onboarding after cross-feature settings contracts have narrowed;
-3. Home last, because it is the application-level feature aggregation surface.
+1. Settings/onboarding after cross-feature settings contracts have narrowed;
+2. Home last, because it is the application-level feature aggregation surface.
 
 Every extraction must preserve the one-way dependency rule. A feature that still requires `:shared` remains logically isolated there until the missing contract is extracted; creating a Gradle module that depends back on `:shared` is explicitly not considered successful modularization.
