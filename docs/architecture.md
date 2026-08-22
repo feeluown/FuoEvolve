@@ -23,10 +23,11 @@ The current compile-time modules are:
 - `:feature:download`: physical Download state/orchestration and offline-library coordination boundary.
 - `:feature:providercatalog`: physical provider discovery/configuration/catalog state boundary.
 - `:feature:providerauth`: physical provider authentication and device-OAuth orchestration boundary.
+- `:feature:providerdetail`: physical provider feature/playlist/track/media/video detail orchestration boundary.
 - `:shared`: app shell, shared Compose/design primitives and application bindings for physical feature modules plus feature implementations not yet physically extracted.
 - `:androidApp`: Android composition root and platform adapters.
 
-Recognition, Search, Offline Library and Provider Catalog/Auth have one-way dependency graphs. Application-domain types remain at the `:shared` binding layer when moving them lower would unnecessarily widen a feature contract.
+Recognition, Search, Offline Library, Provider Catalog/Auth and Provider Detail have one-way dependency graphs. Application-domain types remain at the `:shared` binding layer when moving them lower would unnecessarily widen a feature contract.
 
 ## P2 ownership result
 
@@ -109,6 +110,24 @@ The module depends only on feature-owned session, device-authorization, device-c
 
 The previous shared Provider Catalog owner and Provider Auth feature/legacy controller owners are retired. Catalog and Auth deliberately do not depend on each other; shared composition may observe both without creating a provider mega-controller.
 
+## P3-D Provider Detail physical boundary
+
+Provider Detail is implemented as one physical module, `:feature:providerdetail`, with five destination-specific owners instead of one aggregate provider-detail owner.
+
+The module owns:
+
+- Feature Detail page loading, merge/prefetch, dynamic-queue handling and complete-queue playback orchestration;
+- Playlist Detail paging, playback-background page loading, track de-duplication, remove/delete permission policy and mutation state;
+- Track Detail loading plus independent similar-track, comment and video related-content state;
+- Media Item Detail track/album pagination and complete-track playback orchestration;
+- Video Detail payload loading, timeout/error state and fullscreen state.
+
+Each destination consumes a separate feature-owned capability port. The module is generic over feature, content, playlist, category, track, comment, media-item, video and playback representations. It therefore does not depend on concrete `ProviderMusicRepository`, `PlaybackQueueUiPort`, `AppSettingsRepository`, `ProviderCatalogFeatureController`, `AppNavigator`, `MusicTrack`, provider detail models or application routes.
+
+`:shared` remains the application integration boundary. It adapts the aggregate provider repository into destination-specific ports, binds playback queue and navigation operations, persists playlist playback statistics, reads provider login/capability state, maps provider failures to user-facing errors and maps the physical feature states back to the stable app-facing models.
+
+The existing concrete `ProviderFeatureDetailUiState`, `ProviderPlaylistDetailUiState`, `ProviderTrackDetailUiState`, `ProviderMediaItemDetailUiState` and `ProviderVideoDetailUiState` classes remain in `org.feeluown.mobile` with their existing default constructors. The controller interfaces, `ProviderDetailOwners` aggregate and `createProviderDetailOwners(...)` composition API also remain stable while their business ownership is delegated to the physical module.
+
 ## Playback
 
 Playback status, timing and transport come from `PlaybackSession`. Rich UI concerns use narrow contracts:
@@ -131,7 +150,7 @@ New features should depend on narrow provider capability interfaces or feature-o
 
 A feature may move to its own Gradle module only when all of its dependencies point to core/api contracts, other lower-level modules, or generic feature-owned ports bound by the application integration layer. `feature -> shared` is forbidden because it distributes the monolith rather than establishing a real boundary.
 
-Cross-feature behavior should use the smallest stable contract. The Download/Local Music boundary is the reference example: Download asks for local-library readiness/refresh rather than depending on the Local Music controller. Provider Catalog/Auth similarly keep session synchronization and authentication transport behind feature-owned ports instead of depending on concrete provider owners.
+Cross-feature behavior should use the smallest stable contract. The Download/Local Music boundary is the reference example: Download asks for local-library readiness/refresh rather than depending on the Local Music controller. Provider Catalog/Auth similarly keep session synchronization and authentication transport behind feature-owned ports instead of depending on concrete provider owners. Provider Detail uses five destination-specific ports rather than exposing `ProviderMusicRepository` or a replacement mega-repository to its physical module.
 
 ## Composition roots
 
@@ -158,10 +177,18 @@ Provider Catalog/Auth add `checkProviderFeatureBoundaries`, wired to the Provide
 - rejects either provider feature module depending on `:shared`;
 - rejects concrete shared/application/provider types from each module's commonMain source.
 
-Android and iOS CI run Recognition, Search, Local Playlist, Local Music, Download, Provider Catalog, Provider Auth, playback runtime and shared tests in addition to the architecture gates.
+Provider Detail adds `checkProviderDetailFeatureBoundaries`, wired to its feature test lifecycle. It:
+
+- requires the physical module source/test and shared integration binding;
+- rejects `:feature:providerdetail -> :shared`;
+- rejects concrete shared/application/provider types from the physical module;
+- rejects the previous shared `DefaultProvider*DetailController` business owners from returning;
+- requires all five stable app-facing UiState models to remain concrete data classes rather than typealiases.
+
+Android and iOS CI run Recognition, Search, Local Playlist, Local Music, Download, Provider Catalog, Provider Auth, Provider Detail, playback runtime and shared tests in addition to the architecture gates.
 
 ## Migration rule
 
 Architecture changes remain behavior-preserving and independently reviewable: move ownership first, introduce narrow ports at cross-feature boundaries, then remove compatibility surfaces only after the last production caller has migrated. Physical module extraction is the final step for a feature, not a substitute for ownership isolation.
 
-P2 sequencing and P3 progress are tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md). After Provider Catalog/Auth, Provider Detail is the next physical boundary; Settings/Onboarding follow after their cross-feature settings contracts narrow, and Home remains last because it is the application-level feature aggregation surface.
+P2 sequencing and P3 progress are tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md). After Provider Detail, Settings/Onboarding is the next physical boundary; Home remains last because it is the application-level feature aggregation surface.
