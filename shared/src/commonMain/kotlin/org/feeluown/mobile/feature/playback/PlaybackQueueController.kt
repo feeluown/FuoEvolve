@@ -23,6 +23,7 @@ internal class PlaybackQueueController {
     var repeatMode by mutableStateOf(RepeatMode.QUEUE)
     var isFmQueue by mutableStateOf(false)
     var shuffleBeforeFm by mutableStateOf<Boolean?>(null)
+    private var pendingPlaybackStartReason: PlaybackStartReason? = null
 
     fun currentTrack(): MusicTrack? =
         if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
@@ -41,6 +42,14 @@ internal class PlaybackQueueController {
     }
 
     fun displayQueueIndex(): Int = if (currentTrack() != null) 0 else -1
+
+    fun markNextPlaybackStart(reason: PlaybackStartReason) {
+        pendingPlaybackStartReason = reason
+    }
+
+    fun consumePlaybackStartReason(): PlaybackStartReason =
+        pendingPlaybackStartReason?.also { pendingPlaybackStartReason = null }
+            ?: PlaybackStartReason.AUTO_NEXT
 
     fun updateCurrentTrack(track: MusicTrack) {
         if (currentIsUpNext) {
@@ -62,6 +71,7 @@ internal class PlaybackQueueController {
         shuffleBeforeFm = snapshot.shuffleBeforeFm
         currentUpNextTrack = null
         currentIsUpNext = false
+        pendingPlaybackStartReason = null
     }
 
     fun snapshot(): PlaybackQueueSnapshot = PlaybackQueueSnapshot(
