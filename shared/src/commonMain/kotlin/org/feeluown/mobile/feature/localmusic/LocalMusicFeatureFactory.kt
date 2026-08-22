@@ -3,13 +3,16 @@ package org.feeluown.mobile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-typealias LocalMusicFeatureController = LocalMusicFeatureOwner<
+private typealias CoreLocalMusicFeatureController = LocalMusicFeatureOwner<
     MusicTrack,
     ProviderInfo,
     LocalMusicDirectory,
     LocalMusicViewMode,
     LocalMusicCollectionSelection
 >
+
+interface LocalMusicFeatureController : CoreLocalMusicFeatureController, LocalMusicActionPort
+
 typealias LocalMusicUiState = LocalMusicFeatureState<
     MusicTrack,
     ProviderInfo,
@@ -175,11 +178,9 @@ fun createLocalMusicFeatureController(
         )
         owner.updateScanSettings()
     }
-    return owner
+    return BoundLocalMusicFeatureController(owner)
 }
 
-fun LocalMusicFeatureController.asLocalMusicActionPort(): LocalMusicActionPort = object : LocalMusicActionPort {
-    override fun openLocalMetadataEditor(track: MusicTrack) {
-        this@asLocalMusicActionPort.openLocalMetadataEditor(track)
-    }
-}
+private class BoundLocalMusicFeatureController(
+    private val delegate: CoreLocalMusicFeatureController,
+) : LocalMusicFeatureController, CoreLocalMusicFeatureController by delegate
