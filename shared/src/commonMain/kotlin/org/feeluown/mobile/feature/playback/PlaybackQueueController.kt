@@ -105,6 +105,5 @@ internal class PlaybackQueueController {
             !shuffleEnabled &&
             repeatMode == RepeatMode.QUEUE &&
             !isFmQueue &&
-            shuffleBeforeFm == null &&
-            pendingPlaybackStartReason == null
+            shuffleBeforeFm == null
 }
