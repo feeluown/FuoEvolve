@@ -3,7 +3,7 @@ package org.feeluown.mobile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-private typealias CoreLocalMusicFeatureController = LocalMusicFeatureOwner<
+typealias CoreLocalMusicFeatureController = LocalMusicFeatureOwner<
     MusicTrack,
     ProviderInfo,
     LocalMusicDirectory,
