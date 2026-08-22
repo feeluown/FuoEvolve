@@ -1,8 +1,9 @@
 package org.feeluown.mobile
 
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 
 /**
  * Owns the durable playback-queue state independently from the app controller.
@@ -11,18 +12,21 @@ import androidx.compose.runtime.setValue
  * type remains the single source of truth for queue state and persistence.
  */
 internal class PlaybackQueueController {
-    var mainQueue by mutableStateOf<List<MusicTrack>>(emptyList())
-    var originalMainQueue by mutableStateOf<List<MusicTrack>>(emptyList())
-    var upNextQueue by mutableStateOf<List<MusicTrack>>(emptyList())
-    var mainQueueIndex by mutableStateOf(-1)
-    var currentUpNextTrack by mutableStateOf<MusicTrack?>(null)
-    var currentIsUpNext by mutableStateOf(false)
-    var queueFeature by mutableStateOf<ProviderFeature?>(null)
-    var queuePlaylistId by mutableStateOf<String?>(null)
-    var shuffleEnabled by mutableStateOf(false)
-    var repeatMode by mutableStateOf(RepeatMode.QUEUE)
-    var isFmQueue by mutableStateOf(false)
-    var shuffleBeforeFm by mutableStateOf<Boolean?>(null)
+    private var applyingStartupSnapshot = false
+    private var startupDirty = false
+
+    var mainQueue by trackedStateOf<List<MusicTrack>>(emptyList())
+    var originalMainQueue by trackedStateOf<List<MusicTrack>>(emptyList())
+    var upNextQueue by trackedStateOf<List<MusicTrack>>(emptyList())
+    var mainQueueIndex by trackedStateOf(-1)
+    var currentUpNextTrack by trackedStateOf<MusicTrack?>(null)
+    var currentIsUpNext by trackedStateOf(false)
+    var queueFeature by trackedStateOf<ProviderFeature?>(null)
+    var queuePlaylistId by trackedStateOf<String?>(null)
+    var shuffleEnabled by trackedStateOf(false)
+    var repeatMode by trackedStateOf(RepeatMode.QUEUE)
+    var isFmQueue by trackedStateOf(false)
+    var shuffleBeforeFm by trackedStateOf<Boolean?>(null)
     private var pendingPlaybackStartReason: PlaybackStartReason? = null
 
     fun currentTrack(): MusicTrack? =
@@ -61,25 +65,33 @@ internal class PlaybackQueueController {
     }
 
     /**
-     * Applies the persisted startup queue only while no live queue state has been established.
+     * Applies the persisted startup queue only if no live queue mutation happened first.
      *
-     * The platform engine can restore its paused track immediately, while the durable queue is
-     * loaded asynchronously. If the user selects/replaces a queue before this snapshot arrives,
-     * that live queue is newer and must not be overwritten by the startup snapshot.
+     * Mutation history is tracked monotonically rather than inferred from current values so user
+     * actions that return the queue to its defaults (for example clearing an already-empty queue or
+     * toggling shuffle twice) still invalidate a delayed startup snapshot.
+     *
+     * @return true when the snapshot was applied, false when a newer live mutation won the race.
      */
-    fun restore(snapshot: PlaybackQueueSnapshot) {
-        if (!isPristineStartupState()) return
-        mainQueue = snapshot.mainQueue
-        originalMainQueue = snapshot.originalMainQueue
-        upNextQueue = snapshot.upNextQueue
-        mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
-        shuffleEnabled = snapshot.shuffleEnabled
-        repeatMode = snapshot.repeatMode
-        isFmQueue = snapshot.isFmQueue
-        shuffleBeforeFm = snapshot.shuffleBeforeFm
-        currentUpNextTrack = null
-        currentIsUpNext = false
-        pendingPlaybackStartReason = null
+    fun restore(snapshot: PlaybackQueueSnapshot): Boolean {
+        if (startupDirty) return false
+        applyingStartupSnapshot = true
+        try {
+            mainQueue = snapshot.mainQueue
+            originalMainQueue = snapshot.originalMainQueue
+            upNextQueue = snapshot.upNextQueue
+            mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex)
+            shuffleEnabled = snapshot.shuffleEnabled
+            repeatMode = snapshot.repeatMode
+            isFmQueue = snapshot.isFmQueue
+            shuffleBeforeFm = snapshot.shuffleBeforeFm
+            currentUpNextTrack = null
+            currentIsUpNext = false
+            pendingPlaybackStartReason = null
+        } finally {
+            applyingStartupSnapshot = false
+        }
+        return true
     }
 
     fun snapshot(): PlaybackQueueSnapshot = PlaybackQueueSnapshot(
@@ -93,17 +105,15 @@ internal class PlaybackQueueController {
         shuffleBeforeFm = shuffleBeforeFm,
     )
 
-    private fun isPristineStartupState(): Boolean =
-        mainQueue.isEmpty() &&
-            originalMainQueue.isEmpty() &&
-            upNextQueue.isEmpty() &&
-            mainQueueIndex == -1 &&
-            currentUpNextTrack == null &&
-            !currentIsUpNext &&
-            queueFeature == null &&
-            queuePlaylistId == null &&
-            !shuffleEnabled &&
-            repeatMode == RepeatMode.QUEUE &&
-            !isFmQueue &&
-            shuffleBeforeFm == null
+    private fun <T> trackedStateOf(initialValue: T): ReadWriteProperty<Any?, T> {
+        val state: MutableState<T> = mutableStateOf(initialValue)
+        return object : ReadWriteProperty<Any?, T> {
+            override fun getValue(thisRef: Any?, property: KProperty<*>): T = state.value
+
+            override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
+                if (!applyingStartupSnapshot) startupDirty = true
+                state.value = value
+            }
+        }
+    }
 }
