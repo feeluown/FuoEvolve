@@ -60,7 +60,15 @@ internal class PlaybackQueueController {
         }
     }
 
+    /**
+     * Applies the persisted startup queue only while no live queue state has been established.
+     *
+     * The platform engine can restore its paused track immediately, while the durable queue is
+     * loaded asynchronously. If the user selects/replaces a queue before this snapshot arrives,
+     * that live queue is newer and must not be overwritten by the startup snapshot.
+     */
     fun restore(snapshot: PlaybackQueueSnapshot) {
+        if (!isPristineStartupState()) return
         mainQueue = snapshot.mainQueue
         originalMainQueue = snapshot.originalMainQueue
         upNextQueue = snapshot.upNextQueue
@@ -84,4 +92,19 @@ internal class PlaybackQueueController {
         isFmQueue = isFmQueue,
         shuffleBeforeFm = shuffleBeforeFm,
     )
+
+    private fun isPristineStartupState(): Boolean =
+        mainQueue.isEmpty() &&
+            originalMainQueue.isEmpty() &&
+            upNextQueue.isEmpty() &&
+            mainQueueIndex == -1 &&
+            currentUpNextTrack == null &&
+            !currentIsUpNext &&
+            queueFeature == null &&
+            queuePlaylistId == null &&
+            !shuffleEnabled &&
+            repeatMode == RepeatMode.QUEUE &&
+            !isFmQueue &&
+            shuffleBeforeFm == null &&
+            pendingPlaybackStartReason == null
 }
