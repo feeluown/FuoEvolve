@@ -130,3 +130,7 @@ tasks.register("checkOfflineFeatureBoundaries") {
         }
     }
 }
+
+tasks.matching { it.name == "allTests" }.configureEach {
+    dependsOn("checkOfflineFeatureBoundaries")
+}
