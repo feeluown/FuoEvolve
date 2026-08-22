@@ -76,12 +76,27 @@ Completed.
 
 Architecture checks reject moving Search ownership back into `:shared`, adding `:feature:search -> :shared`, or leaking the aggregate application repositories/models into the physical Search module. Android and iOS CI both run `:feature:search:allTests`.
 
+### P3-B: Offline library cluster
+
+Completed as one physical-boundary change set for the three mutually related low-risk features:
+
+- `:feature:localplaylist` owns local-playlist state, CRUD/import/export orchestration and feature tests;
+- `:feature:localmusic` owns local-library refresh/filter/permission state, metadata/lyrics workflows and feature tests;
+- `:feature:download` owns download state/actions, task observation and offline-library refresh coordination.
+
+The three modules are generic over application-facing track/repository/provider/navigation types. Concrete `MusicTrack`, provider repositories, settings and `AppNavigator` are bound only in `:shared`, so none of the new feature modules depends back on `:shared`.
+
+The previous direct `DownloadController -> LocalMusicFeatureController` coordination is replaced by a narrow local-library port. Completion-triggered refresh, media-change debounce and delete-download refresh behavior remain owned by Download without a concrete feature-to-feature dependency.
+
+Shared Compose screens remain in `:shared`; the physical modules own business state and orchestration rather than UI styling/navigation composition. Android and iOS CI run all three feature suites, and the offline feature fitness check rejects reintroducing the retired shared owners or leaking concrete shared dependencies into the modules.
+
 ### Follow-up module candidates
 
-Likely order after P3-A:
+Recommended order after the offline-library cluster:
 
-1. `:feature:download` after download/provider/local repository dependencies are replaced by narrow lower-level ports;
-2. `:feature:localmusic` and `:feature:localplaylist` after their persistence/provider/navigation dependencies are similarly isolated;
-3. Settings/provider-content/Home once their shared UI/provider contracts are sufficiently narrow.
+1. provider catalog and provider authentication, which are narrower than provider detail;
+2. provider detail ownership once catalog/auth contracts are stable;
+3. Settings/onboarding after cross-feature settings contracts have narrowed;
+4. Home last, because it is the application-level feature aggregation surface.
 
 Every extraction must preserve the one-way dependency rule. A feature that still requires `:shared` remains logically isolated there until the missing contract is extracted; creating a Gradle module that depends back on `:shared` is explicitly not considered successful modularization.
