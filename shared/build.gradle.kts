@@ -26,7 +26,9 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            api(project(":core:model"))
             api(project(":playback:api"))
+            api(project(":provider:api"))
             api(project(":feature:recognition"))
             api(project(":feature:search"))
             api(project(":feature:localplaylist"))
@@ -38,7 +40,6 @@ kotlin {
             api(project(":feature:settings"))
             api(project(":feature:onboarding"))
             api(project(":feature:home"))
-            implementation(project(":provider:api"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.animation)
@@ -93,4 +94,125 @@ android {
     lint {
         disable.add("NullSafeMutableLiveData")
     }
+}
+
+val p4RequiredContractFiles = listOf(
+    "core/model/src/commonMain/kotlin/org/feeluown/mobile/TrackSourceType.kt",
+    "provider/api/src/commonMain/kotlin/org/feeluown/mobile/ProviderContracts.kt",
+    "playback/api/src/commonMain/kotlin/org/feeluown/mobile/PlaybackContracts.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/AppSettingsContracts.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/MediaContracts.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/PlaybackApplicationContracts.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/ProviderApplicationContracts.kt",
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/RepositoryContracts.kt",
+)
+
+val p4MovedContractNames = listOf(
+    "TrackSourceType",
+    "ProviderLoginMode",
+    "ProviderHeaderInput",
+    "ProviderOAuthInput",
+    "ProviderAuthState",
+    "ProviderCapabilities",
+    "ProviderResourceState",
+    "ProviderMutationResult",
+    "ProviderLoginConfig",
+    "ProviderInfo",
+    "ProviderFeatureCategory",
+    "ProviderContentType",
+    "ProviderFeature",
+    "ProviderPlaylist",
+    "ProviderMediaItemType",
+    "ProviderMediaItem",
+    "ProviderVideo",
+    "ProviderComment",
+    "VideoPlaybackPayload",
+    "AudioQualityPolicy",
+    "UnavailablePlaybackPolicy",
+    "RepeatMode",
+    "SmartReplacementSelection",
+    "PlaybackPart",
+    "PlaybackPayload",
+    "PlayerStatus",
+    "SleepTimerMode",
+    "SleepTimerState",
+    "TrackChangeDirection",
+    "PlayMode",
+    "AudioDecoderType",
+    "AudioDecoderInfo",
+    "AudioFormatInfo",
+)
+
+tasks.register("checkP4ContractBoundaries") {
+    group = "verification"
+    description = "Reject restoration of the shared contract aggregate or back-dependencies from lower contract modules."
+
+    val aggregate = rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/FuoContracts.kt")
+    val requiredFiles = p4RequiredContractFiles.map(rootProject::file)
+    val lowerBuildFiles = listOf(
+        rootProject.file("core/model/build.gradle.kts"),
+        rootProject.file("provider/api/build.gradle.kts"),
+        rootProject.file("playback/api/build.gradle.kts"),
+    )
+    val sharedModelRoot = rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model")
+
+    inputs.files(requiredFiles)
+    inputs.files(lowerBuildFiles)
+    inputs.dir(sharedModelRoot)
+
+    doLast {
+        if (aggregate.isFile) {
+            throw GradleException("Retired FuoContracts.kt aggregate was restored; keep contracts in their bounded-context files/modules.")
+        }
+
+        val missing = requiredFiles.filterNot { it.isFile }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("P4 contract boundary files are missing:")
+                    missing.forEach { appendLine(" - ${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}") }
+                },
+            )
+        }
+
+        val sharedBackDependencies = lowerBuildFiles.filter { file ->
+            file.readText().contains("project(\":shared\")")
+        }
+        if (sharedBackDependencies.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Lower contract modules must not depend on :shared:")
+                    sharedBackDependencies.forEach { appendLine(" - ${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}") }
+                },
+            )
+        }
+
+        val declarationPattern = Regex(
+            "\\b(?:data\\s+class|enum\\s+class)\\s+(?:${p4MovedContractNames.joinToString("|")})\\b",
+        )
+        val duplicateDeclarations = sharedModelRoot.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (declarationPattern.containsMatchIn(line)) {
+                        "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1}"
+                    } else {
+                        null
+                    }
+                }.asSequence()
+            }
+            .toList()
+        if (duplicateDeclarations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Contracts moved to lower modules were redeclared in :shared:")
+                    duplicateDeclarations.forEach { appendLine(" - $it") }
+                },
+            )
+        }
+    }
+}
+
+tasks.named("allTests") {
+    dependsOn("checkP4ContractBoundaries")
 }
