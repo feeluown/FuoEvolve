@@ -97,6 +97,19 @@ internal class PlaybackStartCoordinator(
         }
         queue.updateCurrentTrack(playbackTrack)
         resetLyricsForPlaybackRequest()
+
+        // Establish the platform playback transaction before publishing the new queue/current-track
+        // overlay. Android can still hold a restored paused Media3 session at this point; publishing
+        // B first lets runtime observers republish stale A before the engine has invalidated it.
+        // prepareLoading() is therefore the transaction boundary: after it returns, active selections
+        // have discarded the old resumable session and stale service state is generation-gated.
+        val reasonAwareEngine = playbackEngine as? PlaybackStartReasonAwareEngine
+        if (reasonAwareEngine != null) {
+            reasonAwareEngine.prepareLoading(playbackTrack, startReason)
+        } else {
+            playbackEngine.prepareLoading(playbackTrack)
+        }
+
         publishPlaybackState(
             currentPlaybackState().copy(
                 status = PlayerStatus.Loading,
@@ -111,12 +124,6 @@ internal class PlaybackStartCoordinator(
             )
         )
         persistQueue()
-        val reasonAwareEngine = playbackEngine as? PlaybackStartReasonAwareEngine
-        if (reasonAwareEngine != null) {
-            reasonAwareEngine.prepareLoading(playbackTrack, startReason)
-        } else {
-            playbackEngine.prepareLoading(playbackTrack)
-        }
         setLoading(true)
         setMessage(messageAfterStart ?: "正在播放：${track.title}")
 
