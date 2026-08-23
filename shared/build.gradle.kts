@@ -35,6 +35,9 @@ kotlin {
             api(project(":provider:api"))
             api(project(":provider:runtime"))
             implementation(project(":provider:bilibili"))
+            implementation(project(":provider:netease"))
+            implementation(project(":provider:qqmusic"))
+            implementation(project(":provider:ytmusic"))
             api(project(":persistence:settings"))
             api(project(":feature:recognition"))
             api(project(":feature:search"))
@@ -443,4 +446,7 @@ tasks.named("allTests") {
     dependsOn("checkP4ContractBoundaries")
     dependsOn(":persistence:settings:allTests")
     dependsOn(":provider:bilibili:allTests")
+    dependsOn(":provider:netease:allTests")
+    dependsOn(":provider:qqmusic:allTests")
+    dependsOn(":provider:ytmusic:allTests")
 }
