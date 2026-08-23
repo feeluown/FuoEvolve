@@ -1,11 +1,13 @@
 package org.feeluown.mobile
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -34,10 +36,17 @@ internal class BydInstrumentLyricsPublisher(
 ) {
     private val appContext = context.applicationContext
     private var collectJob: Job? = null
+    private var positionSyncJob: Job? = null
     private var bridge: BydInstrumentLyricsBridge? = null
     private var lastTrackKey: String? = null
     private var lastWindow: InstrumentLyricsWindow? = null
     private var hasPublishedLyrics = false
+    private var cachedLyricsKey: String? = null
+    private var cachedPayload: StatusBarLyricsPayload = StatusBarLyricsPayload.Empty
+    private var anchorPositionMs: Long = 0L
+    private var anchorRealtimeMs: Long = 0L
+    private var anchorPlaying: Boolean = false
+    private var latestSnapshot: Snapshot? = null
 
     fun start() {
         if (collectJob != null) return
@@ -63,11 +72,14 @@ internal class BydInstrumentLyricsPublisher(
     fun close() {
         collectJob?.cancel()
         collectJob = null
-        clearPublishedLyrics()
+        deactivate()
         bridge = null
     }
 
     private fun publish(snapshot: Snapshot) {
+        latestSnapshot = snapshot
+        updatePositionAnchor(snapshot)
+
         val track = snapshot.track
         if (
             !snapshot.enabled ||
@@ -76,15 +88,22 @@ internal class BydInstrumentLyricsPublisher(
             snapshot.status == PlaybackSessionStatus.Error ||
             snapshot.status == PlaybackSessionStatus.Ended
         ) {
-            clearPublishedLyrics()
+            deactivate()
             return
         }
 
-        val payload = buildStatusBarLyricsPayload(
-            rawLyrics = snapshot.lyrics,
-            durationMs = snapshot.durationMs.takeIf { it > 0L } ?: track.durationMs,
-        )
-        val window = buildInstrumentLyricsWindow(payload, snapshot.positionMs)
+        publishAtPosition(snapshot, snapshot.positionMs)
+        if (snapshot.status == PlaybackSessionStatus.Playing) {
+            ensurePositionSyncLoop()
+        } else {
+            stopPositionSyncLoop()
+        }
+    }
+
+    private fun publishAtPosition(snapshot: Snapshot, positionMs: Long) {
+        val track = snapshot.track ?: return
+        val payload = payloadFor(snapshot, track)
+        val window = buildInstrumentLyricsWindow(payload, positionMs)
         if (window == null) {
             clearPublishedLyrics()
             return
@@ -101,6 +120,47 @@ internal class BydInstrumentLyricsPublisher(
         }
     }
 
+    private fun payloadFor(snapshot: Snapshot, track: TrackRef): StatusBarLyricsPayload {
+        val durationMs = snapshot.durationMs.takeIf { it > 0L } ?: track.durationMs
+        val lyricsKey = listOf(track.source, track.id, snapshot.lyrics.orEmpty(), durationMs).joinToString("\u0000")
+        if (lyricsKey != cachedLyricsKey) {
+            cachedLyricsKey = lyricsKey
+            cachedPayload = buildStatusBarLyricsPayload(
+                rawLyrics = snapshot.lyrics,
+                durationMs = durationMs,
+            )
+        }
+        return cachedPayload
+    }
+
+    private fun updatePositionAnchor(snapshot: Snapshot, realtimeMs: Long = SystemClock.elapsedRealtime()) {
+        anchorPositionMs = snapshot.positionMs.coerceAtLeast(0L)
+        anchorRealtimeMs = realtimeMs
+        anchorPlaying = snapshot.status == PlaybackSessionStatus.Playing
+    }
+
+    private fun estimatedPositionMs(realtimeMs: Long = SystemClock.elapsedRealtime()): Long {
+        if (!anchorPlaying) return anchorPositionMs
+        return (anchorPositionMs + (realtimeMs - anchorRealtimeMs).coerceAtLeast(0L)).coerceAtLeast(0L)
+    }
+
+    private fun ensurePositionSyncLoop() {
+        if (positionSyncJob?.isActive == true) return
+        positionSyncJob = scope.launch {
+            while (true) {
+                val snapshot = latestSnapshot ?: break
+                if (!snapshot.enabled || snapshot.status != PlaybackSessionStatus.Playing || snapshot.track == null) break
+                publishAtPosition(snapshot, estimatedPositionMs())
+                delay(POSITION_SYNC_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopPositionSyncLoop() {
+        positionSyncJob?.cancel()
+        positionSyncJob = null
+    }
+
     private fun ensureBridge(): BydInstrumentLyricsBridge? {
         bridge?.let { return it }
         return BydInstrumentLyricsBridge.create(appContext)
@@ -109,6 +169,17 @@ internal class BydInstrumentLyricsPublisher(
             }
             .getOrNull()
             ?.also { bridge = it }
+    }
+
+    private fun deactivate() {
+        stopPositionSyncLoop()
+        clearPublishedLyrics()
+        latestSnapshot = null
+        anchorPositionMs = 0L
+        anchorRealtimeMs = 0L
+        anchorPlaying = false
+        cachedLyricsKey = null
+        cachedPayload = StatusBarLyricsPayload.Empty
     }
 
     private fun clearPublishedLyrics() {
@@ -131,6 +202,7 @@ internal class BydInstrumentLyricsPublisher(
 
     private companion object {
         const val TAG = "BydInstrumentLyrics"
+        const val POSITION_SYNC_INTERVAL_MS = 100L
     }
 }
 
