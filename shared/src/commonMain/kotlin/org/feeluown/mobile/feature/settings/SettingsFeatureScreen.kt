@@ -99,7 +99,7 @@ private enum class FeatureSettingsCategory(
 ) {
     Sources("音源与账号", "音源启用、排序、登录与显示范围"),
     Playback("播放与音质", "网络音质、播放策略与智能替换"),
-    Appearance("外观与显示", "主题、歌词字号与状态栏歌词"),
+    Appearance("外观与显示", "主题、歌词字号与歌词同步"),
     LocalMusic("本地音乐", "媒体目录扫描与短音频过滤"),
     Storage("下载与存储", "下载行为、缓存上限与清理"),
     About("关于", "版本、项目链接与诊断信息"),
@@ -950,6 +950,16 @@ private fun AppearanceFeatureSettings(
                 checked = settings.statusBarLyricsEnabled,
                 enabled = enabled,
                 onCheckedChange = controller::setStatusBarLyricsEnabled,
+            )
+        }
+        if (state.bydInstrumentLyricsAvailable) {
+            SettingsDivider(startPadding = FuoSpacing.lg)
+            SettingsToggleRow(
+                title = "比亚迪仪表歌词",
+                supportingText = "将当前歌词同步到驾驶仪表的三行歌词区域",
+                checked = settings.bydInstrumentLyricsEnabled,
+                enabled = enabled,
+                onCheckedChange = controller::setBydInstrumentLyricsEnabled,
             )
         }
     }
