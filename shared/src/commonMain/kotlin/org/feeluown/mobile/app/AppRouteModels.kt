@@ -229,19 +229,6 @@ fun NavigationPlaylist.toProviderPlaylist(): ProviderPlaylist = ProviderPlaylist
     canDelete = canDelete,
 )
 
-fun ProviderMediaItem.toNavigationMediaItem(): NavigationMediaItem = NavigationMediaItem(
-    id = id,
-    title = title,
-    providerId = providerId,
-    providerName = providerName,
-    type = type.name,
-    coverUrl = coverUrl,
-    description = description,
-    providerUrl = providerUrl,
-    trackCount = trackCount,
-    albumCount = albumCount,
-)
-
 fun NavigationMediaItem.toProviderMediaItem(): ProviderMediaItem = ProviderMediaItem(
     id = id,
     title = title,
@@ -271,12 +258,12 @@ fun MediaRef.toNavigationMediaItem(): NavigationMediaItem = NavigationMediaItem(
 fun NavigationMediaItem.toMediaRef(): MediaRef = MediaRef(
     id = id,
     title = title,
-    sourceId = providerId,
-    sourceName = providerName,
+    providerId = providerId,
+    providerName = providerName,
     type = MediaRefType.valueOf(type),
     coverUrl = coverUrl,
     description = description,
-    externalUrl = providerUrl,
+    providerUrl = providerUrl,
     trackCount = trackCount,
     albumCount = albumCount,
 )
