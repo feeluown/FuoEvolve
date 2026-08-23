@@ -190,7 +190,7 @@ fun NavigationTrack.toMusicTrack(): MusicTrack = MusicTrack(
     isUnavailable = isUnavailable,
     artistItemId = artistItemId,
     albumItemId = albumItemId,
-    artistRefs = artistItems.map(NavigationMediaItem::toMediaRef),
+    artistItems = artistItems.map(NavigationMediaItem::toMediaRef),
     providerUrl = providerUrl,
     providerTags = providerTags,
 )
