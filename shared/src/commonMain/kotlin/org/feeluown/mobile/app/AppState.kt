@@ -97,12 +97,26 @@ class AppNavigator {
 }
 
 data class AppUiState(
-    val settings: SettingsState = SettingsState(),
-    val providerSessions: ProviderSessionState = ProviderSessionState(),
+    val isInitialized: Boolean = false,
+    val onboardingCompleted: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.System,
+    val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
+    val themePaletteStyle: ThemePaletteStyle = ThemePaletteStyle.Expressive,
+    val themeColorSpec: ThemeColorSpec = ThemeColorSpec.Expressive_2025,
     val backStack: List<AppRoute> = listOf(AppRoute.Home),
-) {
-    val isInitialized: Boolean get() = settings.isLoaded
-    val onboardingCompleted: Boolean get() = settings.settings.onboardingCompleted
+)
+
+private fun appUiState(settingsState: SettingsState, backStack: List<AppRoute>): AppUiState {
+    val settings = settingsState.settings
+    return AppUiState(
+        isInitialized = settingsState.isLoaded,
+        onboardingCompleted = settings.onboardingCompleted,
+        themeMode = settings.themeMode,
+        themeColorScheme = settings.themeColorScheme,
+        themePaletteStyle = settings.themePaletteStyle,
+        themeColorSpec = settings.themeColorSpec,
+        backStack = backStack,
+    )
 }
 
 sealed interface AppIntent {
@@ -112,6 +126,7 @@ sealed interface AppIntent {
     data class UpdateThemeColorSpec(val value: ThemeColorSpec) : AppIntent
 }
 
+@Suppress("UNUSED_PARAMETER")
 class FuoAppViewModel(
     val playbackSession: PlaybackSession,
     val playbackNavigationPort: PlaybackNavigationPort,
@@ -179,18 +194,13 @@ class FuoAppViewModel(
 
     val uiState: StateFlow<AppUiState> = combine(
         settingsRepository.state,
-        providerSessionRepository.state,
         navigator.backStack,
-    ) { settings, sessions, backStack -> AppUiState(settings, sessions, backStack) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = AppUiState(
-                settings = settingsRepository.state.value,
-                providerSessions = providerSessionRepository.state.value,
-                backStack = navigator.backStack.value,
-            ),
-        )
+        ::appUiState,
+    ).stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = appUiState(settingsRepository.state.value, navigator.backStack.value),
+    )
 
     fun dispatchSearch(action: SearchAction) = searchController.dispatch(action)
     fun searchRecognizedSong(song: RecognizedSong) = searchController.searchRecognizedSong(song)

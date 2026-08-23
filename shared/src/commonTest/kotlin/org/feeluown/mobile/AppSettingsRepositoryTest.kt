@@ -1,17 +1,8 @@
 package org.feeluown.mobile
 
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.mutablePreferencesOf
-import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -20,15 +11,15 @@ import kotlin.test.assertTrue
 class AppSettingsRepositoryTest {
     @Test
     fun legacySettingsMigrateOnceAndDiscardLoginDrafts() = runTest {
-        val dataStore = FakePreferencesDataStore()
+        val store = FakeSettingsSnapshotStore()
         var migrationCount = 0
         val legacy = AppSettings(
             localMusicMinDurationSeconds = 42,
             providerCookieInputs = mapOf("netease" to "secret"),
             providerHeaderInputs = mapOf("qqmusic" to ProviderHeaderInput(cookie = "secret")),
         )
-        val first = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val first = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = LegacyAppSettingsLoader {
                 migrationCount += 1
                 legacy
@@ -42,8 +33,8 @@ class AppSettingsRepositoryTest {
         assertTrue(migrated.providerCookieInputs.isEmpty())
         assertTrue(migrated.providerHeaderInputs.isEmpty())
 
-        val second = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val second = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = LegacyAppSettingsLoader {
                 migrationCount += 1
                 AppSettings(localMusicMinDurationSeconds = 99)
@@ -57,8 +48,8 @@ class AppSettingsRepositoryTest {
 
     @Test
     fun concurrentTransformsDoNotLoseUpdates() = runTest {
-        val repository = DataStoreAppSettingsRepository(
-            dataStore = FakePreferencesDataStore(),
+        val repository = PersistentAppSettingsRepository(
+            store = FakeSettingsSnapshotStore(),
             legacyLoader = null,
             scope = backgroundScope,
         )
@@ -80,11 +71,8 @@ class AppSettingsRepositoryTest {
 
     @Test
     fun corruptedPayloadRecoversAndAcceptsFutureUpdates() = runTest {
-        val dataStore = FakePreferencesDataStore(
-            mutablePreferencesOf(stringPreferencesKey("app_settings_json_v1") to "not-json"),
-        )
-        val repository = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val repository = PersistentAppSettingsRepository(
+            store = FakeSettingsSnapshotStore(SettingsSnapshotReadResult.Corrupted),
             legacyLoader = null,
             scope = backgroundScope,
         )
@@ -97,13 +85,10 @@ class AppSettingsRepositoryTest {
 
     @Test
     fun missingDynamicCoverSettingUsesDisabledDefault() = runTest {
-        val dataStore = FakePreferencesDataStore(
-            mutablePreferencesOf(
-                stringPreferencesKey("app_settings_json_v1") to "{\"onboardingCompleted\":true}",
+        val repository = PersistentAppSettingsRepository(
+            store = FakeSettingsSnapshotStore(
+                SettingsSnapshotReadResult.Loaded(PersistedSettingsV1(onboardingCompleted = true)),
             ),
-        )
-        val repository = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
             legacyLoader = null,
             scope = backgroundScope,
         )
@@ -119,9 +104,9 @@ class AppSettingsRepositoryTest {
 
     @Test
     fun statusBarLyricsSettingDefaultsOffAndRoundTrips() = runTest {
-        val dataStore = FakePreferencesDataStore()
-        val first = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val store = FakeSettingsSnapshotStore()
+        val first = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = null,
             scope = backgroundScope,
         )
@@ -129,8 +114,8 @@ class AppSettingsRepositoryTest {
         assertFalse(first.awaitSettings().statusBarLyricsEnabled)
         first.update { it.copy(statusBarLyricsEnabled = true) }
 
-        val restored = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val restored = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = null,
             scope = backgroundScope,
         ).awaitSettings()
@@ -139,9 +124,9 @@ class AppSettingsRepositoryTest {
 
     @Test
     fun playlistPlaybackStatsRoundTripWithProviderPlaylistKey() = runTest {
-        val dataStore = FakePreferencesDataStore()
-        val first = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val store = FakeSettingsSnapshotStore()
+        val first = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = null,
             scope = backgroundScope,
         )
@@ -154,8 +139,8 @@ class AppSettingsRepositoryTest {
                 playlistPlaybackStats = mapOf("netease::playlist:123" to stat),
             )
         }
-        val restored = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val restored = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = null,
             scope = backgroundScope,
         ).awaitSettings()
@@ -165,7 +150,7 @@ class AppSettingsRepositoryTest {
 
     @Test
     fun smartReplacementSelectionRoundTripsAcrossSettingsStorage() = runTest {
-        val dataStore = FakePreferencesDataStore()
+        val store = FakeSettingsSnapshotStore()
         val selection = SmartReplacementSelection(
             replacementId = "qqmusic:456",
             replacementTitle = "候选歌曲",
@@ -177,16 +162,16 @@ class AppSettingsRepositoryTest {
             replacementDurationMs = 192_000,
             replacementScore = 0.86,
         )
-        val first = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val first = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = null,
             scope = backgroundScope,
         )
         first.awaitSettings()
         first.update { it.copy(smartReplacementSelections = mapOf("netease:123" to selection)) }
 
-        val restored = DataStoreAppSettingsRepository(
-            dataStore = dataStore,
+        val restored = PersistentAppSettingsRepository(
+            store = store,
             legacyLoader = null,
             scope = backgroundScope,
         ).awaitSettings()
@@ -216,17 +201,15 @@ class AppSettingsRepositoryTest {
         )
     }
 
-    private class FakePreferencesDataStore(
-        initial: Preferences = emptyPreferences(),
-    ) : DataStore<Preferences> {
-        private val mutex = Mutex()
-        private val mutableData = MutableStateFlow(initial)
+    private class FakeSettingsSnapshotStore(
+        initial: SettingsSnapshotReadResult = SettingsSnapshotReadResult.Missing,
+    ) : SettingsSnapshotStore {
+        private var result: SettingsSnapshotReadResult = initial
 
-        override val data: Flow<Preferences> = mutableData
+        override suspend fun read(): SettingsSnapshotReadResult = result
 
-        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
-            mutex.withLock {
-                transform(mutableData.value).also { mutableData.value = it }
-            }
+        override suspend fun write(snapshot: PersistedSettingsV1) {
+            result = SettingsSnapshotReadResult.Loaded(snapshot)
+        }
     }
 }

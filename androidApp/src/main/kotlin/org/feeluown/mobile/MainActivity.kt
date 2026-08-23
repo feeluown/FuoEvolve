@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
             val lifecycleOwner = LocalLifecycleOwner.current
             val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
             val systemDark = LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-            SideEffect { configureSystemBars(resolveDarkTheme(appUiState.settings.settings.themeMode, systemDark)) }
+            SideEffect { configureSystemBars(resolveDarkTheme(appUiState.themeMode, systemDark)) }
             DisposableEffect(lifecycleOwner) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
@@ -156,7 +156,7 @@ class MainActivity : ComponentActivity() {
                 launchSharedText?.let(appViewModel.sharedResourceActionPort::open)
             }
 
-            P2AppRoot(
+            AppRoot(
                 appViewModel = appViewModel,
                 hasAudioPermission = hasAudioPermission,
                 hasImagePermission = hasImagePermission,

@@ -13,17 +13,19 @@ fun createAndroidAppSettingsRepository(
     scope: CoroutineScope,
 ): AppSettingsRepository {
     val applicationContext = context.applicationContext
-    val dataStore = createSettingsDataStore(
-        storage = OkioStorage<Preferences>(
-            fileSystem = FileSystem.SYSTEM,
-            serializer = PreferencesSerializer,
-            producePath = {
-                applicationContext.filesDir.resolve(APP_SETTINGS_FILE_NAME).absolutePath.toPath()
-            },
+    val store = DataStoreSettingsSnapshotStore(
+        createSettingsDataStore(
+            storage = OkioStorage<Preferences>(
+                fileSystem = FileSystem.SYSTEM,
+                serializer = PreferencesSerializer,
+                producePath = {
+                    applicationContext.filesDir.resolve(APP_SETTINGS_FILE_NAME).absolutePath.toPath()
+                },
+            ),
         ),
     )
-    return DataStoreAppSettingsRepository(
-        dataStore = dataStore,
+    return PersistentAppSettingsRepository(
+        store = store,
         legacyLoader = LegacyAppSettingsLoader { AndroidLegacySettingsLoader(applicationContext).load() },
         scope = scope,
     )

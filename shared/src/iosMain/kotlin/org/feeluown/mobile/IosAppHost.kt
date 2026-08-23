@@ -71,7 +71,7 @@ private fun IosApp(
             networkStatusOutput, audioRecognitionOutput, oauthDeviceCodeOutput,
         )
     }
-    P2AppRoot(
+    AppRoot(
         appViewModel = container.appViewModel,
         hasAudioPermission = container.hasAudioPermission,
         onRequestAudioPermission = container::requestAudioPermission,
