@@ -115,55 +115,12 @@ data class ProviderPlaylist(
     val canDelete: Boolean? = null,
 )
 
-enum class ProviderMediaItemType {
-    Artist,
-    Album,
-}
+typealias ProviderMediaItemType = MediaRefType
+typealias ProviderMediaItem = MediaRef
 
-data class ProviderMediaItem(
-    val id: String,
-    val title: String,
-    val providerId: String,
-    val providerName: String,
-    val type: ProviderMediaItemType,
-    val coverUrl: String? = null,
-    val description: String = "",
-    val providerUrl: String? = null,
-    val trackCount: Int? = null,
-    val albumCount: Int? = null,
-)
+fun ProviderMediaItem.toMediaRef(): MediaRef = this
 
-fun ProviderMediaItem.toMediaRef(): MediaRef = MediaRef(
-    id = id,
-    title = title,
-    sourceId = providerId,
-    sourceName = providerName,
-    type = when (type) {
-        ProviderMediaItemType.Artist -> MediaRefType.Artist
-        ProviderMediaItemType.Album -> MediaRefType.Album
-    },
-    coverUrl = coverUrl,
-    description = description,
-    externalUrl = providerUrl,
-    trackCount = trackCount,
-    albumCount = albumCount,
-)
-
-fun MediaRef.toProviderMediaItem(): ProviderMediaItem = ProviderMediaItem(
-    id = id,
-    title = title,
-    providerId = sourceId,
-    providerName = sourceName,
-    type = when (type) {
-        MediaRefType.Artist -> ProviderMediaItemType.Artist
-        MediaRefType.Album -> ProviderMediaItemType.Album
-    },
-    coverUrl = coverUrl,
-    description = description,
-    providerUrl = externalUrl,
-    trackCount = trackCount,
-    albumCount = albumCount,
-)
+fun MediaRef.toProviderMediaItem(): ProviderMediaItem = this
 
 data class ProviderVideo(
     val id: String,
