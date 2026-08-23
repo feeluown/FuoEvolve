@@ -55,7 +55,7 @@ enum class ThemeColorSpec(
     val label: String,
 ) {
     Material3_2021("Material 3 (2021)"),
-    Expressive_2025("Expressive (2025)"),
+    Expressive_2025("Material 3 (2025)"),
 }
 
 @Serializable
@@ -91,6 +91,7 @@ data class AppSettings(
     val pauseOnOtherAppPlayback: Boolean = DEFAULT_PAUSE_ON_OTHER_APP_PLAYBACK,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
     val statusBarLyricsEnabled: Boolean = false,
+    val bydInstrumentLyricsEnabled: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
     val themePaletteStyle: ThemePaletteStyle = ThemePaletteStyle.Expressive,
