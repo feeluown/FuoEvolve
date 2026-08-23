@@ -2,11 +2,10 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.feeluown.mobile.provider.bilibili.BilibiliProvider
 import org.feeluown.mobile.provider.core.InMemoryProviderCredentialStore
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
-import org.feeluown.mobile.provider.core.ProviderCredentials
+import org.feeluown.mobile.provider.core.ProviderDeviceAuthorizationCapability
 import org.feeluown.mobile.provider.core.mediaItemKey
 import org.feeluown.mobile.provider.core.playlistKey
 import org.feeluown.mobile.provider.core.splitResourceId
@@ -14,15 +13,10 @@ import org.feeluown.mobile.provider.core.trackKey
 import org.feeluown.mobile.provider.core.videoKey
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
-import org.feeluown.mobile.provider.netease.NeteaseProvider
-import org.feeluown.mobile.provider.qqmusic.QQMusicProvider
-import org.feeluown.mobile.provider.ytmusic.YtMusicContentProvider
-import org.feeluown.mobile.provider.ytmusic.YtMusicProvider
 
 /**
  * The provider boundary used by the app after the legacy runtime migration.
- * The public repository contract intentionally stays unchanged so playback,
- * sharing and local data do not need a second migration.
+ * Concrete providers are constructed only by [ProviderComposition].
  */
 class KotlinProviderRepository : ProviderMusicRepository {
     private val stateMutex = Mutex()
@@ -39,7 +33,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
         http = ProviderHttpClient()
         credentials = InMemoryProviderCredentialStore()
         isCellularConnection = { false }
-        providerMap = createProviders(http, credentials)
+        providerMap = ProviderComposition.createProviders(http, credentials)
     }
 
     internal constructor(
@@ -50,7 +44,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
         this.http = http
         this.credentials = credentials
         this.isCellularConnection = isCellularConnection
-        providerMap = createProviders(http, credentials)
+        providerMap = ProviderComposition.createProviders(http, credentials)
     }
 
     override suspend fun initialize() {
@@ -80,9 +74,8 @@ class KotlinProviderRepository : ProviderMusicRepository {
         return enabledProviderIds.mapNotNull { providerMap[it]?.info }
     }
 
-    override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> {
-        return searchAll(keyword, providerId).tracks
-    }
+    override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> =
+        searchAll(keyword, providerId).tracks
 
     override suspend fun searchAll(keyword: String, providerId: String?): ProviderSearchResults {
         initialize()
@@ -285,29 +278,39 @@ class KotlinProviderRepository : ProviderMusicRepository {
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         requireProvider(providerId).loginWithCookies(cookiesJson)
 
-    override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState =
-        requireProvider(providerId).loginWithHeaders(authorization, cookie)
+    override suspend fun loginWithHeaders(
+        providerId: String,
+        authorization: String,
+        cookie: String,
+    ): ProviderAuthState = requireProvider(providerId).loginWithHeaders(authorization, cookie)
 
-    override suspend fun loginWithYtmusicHeaderFile(headerFileJson: String): ProviderAuthState =
-        requireProvider("ytmusic").loginWithHeaderFile(headerFileJson)
+    override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState =
+        requireProvider(providerId).loginWithHeaderFile(headerFileJson)
 
-    override suspend fun beginYtmusicOAuth(clientId: String, clientSecret: String) =
-        requireYtMusicProvider().beginOAuth(clientId, clientSecret)
+    override suspend fun beginDeviceAuthorization(
+        providerId: String,
+        clientId: String,
+        clientSecret: String,
+    ): ProviderDeviceAuthorization = requireDeviceAuthorizationProvider(providerId)
+        .beginDeviceAuthorization(clientId, clientSecret)
 
-    override suspend fun pollYtmusicOAuth(
+    override suspend fun pollDeviceAuthorization(
+        providerId: String,
         deviceCode: String,
         clientId: String,
         clientSecret: String,
-    ) = requireYtMusicProvider().pollOAuth(deviceCode, clientId, clientSecret)
+    ): ProviderDeviceAuthorizationPollResult = requireDeviceAuthorizationProvider(providerId)
+        .pollDeviceAuthorization(deviceCode, clientId, clientSecret)
 
-    override suspend fun loginWithYtmusicOAuth(
+    override suspend fun loginWithOAuth(
+        providerId: String,
         accessToken: String,
         refreshToken: String,
         expiresAtMillis: Long?,
         scope: String?,
         clientId: String,
         clientSecret: String,
-    ): ProviderAuthState = requireYtMusicProvider().loginWithOAuth(
+    ): ProviderAuthState = requireProvider(providerId).loginWithOAuth(
         accessToken = accessToken,
         refreshToken = refreshToken,
         expiresAtMillis = expiresAtMillis,
@@ -316,11 +319,13 @@ class KotlinProviderRepository : ProviderMusicRepository {
         clientSecret = clientSecret,
     )
 
-    override suspend fun loginWithYtmusicOAuthJson(
+    override suspend fun loginWithOAuthJson(
+        providerId: String,
         oauthJson: String,
         clientId: String,
         clientSecret: String,
-    ): ProviderAuthState = requireYtMusicProvider().loginWithOAuthJson(oauthJson, clientId, clientSecret)
+    ): ProviderAuthState = requireDeviceAuthorizationProvider(providerId)
+        .loginWithOAuthJson(oauthJson, clientId, clientSecret)
 
     override suspend fun logout(providerId: String): ProviderAuthState = requireProvider(providerId).logout()
 
@@ -355,16 +360,17 @@ class KotlinProviderRepository : ProviderMusicRepository {
     override suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail =
         playlistDetailPage(playlist, 0, PROVIDER_PAGE_SIZE)
 
-    override suspend fun playlistDetailPage(playlist: ProviderPlaylist, offset: Int, limit: Int): ProviderPlaylistDetail =
-        requireProvider(playlist.providerId).playlistDetail(playlist, offset, limit)
+    override suspend fun playlistDetailPage(
+        playlist: ProviderPlaylist,
+        offset: Int,
+        limit: Int,
+    ): ProviderPlaylistDetail = requireProvider(playlist.providerId).playlistDetail(playlist, offset, limit)
 
     override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> =
         requireProvider(playlist.providerId).playlistTracks(playlist)
 
-    override suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> {
-        val provider = requireProvider(track.source)
-        return provider.playlistOperationTargets(track)
-    }
+    override suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> =
+        requireProvider(track.source).playlistOperationTargets(track)
 
     override suspend fun addTrackToPlaylist(playlist: ProviderPlaylist, track: MusicTrack): ProviderMutationResult =
         requireProvider(playlist.providerId).addTrackToPlaylist(playlist, track)
@@ -384,8 +390,13 @@ class KotlinProviderRepository : ProviderMusicRepository {
     override suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         mediaItemDetailPage(item, 0, 0, PROVIDER_PAGE_SIZE)
 
-    override suspend fun mediaItemDetailPage(item: ProviderMediaItem, tracksOffset: Int, albumsOffset: Int, limit: Int): ProviderMediaItemDetail =
-        requireProvider(item.providerId).mediaItemDetail(item, tracksOffset, albumsOffset, limit)
+    override suspend fun mediaItemDetailPage(
+        item: ProviderMediaItem,
+        tracksOffset: Int,
+        albumsOffset: Int,
+        limit: Int,
+    ): ProviderMediaItemDetail = requireProvider(item.providerId)
+        .mediaItemDetail(item, tracksOffset, albumsOffset, limit)
 
     override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> =
         requireProvider(item.providerId).mediaItemTracks(item)
@@ -405,7 +416,11 @@ class KotlinProviderRepository : ProviderMusicRepository {
             ?: ProviderResourceState(providerId = providerId, resourceId = resourceId)
     }
 
-    override suspend fun setResourceFavorite(resourceType: String, resourceId: String, favorite: Boolean): ProviderMutationResult {
+    override suspend fun setResourceFavorite(
+        resourceType: String,
+        resourceId: String,
+        favorite: Boolean,
+    ): ProviderMutationResult {
         val providerId = providerIdForResource(resourceType, resourceId)
         return providerMap[providerId]?.setResourceFavorite(resourceType, resourceId, favorite)
             ?: ProviderMutationResult(false, "当前音源不支持该收藏操作")
@@ -416,7 +431,10 @@ class KotlinProviderRepository : ProviderMusicRepository {
         return enabledProviderIds.mapNotNull { providerMap[it] }
     }
 
-    private fun selectedProvidersForReplacement(providerIds: Set<String>, originalProviderId: String): List<KotlinMusicProvider> {
+    private fun selectedProvidersForReplacement(
+        providerIds: Set<String>,
+        originalProviderId: String,
+    ): List<KotlinMusicProvider> {
         val ids = if (providerIds.isEmpty()) enabledProviderIds else providerIds
         return ids.filter { it != originalProviderId }.mapNotNull { providerMap[it] }
     }
@@ -493,9 +511,9 @@ class KotlinProviderRepository : ProviderMusicRepository {
     private fun requireProvider(providerId: String): KotlinMusicProvider =
         providerMap[providerId] ?: error("unknown provider: $providerId")
 
-    private fun requireYtMusicProvider(): YtMusicContentProvider =
-        requireProvider("ytmusic") as? YtMusicContentProvider
-            ?: error("ytmusic provider is not available")
+    private fun requireDeviceAuthorizationProvider(providerId: String): ProviderDeviceAuthorizationCapability =
+        requireProvider(providerId) as? ProviderDeviceAuthorizationCapability
+            ?: throw UnsupportedOperationException("provider does not support device authorization: $providerId")
 
     private fun providerIdForResource(resourceType: String, resourceId: String): String {
         val expectedPrefix = when (resourceType.lowercase()) {
@@ -541,29 +559,17 @@ class KotlinProviderRepository : ProviderMusicRepository {
         val common = left.toSet().intersect(right.toSet()).size.toDouble()
         return common / maxOf(left.toSet().size, right.toSet().size).toDouble()
     }
-
-    private fun createProviders(http: ProviderHttpClient, credentials: ProviderCredentialStore): Map<String, KotlinMusicProvider> {
-        val ytmusic = YtMusicProvider(http, credentials)
-        return mapOf(
-            "netease" to NeteaseProvider(http, credentials),
-            "qqmusic" to QQMusicProvider(http, credentials),
-            "bilibili" to BilibiliProvider(http, credentials),
-            "ytmusic" to YtMusicContentProvider(ytmusic, http, credentials),
-        )
-    }
 }
 
 internal fun rankReplacementCandidates(
     candidates: List<MusicTrack>,
     minScore: Double,
     scoreOf: (MusicTrack) -> Double,
-): List<ReplacementCandidate> {
-    return candidates
-        .map { candidate -> ReplacementCandidate(candidate, scoreOf(candidate)) }
-        .filter { candidate -> candidate.score >= minScore }
-        .sortedByDescending { candidate -> candidate.score }
-        .distinctBy { candidate -> candidate.track.id }
-}
+): List<ReplacementCandidate> = candidates
+    .map { candidate -> ReplacementCandidate(candidate, scoreOf(candidate)) }
+    .filter { candidate -> candidate.score >= minScore }
+    .sortedByDescending { candidate -> candidate.score }
+    .distinctBy { candidate -> candidate.track.id }
 
 internal suspend fun <T> selectRankedReplacementCandidate(
     candidates: List<ReplacementCandidate>,
@@ -581,12 +587,10 @@ internal suspend fun <T> selectReplacementCandidate(
     minScore: Double,
     scoreOf: (MusicTrack) -> Double,
     resolve: suspend (MusicTrack) -> T?,
-): Triple<MusicTrack, Double, T>? {
-    return selectRankedReplacementCandidate(
-        candidates = rankReplacementCandidates(candidates, minScore, scoreOf),
-        resolve = resolve,
-    )
-}
+): Triple<MusicTrack, Double, T>? = selectRankedReplacementCandidate(
+    candidates = rankReplacementCandidates(candidates, minScore, scoreOf),
+    resolve = resolve,
+)
 
 internal fun bilibiliReplacementScore(origin: MusicTrack, candidate: MusicTrack): Double {
     val originTitle = normalizeReplacementTitle(origin.title)
