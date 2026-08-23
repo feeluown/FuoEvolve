@@ -20,13 +20,21 @@ internal const val BYD_INSTRUMENT_DEVICE_CLASS = "android.hardware.bydauto.instr
 
 internal fun isBydInstrumentLyricsAvailable(): Boolean = runCatching {
     val instrumentClass = Class.forName(BYD_INSTRUMENT_DEVICE_CLASS)
-    instrumentClass.methods.any { method ->
-        method.name == "sendThreeLineLyrics" &&
-            method.parameterTypes.contentEquals(
-                arrayOf(String::class.java, String::class.java, String::class.java),
-            )
-    } && instrumentClass.methods.any { method -> method.name == "getInstance" }
+    val hasInstanceFactory = instrumentClass.methods.any { method -> method.name == "getInstance" }
+    val hasThreeLineLyrics = instrumentClass.methods.any(::isThreeLineLyricsMethod)
+    val hasMusicName = instrumentClass.methods.any(::isMusicNameMethod)
+    hasInstanceFactory && (hasThreeLineLyrics || hasMusicName)
 }.getOrDefault(false)
+
+private fun isThreeLineLyricsMethod(method: Method): Boolean =
+    method.name == "sendThreeLineLyrics" &&
+        method.parameterTypes.contentEquals(
+            arrayOf(String::class.java, String::class.java, String::class.java),
+        )
+
+private fun isMusicNameMethod(method: Method): Boolean =
+    method.name == "sendMusicName" &&
+        method.parameterTypes.contentEquals(arrayOf(String::class.java))
 
 internal class BydInstrumentLyricsPublisher(
     context: Context,
@@ -42,6 +50,7 @@ internal class BydInstrumentLyricsPublisher(
     private var publicationFailed = false
     private var lastTrackKey: String? = null
     private var lastWindow: InstrumentLyricsWindow? = null
+    private var lastStatus: PlaybackSessionStatus? = null
     private var hasPublishedLyrics = false
     private var cachedLyricsKey: String? = null
     private var cachedPayload: StatusBarLyricsPayload = StatusBarLyricsPayload.Empty
@@ -113,15 +122,16 @@ internal class BydInstrumentLyricsPublisher(
         }
 
         val trackKey = listOf(track.source, track.id, track.title, track.artists).joinToString("\u0000")
-        if (trackKey == lastTrackKey && window == lastWindow) return true
+        if (trackKey == lastTrackKey && window == lastWindow && snapshot.status == lastStatus) return true
 
         val activeBridge = ensureBridge() ?: return false
-        if (!activeBridge.sendThreeLineLyrics(window.previous, window.current, window.next)) {
+        if (!activeBridge.publish(window, snapshot.status)) {
             publicationFailed = true
             return false
         }
         lastTrackKey = trackKey
         lastWindow = window
+        lastStatus = snapshot.status
         hasPublishedLyrics = true
         return true
     }
@@ -176,7 +186,10 @@ internal class BydInstrumentLyricsPublisher(
                 Log.w(TAG, "Unable to initialize BYD instrument lyrics; playback is unaffected", throwable)
             }
             .getOrNull()
-            ?.also { bridge = it }
+            ?.also { createdBridge ->
+                Log.i(TAG, "Using BYD instrument lyrics transport=${createdBridge.transportName}")
+                bridge = createdBridge
+            }
     }
 
     private fun deactivate() {
@@ -194,10 +207,11 @@ internal class BydInstrumentLyricsPublisher(
 
     private fun clearPublishedLyrics() {
         if (hasPublishedLyrics) {
-            bridge?.sendThreeLineLyrics("", "", "")
+            bridge?.clear()
         }
         lastTrackKey = null
         lastWindow = null
+        lastStatus = null
         hasPublishedLyrics = false
     }
 
@@ -218,18 +232,87 @@ internal class BydInstrumentLyricsPublisher(
 
 private class BydInstrumentLyricsBridge(
     private val device: Any,
-    private val sendThreeLineLyricsMethod: Method,
+    private val threeLineLyricsMethod: Method?,
+    private val musicNameMethod: Method?,
+    private val musicStateMethod: Method?,
+    private val musicSourceMethod: Method?,
+    private val musicPlayValue: Int?,
+    private val musicPauseValue: Int?,
+    private val musicStopValue: Int?,
+    private val musicSourceOthersValue: Int?,
 ) {
-    fun sendThreeLineLyrics(previous: String, current: String, next: String): Boolean = runCatching {
-        val result = sendThreeLineLyricsMethod.invoke(device, previous, current, next)
-        val success = (result as? Number)?.toInt()?.let { it == 0 } ?: true
-        if (!success) {
-            Log.w(TAG, "BYD sendThreeLineLyrics returned $result")
+    val transportName: String = if (threeLineLyricsMethod != null) "three-line" else "DiLink-music-name"
+
+    private var lastMusicStateValue: Int? = null
+    private var musicSourceInitialized = false
+
+    fun publish(window: InstrumentLyricsWindow, status: PlaybackSessionStatus): Boolean {
+        threeLineLyricsMethod?.let { method ->
+            return invokeRequired(method, window.previous, window.current, window.next)
         }
-        success
+
+        val nameMethod = musicNameMethod ?: return false
+        initializeMusicSourceIfAvailable()
+        publishMusicStateIfAvailable(status)
+        return invokeRequired(nameMethod, window.current)
+    }
+
+    fun clear() {
+        if (threeLineLyricsMethod != null) {
+            invokeOptional(threeLineLyricsMethod, "", "", "")
+            return
+        }
+        musicNameMethod?.let { invokeOptional(it, "") }
+        publishMusicStateValueIfAvailable(musicStopValue)
+    }
+
+    private fun initializeMusicSourceIfAvailable() {
+        if (musicSourceInitialized) return
+        musicSourceInitialized = true
+        val method = musicSourceMethod ?: return
+        val value = musicSourceOthersValue ?: return
+        invokeOptional(method, value)
+    }
+
+    private fun publishMusicStateIfAvailable(status: PlaybackSessionStatus) {
+        val value = when (status) {
+            PlaybackSessionStatus.Playing -> musicPlayValue
+            PlaybackSessionStatus.Paused -> musicPauseValue
+            PlaybackSessionStatus.Ended,
+            PlaybackSessionStatus.Idle,
+            PlaybackSessionStatus.Error,
+            -> musicStopValue
+            PlaybackSessionStatus.Loading -> null
+        }
+        publishMusicStateValueIfAvailable(value)
+    }
+
+    private fun publishMusicStateValueIfAvailable(value: Int?) {
+        val method = musicStateMethod ?: return
+        val stateValue = value ?: return
+        if (lastMusicStateValue == stateValue) return
+        if (invokeOptional(method, stateValue)) lastMusicStateValue = stateValue
+    }
+
+    private fun invokeRequired(method: Method, vararg args: Any): Boolean = runCatching {
+        val result = method.invoke(device, *args)
+        commandSucceeded(result)
     }.onFailure { throwable ->
-        Log.w(TAG, "Failed to publish lyrics to BYD instrument", unwrapInvocationException(throwable))
+        Log.w(TAG, "Failed to publish lyrics through ${method.name}", unwrapInvocationException(throwable))
     }.getOrDefault(false)
+
+    private fun invokeOptional(method: Method, vararg args: Any): Boolean = runCatching {
+        val result = method.invoke(device, *args)
+        commandSucceeded(result)
+    }.onFailure { throwable ->
+        Log.d(TAG, "Optional BYD instrument call ${method.name} failed", unwrapInvocationException(throwable))
+    }.getOrDefault(false)
+
+    private fun commandSucceeded(result: Any?): Boolean {
+        val success = (result as? Number)?.toInt()?.let { it == 0 } ?: true
+        if (!success) Log.w(TAG, "BYD instrument command returned $result")
+        return success
+    }
 
     companion object {
         private const val TAG = "BydInstrumentLyrics"
@@ -250,18 +333,36 @@ private class BydInstrumentLyricsBridge(
                 getInstanceMethod.invoke(null, permissionContext)
             } ?: error("BYDAutoInstrumentDevice.getInstance returned null")
 
-            val sendMethod = instrumentClass.getMethod(
-                "sendThreeLineLyrics",
-                String::class.java,
-                String::class.java,
-                String::class.java,
+            val threeLineMethod = instrumentClass.methods.firstOrNull(::isThreeLineLyricsMethod)
+            val musicNameMethod = instrumentClass.methods.firstOrNull(::isMusicNameMethod)
+            if (threeLineMethod == null && musicNameMethod == null) {
+                error("No supported BYD instrument lyrics transport is available")
+            }
+
+            BydInstrumentLyricsBridge(
+                device = device,
+                threeLineLyricsMethod = threeLineMethod,
+                musicNameMethod = musicNameMethod,
+                musicStateMethod = instrumentClass.optionalIntMethod("sendMusicState"),
+                musicSourceMethod = instrumentClass.optionalIntMethod("sendMusicSource"),
+                musicPlayValue = instrumentClass.optionalStaticInt("MUSIC_PLAY"),
+                musicPauseValue = instrumentClass.optionalStaticInt("MUSIC_PAUSE"),
+                musicStopValue = instrumentClass.optionalStaticInt("MUSIC_STOP"),
+                musicSourceOthersValue = instrumentClass.optionalStaticInt("MUSIC_SOURCE_OTHERS"),
             )
-            BydInstrumentLyricsBridge(device, sendMethod)
         }.recoverCatching { throwable ->
             throw unwrapInvocationException(throwable)
         }
     }
 }
+
+private fun Class<*>.optionalIntMethod(name: String): Method? = methods.firstOrNull { method ->
+    method.name == name && method.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+}
+
+private fun Class<*>.optionalStaticInt(name: String): Int? = runCatching {
+    getField(name).getInt(null)
+}.getOrNull()
 
 private fun unwrapInvocationException(throwable: Throwable): Throwable =
     (throwable as? InvocationTargetException)?.targetException ?: throwable
