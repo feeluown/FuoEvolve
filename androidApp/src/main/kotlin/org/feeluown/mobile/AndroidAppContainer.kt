@@ -21,6 +21,7 @@ internal class AndroidAppContainer(
     private val context: Context = application.applicationContext
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
+    private var bydInstrumentLyricsPublisher: BydInstrumentLyricsPublisher? = null
 
     val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
@@ -245,6 +246,7 @@ internal class AndroidAppContainer(
             debugLogViewerAvailable = debugLogFeatureController.isAvailable,
             navigator = navigator,
             scope = appScope,
+            bydInstrumentLyricsAvailable = isBydInstrumentLyricsAvailable(),
         )
     }
 
@@ -348,6 +350,16 @@ internal class AndroidAppContainer(
                 .distinctUntilChanged(),
             scope = appScope,
         ).also(LyriconLyricsPublisher::start)
+        if (isBydInstrumentLyricsAvailable()) {
+            bydInstrumentLyricsPublisher = BydInstrumentLyricsPublisher(
+                context = context,
+                playbackSession = session,
+                enabled = settingsRepository.state
+                    .map { state -> state.settings.bydInstrumentLyricsEnabled }
+                    .distinctUntilChanged(),
+                scope = appScope,
+            ).also(BydInstrumentLyricsPublisher::start)
+        }
 
         FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
             override fun toggle() = session.toggle()
@@ -378,6 +390,8 @@ internal class AndroidAppContainer(
 
     override fun close() {
         FuoPlaybackService.transportControls = null
+        bydInstrumentLyricsPublisher?.close()
+        bydInstrumentLyricsPublisher = null
         lyriconLyricsPublisher?.close()
         lyriconLyricsPublisher = null
         appScope.cancel()
