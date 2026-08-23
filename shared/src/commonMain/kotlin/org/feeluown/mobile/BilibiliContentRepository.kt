@@ -1,14 +1,8 @@
 package org.feeluown.mobile
 
-import org.feeluown.mobile.provider.bilibili.BilibiliProviderFactory
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
-import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
-import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
-import org.feeluown.mobile.provider.qqmusic.QQMusicArtistDetailProvider
-import org.feeluown.mobile.provider.qqmusic.QQMusicContentProvider
-import org.feeluown.mobile.provider.qqmusic.QQMusicUserLibrary
 
 /**
  * Adds Bilibili browsing surfaces without changing the core provider repository.
@@ -197,30 +191,9 @@ fun createFuoProviderRepository(
         persistentCache = persistentCache,
         isCellularConnection = isCellularConnection,
     )
-    val qqmusicHttp = ProviderHttpClient(persistentCache = persistentCache)
-    val qqmusic = QQMusicContentProvider(
-        http = qqmusicHttp,
+    val bilibili = ProviderComposition.createBilibiliContentProvider(
         credentials = credentials,
+        persistentCache = persistentCache,
     )
-    val qqmusicUserLibrary = QQMusicUserLibrary(
-        http = qqmusicHttp,
-        credentials = credentials,
-    )
-    val qqmusicArtistDetails = QQMusicArtistDetailProvider(
-        http = qqmusicHttp,
-        credentials = credentials,
-    )
-    val withQQMusicContent = QQMusicContentRepository(
-        delegate,
-        qqmusic,
-        qqmusicUserLibrary,
-        qqmusicArtistDetails,
-    )
-    val bilibili = BilibiliProviderFactory.createContentProvider(
-        ProviderRuntimeDependencies(
-            http = ProviderHttpClient(persistentCache = persistentCache),
-            credentials = credentials,
-        ),
-    )
-    return BilibiliContentRepository(withQQMusicContent, bilibili)
+    return BilibiliContentRepository(delegate, bilibili)
 }
