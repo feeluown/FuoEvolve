@@ -55,7 +55,7 @@ enum class ThemeColorSpec(
     val label: String,
 ) {
     Material3_2021("Material 3 (2021)"),
-    Expressive_2025("Material 3 (2025)"),
+    Expressive_2025("Expressive (2025)"),
 }
 
 @Serializable
