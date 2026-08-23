@@ -75,16 +75,16 @@ class PlaybackStartReasonTest {
         var playbackStarted = false
         val coordinator = coordinator(
             queue = queue,
-            onStart = { track, _, _ ->
-                playbackStarted = true
-                startedTrack = track
-                startReason = queue.consumePlaybackStartReason()
-            },
             onQueueUpdate = {
                 // Reproduce the old Android race: publishing the replacement queue caused runtime
                 // observers to republish the restored paused track, which synchronized it into the
                 // current queue slot before startPlayback() read that slot.
                 if (!playbackStarted) queue.updateCurrentTrack(restoredTrack)
+            },
+            onStart = { track, _, _ ->
+                playbackStarted = true
+                startedTrack = track
+                startReason = queue.consumePlaybackStartReason()
             },
         )
 
@@ -141,8 +141,8 @@ class PlaybackStartReasonTest {
 
     private fun TestScope.coordinator(
         queue: PlaybackQueueController,
-        onStart: (MusicTrack, Int, Int?) -> Unit,
         onQueueUpdate: () -> Unit = {},
+        onStart: (MusicTrack, Int, Int?) -> Unit,
     ): PlaybackQueueCoordinator = PlaybackQueueCoordinator(
         queue = queue,
         scope = this,
