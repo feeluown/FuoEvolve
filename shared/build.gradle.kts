@@ -101,10 +101,10 @@ android {
 
 val p4RequiredContractFiles = listOf(
     "core/model/src/commonMain/kotlin/org/feeluown/mobile/TrackSourceType.kt",
+    "core/model/src/commonMain/kotlin/org/feeluown/mobile/MediaModels.kt",
     "provider/api/src/commonMain/kotlin/org/feeluown/mobile/ProviderContracts.kt",
     "playback/api/src/commonMain/kotlin/org/feeluown/mobile/PlaybackContracts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/AppSettingsContracts.kt",
-    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/MediaContracts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/PlaybackApplicationContracts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/ProviderApplicationContracts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/RepositoryContracts.kt",
@@ -112,6 +112,12 @@ val p4RequiredContractFiles = listOf(
 
 val p4MovedContractNames = listOf(
     "TrackSourceType",
+    "MediaRefType",
+    "MediaRef",
+    "LocalMusicScanSettings",
+    "LocalMusicDirectory",
+    "LocalTrackMetadata",
+    "MusicTrack",
     "ProviderLoginMode",
     "ProviderHeaderInput",
     "ProviderOAuthInput",
@@ -154,17 +160,24 @@ val p4IosExportedModules = listOf(
 
 tasks.register("checkP4ContractBoundaries") {
     group = "verification"
-    description = "Reject restoration of the shared contract aggregate or back-dependencies from lower contract modules."
+    description = "Reject restoration of shared contract aggregates or invalid lower-layer media dependencies."
 
-    val aggregate = rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/FuoContracts.kt")
-    val requiredFiles = p4RequiredContractFiles.map(rootProject::file)
-    val lowerBuildFiles = listOf(
-        rootProject.file("core/model/build.gradle.kts"),
-        rootProject.file("provider/api/build.gradle.kts"),
-        rootProject.file("playback/api/build.gradle.kts"),
+    val retiredSharedFiles = listOf(
+        rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/FuoContracts.kt"),
+        rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/MediaContracts.kt"),
     )
+    val requiredFiles = p4RequiredContractFiles.map(rootProject::file)
+    val coreBuildFile = rootProject.file("core/model/build.gradle.kts")
+    val providerApiBuildFile = rootProject.file("provider/api/build.gradle.kts")
+    val playbackApiBuildFile = rootProject.file("playback/api/build.gradle.kts")
+    val lowerBuildFiles = listOf(coreBuildFile, providerApiBuildFile, playbackApiBuildFile)
     val sharedBuildFile = rootProject.file("shared/build.gradle.kts")
     val sharedModelRoot = rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model")
+    val coreMediaFile = rootProject.file("core/model/src/commonMain/kotlin/org/feeluown/mobile/MediaModels.kt")
+    val providerContractsFile = rootProject.file("provider/api/src/commonMain/kotlin/org/feeluown/mobile/ProviderContracts.kt")
+    val playbackApplicationContractsFile = rootProject.file(
+        "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/PlaybackApplicationContracts.kt",
+    )
 
     inputs.files(requiredFiles)
     inputs.files(lowerBuildFiles)
@@ -172,8 +185,14 @@ tasks.register("checkP4ContractBoundaries") {
     inputs.dir(sharedModelRoot)
 
     doLast {
-        if (aggregate.isFile) {
-            throw GradleException("Retired FuoContracts.kt aggregate was restored; keep contracts in their bounded-context files/modules.")
+        val restoredRetiredFiles = retiredSharedFiles.filter { it.isFile }
+        if (restoredRetiredFiles.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Retired shared contract files were restored:")
+                    restoredRetiredFiles.forEach { appendLine(" - ${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}") }
+                },
+            )
         }
 
         val missing = requiredFiles.filterNot { it.isFile }
@@ -196,6 +215,41 @@ tasks.register("checkP4ContractBoundaries") {
                     sharedBackDependencies.forEach { appendLine(" - ${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}") }
                 },
             )
+        }
+
+        val coreBuildText = coreBuildFile.readText()
+        val forbiddenCoreDependencies = listOf(":provider:api", ":playback:api", ":feature:").filter { dependency ->
+            coreBuildText.contains("project(\"$dependency")
+        }
+        if (forbiddenCoreDependencies.isNotEmpty()) {
+            throw GradleException(
+                ":core:model must remain the dependency floor; forbidden project dependencies: ${forbiddenCoreDependencies.joinToString()}",
+            )
+        }
+
+        if (!providerApiBuildFile.readText().contains("api(project(\":core:model\"))")) {
+            throw GradleException(":provider:api must consume :core:model as its public media identity boundary.")
+        }
+
+        val coreMediaText = coreMediaFile.readText()
+        if (coreMediaText.contains("ProviderMediaItem") || coreMediaText.contains("ProviderMediaItemType")) {
+            throw GradleException(":core:model media contracts must not reference provider aggregate media types.")
+        }
+        if (!coreMediaText.contains("val artistItems: List<MediaRef>")) {
+            throw GradleException("MusicTrack must store provider-neutral MediaRef values for artist navigation metadata.")
+        }
+
+        val providerContractsText = providerContractsFile.readText()
+        if (
+            !providerContractsText.contains("typealias ProviderMediaItemType = MediaRefType") ||
+            !providerContractsText.contains("typealias ProviderMediaItem = MediaRef")
+        ) {
+            throw GradleException("Provider media compatibility names must remain aliases to the core MediaRef contracts.")
+        }
+
+        val playbackApplicationText = playbackApplicationContractsFile.readText()
+        if (!playbackApplicationText.contains("private const val CURRENT_VERSION = \"v2\"")) {
+            throw GradleException("P4-B must preserve the existing v2 playback queue persistence format.")
         }
 
         val sharedBuildText = sharedBuildFile.readText()
