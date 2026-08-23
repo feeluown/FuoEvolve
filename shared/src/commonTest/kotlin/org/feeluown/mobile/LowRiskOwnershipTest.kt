@@ -14,19 +14,19 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class LowRiskOwnershipTest {
     @Test
-    fun appUiStateUsesSettingsRepositoryAsBootstrapSourceOfTruth() {
+    fun appUiStateKeepsBootstrapStateAppScoped() {
         val loading = AppUiState()
         assertFalse(loading.isInitialized)
         assertFalse(loading.onboardingCompleted)
 
         val ready = AppUiState(
-            settings = SettingsState(
-                isLoaded = true,
-                settings = AppSettings(onboardingCompleted = true),
-            ),
+            isInitialized = true,
+            onboardingCompleted = true,
+            themeMode = ThemeMode.Dark,
         )
         assertTrue(ready.isInitialized)
         assertTrue(ready.onboardingCompleted)
+        assertEquals(ThemeMode.Dark, ready.themeMode)
     }
 
     @Test
