@@ -380,13 +380,17 @@ internal class PlaybackQueueCoordinator(
                 queueState.mainQueueIndex = 0
             }
         }
-        publishQueueMutation()
+
+        // Starting the selected track is part of the same queue-replacement transaction. Do not
+        // publish the new queue first: Android runtime observers may still republish a restored
+        // paused engine state in response and let the old track race the intended selection.
         playMainIndexInternal(
             queueState.mainQueueIndex,
             0,
             TrackChangeDirection.Next,
             if (keepSelectedTrack) PlaybackStartReason.USER_SELECTION else PlaybackStartReason.PLAYLIST_REPLACE,
         )
+        publishQueueMutation()
     }
 
     private fun playMainIndexInternal(
@@ -413,8 +417,8 @@ internal class PlaybackQueueCoordinator(
         queueState.upNextQueue = queueState.upNextQueue.filterIndexed { itemIndex, _ -> itemIndex != index }
         queueState.currentUpNextTrack = track
         queueState.currentIsUpNext = true
-        publishQueueMutation()
         startTrack(track, 0, null, reason)
+        publishQueueMutation()
     }
 
     private fun startTrack(
