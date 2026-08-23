@@ -65,7 +65,7 @@ internal class BydInstrumentLyricsPublisher(
             combine(
                 playbackSession.state,
                 enabled.distinctUntilChanged(),
-                BydInstrumentPermissionState.granted.distinctUntilChanged(),
+                BydInstrumentPermissionState.granted,
             ) { state, isEnabled, permissionGranted ->
                 Snapshot(
                     enabled = isEnabled,
