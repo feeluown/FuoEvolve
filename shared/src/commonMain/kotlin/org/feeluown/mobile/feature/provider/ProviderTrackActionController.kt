@@ -178,9 +178,10 @@ internal class ProviderTrackActionController(
             .filter(String::isNotBlank)
             .distinct()
         val providerId = source.takeIf { it.isNotBlank() }
-        val firstItem = if (!artistItemId.isNullOrBlank() && providerId != null && names.isNotEmpty()) {
+        val itemId = artistItemId
+        val firstItem = if (!itemId.isNullOrBlank() && providerId != null && names.isNotEmpty()) {
             ProviderMediaItem(
-                id = artistItemId,
+                id = itemId,
                 title = names.first(),
                 providerId = providerId,
                 providerName = providerName ?: providerId,
