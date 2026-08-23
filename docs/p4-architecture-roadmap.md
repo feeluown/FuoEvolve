@@ -10,41 +10,43 @@ Lower contract/data/provider modules must never depend back on `:shared`.
 
 ## P4-A: contract ownership
 
-In progress in this change set.
+Completed in PR #115.
 
 The first P4 step retires the broad `shared/.../FuoContracts.kt` aggregate and moves only contracts whose dependency direction is already stable:
 
 - `:core:model` owns `TrackSourceType` alongside `TrackRef`;
-- `:provider:api` owns provider-neutral login, capability, resource, feature, playlist/media/video and mutation value contracts;
-- `:playback:api` owns playback policy, replacement-selection, resolved payload, sleep-timer and audio-format value contracts;
-- `:shared` keeps the application aggregates that still depend on concrete application models, but splits them by bounded context instead of rebuilding another catch-all file.
+- `:provider:api` owns provider-neutral login, capability, resource, feature, playlist/video and mutation contracts;
+- `:playback:api` owns playback policy, replacement-selection, resolved payload, sleep-timer and audio-format contracts;
+- `:shared` keeps the application contracts that still depend on application orchestration, split by bounded context instead of rebuilding another catch-all file.
 
 Package names remain stable during this migration so P4-A is a behavior-neutral ownership move rather than an application-wide import rewrite.
 
-### Intentionally deferred from P4-A
-
-`MusicTrack` is not moved to `:core:model` yet because it currently embeds `ProviderMediaItem`. Moving it as-is would create the wrong dependency direction (`core -> provider`). The next contract step must first remove that provider-specific coupling or introduce a provider-neutral reference model.
-
-The aggregate `ProviderMusicRepository` also remains in `:shared` because it still exposes `MusicTrack`, playback payloads and YTMusic implementation-specific OAuth types. It should be decomposed behind provider-neutral ports before moving provider runtime code downward.
-
-Settings repositories and DataStore persistence remain in `:shared` for P4-A and move in a dedicated persistence step so serialization/migration behavior can be reviewed separately.
+The iOS `Shared.framework` explicitly re-exports the lower public contract modules. The P4 architecture gate rejects restoring the aggregate, lower-layer back-dependencies, or removing the required Kotlin/Native exports.
 
 ## P4-B: media model normalization
 
-Goal: make the cross-feature media model independent from provider implementation models.
+Completed in PR #115 after P4-A.
 
-- replace provider-specific nested media objects in `MusicTrack` with stable references/value objects;
-- preserve provider navigation metadata through explicit IDs/refs rather than provider aggregate objects;
-- move the resulting stable media contracts to `:core:model`;
-- migrate queue/persistence codecs without changing persisted compatibility.
+The cross-feature media model is now independent from provider aggregate ownership:
 
-Exit criterion: `:core:model` contains the stable track/media identity used across feature, playback and provider layers and has no dependency on provider/application modules.
+- `MediaRef` / `MediaRefType` provide stable source-neutral media identity in `:core:model`;
+- `MusicTrack`, local scan settings, local directory metadata and local track metadata move from `:shared` into `:core:model`;
+- `MusicTrack.artistItems` now stores `List<MediaRef>` rather than a provider-owned media class;
+- provider-facing `ProviderMediaItem` / `ProviderMediaItemType` names remain temporary Kotlin source-compatible type aliases to the core reference contracts, so existing concrete provider parsers do not need a large behavior-changing rewrite;
+- the core reference exposes source naming as the canonical model while compatibility aliases keep provider callers source-compatible during the P4-C migration;
+- typed navigation keeps its serialized `artistItems` payload but maps it to/from core refs, preserving route compatibility;
+- playback queue persistence remains format `v2`; existing explicit artist/album IDs continue to decode, and a historical-v2 regression fixture protects restore compatibility.
+
+Architecture fitness checks now also reject restoring `MediaContracts.kt`, placing provider/playback/feature dependencies under `:core:model`, reintroducing provider aggregate media types into the core media file, breaking the provider-to-core dependency, or changing the queue persistence version during this behavior-neutral step.
+
+Exit criterion reached: `:core:model` owns the stable track/media identity used across feature, playback and provider layers and has no dependency on provider/application modules.
 
 ## P4-C: provider contract/runtime split
 
 Goal: turn the currently thin `:provider:api` into the true provider-neutral boundary and separate reusable provider runtime infrastructure from concrete providers.
 
 - decompose `ProviderMusicRepository` into narrow capability contracts;
+- migrate provider callers from the temporary `ProviderMediaItem` compatibility aliases to canonical `MediaRef` naming where appropriate;
 - move provider-neutral failures/capabilities/contracts into `:provider:api`;
 - move HTTP/request/session/common mapping infrastructure into a provider runtime/core boundary;
 - keep NetEase, QQ Music, Bilibili and YTMusic implementations above the API/runtime layer;
