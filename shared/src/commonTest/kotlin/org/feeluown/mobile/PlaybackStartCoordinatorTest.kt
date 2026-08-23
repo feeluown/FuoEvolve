@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class PlaybackStartCoordinatorTest {
     @Test
@@ -80,12 +81,45 @@ class PlaybackStartCoordinatorTest {
         assertNull(fixture.coordinator.startFailure.value)
     }
 
+    @Test
+    fun activeSelectionPreparesEngineBeforePublishingNewPlaybackState() = runTest {
+        val restored = track("netease:restored")
+        val selected = track("qqmusic:selected")
+        val queue = PlaybackQueueController().apply {
+            mainQueue = listOf(selected)
+            mainQueueIndex = 0
+            markNextPlaybackStart(PlaybackStartReason.PLAYLIST_REPLACE)
+        }
+        val engine = FakePlaybackEngine(resolvesInternally = true)
+        val repository = FakePlaybackRepository(resolveError = IllegalStateException("resolver should not be called"))
+        var published = false
+        val fixture = fixture(
+            queue = queue,
+            engine = engine,
+            repository = repository,
+            initialPlaybackState = PlaybackState(status = PlayerStatus.Paused, currentTrack = restored),
+            onPublishPlaybackState = {
+                assertEquals(selected, engine.preparedTrack)
+                assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, engine.preparedReason)
+                published = true
+            },
+        )
+
+        fixture.coordinator.start(selected)
+
+        assertTrue(published)
+        assertEquals(selected, fixture.playbackState.currentTrack)
+        assertEquals(PlayerStatus.Loading, fixture.playbackState.status)
+    }
+
     private fun TestScope.fixture(
         queue: PlaybackQueueController,
         engine: FakePlaybackEngine,
         repository: FakePlaybackRepository,
+        initialPlaybackState: PlaybackState = PlaybackState(),
+        onPublishPlaybackState: (PlaybackState) -> Unit = {},
     ): Fixture {
-        var playbackState = PlaybackState()
+        var playbackState = initialPlaybackState
         var requestSerial = 0L
         var parts = emptyList<PlaybackPart>()
         var currentPartIndex = -1
@@ -96,7 +130,10 @@ class PlaybackStartCoordinatorTest {
             playbackRepository = repository,
             scope = this,
             currentPlaybackState = { playbackState },
-            publishPlaybackState = { playbackState = it },
+            publishPlaybackState = {
+                onPublishPlaybackState(it)
+                playbackState = it
+            },
             prepareTrack = { it },
             unavailablePlaybackPolicy = { UnavailablePlaybackPolicy.Skip },
             smartReplacementProviderIds = { setOf("bilibili") },
@@ -131,7 +168,7 @@ class PlaybackStartCoordinatorTest {
         title = "Original title",
         artists = "Artist",
         album = "Album",
-        source = "netease",
+        source = id.substringBefore(':'),
         sourceType = TrackSourceType.Provider,
         providerId = id,
     )
@@ -156,18 +193,24 @@ class PlaybackStartCoordinatorTest {
 
     private class FakePlaybackEngine(
         private val resolvesInternally: Boolean = false,
-    ) : PlaybackEngine {
+    ) : PlaybackEngine, PlaybackStartReasonAwareEngine {
         private val mutableState = MutableStateFlow(PlaybackState())
         override val state: StateFlow<PlaybackState> = mutableState
         override val resolvesResourcesInternally: Boolean get() = resolvesInternally
 
         var preparedTrack: MusicTrack? = null
+        var preparedReason: PlaybackStartReason? = null
         var playedTrack: MusicTrack? = null
         var playedPayload: PlaybackPayload? = null
         var playedPlan: PlaybackPlan? = null
 
         override fun prepareLoading(track: MusicTrack) {
             preparedTrack = track
+        }
+
+        override fun prepareLoading(track: MusicTrack, reason: PlaybackStartReason) {
+            preparedTrack = track
+            preparedReason = reason
         }
 
         override fun play(track: MusicTrack, payload: PlaybackPayload) {
