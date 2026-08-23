@@ -44,13 +44,14 @@ class ProviderSessionRepositoryTest {
     }
 
     @Test
-    fun ytmusicOAuthLoginPersistsLoggedInState() = runTest {
+    fun providerNeutralOAuthLoginPersistsLoggedInState() = runTest {
         val provider = RacingProviderRepository()
         provider.allowRefreshToFinish.complete(Unit)
         val repository = DefaultProviderSessionRepository(provider)
         repository.updateProviders(listOf(YTMUSIC))
 
-        val state = repository.loginWithYtmusicOAuth(
+        val state = repository.loginWithOAuth(
+            providerId = YTMUSIC.providerId,
             accessToken = "access",
             refreshToken = "refresh",
             expiresAtMillis = 1_700_000_000_000L,
@@ -102,7 +103,8 @@ class ProviderSessionRepositoryTest {
             return state(providerId, true)
         }
 
-        override suspend fun loginWithYtmusicOAuth(
+        override suspend fun loginWithOAuth(
+            providerId: String,
             accessToken: String,
             refreshToken: String,
             expiresAtMillis: Long?,
@@ -111,16 +113,17 @@ class ProviderSessionRepositoryTest {
             clientSecret: String,
         ): ProviderAuthState {
             oauthLoggedIn = true
-            return state(YTMUSIC.providerId, true)
+            return state(providerId, true)
         }
 
-        override suspend fun loginWithYtmusicOAuthJson(
+        override suspend fun loginWithOAuthJson(
+            providerId: String,
             oauthJson: String,
             clientId: String,
             clientSecret: String,
         ): ProviderAuthState {
             oauthLoggedIn = true
-            return state(YTMUSIC.providerId, true)
+            return state(providerId, true)
         }
 
         override suspend fun logout(providerId: String): ProviderAuthState {
