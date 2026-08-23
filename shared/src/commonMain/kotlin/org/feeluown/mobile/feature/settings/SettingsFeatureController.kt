@@ -174,7 +174,7 @@ private class BoundSettingsFeatureController(
     override fun setAudioCacheLimitMb(value: Int) = owner.setAudioCacheLimitMb(value)
     override fun setImageCacheLimitMb(value: Int) = owner.setImageCacheLimitMb(value)
     override fun refreshLocalMusicDirectories() = owner.refreshLocalMusicDirectories()
-    override fun setLocalMusicDirectoryEnabled(directoryId: String, enabled: Boolean) = owner.setDirectoryEnabled(directoryId, enabled)
+    override fun setLocalMusicDirectoryEnabled(directoryId: String, enabled: Boolean) = owner.setLocalMusicDirectoryEnabled(directoryId, enabled)
     override fun setLocalMusicMinDurationSeconds(value: Int) = owner.setLocalMusicMinDurationSeconds(value)
     override fun clearCache() = owner.clearCache()
     override fun refreshCacheUsage() = owner.refreshCacheUsage()
