@@ -38,6 +38,8 @@ internal class BydInstrumentLyricsPublisher(
     private var collectJob: Job? = null
     private var positionSyncJob: Job? = null
     private var bridge: BydInstrumentLyricsBridge? = null
+    private var bridgeInitializationAttempted = false
+    private var publicationFailed = false
     private var lastTrackKey: String? = null
     private var lastWindow: InstrumentLyricsWindow? = null
     private var hasPublishedLyrics = false
@@ -92,32 +94,36 @@ internal class BydInstrumentLyricsPublisher(
             return
         }
 
-        publishAtPosition(snapshot, snapshot.positionMs)
-        if (snapshot.status == PlaybackSessionStatus.Playing) {
+        val canSync = publishAtPosition(snapshot, snapshot.positionMs)
+        if (canSync && snapshot.status == PlaybackSessionStatus.Playing) {
             ensurePositionSyncLoop()
         } else {
             stopPositionSyncLoop()
         }
     }
 
-    private fun publishAtPosition(snapshot: Snapshot, positionMs: Long) {
-        val track = snapshot.track ?: return
+    private fun publishAtPosition(snapshot: Snapshot, positionMs: Long): Boolean {
+        if (publicationFailed) return false
+        val track = snapshot.track ?: return false
         val payload = payloadFor(snapshot, track)
         val window = buildInstrumentLyricsWindow(payload, positionMs)
         if (window == null) {
             clearPublishedLyrics()
-            return
+            return false
         }
 
         val trackKey = listOf(track.source, track.id, track.title, track.artists).joinToString("\u0000")
-        if (trackKey == lastTrackKey && window == lastWindow) return
+        if (trackKey == lastTrackKey && window == lastWindow) return true
 
-        val activeBridge = ensureBridge() ?: return
-        if (activeBridge.sendThreeLineLyrics(window.previous, window.current, window.next)) {
-            lastTrackKey = trackKey
-            lastWindow = window
-            hasPublishedLyrics = true
+        val activeBridge = ensureBridge() ?: return false
+        if (!activeBridge.sendThreeLineLyrics(window.previous, window.current, window.next)) {
+            publicationFailed = true
+            return false
         }
+        lastTrackKey = trackKey
+        lastWindow = window
+        hasPublishedLyrics = true
+        return true
     }
 
     private fun payloadFor(snapshot: Snapshot, track: TrackRef): StatusBarLyricsPayload {
@@ -150,7 +156,7 @@ internal class BydInstrumentLyricsPublisher(
             while (true) {
                 val snapshot = latestSnapshot ?: break
                 if (!snapshot.enabled || snapshot.status != PlaybackSessionStatus.Playing || snapshot.track == null) break
-                publishAtPosition(snapshot, estimatedPositionMs())
+                if (!publishAtPosition(snapshot, estimatedPositionMs())) break
                 delay(POSITION_SYNC_INTERVAL_MS)
             }
         }
@@ -163,6 +169,8 @@ internal class BydInstrumentLyricsPublisher(
 
     private fun ensureBridge(): BydInstrumentLyricsBridge? {
         bridge?.let { return it }
+        if (bridgeInitializationAttempted) return null
+        bridgeInitializationAttempted = true
         return BydInstrumentLyricsBridge.create(appContext)
             .onFailure { throwable ->
                 Log.w(TAG, "Unable to initialize BYD instrument lyrics; playback is unaffected", throwable)
@@ -180,6 +188,8 @@ internal class BydInstrumentLyricsPublisher(
         anchorPlaying = false
         cachedLyricsKey = null
         cachedPayload = StatusBarLyricsPayload.Empty
+        bridgeInitializationAttempted = false
+        publicationFailed = false
     }
 
     private fun clearPublishedLyrics() {
