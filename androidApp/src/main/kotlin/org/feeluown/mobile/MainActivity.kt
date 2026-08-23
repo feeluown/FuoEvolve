@@ -38,11 +38,13 @@ private data class PendingLocalPlaylistImport(val fileName: String, val content:
 private const val LOCAL_PLAYLIST_MIME_TYPE = "application/x-fuo"
 private const val CONTENT_URI_SCHEME = "content"
 private const val FILE_URI_SCHEME = "file"
+private const val BYD_INSTRUMENT_PERMISSION_REQUEST_CODE = 4104
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestBydInstrumentPermissionsIfNeeded(BYD_INSTRUMENT_PERMISSION_REQUEST_CODE)
         val fuoApplication = application as FuoEvolveApplication
         handleOAuthUserCodeCopyIntent(intent)
         val launchLocalPlaylistImport = localPlaylistImportFromIntent(intent)
