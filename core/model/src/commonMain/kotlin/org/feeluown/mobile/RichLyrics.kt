@@ -35,7 +35,7 @@ fun composeRichLyrics(
 
     if (romanizationTrack == null && secondaryTracks.isEmpty()) return primary
     if (romanizationTrack == null && secondaryTracks.size == 1) {
-        return composeLyricsWithTranslation(primary, secondaryTracks.first())
+        return composeRichLyricsTransport(primary, secondaryTracks.first(), null)
     }
 
     val primaryLines = parseTimedRichTrack(primary)
@@ -61,11 +61,33 @@ fun composeRichLyrics(
         }.trimEnd().takeIf(String::isNotBlank)
     }
 
-    return composeLyricsWithRichTracks(
+    return composeRichLyricsTransport(
         main = primary,
         translation = secondary,
         romanization = romanizationTrack,
     )
+}
+
+private fun composeRichLyricsTransport(
+    main: String,
+    translation: String?,
+    romanization: String?,
+): String {
+    val trimmedMain = main.trimEnd()
+    val trimmedRomanization = romanization?.trim()?.takeIf(String::isNotBlank)
+    val trimmedTranslation = translation?.trim()?.takeIf(String::isNotBlank)
+    if (trimmedRomanization == null && trimmedTranslation == null) return trimmedMain
+    return buildString {
+        append(trimmedMain)
+        trimmedRomanization?.let {
+            append("\n__FUO_LYRIC_ROMANIZATION__\n")
+            append(it)
+        }
+        trimmedTranslation?.let {
+            append("\n__FUO_LYRIC_TRANSLATION__\n")
+            append(it)
+        }
+    }
 }
 
 private data class TimedRichText(val timeMs: Long, val text: String)
