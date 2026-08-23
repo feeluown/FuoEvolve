@@ -78,6 +78,45 @@ class LocalMusicPresentationTest {
     }
 
     @Test
+    fun playbackQueueReadsHistoricalV2TrackAfterCoreModelMove() {
+        val raw = listOf(
+            "v2",
+            "0\tfalse\tQUEUE\tfalse\t",
+            listOf(
+                "track",
+                "main",
+                "netease:1",
+                "Song",
+                "Artist",
+                "Album",
+                "netease",
+                "Provider",
+                "",
+                "180000",
+                "",
+                "",
+                "netease:1",
+                "网易云音乐",
+                "false",
+                "",
+                "",
+                "false",
+                "artist:netease:10",
+                "album:netease:20",
+            ).joinToString("\t"),
+        ).joinToString("\n")
+
+        val decoded = PlaybackQueueCodec.decode(raw).mainQueue.single()
+
+        assertEquals("netease:1", decoded.id)
+        assertEquals(TrackSourceType.Provider, decoded.sourceType)
+        assertEquals(180_000L, decoded.durationMs)
+        assertEquals("artist:netease:10", decoded.artistItemId)
+        assertEquals("album:netease:20", decoded.albumItemId)
+        assertTrue(PlaybackQueueCodec.encode(PlaybackQueueSnapshot(mainQueue = listOf(decoded))).startsWith("v2\n"))
+    }
+
+    @Test
     fun playbackQueueKeepsSmartReplacementDetailTargets() {
         val track = localTrack(TrackSourceType.Provider).copy(
             isSmartReplacement = true,
