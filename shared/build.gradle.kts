@@ -21,6 +21,9 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
+            export(project(":core:model"))
+            export(project(":playback:api"))
+            export(project(":provider:api"))
         }
     }
 
@@ -143,6 +146,12 @@ val p4MovedContractNames = listOf(
     "AudioFormatInfo",
 )
 
+val p4IosExportedModules = listOf(
+    ":core:model",
+    ":playback:api",
+    ":provider:api",
+)
+
 tasks.register("checkP4ContractBoundaries") {
     group = "verification"
     description = "Reject restoration of the shared contract aggregate or back-dependencies from lower contract modules."
@@ -154,10 +163,12 @@ tasks.register("checkP4ContractBoundaries") {
         rootProject.file("provider/api/build.gradle.kts"),
         rootProject.file("playback/api/build.gradle.kts"),
     )
+    val sharedBuildFile = rootProject.file("shared/build.gradle.kts")
     val sharedModelRoot = rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core/model")
 
     inputs.files(requiredFiles)
     inputs.files(lowerBuildFiles)
+    inputs.file(sharedBuildFile)
     inputs.dir(sharedModelRoot)
 
     doLast {
@@ -184,6 +195,16 @@ tasks.register("checkP4ContractBoundaries") {
                     appendLine("Lower contract modules must not depend on :shared:")
                     sharedBackDependencies.forEach { appendLine(" - ${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}") }
                 },
+            )
+        }
+
+        val sharedBuildText = sharedBuildFile.readText()
+        val missingIosExports = p4IosExportedModules.filterNot { module ->
+            sharedBuildText.contains("export(project(\"$module\"))")
+        }
+        if (missingIosExports.isNotEmpty()) {
+            throw GradleException(
+                "Shared.framework must re-export lower public contracts for Swift ABI compatibility: ${missingIosExports.joinToString()}",
             )
         }
 
