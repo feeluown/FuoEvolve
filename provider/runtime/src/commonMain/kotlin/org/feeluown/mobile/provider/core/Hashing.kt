@@ -5,7 +5,7 @@ package org.feeluown.mobile.provider.core
  * WBI and QQ Music's RPC signature). It is not used for password or credential
  * protection.
  */
-internal fun md5Hex(value: String): String {
+fun md5Hex(value: String): String {
     val input = value.encodeToByteArray()
     val paddedLength = ((input.size + 9 + 63) / 64) * 64
     val padded = ByteArray(paddedLength)
@@ -66,7 +66,7 @@ internal fun md5Hex(value: String): String {
     }
 }
 
-internal fun base64DecodeToString(value: String): String =
+fun base64DecodeToString(value: String): String =
     base64Decode(value).decodeToString()
 
 private fun base64Decode(value: String): ByteArray {
