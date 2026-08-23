@@ -6,10 +6,8 @@ enum class MediaRefType {
 }
 
 /**
- * Stable cross-feature reference to provider-backed media without depending on
- * provider aggregate models. IDs remain provider-defined opaque identities;
- * source metadata is carried explicitly so upper layers can adapt the ref to
- * provider navigation when needed.
+ * Stable cross-feature media reference. Provider-facing APIs may adapt this
+ * value, but core only owns source identity and portable navigation metadata.
  */
 data class MediaRef(
     val id: String,
@@ -22,7 +20,41 @@ data class MediaRef(
     val externalUrl: String? = null,
     val trackCount: Int? = null,
     val albumCount: Int? = null,
-)
+) {
+    /** Source-compatible constructor for the provider API migration alias. */
+    constructor(
+        id: String,
+        title: String,
+        providerId: String,
+        providerName: String,
+        type: MediaRefType,
+        coverUrl: String? = null,
+        description: String = "",
+        providerUrl: String? = null,
+        trackCount: Int? = null,
+        albumCount: Int? = null,
+        @Suppress("UNUSED_PARAMETER") providerCompatibility: Unit = Unit,
+    ) : this(
+        id = id,
+        title = title,
+        sourceId = providerId,
+        sourceName = providerName,
+        type = type,
+        coverUrl = coverUrl,
+        description = description,
+        externalUrl = providerUrl,
+        trackCount = trackCount,
+        albumCount = albumCount,
+    )
+
+    /** Compatibility aliases while provider callers migrate to source naming. */
+    val providerId: String
+        get() = sourceId
+    val providerName: String
+        get() = sourceName
+    val providerUrl: String?
+        get() = externalUrl
+}
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
@@ -91,9 +123,12 @@ data class MusicTrack(
     val isUnavailable: Boolean = false,
     val artistItemId: String? = null,
     val albumItemId: String? = null,
-    val artistRefs: List<MediaRef> = emptyList(),
+    val artistItems: List<MediaRef> = emptyList(),
     val providerUrl: String? = null,
     val providerTags: List<String> = emptyList(),
-)
+) {
+    val artistRefs: List<MediaRef>
+        get() = artistItems
+}
 
 const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
