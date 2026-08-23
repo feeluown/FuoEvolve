@@ -2,7 +2,11 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import org.feeluown.mobile.feature.settings.SettingsAudioQualityPort as CoreAudioQualityPort
 import org.feeluown.mobile.feature.settings.SettingsCachePort as CoreCachePort
 import org.feeluown.mobile.feature.settings.SettingsDownloadPort as CoreDownloadPort
@@ -30,6 +34,7 @@ data class SettingsFeatureUiState(
     val downloadTasks: List<DownloadTask> = emptyList(),
     val localMusic: LocalMusicUiState = LocalMusicUiState(viewMode = LocalMusicViewMode.All),
     val statusBarLyricsAvailable: Boolean = false,
+    val bydInstrumentLyricsAvailable: Boolean = false,
     val debugLogViewerAvailable: Boolean = false,
     val isBusy: Boolean = false,
     val feedback: String? = null,
@@ -65,6 +70,7 @@ interface SettingsFeatureController {
     fun openDebugLogs()
     fun setStatusBarLyricsAvailability(available: Boolean)
     fun setStatusBarLyricsEnabled(enabled: Boolean)
+    fun setBydInstrumentLyricsEnabled(enabled: Boolean)
     fun dismissFeedback(feedback: String)
 }
 
@@ -94,6 +100,7 @@ fun createSettingsFeatureController(
     debugLogViewerAvailable: Boolean,
     navigator: AppNavigator,
     scope: CoroutineScope,
+    bydInstrumentLyricsAvailable: Boolean = false,
 ): SettingsFeatureController {
     val owner = createSettingsFeatureOwner(
         preferences = BoundSettingsPreferencesPort(settingsRepository),
@@ -105,14 +112,30 @@ fun createSettingsFeatureController(
         debugLogViewerAvailable = debugLogViewerAvailable,
         scope = scope,
     )
-    return BoundSettingsFeatureController(owner, settingsRepository)
+    return BoundSettingsFeatureController(
+        owner = owner,
+        settingsRepository = settingsRepository,
+        scope = scope,
+        bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
+    )
 }
 
 private class BoundSettingsFeatureController(
     private val owner: BoundCoreOwner,
     private val settingsRepository: AppSettingsRepository,
+    private val scope: CoroutineScope,
+    private val bydInstrumentLyricsAvailable: Boolean,
 ) : SettingsFeatureController {
-    override val uiState: StateFlow<SettingsFeatureUiState> = owner.state.mapSettingsState(::toUiState)
+    override val uiState: StateFlow<SettingsFeatureUiState> = combine(
+        owner.state,
+        settingsRepository.state,
+    ) { state, settingsState ->
+        toUiState(state, settingsState.settings)
+    }.stateIn(
+        scope = scope,
+        started = SharingStarted.Eagerly,
+        initialValue = toUiState(owner.state.value, settingsRepository.state.value.settings),
+    )
 
     override fun close() = owner.close()
 
@@ -151,7 +174,7 @@ private class BoundSettingsFeatureController(
     override fun setAudioCacheLimitMb(value: Int) = owner.setAudioCacheLimitMb(value)
     override fun setImageCacheLimitMb(value: Int) = owner.setImageCacheLimitMb(value)
     override fun refreshLocalMusicDirectories() = owner.refreshLocalMusicDirectories()
-    override fun setLocalMusicDirectoryEnabled(directoryId: String, enabled: Boolean) = owner.setLocalMusicDirectoryEnabled(directoryId, enabled)
+    override fun setLocalMusicDirectoryEnabled(directoryId: String, enabled: Boolean) = owner.setDirectoryEnabled(directoryId, enabled)
     override fun setLocalMusicMinDurationSeconds(value: Int) = owner.setLocalMusicMinDurationSeconds(value)
     override fun clearCache() = owner.clearCache()
     override fun refreshCacheUsage() = owner.refreshCacheUsage()
@@ -159,14 +182,23 @@ private class BoundSettingsFeatureController(
     override fun openDebugLogs() = owner.openDebugLogs()
     override fun setStatusBarLyricsAvailability(available: Boolean) = owner.setStatusBarLyricsAvailability(available)
     override fun setStatusBarLyricsEnabled(enabled: Boolean) = owner.setStatusBarLyricsEnabled(enabled)
+    override fun setBydInstrumentLyricsEnabled(enabled: Boolean) {
+        scope.launch {
+            settingsRepository.update { settings -> settings.copy(bydInstrumentLyricsEnabled = enabled) }
+        }
+    }
     override fun dismissFeedback(feedback: String) = owner.dismissFeedback(feedback)
 
-    private fun toUiState(state: BoundCoreState): SettingsFeatureUiState = SettingsFeatureUiState(
-        settings = settingsRepository.state.value.settings,
+    private fun toUiState(
+        state: BoundCoreState,
+        appSettings: AppSettings,
+    ): SettingsFeatureUiState = SettingsFeatureUiState(
+        settings = appSettings,
         cacheUsage = state.cacheUsage,
         downloadTasks = state.downloadTasks,
         localMusic = state.localMusic,
         statusBarLyricsAvailable = state.statusBarLyricsAvailable,
+        bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
         debugLogViewerAvailable = state.debugLogViewerAvailable,
         isBusy = state.isBusy,
         feedback = state.feedback,
