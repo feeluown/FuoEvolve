@@ -133,6 +133,38 @@ data class ProviderMediaItem(
     val albumCount: Int? = null,
 )
 
+fun ProviderMediaItem.toMediaRef(): MediaRef = MediaRef(
+    id = id,
+    title = title,
+    sourceId = providerId,
+    sourceName = providerName,
+    type = when (type) {
+        ProviderMediaItemType.Artist -> MediaRefType.Artist
+        ProviderMediaItemType.Album -> MediaRefType.Album
+    },
+    coverUrl = coverUrl,
+    description = description,
+    externalUrl = providerUrl,
+    trackCount = trackCount,
+    albumCount = albumCount,
+)
+
+fun MediaRef.toProviderMediaItem(): ProviderMediaItem = ProviderMediaItem(
+    id = id,
+    title = title,
+    providerId = sourceId,
+    providerName = sourceName,
+    type = when (type) {
+        MediaRefType.Artist -> ProviderMediaItemType.Artist
+        MediaRefType.Album -> ProviderMediaItemType.Album
+    },
+    coverUrl = coverUrl,
+    description = description,
+    providerUrl = externalUrl,
+    trackCount = trackCount,
+    albumCount = albumCount,
+)
+
 data class ProviderVideo(
     val id: String,
     val title: String,
