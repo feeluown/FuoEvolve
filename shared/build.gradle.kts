@@ -34,6 +34,7 @@ kotlin {
             api(project(":playback:api"))
             api(project(":provider:api"))
             api(project(":provider:runtime"))
+            implementation(project(":provider:bilibili"))
             api(project(":persistence:settings"))
             api(project(":feature:recognition"))
             api(project(":feature:search"))
@@ -441,4 +442,5 @@ tasks.register("checkP4ContractBoundaries") {
 tasks.named("allTests") {
     dependsOn("checkP4ContractBoundaries")
     dependsOn(":persistence:settings:allTests")
+    dependsOn(":provider:bilibili:allTests")
 }
