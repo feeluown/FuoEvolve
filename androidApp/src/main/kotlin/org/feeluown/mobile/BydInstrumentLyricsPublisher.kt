@@ -65,9 +65,11 @@ internal class BydInstrumentLyricsPublisher(
             combine(
                 playbackSession.state,
                 enabled.distinctUntilChanged(),
-            ) { state, isEnabled ->
+                BydInstrumentPermissionState.granted.distinctUntilChanged(),
+            ) { state, isEnabled, permissionGranted ->
                 Snapshot(
                     enabled = isEnabled,
+                    permissionGranted = permissionGranted,
                     status = state.status,
                     track = state.currentTrack,
                     positionMs = state.positionMs,
@@ -100,6 +102,11 @@ internal class BydInstrumentLyricsPublisher(
             snapshot.status == PlaybackSessionStatus.Ended
         ) {
             deactivate()
+            return
+        }
+
+        if (!snapshot.permissionGranted) {
+            suspendForPermission()
             return
         }
 
@@ -165,7 +172,14 @@ internal class BydInstrumentLyricsPublisher(
         positionSyncJob = scope.launch {
             while (true) {
                 val snapshot = latestSnapshot ?: break
-                if (!snapshot.enabled || snapshot.status != PlaybackSessionStatus.Playing || snapshot.track == null) break
+                if (
+                    !snapshot.enabled ||
+                    !snapshot.permissionGranted ||
+                    snapshot.status != PlaybackSessionStatus.Playing ||
+                    snapshot.track == null
+                ) {
+                    break
+                }
                 if (!publishAtPosition(snapshot, estimatedPositionMs())) break
                 delay(POSITION_SYNC_INTERVAL_MS)
             }
@@ -190,6 +204,17 @@ internal class BydInstrumentLyricsPublisher(
                 Log.i(TAG, "Using BYD instrument lyrics transport=${createdBridge.transportName}")
                 bridge = createdBridge
             }
+    }
+
+    private fun suspendForPermission() {
+        stopPositionSyncLoop()
+        bridge = null
+        bridgeInitializationAttempted = false
+        publicationFailed = false
+        lastTrackKey = null
+        lastWindow = null
+        lastStatus = null
+        hasPublishedLyrics = false
     }
 
     private fun deactivate() {
@@ -217,6 +242,7 @@ internal class BydInstrumentLyricsPublisher(
 
     private data class Snapshot(
         val enabled: Boolean,
+        val permissionGranted: Boolean,
         val status: PlaybackSessionStatus,
         val track: TrackRef?,
         val positionMs: Long,
@@ -241,14 +267,26 @@ private class BydInstrumentLyricsBridge(
     private val musicStopValue: Int?,
     private val musicSourceOthersValue: Int?,
 ) {
-    val transportName: String = if (threeLineLyricsMethod != null) "three-line" else "DiLink-music-name"
+    val transportName: String
+        get() = if (useMusicNameTransport || threeLineLyricsMethod == null) {
+            "DiLink-music-name"
+        } else {
+            "three-line"
+        }
 
+    private var useMusicNameTransport = threeLineLyricsMethod == null
     private var lastMusicStateValue: Int? = null
     private var musicSourceInitialized = false
 
     fun publish(window: InstrumentLyricsWindow, status: PlaybackSessionStatus): Boolean {
-        threeLineLyricsMethod?.let { method ->
-            return invokeRequired(method, window.previous, window.current, window.next)
+        if (!useMusicNameTransport) {
+            val method = threeLineLyricsMethod
+            if (method != null && invokeRequired(method, window.previous, window.current, window.next)) {
+                return true
+            }
+            if (musicNameMethod == null) return false
+            useMusicNameTransport = true
+            Log.w(TAG, "Falling back to BYD sendMusicName after three-line lyrics publishing failed")
         }
 
         val nameMethod = musicNameMethod ?: return false
@@ -258,9 +296,9 @@ private class BydInstrumentLyricsBridge(
     }
 
     fun clear() {
-        if (threeLineLyricsMethod != null) {
-            invokeOptional(threeLineLyricsMethod, "", "", "")
-            return
+        if (!useMusicNameTransport) {
+            val method = threeLineLyricsMethod
+            if (method != null && invokeOptional(method, "", "", "")) return
         }
         musicNameMethod?.let { invokeOptional(it, "") }
         publishMusicStateValueIfAvailable(musicStopValue)
