@@ -6,54 +6,29 @@ enum class MediaRefType {
 }
 
 /**
- * Stable cross-feature media reference. Provider-facing APIs may adapt this
- * value, but core only owns source identity and portable navigation metadata.
+ * Stable cross-feature media reference. The value lives in core and carries
+ * only portable identity/navigation metadata; the provider-prefixed storage
+ * names are retained temporarily for Kotlin source/copy compatibility during
+ * P4-C, while neutral aliases are the canonical accessors for new code.
  */
 data class MediaRef(
     val id: String,
     val title: String,
-    val sourceId: String,
-    val sourceName: String,
+    val providerId: String,
+    val providerName: String,
     val type: MediaRefType,
     val coverUrl: String? = null,
     val description: String = "",
-    val externalUrl: String? = null,
+    val providerUrl: String? = null,
     val trackCount: Int? = null,
     val albumCount: Int? = null,
 ) {
-    /** Source-compatible constructor for the provider API migration alias. */
-    constructor(
-        id: String,
-        title: String,
-        providerId: String,
-        providerName: String,
-        type: MediaRefType,
-        coverUrl: String? = null,
-        description: String = "",
-        providerUrl: String? = null,
-        trackCount: Int? = null,
-        albumCount: Int? = null,
-        @Suppress("UNUSED_PARAMETER") providerCompatibility: Unit = Unit,
-    ) : this(
-        id = id,
-        title = title,
-        sourceId = providerId,
-        sourceName = providerName,
-        type = type,
-        coverUrl = coverUrl,
-        description = description,
-        externalUrl = providerUrl,
-        trackCount = trackCount,
-        albumCount = albumCount,
-    )
-
-    /** Compatibility aliases while provider callers migrate to source naming. */
-    val providerId: String
-        get() = sourceId
-    val providerName: String
-        get() = sourceName
-    val providerUrl: String?
-        get() = externalUrl
+    val sourceId: String
+        get() = providerId
+    val sourceName: String
+        get() = providerName
+    val externalUrl: String?
+        get() = providerUrl
 }
 
 data class LocalMusicScanSettings(
