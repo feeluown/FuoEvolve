@@ -151,7 +151,7 @@ fun MusicTrack.toNavigationTrack(): NavigationTrack = NavigationTrack(
     isUnavailable = isUnavailable,
     artistItemId = artistItemId,
     albumItemId = albumItemId,
-    artistItems = artistItems.map(ProviderMediaItem::toNavigationMediaItem),
+    artistItems = artistRefs.map(MediaRef::toNavigationMediaItem),
     providerUrl = providerUrl,
     providerTags = providerTags,
 )
@@ -190,7 +190,7 @@ fun NavigationTrack.toMusicTrack(): MusicTrack = MusicTrack(
     isUnavailable = isUnavailable,
     artistItemId = artistItemId,
     albumItemId = albumItemId,
-    artistItems = artistItems.map(NavigationMediaItem::toProviderMediaItem),
+    artistRefs = artistItems.map(NavigationMediaItem::toMediaRef),
     providerUrl = providerUrl,
     providerTags = providerTags,
 )
@@ -251,6 +251,32 @@ fun NavigationMediaItem.toProviderMediaItem(): ProviderMediaItem = ProviderMedia
     coverUrl = coverUrl,
     description = description,
     providerUrl = providerUrl,
+    trackCount = trackCount,
+    albumCount = albumCount,
+)
+
+fun MediaRef.toNavigationMediaItem(): NavigationMediaItem = NavigationMediaItem(
+    id = id,
+    title = title,
+    providerId = sourceId,
+    providerName = sourceName,
+    type = type.name,
+    coverUrl = coverUrl,
+    description = description,
+    providerUrl = externalUrl,
+    trackCount = trackCount,
+    albumCount = albumCount,
+)
+
+fun NavigationMediaItem.toMediaRef(): MediaRef = MediaRef(
+    id = id,
+    title = title,
+    sourceId = providerId,
+    sourceName = providerName,
+    type = MediaRefType.valueOf(type),
+    coverUrl = coverUrl,
+    description = description,
+    externalUrl = providerUrl,
     trackCount = trackCount,
     albumCount = albumCount,
 )
