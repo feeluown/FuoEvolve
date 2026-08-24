@@ -16,9 +16,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -27,10 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
@@ -43,6 +38,7 @@ private data class PendingLocalPlaylistExport(val fileName: String, val content:
 private data class PendingLocalPlaylistImport(val fileName: String, val content: String)
 private const val LOCAL_PLAYLIST_MIME_TYPE = "application/x-fuo"
 private const val PROVIDER_CREDENTIAL_BACKUP_MIME_TYPE = "application/json"
+private const val ALL_PROVIDER_CREDENTIALS_TARGET = "__all_provider_credentials__"
 private const val CONTENT_URI_SCHEME = "content"
 private const val FILE_URI_SCHEME = "file"
 private const val BYD_INSTRUMENT_PERMISSION_REQUEST_CODE = 4104
@@ -149,6 +145,31 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            var providerCredentialExportTargetKey by rememberSaveable { mutableStateOf<String?>(null) }
+            var providerCredentialExportTargetName by rememberSaveable { mutableStateOf("") }
+            val providerCredentialExportTarget = providerCredentialExportTargetKey?.let { key ->
+                ProviderCredentialBackupTarget(
+                    providerId = key.takeUnless { it == ALL_PROVIDER_CREDENTIALS_TARGET },
+                    providerName = providerCredentialExportTargetName.ifBlank {
+                        if (key == ALL_PROVIDER_CREDENTIALS_TARGET) "全部已登录音源" else key
+                    },
+                )
+            }
+            val credentialBackupActions = ProviderCredentialBackupActions(
+                exportAll = {
+                    providerCredentialExportTargetKey = ALL_PROVIDER_CREDENTIALS_TARGET
+                    providerCredentialExportTargetName = "全部已登录音源"
+                },
+                exportProvider = { provider ->
+                    providerCredentialExportTargetKey = provider.providerId
+                    providerCredentialExportTargetName = provider.providerName
+                },
+                importBackup = {
+                    providerCredentialImportLauncher.launch(
+                        arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
+                    )
+                },
+            )
 
             var pendingLocalPlaylistExport by remember { mutableStateOf<PendingLocalPlaylistExport?>(null) }
             val localPlaylistFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -188,7 +209,7 @@ class MainActivity : ComponentActivity() {
                 launchSharedText?.let(appViewModel.sharedResourceActionPort::open)
             }
 
-            Box(Modifier.fillMaxSize()) {
+            CompositionLocalProvider(LocalProviderCredentialBackupActions provides credentialBackupActions) {
                 AppRoot(
                     appViewModel = appViewModel,
                     hasAudioPermission = hasAudioPermission,
@@ -231,27 +252,22 @@ class MainActivity : ComponentActivity() {
                     onShareText = ::shareText,
                 )
 
-                if (appUiState.backStack.lastOrNull() == AppRoute.Settings) {
-                    ProviderCredentialBackupOverlay(
-                        backup = providerCredentialBackup,
-                        onImportFile = {
-                            providerCredentialImportLauncher.launch(
-                                arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
-                            )
-                        },
-                        onExportFile = { fileName ->
-                            providerCredentialExportLauncher.launch(fileName)
-                        },
-                        onRestored = { restoredProviderIds ->
-                            val restored = restoredProviderIds.toSet()
-                            val providers = appViewModel.providerCatalogFeatureController.uiState.value.availableProviders
-                                .filter { provider -> provider.providerId in restored }
-                            appViewModel.providerAuthFeatureController.refreshAll(providers, refreshUserInfo = true)
-                        },
-                        onFeedback = appViewModel::showFeedback,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
-                    )
-                }
+                ProviderCredentialBackupDialogs(
+                    backup = providerCredentialBackup,
+                    exportTarget = providerCredentialExportTarget,
+                    onDismissExport = {
+                        providerCredentialExportTargetKey = null
+                        providerCredentialExportTargetName = ""
+                    },
+                    onExportFile = providerCredentialExportLauncher::launch,
+                    onRestored = { restoredProviderIds ->
+                        val restored = restoredProviderIds.toSet()
+                        val providers = appViewModel.providerCatalogFeatureController.uiState.value.availableProviders
+                            .filter { provider -> provider.providerId in restored }
+                        appViewModel.providerAuthFeatureController.refreshAll(providers, refreshUserInfo = true)
+                    },
+                    onFeedback = appViewModel::showFeedback,
+                )
             }
 
             BackHandler(
