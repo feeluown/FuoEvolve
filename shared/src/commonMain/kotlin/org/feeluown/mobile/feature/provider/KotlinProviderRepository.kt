@@ -229,7 +229,7 @@ class KotlinProviderRepository : ProviderMusicRepository {
         ).copy(replacementStrategy = track.replacementStrategy ?: "title_artist_duration")
     }
 
-    private fun annotateSmartReplacement(
+    internal fun annotateSmartReplacement(
         payload: PlaybackPayload,
         original: MusicTrack,
         candidate: MusicTrack,
@@ -237,6 +237,12 @@ class KotlinProviderRepository : ProviderMusicRepository {
         useOriginalMetadata: Boolean,
         useOriginalLyrics: Boolean,
     ): PlaybackPayload = payload.copy(
+        // A replacement substitutes exactly one logical queue track. Provider multipart metadata
+        // belongs to the replacement container (for example a Bilibili multi-P video); carrying it
+        // forward makes Next advance to P2 instead of the next queue track. Keep the already-resolved
+        // current-part URL, but do not expose provider-internal parts as queue-local continuation.
+        parts = emptyList(),
+        currentPartIndex = -1,
         isSmartReplacement = true,
         originalId = original.id,
         originalTitle = original.title,
