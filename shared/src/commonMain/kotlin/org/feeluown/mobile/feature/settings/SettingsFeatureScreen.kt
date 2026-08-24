@@ -226,7 +226,7 @@ fun SettingsFeatureScreen(
                         }
                     }
                     FeatureSettingsRoute.CredentialBackup -> SettingsScaffold(
-                        title = "登录凭证备份与恢复",
+                        title = "登录凭证",
                         onBack = ::pop,
                         isLoading = catalogState.isLoading,
                     ) { bodyModifier ->
@@ -653,8 +653,7 @@ private fun ProviderCatalogSettings(
     if (credentialBackupActions.isAvailable) {
         SettingsGroup(title = "登录凭证") {
             SettingsRow(
-                title = "登录凭证备份与恢复",
-                supportingText = "加密备份全部或单个音源，也可从备份文件恢复",
+                title = "备份与恢复",
                 leadingContent = { Icon(Icons.Filled.ManageAccounts, contentDescription = null) },
                 trailingContent = {
                     Icon(
@@ -700,12 +699,8 @@ private fun ProviderCredentialBackupSettings(
 
     SettingsGroup(title = "备份") {
         SettingsRow(
-            title = "导出全部登录凭证",
-            supportingText = if (orderedLoggedInProviders.isEmpty()) {
-                "当前没有已登录的音源"
-            } else {
-                "${orderedLoggedInProviders.size} 个已登录音源 · 默认使用密码加密"
-            },
+            title = "导出全部",
+            supportingText = orderedLoggedInProviders.takeIf { it.isNotEmpty() }?.let { "${it.size} 个音源" },
             enabled = exportAll != null && orderedLoggedInProviders.isNotEmpty(),
             leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
             trailingContent = {
@@ -721,17 +716,13 @@ private fun ProviderCredentialBackupSettings(
 
     SettingsGroup(title = "单独导出") {
         if (orderedLoggedInProviders.isEmpty()) {
-            SettingsRow(
-                title = "暂无可导出的音源",
-                supportingText = "登录音源后可在这里单独备份对应凭证",
-            )
+            SettingsRow(title = "暂无已登录音源")
         } else {
             orderedLoggedInProviders.forEachIndexed { index, provider ->
                 val auth = state.sessions.authStates[provider.providerId]
                 SettingsRow(
                     title = provider.providerName,
-                    supportingText = auth?.userName?.takeIf { it.isNotBlank() }?.let { "已登录 · $it" }
-                        ?: "仅导出此音源的登录凭证",
+                    supportingText = auth?.userName?.takeIf { it.isNotBlank() },
                     enabled = exportProvider != null,
                     leadingContent = { Icon(Icons.Filled.ManageAccounts, contentDescription = null) },
                     trailingContent = {
@@ -750,8 +741,7 @@ private fun ProviderCredentialBackupSettings(
 
     SettingsGroup(title = "恢复") {
         SettingsRow(
-            title = "从备份文件恢复",
-            supportingText = "支持全部音源备份和单个音源备份；恢复前会再次确认覆盖",
+            title = "从文件恢复",
             enabled = importBackup != null,
             leadingContent = { Icon(Icons.Filled.Settings, contentDescription = null) },
             trailingContent = {
@@ -762,13 +752,6 @@ private fun ProviderCredentialBackupSettings(
                 )
             },
             onClick = importBackup,
-        )
-    }
-
-    SettingsGroup(title = "安全说明") {
-        SettingsRow(
-            title = "默认使用加密备份",
-            supportingText = "备份可能包含 Cookie、访问令牌、Refresh Token、Authorization 和 OAuth client_secret。明文导出仅用于可信第三方应用，并需要额外风险确认。",
         )
     }
 }
@@ -1349,8 +1332,7 @@ private fun ProviderAccountSettings(
     if (auth.isLoggedIn && credentialBackupActions.exportProvider != null) {
         SettingsGroup(title = "登录凭证") {
             SettingsRow(
-                title = "导出此音源登录凭证",
-                supportingText = "仅备份 ${provider.providerName}，默认使用密码加密",
+                title = "导出登录凭证",
                 enabled = !busy,
                 leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
                 trailingContent = {
