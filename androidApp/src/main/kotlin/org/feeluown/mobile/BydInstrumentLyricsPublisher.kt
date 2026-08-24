@@ -181,6 +181,7 @@ internal class BydInstrumentLyricsPublisher(
                     break
                 }
                 if (!publishAtPosition(snapshot, estimatedPositionMs())) break
+                bridge?.refreshSessionLease(snapshot.status)
                 delay(POSITION_SYNC_INTERVAL_MS)
             }
         }
@@ -276,6 +277,7 @@ private class BydInstrumentLyricsBridge(
 
     private var useMusicNameTransport = threeLineLyricsMethod == null
     private var lastMusicStateValue: Int? = null
+    private var lastMusicSessionRefreshRealtimeMs = 0L
 
     fun publish(window: InstrumentLyricsWindow, status: PlaybackSessionStatus): Boolean {
         if (!useMusicNameTransport) {
@@ -293,6 +295,20 @@ private class BydInstrumentLyricsBridge(
         return invokeRequired(nameMethod, window.current)
     }
 
+    fun refreshSessionLease(
+        status: PlaybackSessionStatus,
+        realtimeMs: Long = SystemClock.elapsedRealtime(),
+    ) {
+        if (!useMusicNameTransport || status != PlaybackSessionStatus.Playing) return
+        if (
+            lastMusicSessionRefreshRealtimeMs != 0L &&
+            realtimeMs - lastMusicSessionRefreshRealtimeMs < MUSIC_SESSION_LEASE_INTERVAL_MS
+        ) {
+            return
+        }
+        refreshMusicSession(status, realtimeMs)
+    }
+
     fun clear() {
         if (!useMusicNameTransport) {
             val method = threeLineLyricsMethod
@@ -301,13 +317,17 @@ private class BydInstrumentLyricsBridge(
         musicNameMethod?.let { invokeOptional(it, "") }
         publishMusicStateValueIfAvailable(musicStopValue, force = true)
         lastMusicStateValue = null
+        lastMusicSessionRefreshRealtimeMs = 0L
     }
 
-    private fun refreshMusicSession(status: PlaybackSessionStatus) {
-        // The publisher suppresses identical track/window/status snapshots, so this runs only
-        // for a lyric transition or playback lifecycle change. Reasserting source/state here
-        // lets DiLink reclaim third-party music display after firmware/media interruptions
-        // without introducing a high-frequency heartbeat.
+    private fun refreshMusicSession(
+        status: PlaybackSessionStatus,
+        realtimeMs: Long = SystemClock.elapsedRealtime(),
+    ) {
+        // Reassert source/state on actual lyric/status changes, then maintain the same ownership
+        // with a low-frequency lease while playing. The lease intentionally never resends
+        // sendMusicName, so long scrolling lyrics are not restarted.
+        lastMusicSessionRefreshRealtimeMs = realtimeMs
         publishMusicSourceIfAvailable()
         publishMusicStateIfAvailable(status, force = true)
     }
@@ -360,6 +380,7 @@ private class BydInstrumentLyricsBridge(
 
     companion object {
         private const val TAG = "BydInstrumentLyrics"
+        private const val MUSIC_SESSION_LEASE_INTERVAL_MS = 5_000L
 
         fun create(context: Context): Result<BydInstrumentLyricsBridge> = runCatching {
             val instrumentClass = Class.forName(BYD_INSTRUMENT_DEVICE_CLASS)
