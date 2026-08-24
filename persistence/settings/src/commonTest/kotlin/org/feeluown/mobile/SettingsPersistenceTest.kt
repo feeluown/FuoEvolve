@@ -69,6 +69,7 @@ class SettingsPersistenceTest {
                     replacementScore = 0.9,
                 ),
             ),
+            lyricsAssociations = mapOf("bilibili:BVdemo" to "netease:1"),
             playlistPlaybackStats = mapOf(
                 "netease::playlist:1" to PersistedPlaylistPlaybackStat(2, 1234),
             ),
