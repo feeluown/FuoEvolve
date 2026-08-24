@@ -79,7 +79,8 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
         LyricFontSize.Medium -> 7.dp
         LyricFontSize.Large -> 8.dp
     }
-    val associationMatchesTrack = associationState.trackId == state.currentTrack?.id
+    val currentTrack = state.currentTrack
+    val associationMatchesTrack = associationState.trackId == currentTrack?.id
 
     LaunchedEffect(currentIndex, lines.size) {
         if (currentIndex < 0) return@LaunchedEffect
@@ -118,11 +119,11 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (
-                    state.currentTrack != null &&
+                    currentTrack != null &&
                     associationMatchesTrack &&
                     associationState.isLyricsUnavailable
                 ) {
-                    TextButton(onClick = { lyricsPort.openAssociationSearch(state.currentTrack) }) {
+                    TextButton(onClick = { lyricsPort.openAssociationSearch(currentTrack) }) {
                         Text("搜索并关联歌词")
                     }
                 }
@@ -211,12 +212,12 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                     }
                 }
                 if (
-                    state.currentTrack != null &&
+                    currentTrack != null &&
                     associationMatchesTrack &&
                     associationState.isManualAssociation
                 ) {
                     TextButton(
-                        onClick = { lyricsPort.openAssociationSearch(state.currentTrack) },
+                        onClick = { lyricsPort.openAssociationSearch(currentTrack) },
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(FuoSpacing.sm),
