@@ -3,9 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -86,8 +84,8 @@ internal fun ProviderCredentialBackupDialogs(
                                 importInspection = null
                                 onRestored(result.restoredProviderIds)
                                 val ignored = if (result.ignoredProviderIds.isEmpty()) "" else
-                                    "，另有 ${result.ignoredProviderIds.size} 个当前版本不支持的音源已跳过"
-                                onFeedback("已恢复 ${result.restoredProviderIds.size} 个音源登录凭证$ignored")
+                                    "，${result.ignoredProviderIds.size} 个音源已跳过"
+                                onFeedback("已恢复 ${result.restoredProviderIds.size} 个音源$ignored")
                             }
                             .onFailure { importError = it.message ?: "恢复登录凭证失败" }
                     }
@@ -99,7 +97,7 @@ internal fun ProviderCredentialBackupDialogs(
     importError?.let { message ->
         AlertDialog(
             onDismissRequest = { importError = null },
-            title = { Text("登录凭证备份") },
+            title = { Text("登录凭证") },
             text = { Text(message) },
             confirmButton = { TextButton(onClick = { importError = null }) { Text("确定") } },
         )
@@ -126,22 +124,15 @@ private fun ProviderCredentialExportDialog(
         ProviderCredentialExportMode.Encrypted -> encryptedReady
         ProviderCredentialExportMode.Plaintext -> plaintextRiskAccepted
     }
-    val targetDescription = if (target.providerId == null) {
-        "导出全部已保存的音源登录凭证"
-    } else {
-        "仅导出 ${target.providerName} 的登录凭证"
-    }
 
     AlertDialog(
         onDismissRequest = { if (!isBusy) onDismiss() },
         title = { Text(if (target.providerId == null) "导出全部登录凭证" else "导出 ${target.providerName}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("$targetDescription。默认推荐加密备份；只有第三方应用明确需要读取凭证时才使用明文导出。")
                 ExportModeRow(
                     selected = mode == ProviderCredentialExportMode.Encrypted,
-                    title = "加密备份（推荐）",
-                    description = "使用备份密码加密，可在其他设备恢复。",
+                    title = "加密备份",
                     onClick = {
                         mode = ProviderCredentialExportMode.Encrypted
                         plaintextRiskAccepted = false
@@ -149,8 +140,7 @@ private fun ProviderCredentialExportDialog(
                 )
                 ExportModeRow(
                     selected = mode == ProviderCredentialExportMode.Plaintext,
-                    title = "明文 JSON（第三方应用）",
-                    description = "不做任何加密，第三方程序可直接读取。",
+                    title = "明文 JSON",
                     onClick = { mode = ProviderCredentialExportMode.Plaintext },
                 )
 
@@ -159,7 +149,7 @@ private fun ProviderCredentialExportDialog(
                         modifier = Modifier.fillMaxWidth(),
                         value = password,
                         onValueChange = { password = it; error = null },
-                        label = { Text("备份密码（至少 8 位）") },
+                        label = { Text("密码（至少 8 位）") },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                     )
@@ -167,15 +157,10 @@ private fun ProviderCredentialExportDialog(
                         modifier = Modifier.fillMaxWidth(),
                         value = confirmation,
                         onValueChange = { confirmation = it; error = null },
-                        label = { Text("确认备份密码") },
+                        label = { Text("确认密码") },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         isError = confirmation.isNotEmpty() && confirmation != password,
-                    )
-                    Text(
-                        "请妥善保存备份密码。密码不会写入文件，遗失后无法恢复加密备份。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
                     Surface(
@@ -183,13 +168,11 @@ private fun ProviderCredentialExportDialog(
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         shape = MaterialTheme.shapes.medium,
                     ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("明文导出存在高风险", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "文件会直接包含 Cookie、访问令牌、Refresh Token、Authorization 以及 OAuth client_secret。任何拿到文件的人或应用都可能利用这些凭证访问你的账号。仅向你完全信任的第三方应用提供，不要上传到网盘、聊天、Issue 或其他公共位置，使用完成后请及时删除。",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
+                        Text(
+                            "明文文件包含登录凭证，请仅用于可信应用。",
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -200,7 +183,7 @@ private fun ProviderCredentialExportDialog(
                             onCheckedChange = { plaintextRiskAccepted = it },
                         )
                         Text(
-                            "我已了解明文导出的风险，并确认仍要继续",
+                            "我确认导出明文凭证",
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -246,19 +229,14 @@ private fun ProviderCredentialExportDialog(
 private fun ExportModeRow(
     selected: Boolean,
     title: String,
-    description: String,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onClick)
-        Column(Modifier.weight(1f).padding(top = 8.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(2.dp))
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        Text(title, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -277,7 +255,6 @@ private fun ProviderCredentialImportDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (inspection.encrypted) {
-                    Text("这是加密备份。恢复会覆盖备份中对应音源当前保存的登录凭证。")
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = password,
@@ -293,16 +270,15 @@ private fun ProviderCredentialImportDialog(
                         shape = MaterialTheme.shapes.medium,
                     ) {
                         Text(
-                            "检测到明文凭证文件。文件内容未加密，恢复前请确认文件来自你信任的来源。",
+                            "这是明文凭证文件，请确认来源可信。",
                             modifier = Modifier.padding(12.dp),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    inspection.providerCount?.let { Text("备份包含 $it 个音源的登录凭证。") }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = confirmed, onCheckedChange = { confirmed = it })
-                    Text("我确认覆盖备份中对应音源的现有登录凭证", Modifier.weight(1f))
+                    Text("覆盖现有登录凭证", Modifier.weight(1f))
                 }
             }
         },
