@@ -22,7 +22,7 @@ class PlaybackLyricsControllerTest {
         var currentLyrics: String? = null
         val controller = PlaybackLyricsController(
             repository = repository,
-            scope = backgroundScope,
+            scope = this,
             currentRequestSerial = { 1L },
             currentTrackId = { source.id },
             currentLyrics = { currentLyrics },
@@ -53,7 +53,7 @@ class PlaybackLyricsControllerTest {
         var remembered: Pair<String, String?>? = null
         val controller = PlaybackLyricsController(
             repository = repository,
-            scope = backgroundScope,
+            scope = this,
             currentRequestSerial = { 7L },
             currentTrackId = { source.id },
             currentLyrics = { currentLyrics },
@@ -88,7 +88,7 @@ class PlaybackLyricsControllerTest {
         )
         val controller = PlaybackLyricsController(
             repository = repository,
-            scope = backgroundScope,
+            scope = this,
             currentRequestSerial = { 1L },
             currentTrackId = { source.id },
             currentLyrics = { null },
