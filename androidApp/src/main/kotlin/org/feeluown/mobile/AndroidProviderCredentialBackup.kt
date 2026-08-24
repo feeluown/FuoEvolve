@@ -218,10 +218,6 @@ internal class AndroidProviderCredentialBackup(
                     providerId = providerId,
                     cookiesJson = JsonObject(credentials.cookies.mapValues { JsonPrimitive(it.value) }).toString(),
                 )
-                !credentials.cookieHeader.isNullOrBlank() -> providerRepository.loginWithCookies(
-                    providerId = providerId,
-                    cookiesJson = credentials.cookieHeader,
-                )
             }
         }
     }
