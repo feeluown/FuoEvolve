@@ -174,11 +174,56 @@ internal class AndroidProviderCredentialBackup(
         require(restorable.isNotEmpty()) { "备份中没有当前版本支持的音源凭证" }
 
         restorable.forEach { (providerId, credentials) -> credentialStore.write(providerId, credentials) }
+        restorable.forEach { (providerId, credentials) ->
+            refreshProviderCredentialState(providerId, credentials)
+        }
 
         ProviderCredentialRestoreResult(
             restoredProviderIds = restorable.keys.toList(),
             ignoredProviderIds = ignored,
         )
+    }
+
+    /**
+     * Re-enter the provider-owned authentication path after the durable credential write. Providers
+     * can invalidate cached identity/session state here (for example YouTube Music's account name).
+     * The durable restore remains successful even if a provider refresh needs network access and
+     * fails while the device is offline.
+     */
+    private suspend fun refreshProviderCredentialState(providerId: String, credentials: ProviderCredentials) {
+        runCatching {
+            when {
+                !credentials.headerFileJson.isNullOrBlank() -> providerRepository.loginWithHeaderFile(
+                    providerId = providerId,
+                    headerFileJson = credentials.headerFileJson,
+                )
+                credentials.hasOAuthAccess() &&
+                    !credentials.oauthClientId.isNullOrBlank() &&
+                    !credentials.oauthClientSecret.isNullOrBlank() -> providerRepository.loginWithOAuth(
+                    providerId = providerId,
+                    accessToken = credentials.oauthAccessToken.orEmpty(),
+                    refreshToken = credentials.oauthRefreshToken.orEmpty(),
+                    expiresAtMillis = credentials.oauthExpiresAtMillis,
+                    scope = credentials.oauthScope,
+                    clientId = credentials.oauthClientId,
+                    clientSecret = credentials.oauthClientSecret,
+                )
+                !credentials.authorization.isNullOrBlank() && !credentials.cookieHeader.isNullOrBlank() ->
+                    providerRepository.loginWithHeaders(
+                        providerId = providerId,
+                        authorization = credentials.authorization,
+                        cookie = credentials.cookieHeader,
+                    )
+                credentials.cookies.isNotEmpty() -> providerRepository.loginWithCookies(
+                    providerId = providerId,
+                    cookiesJson = JsonObject(credentials.cookies.mapValues { JsonPrimitive(it.value) }).toString(),
+                )
+                !credentials.cookieHeader.isNullOrBlank() -> providerRepository.loginWithCookies(
+                    providerId = providerId,
+                    cookiesJson = credentials.cookieHeader,
+                )
+            }
+        }
     }
 
     private fun encodePlaintext(credentials: Map<String, ProviderCredentials>): String {
