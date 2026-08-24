@@ -309,6 +309,20 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                 placeholder = CoverPlaceholder.Playlist,
                 action = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (
+                            state.favoriteState.isFavorite ||
+                            state.favoriteState.canFavorite ||
+                            state.favoriteState.canUnfavorite
+                        ) {
+                            ProviderFavoriteButton(
+                                isFavorite = state.favoriteState.isFavorite,
+                                isLoading = state.isFavoriteLoading,
+                                enabled = owner.canToggleFavorite(),
+                                favoriteLabel = "收藏",
+                                unfavoriteLabel = "已收藏",
+                                onClick = owner::toggleFavorite,
+                            )
+                        }
                         if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
                         ShareTextButton(sharePayload)
                     }
@@ -484,6 +498,20 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                 placeholder = if (isArtist) CoverPlaceholder.Artist else CoverPlaceholder.Album,
                 action = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (
+                            state.favoriteState.isFavorite ||
+                            state.favoriteState.canFavorite ||
+                            state.favoriteState.canUnfavorite
+                        ) {
+                            ProviderFavoriteButton(
+                                isFavorite = state.favoriteState.isFavorite,
+                                isLoading = state.isFavoriteLoading,
+                                enabled = owner.canToggleFavorite(),
+                                favoriteLabel = if (isArtist) "关注" else "收藏",
+                                unfavoriteLabel = if (isArtist) "已关注" else "已收藏",
+                                onClick = owner::toggleFavorite,
+                            )
+                        }
                         if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
                         ShareTextButton(sharePayload)
                     }
@@ -526,6 +554,20 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ProviderFavoriteButton(
+    isFavorite: Boolean,
+    isLoading: Boolean,
+    enabled: Boolean,
+    favoriteLabel: String,
+    unfavoriteLabel: String,
+    onClick: () -> Unit,
+) {
+    TextButton(onClick = onClick, enabled = enabled && !isLoading) {
+        Text(if (isFavorite) unfavoriteLabel else favoriteLabel)
     }
 }
 
