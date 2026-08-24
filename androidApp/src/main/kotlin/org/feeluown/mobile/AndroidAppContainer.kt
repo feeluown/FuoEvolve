@@ -104,7 +104,7 @@ internal class AndroidAppContainer(
             },
             initialState = SearchUiState(
                 searchScope = initialSettings.searchScope,
-                selectedProviderId = initialSettings.selectedSearchProviderId,
+                selectedSearchProviderId = initialSettings.selectedSearchProviderId,
             ),
         )
     }
