@@ -19,6 +19,7 @@ data class PlaybackUiGraph(
     val playlists: PlaylistActionPort,
     val providerTrackActions: ProviderTrackActionPort,
     val localMusicActions: LocalMusicActionPort,
+    val lyrics: PlaybackLyricsPort,
     val replacement: ReplacementActionPort,
 ) {
     val isFullPlayerOpen: Boolean
@@ -54,6 +55,9 @@ val LocalProviderTrackActionPort = staticCompositionLocalOf<ProviderTrackActionP
 val LocalLocalMusicActionPort = staticCompositionLocalOf<LocalMusicActionPort> {
     error("LocalMusicActionPort is not provided")
 }
+val LocalPlaybackLyricsPort = staticCompositionLocalOf<PlaybackLyricsPort> {
+    error("PlaybackLyricsPort is not provided")
+}
 val LocalReplacementActionPort = staticCompositionLocalOf<ReplacementActionPort> {
     error("ReplacementActionPort is not provided")
 }
@@ -72,6 +76,7 @@ fun ProvideNarrowPlaybackUi(
         LocalPlaylistActionPort provides graph.playlists,
         LocalProviderTrackActionPort provides graph.providerTrackActions,
         LocalLocalMusicActionPort provides graph.localMusicActions,
+        LocalPlaybackLyricsPort provides graph.lyrics,
         LocalReplacementActionPort provides graph.replacement,
         content = content,
     )
