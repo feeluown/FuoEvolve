@@ -23,6 +23,7 @@ import org.feeluown.mobile.ProviderMediaItemType
 import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
 import org.feeluown.mobile.ProviderPlaylistDetail
+import org.feeluown.mobile.ProviderResourceState
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.ProviderVideo
 import org.feeluown.mobile.VideoPlaybackPayload
@@ -364,6 +365,123 @@ class NeteaseProvider(
             }
         }
         return result
+    }
+
+    override suspend fun resourceState(resourceType: String, resourceId: String): ProviderResourceState {
+        val type = normalizeFavoriteResourceType(resourceType)
+            ?: return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        if (!authState().isLoggedIn) {
+            return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        }
+        val identifier = favoriteResourceIdentifier(type, resourceId)
+        if (identifier.isBlank()) {
+            return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        }
+        val isFavorite = when (type) {
+            FAVORITE_RESOURCE_PLAYLIST -> {
+                val uid = currentUserId() ?: return ProviderResourceState(providerId = ID, resourceId = resourceId)
+                val playlist = userPlaylistObjects(uid).firstOrNull { it.string("id") == identifier }
+                if (playlist != null && !playlist.boolean("subscribed")) {
+                    return ProviderResourceState(providerId = ID, resourceId = resourceId)
+                }
+                playlist?.boolean("subscribed") == true
+            }
+            FAVORITE_RESOURCE_ARTIST,
+            FAVORITE_RESOURCE_ALBUM,
+            -> isResourceSubscribed(type, identifier)
+            else -> false
+        }
+        return ProviderResourceState(
+            providerId = ID,
+            resourceId = resourceId,
+            isFavorite = isFavorite,
+            canFavorite = !isFavorite,
+            canUnfavorite = isFavorite,
+        )
+    }
+
+    override suspend fun setResourceFavorite(
+        resourceType: String,
+        resourceId: String,
+        favorite: Boolean,
+    ): ProviderMutationResult {
+        val type = normalizeFavoriteResourceType(resourceType)
+            ?: return ProviderMutationResult(false, "网易云音乐暂不支持该收藏操作")
+        if (!authState().isLoggedIn) return ProviderMutationResult(false, "请先登录网易云音乐")
+        val identifier = favoriteResourceIdentifier(type, resourceId)
+        if (identifier.isBlank()) return ProviderMutationResult(false, "无法读取网易云音乐资源编号")
+        if (type == FAVORITE_RESOURCE_PLAYLIST) {
+            val uid = currentUserId()
+            val ownPlaylist = uid?.let { userId ->
+                userPlaylistObjects(userId).firstOrNull {
+                    it.string("id") == identifier && !it.boolean("subscribed")
+                }
+            }
+            if (ownPlaylist != null) return ProviderMutationResult(false, "自己的歌单无需收藏")
+        }
+        val endpoint = when (type) {
+            FAVORITE_RESOURCE_PLAYLIST -> "playlist/${if (favorite) "subscribe" else "unsubscribe"}"
+            FAVORITE_RESOURCE_ARTIST -> "artist/${if (favorite) "sub" else "unsub"}"
+            FAVORITE_RESOURCE_ALBUM -> "album/${if (favorite) "sub" else "unsub"}"
+            else -> return ProviderMutationResult(false, "网易云音乐暂不支持该收藏操作")
+        }
+        val payload = when (type) {
+            FAVORITE_RESOURCE_ARTIST ->
+                """{"artistId":"$identifier","artistIds":"[$identifier]","csrf_token":"${csrfToken().jsonString()}"}"""
+            else ->
+                """{"id":"$identifier","csrf_token":"${csrfToken().jsonString()}"}"""
+        }
+        val root = neteaseWeApiPost(
+            "$BASE/weapi/$endpoint",
+            payload,
+            ProviderRequestKind.Mutation,
+        )
+        val success = root.int("code") == 200 || root.boolean("success")
+        return ProviderMutationResult(
+            success = success,
+            message = if (success) {
+                if (favorite) "收藏成功" else "已取消收藏"
+            } else {
+                root.string("message").ifBlank { if (favorite) "收藏失败" else "取消收藏失败" }
+            },
+        )
+    }
+
+    private suspend fun isResourceSubscribed(type: String, identifier: String): Boolean {
+        val endpoint = when (type) {
+            FAVORITE_RESOURCE_ARTIST -> "artist/sublist"
+            FAVORITE_RESOURCE_ALBUM -> "album/sublist"
+            else -> return false
+        }
+        var offset = 0
+        repeat(FAVORITE_STATE_MAX_PAGES) {
+            val root = neteaseWeApiPost(
+                "$BASE/weapi/$endpoint",
+                """{"limit":$FAVORITE_STATE_PAGE_SIZE,"offset":$offset,"total":true,"csrf_token":"${csrfToken().jsonString()}"}""",
+            )
+            val values = root.array("data")
+            if (values.any { value -> value.asObject().string("id") == identifier }) return true
+            if (values.size < FAVORITE_STATE_PAGE_SIZE) return false
+            offset += values.size
+        }
+        return false
+    }
+
+    private fun normalizeFavoriteResourceType(resourceType: String): String? = when (resourceType.lowercase()) {
+        "playlist", "playlists" -> FAVORITE_RESOURCE_PLAYLIST
+        "artist", "artists" -> FAVORITE_RESOURCE_ARTIST
+        "album", "albums" -> FAVORITE_RESOURCE_ALBUM
+        else -> null
+    }
+
+    private fun favoriteResourceIdentifier(type: String, resourceId: String): String {
+        val expectedPrefix = when (type) {
+            FAVORITE_RESOURCE_PLAYLIST -> "playlist"
+            FAVORITE_RESOURCE_ARTIST -> "artist"
+            FAVORITE_RESOURCE_ALBUM -> "album"
+            else -> null
+        }
+        return splitResourceId(resourceId, expectedPrefix).second.ifBlank { resourceId.substringAfterLast(':') }
     }
 
     override suspend fun loadFeature(feature: ProviderFeature, offset: Int, limit: Int): ProviderContentSection {
@@ -1262,6 +1380,11 @@ class NeteaseProvider(
         const val BASE = "https://music.163.com"
         const val PLAYLIST_MUTATION_SYNC_ATTEMPTS = 6
         const val PLAYLIST_MUTATION_SYNC_DELAY_MS = 200L
+        const val FAVORITE_RESOURCE_PLAYLIST = "playlist"
+        const val FAVORITE_RESOURCE_ARTIST = "artist"
+        const val FAVORITE_RESOURCE_ALBUM = "album"
+        const val FAVORITE_STATE_PAGE_SIZE = 200
+        const val FAVORITE_STATE_MAX_PAGES = 10
         val STYLE_KINDS = setOf("songs", "playlists", "albums", "artists")
         val INFO = ProviderInfo(
             providerId = ID,
@@ -1276,6 +1399,12 @@ class NeteaseProvider(
             canRemoveSongFromPlaylist = true,
             canCreatePlaylist = true,
             canDeletePlaylist = true,
+            canFavoritePlaylist = true,
+            canUnfavoritePlaylist = true,
+            canFavoriteArtist = true,
+            canUnfavoriteArtist = true,
+            canFavoriteAlbum = true,
+            canUnfavoriteAlbum = true,
         )
         val FEATURES = listOf(
             ProviderFeature("netease_daily_songs", ID, NAME, "每日推荐歌曲", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
