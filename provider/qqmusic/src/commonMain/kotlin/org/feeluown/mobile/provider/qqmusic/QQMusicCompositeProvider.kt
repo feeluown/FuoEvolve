@@ -29,7 +29,14 @@ internal class QQMusicCompositeProvider(
     override val id: String get() = content.id
     override val name: String get() = content.name
     override val info get() = content.info
-    override val capabilities get() = content.capabilities
+    override val capabilities get() = content.capabilities.copy(
+        canFavoritePlaylist = true,
+        canUnfavoritePlaylist = true,
+        canFavoriteArtist = true,
+        canUnfavoriteArtist = true,
+        canFavoriteAlbum = true,
+        canUnfavoriteAlbum = true,
+    )
     override val features: List<ProviderFeature> = (content.features + MINE_FEATURES).distinctBy { it.id }
 
     override suspend fun initialize() = content.initialize()
@@ -156,9 +163,10 @@ internal class QQMusicCompositeProvider(
     override suspend fun hotComments(track: MusicTrack) = content.hotComments(track)
     override suspend fun trackVideo(track: MusicTrack) = content.trackVideo(track)
     override suspend fun videoPlaybackPayload(video: org.feeluown.mobile.ProviderVideo) = content.videoPlaybackPayload(video)
-    override suspend fun resourceState(resourceType: String, resourceId: String) = content.resourceState(resourceType, resourceId)
+    override suspend fun resourceState(resourceType: String, resourceId: String) =
+        userLibrary.resourceState(resourceType, resourceId)
     override suspend fun setResourceFavorite(resourceType: String, resourceId: String, favorite: Boolean) =
-        content.setResourceFavorite(resourceType, resourceId, favorite)
+        userLibrary.setResourceFavorite(resourceType, resourceId, favorite)
 
     private suspend fun enrichAuth(base: ProviderAuthState): ProviderAuthState {
         if (!base.isLoggedIn) return base
