@@ -23,11 +23,22 @@ internal class AndroidAppContainer(
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
     private var bydInstrumentLyricsPublisher: BydInstrumentLyricsPublisher? = null
 
+    private val providerCredentialStore: AndroidProviderCredentialStore by lazy {
+        AndroidProviderCredentialStore(context)
+    }
+
     val providerRepository: ProviderMusicRepository by lazy {
         createFuoProviderRepository(
-            credentials = AndroidProviderCredentialStore(context),
+            credentials = providerCredentialStore,
             persistentCache = AndroidProviderCacheStore(context),
             isCellularConnection = ::isCellularConnection,
+        )
+    }
+
+    val providerCredentialBackup: AndroidProviderCredentialBackup by lazy {
+        AndroidProviderCredentialBackup(
+            credentialStore = providerCredentialStore,
+            providerRepository = providerRepository,
         )
     }
 
@@ -358,7 +369,7 @@ internal class AndroidAppContainer(
                     .map { state -> state.settings.bydInstrumentLyricsEnabled }
                     .distinctUntilChanged(),
                 scope = appScope,
-            ).also(BydInstrumentLyricsPublisher::start)
+            ).also(LydInstrumentLyricsPublisher::start)
         }
 
         FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
