@@ -8,19 +8,25 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
@@ -28,13 +34,16 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifier) {
+    val lyricsPort = LocalPlaybackLyricsPort.current
+    val associationState by lyricsPort.associationState.collectAsStateWithLifecycle()
     val lines = remember(state.lyrics) { parseLyrics(state.lyrics) }
-    val displayLines = lines.takeIf { it.isNotEmpty() } ?: listOf(LyricLine(0, "暂无歌词"))
     val listState = rememberLazyListState()
     val renderPositionMs = rememberKaraokePositionMs(
         positionMs = state.positionMs,
@@ -70,6 +79,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
         LyricFontSize.Medium -> 7.dp
         LyricFontSize.Large -> 8.dp
     }
+    val associationMatchesTrack = associationState.trackId == state.currentTrack?.id
 
     LaunchedEffect(currentIndex, lines.size) {
         if (currentIndex < 0) return@LaunchedEffect
@@ -94,90 +104,244 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.medium,
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val edgeSpacerHeight = maxHeight / 2
-            LazyColumn(
-                state = listState,
+        if (lines.isEmpty()) {
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = FuoSpacing.lg),
+                    .padding(FuoSpacing.lg),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                item(key = "lyrics-top-spacer") {
-                    Spacer(modifier = Modifier.height(edgeSpacerHeight))
+                Text(
+                    text = "暂无歌词",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (
+                    state.currentTrack != null &&
+                    associationMatchesTrack &&
+                    associationState.isLyricsUnavailable
+                ) {
+                    TextButton(onClick = { lyricsPort.openAssociationSearch(state.currentTrack) }) {
+                        Text("搜索并关联歌词")
+                    }
                 }
-                itemsIndexed(displayLines) { index, line ->
-                    val active = index == currentIndex
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = linePadding),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        line.romanization?.takeIf { it.isNotBlank() }?.let { romanization ->
-                            if (active && !line.romanizationWords.isNullOrEmpty()) {
+            }
+        } else {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val edgeSpacerHeight = maxHeight / 2
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = FuoSpacing.lg),
+                ) {
+                    item(key = "lyrics-top-spacer") {
+                        Spacer(modifier = Modifier.height(edgeSpacerHeight))
+                    }
+                    itemsIndexed(lines) { index, line ->
+                        val active = index == currentIndex
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = linePadding),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            line.romanization?.takeIf { it.isNotBlank() }?.let { romanization ->
+                                if (active && !line.romanizationWords.isNullOrEmpty()) {
+                                    KaraokeLyricText(
+                                        words = line.romanizationWords,
+                                        positionMs = renderPositionMs,
+                                        style = romanizationStyle,
+                                        activeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
+                                        inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                } else {
+                                    Text(
+                                        text = romanization,
+                                        style = romanizationStyle,
+                                        color = if (active) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f)
+                                        },
+                                        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                            if (active && !line.words.isNullOrEmpty()) {
                                 KaraokeLyricText(
-                                    words = line.romanizationWords,
+                                    words = line.words,
                                     positionMs = renderPositionMs,
-                                    style = romanizationStyle,
-                                    activeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
-                                    inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
-                                    fontWeight = FontWeight.Medium,
+                                    style = activeStyle,
+                                    activeColor = MaterialTheme.colorScheme.primary,
+                                    inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             } else {
                                 Text(
-                                    text = romanization,
-                                    style = romanizationStyle,
+                                    text = line.text,
+                                    style = if (active) activeStyle else inactiveStyle,
                                     color = if (active) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
+                                        MaterialTheme.colorScheme.primary
                                     } else {
-                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f)
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f)
                                     },
-                                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            line.translation?.takeIf { it.isNotBlank() }?.let { translation ->
+                                Text(
+                                    text = translation,
+                                    style = translationStyle,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = if (active) 0.52f else 0.38f,
+                                    ),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }
                         }
-                        if (active && !line.words.isNullOrEmpty()) {
-                            KaraokeLyricText(
-                                words = line.words,
-                                positionMs = renderPositionMs,
-                                style = activeStyle,
-                                activeColor = MaterialTheme.colorScheme.primary,
-                                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            Text(
-                                text = line.text,
-                                style = if (active) activeStyle else inactiveStyle,
-                                color = if (active) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f)
-                                },
-                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        line.translation?.takeIf { it.isNotBlank() }?.let { translation ->
-                            Text(
-                                text = translation,
-                                style = translationStyle,
-                                color = MaterialTheme.colorScheme.onSurface.copy(
-                                    alpha = if (active) 0.52f else 0.38f,
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
+                    }
+                    item(key = "lyrics-bottom-spacer") {
+                        Spacer(modifier = Modifier.height(edgeSpacerHeight))
                     }
                 }
-                item(key = "lyrics-bottom-spacer") {
-                    Spacer(modifier = Modifier.height(edgeSpacerHeight))
+                if (
+                    state.currentTrack != null &&
+                    associationMatchesTrack &&
+                    associationState.isManualAssociation
+                ) {
+                    TextButton(
+                        onClick = { lyricsPort.openAssociationSearch(state.currentTrack) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(FuoSpacing.sm),
+                    ) {
+                        Text("更换歌词")
+                    }
                 }
             }
         }
     }
+
+    if (associationMatchesTrack && associationState.isSearchOpen) {
+        LyricsAssociationDialog(
+            state = associationState,
+            onQueryChange = lyricsPort::updateAssociationQuery,
+            onSearch = lyricsPort::searchAssociation,
+            onSelect = lyricsPort::selectAssociation,
+            onDismiss = lyricsPort::closeAssociationSearch,
+        )
+    }
+}
+
+@Composable
+private fun LyricsAssociationDialog(
+    state: LyricsAssociationUiState,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onSelect: (MusicTrack) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("关联歌词") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                state.associatedTrackTitle?.takeIf { state.isManualAssociation }?.let { title ->
+                    Text(
+                        text = "当前关联：$title",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedTextField(
+                    value = state.query,
+                    onValueChange = onQueryChange,
+                    label = { Text("搜索歌曲") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                when {
+                    state.isSearching -> CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                    )
+                    state.message != null -> Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.results.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        itemsIndexed(state.results, key = { _, track -> track.id }) { _, track ->
+                            TextButton(
+                                onClick = { onSelect(track) },
+                                enabled = state.selectingTrackId == null,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = track.title,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val detail = listOf(
+                                        track.artists.takeIf { it.isNotBlank() },
+                                        (track.providerName ?: track.source).takeIf { it.isNotBlank() },
+                                    ).filterNotNull().joinToString(" · ")
+                                    if (detail.isNotBlank()) {
+                                        Text(
+                                            text = detail,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    if (state.selectingTrackId == track.id) {
+                                        Text(
+                                            text = "正在读取歌词…",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onSearch,
+                enabled = !state.isSearching && state.selectingTrackId == null,
+            ) {
+                Text("搜索")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable
