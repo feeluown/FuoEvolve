@@ -46,6 +46,11 @@ internal data class ProviderCredentialRestoreResult(
     val ignoredProviderIds: List<String>,
 )
 
+internal data class ProviderCredentialBackupTarget(
+    val providerId: String?,
+    val providerName: String,
+)
+
 /**
  * Portable provider credential backup owned by the Android app container.
  *
@@ -94,25 +99,38 @@ internal class AndroidProviderCredentialBackup(
     suspend fun export(
         mode: ProviderCredentialExportMode,
         password: String = "",
+        providerId: String? = null,
     ): ProviderCredentialBackupFile = withContext(Dispatchers.IO) {
         val providers = providerRepository.availableProviders()
+        val selectedProviders = if (providerId == null) {
+            providers
+        } else {
+            val provider = providers.firstOrNull { it.providerId == providerId }
+                ?: throw IllegalArgumentException("当前版本不支持该音源")
+            listOf(provider)
+        }
         val credentials = buildMap {
-            providers.forEach { provider ->
+            selectedProviders.forEach { provider ->
                 credentialStore.read(provider.providerId)?.let { put(provider.providerId, it) }
             }
         }
-        require(credentials.isNotEmpty()) { "没有可备份的登录凭证" }
+        if (providerId == null) {
+            require(credentials.isNotEmpty()) { "没有可备份的登录凭证" }
+        } else {
+            val providerName = selectedProviders.first().providerName
+            require(credentials.isNotEmpty()) { "$providerName 没有可导出的登录凭证" }
+        }
 
         val plaintext = encodePlaintext(credentials)
         when (mode) {
             ProviderCredentialExportMode.Plaintext -> ProviderCredentialBackupFile(
-                fileName = PLAINTEXT_FILE_NAME,
+                fileName = backupFileName(providerId, encrypted = false),
                 content = plaintext,
             )
             ProviderCredentialExportMode.Encrypted -> {
                 require(password.length >= MIN_PASSWORD_LENGTH) { "备份密码至少需要 $MIN_PASSWORD_LENGTH 位" }
                 ProviderCredentialBackupFile(
-                    fileName = ENCRYPTED_FILE_NAME,
+                    fileName = backupFileName(providerId, encrypted = true),
                     content = encrypt(plaintext, password),
                 )
             }
@@ -274,6 +292,18 @@ internal class AndroidProviderCredentialBackup(
         } finally {
             passwordBytes.fill(0)
             blockInput.fill(0)
+        }
+    }
+
+    private fun backupFileName(providerId: String?, encrypted: Boolean): String {
+        if (providerId == null) return if (encrypted) ENCRYPTED_FILE_NAME else PLAINTEXT_FILE_NAME
+        val safeProviderId = providerId.map { character ->
+            if (character.isLetterOrDigit() || character == '-' || character == '_' || character == '.') character else '_'
+        }.joinToString("").ifBlank { "provider" }
+        return if (encrypted) {
+            "fuoevolve-provider-credentials-$safeProviderId.fuoauth.json"
+        } else {
+            "fuoevolve-provider-credentials-$safeProviderId.plain.json"
         }
     }
 
