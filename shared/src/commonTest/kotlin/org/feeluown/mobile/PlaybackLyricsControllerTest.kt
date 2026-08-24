@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,6 +83,56 @@ class PlaybackLyricsControllerTest {
     }
 
     @Test
+    fun rememberedAssociationIsPreservedWhenLookupFails() = runTest {
+        val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
+        val repository = FakePlaybackLyricsRepository()
+        val rememberedCalls = mutableListOf<Pair<String, String?>>()
+        val controller = PlaybackLyricsController(
+            repository = repository,
+            scope = this,
+            currentRequestSerial = { 1L },
+            currentTrackId = { source.id },
+            currentLyrics = { null },
+            updateLyrics = {},
+            associationForTrackId = { if (it == source.id) "netease:missing" else null },
+            rememberAssociation = { sourceId, targetId -> rememberedCalls += sourceId to targetId },
+        )
+
+        controller.maybeLoad(source)
+        advanceUntilIdle()
+
+        assertTrue(controller.associationState.value.isLyricsUnavailable)
+        assertTrue(rememberedCalls.isEmpty())
+    }
+
+    @Test
+    fun userQueryIsNotOverwrittenWhileDefaultKeywordLoads() = runTest {
+        val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
+        val keywordGate = CompletableDeferred<String?>()
+        val repository = FakePlaybackLyricsRepository(searchKeywordGate = keywordGate)
+        val controller = PlaybackLyricsController(
+            repository = repository,
+            scope = this,
+            currentRequestSerial = { 1L },
+            currentTrackId = { source.id },
+            currentLyrics = { null },
+            updateLyrics = {},
+            associationForTrackId = { null },
+            rememberAssociation = { _, _ -> },
+        )
+
+        controller.openAssociationSearch(source)
+        runCurrent()
+        controller.updateAssociationQuery("用户输入")
+        keywordGate.complete("异步 BGM 标题")
+        advanceUntilIdle()
+
+        assertEquals("用户输入", controller.associationState.value.query)
+        assertFalse(controller.associationState.value.isSearching)
+        assertTrue(repository.searchRequests.isEmpty())
+    }
+
+    @Test
     fun searchFallsBackToTrackTitleWhenProviderHasNoHint() = runTest {
         val source = providerTrack("other:1", "原始标题", "other")
         val repository = FakePlaybackLyricsRepository(
@@ -120,6 +172,7 @@ class PlaybackLyricsControllerTest {
         private val lyrics: Map<String, String> = emptyMap(),
         private val searchKeyword: String? = null,
         private val searchResults: List<MusicTrack> = emptyList(),
+        private val searchKeywordGate: CompletableDeferred<String?>? = null,
     ) : PlaybackLyricsRepository {
         val lyricRequests = mutableListOf<String>()
         val searchRequests = mutableListOf<String>()
@@ -136,6 +189,7 @@ class PlaybackLyricsControllerTest {
 
         override suspend fun trackDetail(trackId: String): MusicTrack? = details[trackId]
 
-        override suspend fun searchKeyword(track: MusicTrack): String? = searchKeyword
+        override suspend fun searchKeyword(track: MusicTrack): String? =
+            searchKeywordGate?.await() ?: searchKeyword
     }
 }
