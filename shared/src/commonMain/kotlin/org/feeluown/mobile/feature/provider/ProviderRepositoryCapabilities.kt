@@ -31,6 +31,8 @@ interface ProviderPlaybackRepository {
     )
 
     suspend fun lyrics(track: MusicTrack): String? = null
+
+    suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
 }
 
 /** Compatibility adapters while the application aggregate repository is being retired. */
@@ -86,6 +88,9 @@ internal class ProviderPlaybackRepositoryView(
     )
 
     override suspend fun lyrics(track: MusicTrack): String? = delegate.lyrics(track)
+
+    override suspend fun lyricsSearchKeyword(track: MusicTrack): String? =
+        delegate.lyricsSearchKeyword(track)
 }
 
 internal class ProviderAuthRepositoryView(
