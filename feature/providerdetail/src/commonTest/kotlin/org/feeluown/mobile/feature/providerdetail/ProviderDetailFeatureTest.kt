@@ -52,6 +52,44 @@ class ProviderDetailFeatureTest {
     }
 
     @Test
+    fun playlistFavoriteStateAndMutationStayOwnedByFeature() = runTest {
+        val port = PlaylistPort()
+        val owner = createProviderPlaylistDetailFeatureOwner(port, backgroundScope)
+        val playlist = FakePlaylist("p1", "收藏歌单", "qqmusic")
+
+        owner.activate(playlist, FakeCategory.Other)
+        runCurrent()
+
+        assertTrue(owner.canToggleFavorite())
+        assertFalse(owner.state.value.favoriteState.isFavorite)
+
+        owner.toggleFavorite()
+        runCurrent()
+
+        assertTrue(owner.state.value.favoriteState.isFavorite)
+        assertEquals(listOf(true), port.favoriteMutations)
+        assertEquals(listOf("qqmusic"), port.mutations)
+    }
+
+    @Test
+    fun mediaItemFavoriteStateAndMutationStayOwnedByFeature() = runTest {
+        val port = MediaPort()
+        val owner = createProviderMediaItemDetailFeatureOwner(port, backgroundScope)
+        val item = FakeMediaItem("artist:qqmusic:mid", "歌手", "qqmusic")
+
+        owner.activate(item)
+        runCurrent()
+
+        assertTrue(owner.canToggleFavorite())
+        owner.toggleFavorite()
+        runCurrent()
+
+        assertTrue(owner.state.value.favoriteState.isFavorite)
+        assertEquals(listOf(true), port.favoriteMutations)
+        assertEquals(listOf("qqmusic"), port.mutations)
+    }
+
+    @Test
     fun videoFullscreenIsFeatureLocalState() = runTest {
         val port = VideoPort()
         val owner = createProviderVideoDetailFeatureOwner(port, backgroundScope)
@@ -73,6 +111,7 @@ class ProviderDetailFeatureTest {
         val hasMore: Boolean,
     )
     private data class FakePlaylist(val id: String, val title: String, val providerId: String)
+    private data class FakeMediaItem(val id: String, val title: String, val providerId: String)
     private enum class FakeCategory { Mine, Other }
     private data class FakeVideo(val id: String, val title: String, val providerId: String)
 
@@ -114,6 +153,7 @@ class ProviderDetailFeatureTest {
 
     private class PlaylistPort : ProviderPlaylistDetailPort<FakePlaylist, FakeCategory, FakeTrack> {
         val mutations = mutableListOf<String>()
+        val favoriteMutations = mutableListOf<Boolean>()
 
         override suspend fun loadPage(
             playlist: FakePlaylist,
@@ -128,6 +168,12 @@ class ProviderDetailFeatureTest {
         override suspend fun removeTrack(playlist: FakePlaylist, track: FakeTrack) =
             ProviderDetailMutationResult(true, "已移除")
         override suspend fun deletePlaylist(playlist: FakePlaylist) = ProviderDetailMutationResult(true)
+        override suspend fun loadFavoriteState(playlist: FakePlaylist) =
+            ProviderDetailFavoriteState(canFavorite = true)
+        override suspend fun setFavorite(playlist: FakePlaylist, favorite: Boolean): ProviderDetailMutationResult {
+            favoriteMutations += favorite
+            return ProviderDetailMutationResult(true, if (favorite) "收藏成功" else "已取消收藏")
+        }
         override suspend fun recordPlayback(playlist: FakePlaylist) = Unit
         override fun playlistId(playlist: FakePlaylist) = playlist.id
         override fun playlistTitle(playlist: FakePlaylist) = playlist.title
@@ -146,6 +192,45 @@ class ProviderDetailFeatureTest {
         override fun playPlaylistTracks(tracks: List<FakeTrack>, index: Int, playlistId: String) = Unit
         override fun playAllPlaylistTracks(tracks: List<FakeTrack>, playlistId: String) = Unit
         override fun appendPlaylistTracks(playlistId: String, tracks: List<FakeTrack>) = Unit
+        override fun onProviderMutation(providerId: String) {
+            mutations += providerId
+        }
+    }
+
+    private class MediaPort : ProviderMediaItemDetailPort<FakeMediaItem, FakeTrack> {
+        val mutations = mutableListOf<String>()
+        val favoriteMutations = mutableListOf<Boolean>()
+
+        override suspend fun loadPage(
+            item: FakeMediaItem,
+            tracksOffset: Int,
+            albumsOffset: Int,
+        ) = ProviderMediaItemDetailPage(
+            item = item,
+            tracks = emptyList(),
+            albums = emptyList(),
+            tracksNextOffset = 0,
+            tracksHasMore = false,
+            albumsNextOffset = 0,
+            albumsHasMore = false,
+        )
+
+        override suspend fun loadFavoriteState(item: FakeMediaItem) =
+            ProviderDetailFavoriteState(canFavorite = true)
+
+        override suspend fun setFavorite(item: FakeMediaItem, favorite: Boolean): ProviderDetailMutationResult {
+            favoriteMutations += favorite
+            return ProviderDetailMutationResult(true, if (favorite) "收藏成功" else "已取消收藏")
+        }
+
+        override fun itemId(item: FakeMediaItem) = item.id
+        override fun itemTitle(item: FakeMediaItem) = item.title
+        override fun itemProviderId(item: FakeMediaItem) = item.providerId
+        override fun trackId(track: FakeTrack) = track.id
+        override fun errorMessage(throwable: Throwable, fallback: String, providerId: String?) = fallback
+        override fun open(item: FakeMediaItem) = Unit
+        override fun close() = Unit
+        override fun playTracks(tracks: List<FakeTrack>, index: Int) = Unit
         override fun onProviderMutation(providerId: String) {
             mutations += providerId
         }
