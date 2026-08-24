@@ -39,6 +39,76 @@ class BilibiliProviderTest {
     }
 
     @Test
+    fun lyricSearchKeywordPrefersBgmTitle() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/x/web-interface/view" -> respond(
+                                """{"code":0,"data":{"bvid":"BVdemo","cid":123,"title":"视频标题","pages":[{"cid":123,"page":1,"part":"正片"}]}}""",
+                            )
+                            "/x/player/wbi/v2" -> {
+                                assertEquals("BVdemo", request.url.parameters["bvid"])
+                                assertEquals("123", request.url.parameters["cid"])
+                                respond(
+                                    """{"code":0,"data":{"bgm_info":{"music_id":"MA1","music_title":"Unwelcome school"}}}""",
+                                )
+                            }
+                            else -> error("unexpected Bilibili request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = BilibiliProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "bilibili:BVdemo",
+            title = "视频标题",
+            artists = "UP",
+            album = "",
+            source = "bilibili",
+            sourceType = TrackSourceType.Provider,
+            providerId = "bilibili:BVdemo",
+        )
+
+        assertEquals("Unwelcome school", provider.lyricsSearchKeyword(track))
+        client.close()
+    }
+
+    @Test
+    fun lyricSearchKeywordFallsBackToTrackTitleWithoutBgm() = runTest {
+        val client = ProviderHttpClient(
+            HttpClient(MockEngine) {
+                engine {
+                    addHandler { request ->
+                        when (request.url.encodedPath) {
+                            "/x/web-interface/view" -> respond(
+                                """{"code":0,"data":{"bvid":"BVdemo","cid":123,"title":"接口标题","pages":[{"cid":123,"page":1,"part":"正片"}]}}""",
+                            )
+                            "/x/player/wbi/v2" -> respond("""{"code":0,"data":{"bgm_info":null}}""")
+                            else -> error("unexpected Bilibili request: ${request.url.encodedPath}")
+                        }
+                    }
+                }
+            },
+        )
+        val provider = BilibiliProvider(client, InMemoryProviderCredentialStore())
+        val track = MusicTrack(
+            id = "bilibili:BVdemo",
+            title = "当前视频标题",
+            artists = "UP",
+            album = "",
+            source = "bilibili",
+            sourceType = TrackSourceType.Provider,
+            providerId = "bilibili:BVdemo",
+        )
+
+        assertEquals("当前视频标题", provider.lyricsSearchKeyword(track))
+        client.close()
+    }
+
+    @Test
     fun resolveSelectsBilibiliAudioQualityAndPreservesPlayableParts() = runTest {
         val playUrlRequests = mutableListOf<Pair<String, String?>>()
         val client = ProviderHttpClient(
