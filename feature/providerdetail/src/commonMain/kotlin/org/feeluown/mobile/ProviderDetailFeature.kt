@@ -496,6 +496,16 @@ private class DefaultProviderPlaylistDetailFeatureOwner<Playlist, Category, Trac
                     playlist = playlist,
                     category = category,
                     isLoading = true,
+                    favoriteState = if (before.playlist?.let(port::playlistId) == port.playlistId(playlist)) {
+                        before.favoriteState
+                    } else {
+                        ProviderDetailFavoriteState()
+                    },
+                    isFavoriteLoading = if (before.playlist?.let(port::playlistId) == port.playlistId(playlist)) {
+                        before.isFavoriteLoading
+                    } else {
+                        false
+                    },
                     message = "正在加载：${port.playlistTitle(playlist)}",
                 )
             } else {
@@ -528,6 +538,7 @@ private class DefaultProviderPlaylistDetailFeatureOwner<Playlist, Category, Trac
     }
 
     private fun refreshFavoriteState(playlist: Playlist) {
+        if (favoriteMutationJob?.isActive == true) return
         favoriteStateJob?.cancel()
         favoriteStateJob = scope.launch {
             val favoriteState = runCatching { port.loadFavoriteState(playlist) }.getOrNull() ?: return@launch
@@ -871,9 +882,20 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
         tracksJob?.cancel()
         albumsJob?.cancel()
         tracksJob = scope.launch {
+            val before = state.value
             mutableState.value = ProviderMediaItemDetailFeatureState(
                 item = item,
                 isLoading = true,
+                favoriteState = if (before.item?.let(port::itemId) == port.itemId(item)) {
+                    before.favoriteState
+                } else {
+                    ProviderDetailFavoriteState()
+                },
+                isFavoriteLoading = if (before.item?.let(port::itemId) == port.itemId(item)) {
+                    before.isFavoriteLoading
+                } else {
+                    false
+                },
                 message = "正在加载：${port.itemTitle(item)}",
             )
             runCatching {
@@ -907,6 +929,7 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
     }
 
     private fun refreshFavoriteState(item: Item) {
+        if (favoriteMutationJob?.isActive == true) return
         favoriteStateJob?.cancel()
         favoriteStateJob = scope.launch {
             val favoriteState = runCatching { port.loadFavoriteState(item) }.getOrNull() ?: return@launch
