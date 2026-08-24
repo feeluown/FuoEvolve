@@ -137,6 +137,7 @@ class FuoAppViewModel(
     val playlistActionPort: PlaylistActionPort,
     val providerTrackActionPort: ProviderTrackActionPort,
     val localMusicActionPort: LocalMusicActionPort,
+    val playbackLyricsPort: PlaybackLyricsPort,
     val replacementActionPort: ReplacementActionPort,
     val debugLogFeatureController: DebugLogFeatureController,
     val providerCatalogFeatureController: ProviderCatalogFeatureController,
@@ -170,6 +171,7 @@ class FuoAppViewModel(
         playlists = playlistActionPort,
         providerTrackActions = providerTrackActionPort,
         localMusicActions = localMusicActionPort,
+        lyrics = playbackLyricsPort,
         replacement = replacementActionPort,
     )
 
