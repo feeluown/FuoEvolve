@@ -88,6 +88,7 @@ data class AppSettings(
     val smartReplacementProviderIds: Set<String> = emptySet(),
     val smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
     val smartReplacementSelections: Map<String, SmartReplacementSelection> = emptyMap(),
+    val lyricsAssociations: Map<String, String> = emptyMap(),
     val pauseOnOtherAppPlayback: Boolean = DEFAULT_PAUSE_ON_OTHER_APP_PLAYBACK,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
     val statusBarLyricsEnabled: Boolean = false,
