@@ -16,6 +16,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -24,7 +27,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
@@ -36,6 +42,7 @@ import java.io.File
 private data class PendingLocalPlaylistExport(val fileName: String, val content: String)
 private data class PendingLocalPlaylistImport(val fileName: String, val content: String)
 private const val LOCAL_PLAYLIST_MIME_TYPE = "application/x-fuo"
+private const val PROVIDER_CREDENTIAL_BACKUP_MIME_TYPE = "application/json"
 private const val CONTENT_URI_SCHEME = "content"
 private const val FILE_URI_SCHEME = "file"
 private const val BYD_INSTRUMENT_PERMISSION_REQUEST_CODE = 4104
@@ -55,6 +62,12 @@ class MainActivity : ComponentActivity() {
             var hasImagePermission by remember { mutableStateOf(hasImagePermission()) }
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val appViewModel = fuoApplication.appViewModel
+            val providerCredentialBackup = remember(fuoApplication) {
+                AndroidProviderCredentialBackup(
+                    credentialStore = AndroidProviderCredentialStore(this@MainActivity),
+                    providerRepository = fuoApplication.providerRepository,
+                )
+            }
             remember { AndroidPredictiveBackPreference.initialize(this@MainActivity); Unit }
             val predictiveBackEnabled by AndroidPredictiveBackPreference.enabled
 
@@ -118,6 +131,35 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            var providerCredentialImportHandler by remember { mutableStateOf<((String) -> Unit)?>(null) }
+            var pendingProviderCredentialExport by remember { mutableStateOf<ProviderCredentialBackupFile?>(null) }
+            val providerCredentialImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                val handler = providerCredentialImportHandler
+                providerCredentialImportHandler = null
+                if (uri != null && handler != null) {
+                    val content = readText(uri)
+                    if (content.isBlank()) appViewModel.showFeedback("无法读取登录凭证备份文件")
+                    else handler(content)
+                }
+            }
+            val providerCredentialExportLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument(PROVIDER_CREDENTIAL_BACKUP_MIME_TYPE),
+            ) { uri ->
+                val pending = pendingProviderCredentialExport
+                if (uri != null && pending != null) {
+                    runCatching {
+                        contentResolver.openOutputStream(uri)?.use { output ->
+                            output.write(pending.content.toByteArray(Charsets.UTF_8))
+                        } ?: error("无法打开导出目标")
+                    }.onSuccess {
+                        appViewModel.showFeedback("登录凭证备份已导出")
+                    }.onFailure {
+                        appViewModel.showFeedback(it.message ?: "导出登录凭证失败")
+                    }
+                }
+                pendingProviderCredentialExport = null
+            }
+
             var pendingLocalPlaylistExport by remember { mutableStateOf<PendingLocalPlaylistExport?>(null) }
             val localPlaylistFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
@@ -156,47 +198,73 @@ class MainActivity : ComponentActivity() {
                 launchSharedText?.let(appViewModel.sharedResourceActionPort::open)
             }
 
-            AppRoot(
-                appViewModel = appViewModel,
-                hasAudioPermission = hasAudioPermission,
-                hasImagePermission = hasImagePermission,
-                appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                onRequestAudioPermission = { permissionLauncher.launch(mediaPermissions()) },
-                onRequestImagePermission = { permissionLauncher.launch(imagePermissions()) },
-                hasMicrophonePermission = hasMicrophonePermission,
-                onRequestMicrophonePermission = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                onOpenProviderWebLogin = { provider ->
-                    if (provider.loginConfig != null) {
-                        pendingWebLoginProviderId = provider.providerId
-                        webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
-                    }
-                },
-                onLogoutProvider = { provider ->
-                    ProviderWebLoginActivity.clearWebLoginState()
-                    appViewModel.providerAuthFeatureController.logout(provider.providerId)
-                },
-                onImportYtmusicHeaderFile = { ytmusicHeaderFileLauncher.launch(arrayOf("application/json")) },
-                onImportYtmusicOAuthFile = { ytmusicOAuthFileLauncher.launch(arrayOf("application/json")) },
-                onStartYtmusicOAuth = {
-                    val oauthInput = appViewModel.providerAuthFeatureController.oauthInput("ytmusic")
-                    val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                    if (oauthInput.clientId.isNotBlank() && oauthInput.clientSecret.isNotBlank() && needsPermission) {
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        appViewModel.providerAuthFeatureController.startYtmusicTvOAuthLogin()
-                    }
-                },
-                onImportLocalPlaylistFile = {
-                    localPlaylistFileLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-fuo", "*/*"))
-                },
-                onExportLocalPlaylistFile = { fileName, content ->
-                    pendingLocalPlaylistExport = PendingLocalPlaylistExport(fileName, content)
-                    localPlaylistExportLauncher.launch(fileName)
-                },
-                onShareLocalPlaylistFile = ::shareLocalPlaylistFile,
-                onShareText = ::shareText,
-            )
+            Box(Modifier.fillMaxSize()) {
+                AppRoot(
+                    appViewModel = appViewModel,
+                    hasAudioPermission = hasAudioPermission,
+                    hasImagePermission = hasImagePermission,
+                    appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    onRequestAudioPermission = { permissionLauncher.launch(mediaPermissions()) },
+                    onRequestImagePermission = { permissionLauncher.launch(imagePermissions()) },
+                    hasMicrophonePermission = hasMicrophonePermission,
+                    onRequestMicrophonePermission = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                    onOpenProviderWebLogin = { provider ->
+                        if (provider.loginConfig != null) {
+                            pendingWebLoginProviderId = provider.providerId
+                            webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
+                        }
+                    },
+                    onLogoutProvider = { provider ->
+                        ProviderWebLoginActivity.clearWebLoginState()
+                        appViewModel.providerAuthFeatureController.logout(provider.providerId)
+                    },
+                    onImportYtmusicHeaderFile = { ytmusicHeaderFileLauncher.launch(arrayOf("application/json")) },
+                    onImportYtmusicOAuthFile = { ytmusicOAuthFileLauncher.launch(arrayOf("application/json")) },
+                    onStartYtmusicOAuth = {
+                        val oauthInput = appViewModel.providerAuthFeatureController.oauthInput("ytmusic")
+                        val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                        if (oauthInput.clientId.isNotBlank() && oauthInput.clientSecret.isNotBlank() && needsPermission) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            appViewModel.providerAuthFeatureController.startYtmusicTvOAuthLogin()
+                        }
+                    },
+                    onImportLocalPlaylistFile = {
+                        localPlaylistFileLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-fuo", "*/*"))
+                    },
+                    onExportLocalPlaylistFile = { fileName, content ->
+                        pendingLocalPlaylistExport = PendingLocalPlaylistExport(fileName, content)
+                        localPlaylistExportLauncher.launch(fileName)
+                    },
+                    onShareLocalPlaylistFile = ::shareLocalPlaylistFile,
+                    onShareText = ::shareText,
+                )
+
+                if (appUiState.backStack.lastOrNull() == AppRoute.Settings) {
+                    ProviderCredentialBackupOverlay(
+                        backup = providerCredentialBackup,
+                        onImportFile = { handler ->
+                            providerCredentialImportHandler = handler
+                            providerCredentialImportLauncher.launch(
+                                arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
+                            )
+                        },
+                        onExportFile = { fileName, content ->
+                            pendingProviderCredentialExport = ProviderCredentialBackupFile(fileName, content)
+                            providerCredentialExportLauncher.launch(fileName)
+                        },
+                        onRestored = { restoredProviderIds ->
+                            val restored = restoredProviderIds.toSet()
+                            val providers = appViewModel.providerCatalogFeatureController.uiState.value.availableProviders
+                                .filter { provider -> provider.providerId in restored }
+                            appViewModel.providerAuthFeatureController.refreshAll(providers, refreshUserInfo = true)
+                        },
+                        onFeedback = appViewModel::showFeedback,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+                    )
+                }
+            }
 
             BackHandler(
                 enabled = !appShellHandlesBack && AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
