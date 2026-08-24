@@ -104,7 +104,7 @@ internal class AndroidAppContainer(
             },
             initialState = SearchUiState(
                 searchScope = initialSettings.searchScope,
-                selectedSearchProviderId = initialSettings.selectedSearchProviderId,
+                selectedProviderId = initialSettings.selectedSearchProviderId,
             ),
         )
     }
@@ -369,7 +369,7 @@ internal class AndroidAppContainer(
                     .map { state -> state.settings.bydInstrumentLyricsEnabled }
                     .distinctUntilChanged(),
                 scope = appScope,
-            ).also(LydInstrumentLyricsPublisher::start)
+            ).also(BydInstrumentLyricsPublisher::start)
         }
 
         FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
