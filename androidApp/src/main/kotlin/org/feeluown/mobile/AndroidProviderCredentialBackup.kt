@@ -4,7 +4,6 @@ import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -56,8 +55,6 @@ internal data class ProviderCredentialRestoreResult(
 internal class AndroidProviderCredentialBackup(
     private val credentialStore: ProviderCredentialStore,
     private val providerRepository: ProviderRegistryRepository,
-    private val sessionRepository: ProviderSessionRepository,
-    private val onRestored: () -> Unit = {},
 ) {
     private val json = Json {
         prettyPrint = true
@@ -131,10 +128,6 @@ internal class AndroidProviderCredentialBackup(
         require(restorable.isNotEmpty()) { "备份中没有当前版本支持的音源凭证" }
 
         restorable.forEach { (providerId, credentials) -> credentialStore.write(providerId, credentials) }
-        restorable.keys.forEach { providerId ->
-            runCatching { sessionRepository.refresh(providerId, refreshUserInfo = true) }
-        }
-        onRestored()
 
         ProviderCredentialRestoreResult(
             restoredProviderIds = restorable.keys.toList(),
