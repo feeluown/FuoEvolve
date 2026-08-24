@@ -2,6 +2,9 @@ package org.feeluown.mobile
 
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -44,22 +47,48 @@ internal data class ProviderCredentialRestoreResult(
 )
 
 /**
- * Portable provider credential backup used by the Android settings surface.
+ * Portable provider credential backup owned by the Android app container.
  *
  * The normal on-device credential store remains protected by Android Keystore. Exported encrypted
  * backups deliberately use a password-derived key instead so the file can be restored on another
  * device. Plaintext export exists only for interoperability and is guarded by an explicit UI risk
  * acknowledgement.
+ *
+ * Pending picker payloads live here rather than in Activity composition. This object is process
+ * scoped, so an Activity recreation while Android's document picker is open cannot discard a
+ * selected import or leave a newly created export document empty.
  */
 internal class AndroidProviderCredentialBackup(
     private val credentialStore: ProviderCredentialStore,
-    private val providerRepository: ProviderRegistryRepository,
+    private val providerRepository: ProviderMusicRepository,
 ) {
     private val json = Json {
         prettyPrint = true
         encodeDefaults = true
         ignoreUnknownKeys = true
         explicitNulls = false
+    }
+    private val _pendingImportContent = MutableStateFlow<String?>(null)
+    val pendingImportContent: StateFlow<String?> = _pendingImportContent.asStateFlow()
+    private val pendingExportLock = Any()
+    private var pendingExportFile: ProviderCredentialBackupFile? = null
+
+    fun stageImport(content: String) {
+        _pendingImportContent.value = content
+    }
+
+    fun clearPendingImport() {
+        _pendingImportContent.value = null
+    }
+
+    fun stageExport(file: ProviderCredentialBackupFile) {
+        synchronized(pendingExportLock) {
+            pendingExportFile = file
+        }
+    }
+
+    fun consumePendingExport(): ProviderCredentialBackupFile? = synchronized(pendingExportLock) {
+        pendingExportFile.also { pendingExportFile = null }
     }
 
     suspend fun export(
@@ -227,16 +256,20 @@ internal class AndroidProviderCredentialBackup(
         try {
             mac.init(SecretKeySpec(passwordBytes, HMAC_SHA256))
             var u = mac.doFinal(blockInput)
+            var next = ByteArray(u.size)
             val derived = u.copyOf()
             repeat(iterations - 1) {
-                val next = mac.doFinal(u)
-                u.fill(0)
-                u = next
+                mac.update(u)
+                mac.doFinal(next, 0)
                 for (index in derived.indices) {
-                    derived[index] = (derived[index].toInt() xor u[index].toInt()).toByte()
+                    derived[index] = (derived[index].toInt() xor next[index].toInt()).toByte()
                 }
+                val previous = u
+                u = next
+                next = previous
             }
             u.fill(0)
+            next.fill(0)
             return derived
         } finally {
             passwordBytes.fill(0)
@@ -301,7 +334,7 @@ internal class AndroidProviderCredentialBackup(
         const val PASSWORD_ENCODING = "UTF-8"
         const val PBKDF2_ITERATIONS = 210_000
         const val MIN_ACCEPTED_ITERATIONS = 100_000
-        const val MAX_ACCEPTED_ITERATIONS = 2_000_000
+        const val MAX_ACCEPTED_ITERATIONS = 1_000_000
         const val PBKDF2_BLOCK_INDEX_BYTES = 4
         const val HMAC_SHA256 = "HmacSHA256"
         const val AES_GCM_NAME = "AES-256-GCM"
