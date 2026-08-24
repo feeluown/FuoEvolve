@@ -7,7 +7,9 @@ import org.feeluown.mobile.ProviderContentSection
 import org.feeluown.mobile.ProviderFeature
 import org.feeluown.mobile.ProviderMediaItem
 import org.feeluown.mobile.ProviderMediaItemType
+import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
+import org.feeluown.mobile.ProviderResourceState
 import org.feeluown.mobile.providerBusinessException
 import org.feeluown.mobile.providerContractException
 import org.feeluown.mobile.providerFailureOrNull
@@ -27,6 +29,7 @@ import org.feeluown.mobile.provider.core.providerJson
 import org.feeluown.mobile.provider.core.string
 import org.feeluown.mobile.provider.core.stringOrNull
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.core.network.ProviderRequestKind
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
 import kotlin.random.Random
 
@@ -43,6 +46,224 @@ internal class QQMusicUserLibrary(
     private val credentials: ProviderCredentialStore,
 ) {
     suspend fun userName(): String? = runCatching { snapshot().userName }.getOrNull()
+
+    suspend fun resourceState(resourceType: String, resourceId: String): ProviderResourceState {
+        val type = normalizeFavoriteResourceType(resourceType)
+            ?: return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        if (credentials.read(ID) == null) {
+            return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        }
+        val identifier = favoriteResourceIdentifier(type, resourceId)
+        if (identifier.isBlank()) {
+            return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        }
+        if (type == FAVORITE_RESOURCE_PLAYLIST) {
+            val isOwned = runCatching {
+                snapshot().playlists.any { favoriteResourceIdentifier(type, it.id) == identifier }
+            }.getOrDefault(false)
+            if (isOwned) return ProviderResourceState(providerId = ID, resourceId = resourceId)
+        }
+        val favorite = when (type) {
+            FAVORITE_RESOURCE_PLAYLIST -> isFavoritePlaylist(identifier)
+            FAVORITE_RESOURCE_ARTIST -> isFollowedArtist(identifier)
+            FAVORITE_RESOURCE_ALBUM -> isFavoriteAlbum(identifier)
+            else -> false
+        }
+        return ProviderResourceState(
+            providerId = ID,
+            resourceId = resourceId,
+            isFavorite = favorite,
+            canFavorite = !favorite,
+            canUnfavorite = favorite,
+        )
+    }
+
+    suspend fun setResourceFavorite(
+        resourceType: String,
+        resourceId: String,
+        favorite: Boolean,
+    ): ProviderMutationResult {
+        val type = normalizeFavoriteResourceType(resourceType)
+            ?: return ProviderMutationResult(false, "QQ 音乐暂不支持该收藏操作")
+        if (credentials.read(ID) == null) return ProviderMutationResult(false, "请先登录 QQ 音乐")
+        val identifier = favoriteResourceIdentifier(type, resourceId)
+        if (identifier.isBlank()) return ProviderMutationResult(false, "无法读取 QQ 音乐资源编号")
+        if (type == FAVORITE_RESOURCE_PLAYLIST) {
+            val isOwned = runCatching {
+                snapshot().playlists.any { favoriteResourceIdentifier(type, it.id) == identifier }
+            }.getOrDefault(false)
+            if (isOwned) return ProviderMutationResult(false, "自己的歌单无需收藏")
+        }
+        val success = when (type) {
+            FAVORITE_RESOURCE_PLAYLIST -> mutateFavoritePlaylist(identifier, favorite)
+            FAVORITE_RESOURCE_ARTIST -> mutateFollowedArtist(identifier, favorite)
+            FAVORITE_RESOURCE_ALBUM -> mutateFavoriteAlbum(identifier, favorite)
+            else -> false
+        }
+        return ProviderMutationResult(
+            success = success,
+            message = if (success) {
+                if (favorite) "收藏成功" else "已取消收藏"
+            } else {
+                if (favorite) "QQ 音乐收藏失败" else "QQ 音乐取消收藏失败"
+            },
+        )
+    }
+
+    private suspend fun isFavoritePlaylist(identifier: String): Boolean {
+        val euin = encryptedUin()
+        var offset = 0
+        repeat(FAVORITE_STATE_MAX_PAGES) {
+            val root = rpc(
+                """{"favoritePlaylists":{"module":"music.musicasset.PlaylistFavRead","method":"CgiGetPlaylistFavInfo","param":{"uin":${jsonString(euin)},"offset":$offset,"size":$FAVORITE_STATE_PAGE_SIZE}}}""",
+            )
+            val data = rpcData(root, "favoritePlaylists")
+            val values = firstNonEmpty(data.array("v_list"), data.array("v_playlist"), data.array("list"))
+            if (values.any { value -> qqPlaylistIdentifier(value.asObject()) == identifier }) return true
+            val nextOffset = offset + values.size
+            val total = data.int("total")
+            val hasMore = data.int("hasmore")?.let { it != 0 }
+                ?: total?.let { nextOffset < it }
+                ?: (values.size >= FAVORITE_STATE_PAGE_SIZE)
+            if (!hasMore || values.isEmpty()) return false
+            offset = nextOffset
+        }
+        return false
+    }
+
+    private suspend fun isFavoriteAlbum(identifier: String): Boolean {
+        val euin = encryptedUin()
+        var offset = 0
+        repeat(FAVORITE_STATE_MAX_PAGES) {
+            val root = rpc(
+                """{"favoriteAlbums":{"module":"music.musicasset.AlbumFavRead","method":"CgiGetAlbumFavInfo","param":{"euin":${jsonString(euin)},"offset":$offset,"size":$FAVORITE_STATE_PAGE_SIZE}}}""",
+            )
+            val data = rpcData(root, "favoriteAlbums")
+            val values = firstNonEmpty(data.array("v_list"), data.array("v_album"), data.array("list"))
+            if (values.any { value -> qqAlbumIdentifiers(value.asObject()).contains(identifier) }) return true
+            val nextOffset = offset + values.size
+            val total = data.int("total")
+            val hasMore = data.int("hasmore")?.let { it != 0 }
+                ?: total?.let { nextOffset < it }
+                ?: (values.size >= FAVORITE_STATE_PAGE_SIZE)
+            if (!hasMore || values.isEmpty()) return false
+            offset = nextOffset
+        }
+        return false
+    }
+
+    private suspend fun isFollowedArtist(identifier: String): Boolean {
+        val euin = encryptedUin()
+        var offset = 0
+        repeat(FAVORITE_STATE_MAX_PAGES) {
+            val root = rpc(
+                """{"followedArtists":{"module":"music.concern.RelationList","method":"GetFollowSingerList","param":{"HostUin":${jsonString(euin)},"From":$offset,"Size":$FAVORITE_STATE_PAGE_SIZE}}}""",
+            )
+            val data = rpcData(root, "followedArtists")
+            val values = firstNonEmpty(data.array("List"), data.array("list"), data.array("singerList"))
+            if (values.any { value -> qqArtistIdentifiers(value.asObject()).contains(identifier) }) return true
+            val nextOffset = offset + values.size
+            val total = data.int("Total") ?: data.int("total")
+            val hasMore = when {
+                data.containsKey("HasMore") -> data.boolean("HasMore")
+                data.containsKey("hasMore") -> data.boolean("hasMore")
+                total != null -> nextOffset < total
+                else -> values.size >= FAVORITE_STATE_PAGE_SIZE
+            }
+            if (!hasMore || values.isEmpty()) return false
+            offset = nextOffset
+        }
+        return false
+    }
+
+    private suspend fun mutateFavoritePlaylist(identifier: String, favorite: Boolean): Boolean {
+        val playlistId = identifier.toLongOrNull() ?: return false
+        val euin = encryptedUin()
+        val key = "favoritePlaylistWrite"
+        val root = rpc(
+            """{"$key":{"module":"music.musicasset.PlaylistFavWrite","method":"${if (favorite) "FavPlaylist" else "CancelFavPlaylist"}","param":{"uin":${jsonString(euin)},"v_playlistId":[$playlistId]}}}""",
+            ProviderRequestKind.Mutation,
+        )
+        return rpcMutationSucceeded(root, key)
+    }
+
+    private suspend fun mutateFavoriteAlbum(identifier: String, favorite: Boolean): Boolean {
+        val albumId = identifier.toLongOrNull() ?: return false
+        val key = "favoriteAlbumWrite"
+        val root = rpc(
+            """{"$key":{"module":"music.musicasset.AlbumFavWrite","method":"${if (favorite) "FavAlbum" else "CancelFavAlbum"}","param":{"v_albumId":[$albumId]}}}""",
+            ProviderRequestKind.Mutation,
+        )
+        return rpcMutationSucceeded(root, key)
+    }
+
+    private suspend fun mutateFollowedArtist(identifier: String, favorite: Boolean): Boolean {
+        val root = http.getText(
+            providerId = ID,
+            url = queryUrl(
+                "$BASE/rsc/fcgi-bin/fcg_order_singer_${if (favorite) "add" else "del"}.fcg",
+                mapOf(
+                    "g_tk" to qqToken().toString(),
+                    "format" to "json",
+                    "singermid" to identifier,
+                ),
+            ),
+            headers = authenticatedHeaders("https://y.qq.com/"),
+            kind = ProviderRequestKind.Mutation,
+            cacheKey = null,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        return root.int("code") == 0
+    }
+
+    private fun rpcMutationSucceeded(root: JsonObject, key: String): Boolean {
+        val envelope = root.obj(key) ?: root
+        val code = envelope.int("code")
+        val data = envelope.obj("data") ?: envelope
+        val result = data.int("result") ?: data.int("retCode") ?: data.int("retcode")
+        return (code == null || code == 0) && (result == null || result == 0)
+    }
+
+    private fun qqPlaylistIdentifier(item: JsonObject): String =
+        item.string("tid").ifBlank { item.string("dissid") }.ifBlank { item.string("id") }
+
+    private fun qqAlbumIdentifiers(item: JsonObject): Set<String> = setOf(
+        item.string("id"),
+        item.string("albumID"),
+        item.string("albumId"),
+        item.string("mid"),
+        item.string("albumMid"),
+        item.string("albumMID"),
+        item.string("pmid"),
+    ).filter(String::isNotBlank).toSet()
+
+    private fun qqArtistIdentifiers(item: JsonObject): Set<String> = setOf(
+        item.string("MID"),
+        item.string("mid"),
+        item.string("SingerMid"),
+        item.string("singerMid"),
+        item.string("SingerID"),
+        item.string("singerId"),
+        item.string("id"),
+    ).filter(String::isNotBlank).toSet()
+
+    private fun normalizeFavoriteResourceType(resourceType: String): String? = when (resourceType.lowercase()) {
+        "playlist", "playlists" -> FAVORITE_RESOURCE_PLAYLIST
+        "artist", "artists" -> FAVORITE_RESOURCE_ARTIST
+        "album", "albums" -> FAVORITE_RESOURCE_ALBUM
+        else -> null
+    }
+
+    private fun favoriteResourceIdentifier(type: String, resourceId: String): String {
+        val expectedPrefix = when (type) {
+            FAVORITE_RESOURCE_PLAYLIST -> "playlist"
+            FAVORITE_RESOURCE_ARTIST -> "artist"
+            FAVORITE_RESOURCE_ALBUM -> "album"
+            else -> null
+        }
+        return org.feeluown.mobile.provider.core.splitResourceId(resourceId, expectedPrefix).second
+            .ifBlank { resourceId.substringAfterLast(':') }
+    }
+
 
     suspend fun loadPlaylists(
         feature: ProviderFeature,
@@ -549,6 +770,22 @@ internal class QQMusicUserLibrary(
         return parseCookies(stored.cookieHeader.orEmpty()) + stored.cookies
     }
 
+    private suspend fun qqToken(): Long = qqToken(qqCookies())
+
+    private fun qqToken(values: Map<String, String>): Long {
+        val tokenSource = listOf("qqmusic_key", "p_skey", "skey", "p_lskey", "lskey")
+            .asSequence()
+            .mapNotNull { values[it] }
+            .firstOrNull()
+            .orEmpty()
+        if (tokenSource.isBlank()) return 5_381L
+        var hash = 5_381L
+        tokenSource.forEach { character ->
+            hash = (hash * 33 + character.code) and 0xffff_ffffL
+        }
+        return hash and 0x7fff_ffffL
+    }
+
     private fun normalizeAccountId(raw: String?): String? {
         val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
         val digits = when {
@@ -562,7 +799,10 @@ internal class QQMusicUserLibrary(
     private fun isLikelyQqNumber(value: String): Boolean =
         value.length in MIN_QQ_UIN_LENGTH..MAX_QQ_UIN_LENGTH && value.all(Char::isDigit)
 
-    private suspend fun rpc(payload: String): JsonObject {
+    private suspend fun rpc(
+        payload: String,
+        kind: ProviderRequestKind = ProviderRequestKind.SafeRead,
+    ): JsonObject {
         val request = qqRpcPayload(payload)
         return http.getText(
             providerId = ID,
@@ -575,6 +815,7 @@ internal class QQMusicUserLibrary(
                 ),
             ),
             headers = authenticatedHeaders("https://y.qq.com/"),
+            kind = kind,
             cacheKey = null,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
     }
@@ -587,20 +828,7 @@ internal class QQMusicUserLibrary(
             ?: values["str_musicid"]?.takeIf(String::isNotBlank)
             ?: values["musicid"]?.takeIf(String::isNotBlank)
             ?: "0"
-        val tokenSource = listOf("qqmusic_key", "p_skey", "skey", "p_lskey", "lskey")
-            .asSequence()
-            .mapNotNull { values[it] }
-            .firstOrNull()
-            .orEmpty()
-        val token = if (tokenSource.isBlank()) {
-            5_381L
-        } else {
-            var hash = 5_381L
-            tokenSource.forEach { character ->
-                hash = (hash * 33 + character.code) and 0xffff_ffffL
-            }
-            hash and 0x7fff_ffffL
-        }
+        val token = qqToken(values)
         val common = mapOf(
             "loginUin" to JsonPrimitive(uin),
             "hostUin" to JsonPrimitive(0),
@@ -713,6 +941,11 @@ internal class QQMusicUserLibrary(
         const val WECHAT_LOGIN_TYPE = 2
         const val MIN_QQ_UIN_LENGTH = 5
         const val MAX_QQ_UIN_LENGTH = 12
+        const val FAVORITE_RESOURCE_PLAYLIST = "playlist"
+        const val FAVORITE_RESOURCE_ARTIST = "artist"
+        const val FAVORITE_RESOURCE_ALBUM = "album"
+        const val FAVORITE_STATE_PAGE_SIZE = 100
+        const val FAVORITE_STATE_MAX_PAGES = 20
         const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
         const val CONTENT_SIGN_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
     }
