@@ -7,12 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -34,16 +30,14 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun ProviderCredentialBackupOverlay(
+internal fun ProviderCredentialBackupDialogs(
     backup: AndroidProviderCredentialBackup,
-    onImportFile: () -> Unit,
+    exportTarget: ProviderCredentialBackupTarget?,
+    onDismissExport: () -> Unit,
     onExportFile: (String) -> Unit,
     onRestored: (List<String>) -> Unit,
     onFeedback: (String) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    var showActions by remember { mutableStateOf(false) }
-    var showExport by remember { mutableStateOf(false) }
     val pendingImport by backup.pendingImportContent.collectAsState()
     var importInspection by remember { mutableStateOf<ProviderCredentialBackupInspection?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
@@ -67,48 +61,11 @@ internal fun ProviderCredentialBackupOverlay(
             }
     }
 
-    ExtendedFloatingActionButton(
-        modifier = modifier,
-        onClick = { showActions = true },
-        icon = { androidx.compose.material3.Icon(Icons.Filled.Lock, contentDescription = null) },
-        text = { Text("登录凭证备份") },
-    )
-
-    if (showActions) {
-        AlertDialog(
-            onDismissRequest = { showActions = false },
-            title = { Text("登录凭证备份与恢复") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "备份会包含已登录音源的 Cookie、访问令牌和 OAuth 凭证。默认使用密码加密导出。",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            showActions = false
-                            showExport = true
-                        },
-                    ) { Text("导出登录凭证") }
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            showActions = false
-                            onImportFile()
-                        },
-                    ) { Text("从文件恢复") }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showActions = false }) { Text("取消") } },
-        )
-    }
-
-    if (showExport) {
+    exportTarget?.let { target ->
         ProviderCredentialExportDialog(
             backup = backup,
-            onDismiss = { showExport = false },
+            target = target,
+            onDismiss = onDismissExport,
             onExportFile = onExportFile,
         )
     }
@@ -152,15 +109,16 @@ internal fun ProviderCredentialBackupOverlay(
 @Composable
 private fun ProviderCredentialExportDialog(
     backup: AndroidProviderCredentialBackup,
+    target: ProviderCredentialBackupTarget,
     onDismiss: () -> Unit,
     onExportFile: (String) -> Unit,
 ) {
-    var mode by remember { mutableStateOf(ProviderCredentialExportMode.Encrypted) }
-    var password by remember { mutableStateOf("") }
-    var confirmation by remember { mutableStateOf("") }
-    var plaintextRiskAccepted by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var isBusy by remember { mutableStateOf(false) }
+    var mode by remember(target.providerId) { mutableStateOf(ProviderCredentialExportMode.Encrypted) }
+    var password by remember(target.providerId) { mutableStateOf("") }
+    var confirmation by remember(target.providerId) { mutableStateOf("") }
+    var plaintextRiskAccepted by remember(target.providerId) { mutableStateOf(false) }
+    var error by remember(target.providerId) { mutableStateOf<String?>(null) }
+    var isBusy by remember(target.providerId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val encryptedReady = password.length >= 8 && password == confirmation
@@ -168,13 +126,18 @@ private fun ProviderCredentialExportDialog(
         ProviderCredentialExportMode.Encrypted -> encryptedReady
         ProviderCredentialExportMode.Plaintext -> plaintextRiskAccepted
     }
+    val targetDescription = if (target.providerId == null) {
+        "导出全部已保存的音源登录凭证"
+    } else {
+        "仅导出 ${target.providerName} 的登录凭证"
+    }
 
     AlertDialog(
         onDismissRequest = { if (!isBusy) onDismiss() },
-        title = { Text("导出登录凭证") },
+        title = { Text(if (target.providerId == null) "导出全部登录凭证" else "导出 ${target.providerName}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("默认推荐加密备份；只有第三方应用明确需要读取凭证时才使用明文导出。")
+                Text("$targetDescription。默认推荐加密备份；只有第三方应用明确需要读取凭证时才使用明文导出。")
                 ExportModeRow(
                     selected = mode == ProviderCredentialExportMode.Encrypted,
                     title = "加密备份（推荐）",
@@ -260,6 +223,7 @@ private fun ProviderCredentialExportDialog(
                             backup.export(
                                 mode = mode,
                                 password = if (mode == ProviderCredentialExportMode.Encrypted) password else "",
+                                providerId = target.providerId,
                             )
                         }.onSuccess { file ->
                             backup.stageExport(file)
