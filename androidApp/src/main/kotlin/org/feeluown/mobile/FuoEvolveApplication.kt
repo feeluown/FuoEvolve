@@ -17,6 +17,9 @@ class FuoEvolveApplication : Application() {
     internal val providerRepository: ProviderMusicRepository
         get() = container().providerRepository
 
+    internal val providerCredentialBackup: AndroidProviderCredentialBackup
+        get() = container().providerCredentialBackup
+
     internal val settingsRepository: AppSettingsRepository
         get() = container().settingsRepository
 
