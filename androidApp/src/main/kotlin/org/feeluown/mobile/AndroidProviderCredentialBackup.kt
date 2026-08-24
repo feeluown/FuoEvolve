@@ -1,0 +1,299 @@
+package org.feeluown.mobile
+
+import android.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.feeluown.mobile.provider.core.ProviderCredentialStore
+import org.feeluown.mobile.provider.core.ProviderCredentials
+import java.security.SecureRandom
+import javax.crypto.AEADBadTagException
+import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
+
+internal enum class ProviderCredentialExportMode {
+    Encrypted,
+    Plaintext,
+}
+
+internal data class ProviderCredentialBackupFile(
+    val fileName: String,
+    val content: String,
+)
+
+internal data class ProviderCredentialBackupInspection(
+    val encrypted: Boolean,
+    val providerCount: Int?,
+)
+
+internal data class ProviderCredentialRestoreResult(
+    val restoredProviderIds: List<String>,
+    val ignoredProviderIds: List<String>,
+)
+
+/**
+ * Portable provider credential backup used by the Android settings surface.
+ *
+ * The normal on-device credential store remains protected by Android Keystore. Exported encrypted
+ * backups deliberately use a password-derived key instead so the file can be restored on another
+ * device. Plaintext export exists only for interoperability and is guarded by an explicit UI risk
+ * acknowledgement.
+ */
+internal class AndroidProviderCredentialBackup(
+    private val credentialStore: ProviderCredentialStore,
+    private val providerRepository: ProviderRegistryRepository,
+    private val sessionRepository: ProviderSessionRepository,
+    private val onRestored: () -> Unit = {},
+) {
+    private val json = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
+
+    suspend fun export(
+        mode: ProviderCredentialExportMode,
+        password: String = "",
+    ): ProviderCredentialBackupFile = withContext(Dispatchers.IO) {
+        val providers = providerRepository.availableProviders()
+        val credentials = buildMap {
+            providers.forEach { provider ->
+                credentialStore.read(provider.providerId)?.let { put(provider.providerId, it) }
+            }
+        }
+        require(credentials.isNotEmpty()) { "没有可备份的登录凭证" }
+
+        val plaintext = encodePlaintext(credentials)
+        when (mode) {
+            ProviderCredentialExportMode.Plaintext -> ProviderCredentialBackupFile(
+                fileName = PLAINTEXT_FILE_NAME,
+                content = plaintext,
+            )
+            ProviderCredentialExportMode.Encrypted -> {
+                require(password.length >= MIN_PASSWORD_LENGTH) { "备份密码至少需要 $MIN_PASSWORD_LENGTH 位" }
+                ProviderCredentialBackupFile(
+                    fileName = ENCRYPTED_FILE_NAME,
+                    content = encrypt(plaintext, password),
+                )
+            }
+        }
+    }
+
+    suspend fun inspect(content: String): ProviderCredentialBackupInspection = withContext(Dispatchers.Default) {
+        val root = parseRoot(content)
+        validateHeader(root)
+        val encrypted = root.boolean(ENCRYPTED_FIELD)
+        ProviderCredentialBackupInspection(
+            encrypted = encrypted,
+            providerCount = if (encrypted) null else providersObject(root).size,
+        )
+    }
+
+    suspend fun restore(
+        content: String,
+        password: String = "",
+    ): ProviderCredentialRestoreResult = withContext(Dispatchers.IO) {
+        val outer = parseRoot(content)
+        validateHeader(outer)
+        val plaintextRoot = if (outer.boolean(ENCRYPTED_FIELD)) {
+            require(password.isNotBlank()) { "请输入备份密码" }
+            parseRoot(decrypt(outer, password))
+        } else {
+            outer
+        }
+        validateHeader(plaintextRoot)
+        require(!plaintextRoot.boolean(ENCRYPTED_FIELD)) { "备份文件结构无效" }
+
+        val providers = providersObject(plaintextRoot)
+        require(providers.isNotEmpty()) { "备份中没有登录凭证" }
+        val knownProviderIds = providerRepository.availableProviders().mapTo(linkedSetOf()) { it.providerId }
+        val decoded = providers.mapValues { (providerId, element) ->
+            require(element is JsonObject) { "$providerId 登录凭证格式无效" }
+            json.decodeFromJsonElement(ProviderCredentials.serializer(), element)
+        }
+        val restorable = decoded.filterKeys(knownProviderIds::contains)
+        val ignored = decoded.keys.filterNot(knownProviderIds::contains)
+        require(restorable.isNotEmpty()) { "备份中没有当前版本支持的音源凭证" }
+
+        restorable.forEach { (providerId, credentials) -> credentialStore.write(providerId, credentials) }
+        restorable.keys.forEach { providerId ->
+            runCatching { sessionRepository.refresh(providerId, refreshUserInfo = true) }
+        }
+        onRestored()
+
+        ProviderCredentialRestoreResult(
+            restoredProviderIds = restorable.keys.toList(),
+            ignoredProviderIds = ignored,
+        )
+    }
+
+    private fun encodePlaintext(credentials: Map<String, ProviderCredentials>): String {
+        val root = buildJsonObject {
+            put(FORMAT_FIELD, JsonPrimitive(FORMAT))
+            put(VERSION_FIELD, JsonPrimitive(VERSION))
+            put(ENCRYPTED_FIELD, JsonPrimitive(false))
+            put(
+                PROVIDERS_FIELD,
+                JsonObject(
+                    credentials.mapValues { (_, value) ->
+                        json.encodeToJsonElement(ProviderCredentials.serializer(), value)
+                    },
+                ),
+            )
+        }
+        return json.encodeToString(JsonObject.serializer(), root)
+    }
+
+    private fun encrypt(plaintext: String, password: String): String {
+        val salt = ByteArray(SALT_BYTES).also(SecureRandom()::nextBytes)
+        val iv = ByteArray(GCM_IV_BYTES).also(SecureRandom()::nextBytes)
+        val keyBytes = deriveKey(password, salt, PBKDF2_ITERATIONS)
+        try {
+            val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.updateAAD(AAD)
+            val payload = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+            val root = buildJsonObject {
+                put(FORMAT_FIELD, JsonPrimitive(FORMAT))
+                put(VERSION_FIELD, JsonPrimitive(VERSION))
+                put(ENCRYPTED_FIELD, JsonPrimitive(true))
+                put(KDF_FIELD, buildJsonObject {
+                    put(NAME_FIELD, JsonPrimitive(PBKDF2_NAME))
+                    put(ITERATIONS_FIELD, JsonPrimitive(PBKDF2_ITERATIONS))
+                    put(SALT_FIELD, JsonPrimitive(base64(salt)))
+                })
+                put(CIPHER_FIELD, buildJsonObject {
+                    put(NAME_FIELD, JsonPrimitive(AES_GCM_NAME))
+                    put(IV_FIELD, JsonPrimitive(base64(iv)))
+                    put(TAG_BITS_FIELD, JsonPrimitive(GCM_TAG_BITS))
+                })
+                put(PAYLOAD_FIELD, JsonPrimitive(base64(payload)))
+            }
+            return json.encodeToString(JsonObject.serializer(), root)
+        } finally {
+            keyBytes.fill(0)
+        }
+    }
+
+    private fun decrypt(root: JsonObject, password: String): String {
+        val kdf = root.objectValue(KDF_FIELD)
+        require(kdf.string(NAME_FIELD) == PBKDF2_NAME) { "不支持的备份密钥派生算法" }
+        val iterations = kdf.int(ITERATIONS_FIELD)
+        require(iterations in MIN_ACCEPTED_ITERATIONS..MAX_ACCEPTED_ITERATIONS) { "备份密钥派生参数无效" }
+        val salt = decodeBase64(kdf.string(SALT_FIELD), "备份盐值无效")
+        require(salt.size in 16..64) { "备份盐值无效" }
+
+        val cipherInfo = root.objectValue(CIPHER_FIELD)
+        require(cipherInfo.string(NAME_FIELD) == AES_GCM_NAME) { "不支持的备份加密算法" }
+        require(cipherInfo.int(TAG_BITS_FIELD) == GCM_TAG_BITS) { "备份认证标签参数无效" }
+        val iv = decodeBase64(cipherInfo.string(IV_FIELD), "备份 IV 无效")
+        require(iv.size == GCM_IV_BYTES) { "备份 IV 无效" }
+        val encrypted = decodeBase64(root.string(PAYLOAD_FIELD), "备份内容无效")
+
+        val keyBytes = deriveKey(password, salt, iterations)
+        try {
+            val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.updateAAD(AAD)
+            return try {
+                String(cipher.doFinal(encrypted), Charsets.UTF_8)
+            } catch (_: AEADBadTagException) {
+                throw IllegalArgumentException("密码错误或备份文件已损坏")
+            }
+        } finally {
+            keyBytes.fill(0)
+        }
+    }
+
+    private fun deriveKey(password: String, salt: ByteArray, iterations: Int): ByteArray {
+        val spec = PBEKeySpec(password.toCharArray(), salt, iterations, AES_KEY_BITS)
+        return try {
+            SecretKeyFactory.getInstance(PBKDF2_JCA_NAME).generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
+    }
+
+    private fun parseRoot(content: String): JsonObject = try {
+        json.parseToJsonElement(content).jsonObject
+    } catch (_: Throwable) {
+        throw IllegalArgumentException("无法识别登录凭证备份文件")
+    }
+
+    private fun validateHeader(root: JsonObject) {
+        require(root.string(FORMAT_FIELD) == FORMAT) { "不是 FuoEvolve 登录凭证备份" }
+        require(root.int(VERSION_FIELD) == VERSION) { "暂不支持此版本的登录凭证备份" }
+        require(root[ENCRYPTED_FIELD]?.jsonPrimitive?.booleanOrNull != null) { "备份文件缺少加密标记" }
+    }
+
+    private fun providersObject(root: JsonObject): JsonObject =
+        root[PROVIDERS_FIELD] as? JsonObject ?: throw IllegalArgumentException("备份文件缺少音源登录凭证")
+
+    private fun JsonObject.objectValue(name: String): JsonObject =
+        this[name] as? JsonObject ?: throw IllegalArgumentException("备份文件缺少 $name")
+
+    private fun JsonObject.string(name: String): String =
+        this[name]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("备份文件缺少 $name")
+
+    private fun JsonObject.int(name: String): Int =
+        this[name]?.jsonPrimitive?.intOrNull ?: throw IllegalArgumentException("备份文件缺少 $name")
+
+    private fun JsonObject.boolean(name: String): Boolean =
+        this[name]?.jsonPrimitive?.booleanOrNull ?: throw IllegalArgumentException("备份文件缺少 $name")
+
+    private fun base64(value: ByteArray): String = Base64.encodeToString(value, Base64.NO_WRAP)
+
+    private fun decodeBase64(value: String, error: String): ByteArray = try {
+        Base64.decode(value, Base64.NO_WRAP)
+    } catch (_: IllegalArgumentException) {
+        throw IllegalArgumentException(error)
+    }
+
+    private companion object {
+        const val FORMAT = "fuoevolve-provider-credentials"
+        const val VERSION = 1
+        const val FORMAT_FIELD = "format"
+        const val VERSION_FIELD = "version"
+        const val ENCRYPTED_FIELD = "encrypted"
+        const val PROVIDERS_FIELD = "providers"
+        const val KDF_FIELD = "kdf"
+        const val CIPHER_FIELD = "cipher"
+        const val PAYLOAD_FIELD = "payload"
+        const val NAME_FIELD = "name"
+        const val ITERATIONS_FIELD = "iterations"
+        const val SALT_FIELD = "salt"
+        const val IV_FIELD = "iv"
+        const val TAG_BITS_FIELD = "tagBits"
+        const val PBKDF2_NAME = "PBKDF2-HMAC-SHA256"
+        const val PBKDF2_JCA_NAME = "PBKDF2WithHmacSHA256"
+        const val PBKDF2_ITERATIONS = 210_000
+        const val MIN_ACCEPTED_ITERATIONS = 100_000
+        const val MAX_ACCEPTED_ITERATIONS = 2_000_000
+        const val AES_GCM_NAME = "AES-256-GCM"
+        const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
+        const val AES_KEY_BITS = 256
+        const val GCM_TAG_BITS = 128
+        const val SALT_BYTES = 16
+        const val GCM_IV_BYTES = 12
+        const val MIN_PASSWORD_LENGTH = 8
+        const val ENCRYPTED_FILE_NAME = "fuoevolve-provider-credentials.fuoauth.json"
+        const val PLAINTEXT_FILE_NAME = "fuoevolve-provider-credentials.plain.json"
+        val AAD = "$FORMAT:$VERSION".toByteArray(Charsets.UTF_8)
+    }
+}
