@@ -207,8 +207,8 @@ class ProviderDetailFeatureTest {
             albumsOffset: Int,
         ) = ProviderMediaItemDetailPage(
             item = item,
-            tracks = emptyList(),
-            albums = emptyList(),
+            tracks = emptyList<FakeTrack>(),
+            albums = emptyList<FakeMediaItem>(),
             tracksNextOffset = 0,
             tracksHasMore = false,
             albumsNextOffset = 0,
