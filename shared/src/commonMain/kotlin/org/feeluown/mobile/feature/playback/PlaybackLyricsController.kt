@@ -136,9 +136,6 @@ internal class PlaybackLyricsController(
                     )
                     return@launch
                 }
-                if (associatedTrack == null || associatedLyrics == null) {
-                    rememberAssociation(lyricTrack.id, null)
-                }
             }
 
             val lyrics = runCatching {
