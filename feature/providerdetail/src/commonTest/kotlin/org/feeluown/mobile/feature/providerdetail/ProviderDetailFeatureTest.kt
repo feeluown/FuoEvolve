@@ -1,5 +1,6 @@
 package org.feeluown.mobile.feature.providerdetail
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -68,6 +69,35 @@ class ProviderDetailFeatureTest {
 
         assertTrue(owner.state.value.favoriteState.isFavorite)
         assertEquals(listOf(true), port.favoriteMutations)
+        assertEquals(listOf("qqmusic"), port.mutations)
+    }
+
+    @Test
+    fun playlistRefreshDoesNotCancelFavoriteMutation() = runTest {
+        val port = PlaylistPort()
+        val owner = createProviderPlaylistDetailFeatureOwner(port, backgroundScope)
+        val playlist = FakePlaylist("p1", "收藏歌单", "qqmusic")
+        val gate = CompletableDeferred<Unit>()
+        port.favoriteGate = gate
+
+        owner.activate(playlist, FakeCategory.Other)
+        runCurrent()
+
+        owner.toggleFavorite()
+        runCurrent()
+        assertTrue(owner.state.value.isFavoriteLoading)
+
+        owner.refresh()
+        runCurrent()
+
+        assertTrue(owner.state.value.isFavoriteLoading)
+        assertEquals(listOf(true), port.favoriteMutations)
+
+        gate.complete(Unit)
+        runCurrent()
+
+        assertTrue(owner.state.value.favoriteState.isFavorite)
+        assertFalse(owner.state.value.isFavoriteLoading)
         assertEquals(listOf("qqmusic"), port.mutations)
     }
 
@@ -154,6 +184,7 @@ class ProviderDetailFeatureTest {
     private class PlaylistPort : ProviderPlaylistDetailPort<FakePlaylist, FakeCategory, FakeTrack> {
         val mutations = mutableListOf<String>()
         val favoriteMutations = mutableListOf<Boolean>()
+        var favoriteGate: CompletableDeferred<Unit>? = null
 
         override suspend fun loadPage(
             playlist: FakePlaylist,
@@ -172,6 +203,7 @@ class ProviderDetailFeatureTest {
             ProviderDetailFavoriteState(canFavorite = true)
         override suspend fun setFavorite(playlist: FakePlaylist, favorite: Boolean): ProviderDetailMutationResult {
             favoriteMutations += favorite
+            favoriteGate?.await()
             return ProviderDetailMutationResult(true, if (favorite) "收藏成功" else "已取消收藏")
         }
         override suspend fun recordPlayback(playlist: FakePlaylist) = Unit
