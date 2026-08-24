@@ -20,6 +20,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,18 +36,36 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ProviderCredentialBackupOverlay(
     backup: AndroidProviderCredentialBackup,
-    onImportFile: (((String) -> Unit) -> Unit),
-    onExportFile: (String, String) -> Unit,
+    onImportFile: () -> Unit,
+    onExportFile: (String) -> Unit,
     onRestored: (List<String>) -> Unit,
     onFeedback: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showActions by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
-    var pendingImport by remember { mutableStateOf<String?>(null) }
+    val pendingImport by backup.pendingImportContent.collectAsState()
     var importInspection by remember { mutableStateOf<ProviderCredentialBackupInspection?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(pendingImport) {
+        val content = pendingImport
+        if (content == null) {
+            importInspection = null
+            return@LaunchedEffect
+        }
+        runCatching { backup.inspect(content) }
+            .onSuccess {
+                importInspection = it
+                importError = null
+            }
+            .onFailure {
+                backup.clearPendingImport()
+                importInspection = null
+                importError = it.message ?: "无法读取备份文件"
+            }
+    }
 
     ExtendedFloatingActionButton(
         modifier = modifier,
@@ -75,17 +95,7 @@ internal fun ProviderCredentialBackupOverlay(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             showActions = false
-                            onImportFile { content ->
-                                scope.launch {
-                                    runCatching { backup.inspect(content) }
-                                        .onSuccess {
-                                            pendingImport = content
-                                            importInspection = it
-                                            importError = null
-                                        }
-                                        .onFailure { importError = it.message ?: "无法读取备份文件" }
-                                }
-                            }
+                            onImportFile()
                         },
                     ) { Text("从文件恢复") }
                 }
@@ -108,14 +118,14 @@ internal fun ProviderCredentialBackupOverlay(
             ProviderCredentialImportDialog(
                 inspection = inspection,
                 onDismiss = {
-                    pendingImport = null
+                    backup.clearPendingImport()
                     importInspection = null
                 },
                 onRestore = { password ->
                     scope.launch {
                         runCatching { backup.restore(content, password) }
                             .onSuccess { result ->
-                                pendingImport = null
+                                backup.clearPendingImport()
                                 importInspection = null
                                 onRestored(result.restoredProviderIds)
                                 val ignored = if (result.ignoredProviderIds.isEmpty()) "" else
@@ -143,7 +153,7 @@ internal fun ProviderCredentialBackupOverlay(
 private fun ProviderCredentialExportDialog(
     backup: AndroidProviderCredentialBackup,
     onDismiss: () -> Unit,
-    onExportFile: (String, String) -> Unit,
+    onExportFile: (String) -> Unit,
 ) {
     var mode by remember { mutableStateOf(ProviderCredentialExportMode.Encrypted) }
     var password by remember { mutableStateOf("") }
@@ -252,9 +262,10 @@ private fun ProviderCredentialExportDialog(
                                 password = if (mode == ProviderCredentialExportMode.Encrypted) password else "",
                             )
                         }.onSuccess { file ->
+                            backup.stageExport(file)
                             isBusy = false
                             onDismiss()
-                            onExportFile(file.fileName, file.content)
+                            onExportFile(file.fileName)
                         }.onFailure {
                             isBusy = false
                             error = it.message ?: "导出登录凭证失败"
