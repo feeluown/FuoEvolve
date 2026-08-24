@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.StateFlow
+import org.feeluown.mobile.feature.providerdetail.ProviderDetailFavoriteState
 import org.feeluown.mobile.feature.providerdetail.ProviderDetailMutationResult
 import org.feeluown.mobile.feature.providerdetail.ProviderFeatureDetailFeatureOwner as CoreFeatureOwner
 import org.feeluown.mobile.feature.providerdetail.ProviderFeatureDetailFeatureState as CoreFeatureState
@@ -62,6 +63,8 @@ data class ProviderPlaylistDetailUiState(
     val nextOffset: Int = 0,
     val hasMore: Boolean = false,
     val isLoading: Boolean = false,
+    val favoriteState: ProviderDetailFavoriteState = ProviderDetailFavoriteState(),
+    val isFavoriteLoading: Boolean = false,
     val message: String? = null,
     val errorMessage: String? = null,
 )
@@ -80,6 +83,8 @@ interface ProviderPlaylistDetailController {
     fun remove(track: MusicTrack)
     fun canDelete(): Boolean
     fun delete()
+    fun canToggleFavorite(): Boolean
+    fun toggleFavorite()
 }
 
 data class ProviderTrackDetailUiState(
@@ -113,6 +118,8 @@ data class ProviderMediaItemDetailUiState(
     val albumsNextOffset: Int = 0,
     val albumsHasMore: Boolean = false,
     val isLoading: Boolean = false,
+    val favoriteState: ProviderDetailFavoriteState = ProviderDetailFavoriteState(),
+    val isFavoriteLoading: Boolean = false,
     val message: String? = null,
     val errorMessage: String? = null,
 )
@@ -127,6 +134,8 @@ interface ProviderMediaItemDetailController {
     fun prefetchAlbumsIfNeeded(visibleIndex: Int)
     fun play(index: Int)
     fun playAll()
+    fun canToggleFavorite(): Boolean
+    fun toggleFavorite()
 }
 
 data class ProviderVideoDetailUiState(
@@ -204,7 +213,12 @@ fun createProviderDetailOwners(
         ),
         mediaItem = BoundProviderMediaItemDetailController(
             createProviderMediaItemDetailFeatureOwner(
-                port = BoundProviderMediaItemDetailPort(providerRepository, playbackQueue, navigator),
+                port = BoundProviderMediaItemDetailPort(
+                    providerRepository = providerRepository,
+                    playbackQueue = playbackQueue,
+                    navigator = navigator,
+                    onProviderMutation = onProviderMutation,
+                ),
                 scope = scope,
             ),
         ),
@@ -242,6 +256,8 @@ private class BoundProviderPlaylistDetailController(
     override fun remove(track: MusicTrack) = owner.remove(track)
     override fun canDelete() = owner.canDelete()
     override fun delete() = owner.delete()
+    override fun canToggleFavorite() = owner.canToggleFavorite()
+    override fun toggleFavorite() = owner.toggleFavorite()
 }
 
 private class BoundProviderTrackDetailController(
@@ -269,6 +285,8 @@ private class BoundProviderMediaItemDetailController(
     override fun prefetchAlbumsIfNeeded(visibleIndex: Int) = owner.prefetchAlbumsIfNeeded(visibleIndex)
     override fun play(index: Int) = owner.play(index)
     override fun playAll() = owner.playAll()
+    override fun canToggleFavorite() = owner.canToggleFavorite()
+    override fun toggleFavorite() = owner.toggleFavorite()
 }
 
 private class BoundProviderVideoDetailController(
@@ -335,6 +353,16 @@ private class BoundProviderPlaylistDetailPort(
 
     override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderDetailMutationResult =
         providerRepository.deletePlaylist(playlist).let { ProviderDetailMutationResult(it.success, it.message) }
+
+    override suspend fun loadFavoriteState(playlist: ProviderPlaylist): ProviderDetailFavoriteState =
+        providerRepository.resourceState("playlist", playlist.id).toDetailFavoriteState()
+
+    override suspend fun setFavorite(
+        playlist: ProviderPlaylist,
+        favorite: Boolean,
+    ): ProviderDetailMutationResult = providerRepository
+        .setResourceFavorite("playlist", playlist.id, favorite)
+        .let { ProviderDetailMutationResult(it.success, it.message) }
 
     override suspend fun recordPlayback(playlist: ProviderPlaylist) {
         settingsRepository.update { settings ->
@@ -419,6 +447,7 @@ private class BoundProviderMediaItemDetailPort(
     private val providerRepository: ProviderMusicRepository,
     private val playbackQueue: PlaybackQueueUiPort,
     private val navigator: AppNavigator,
+    private val onProviderMutation: (String) -> Unit,
 ) : CoreMediaItemPort<ProviderMediaItem, MusicTrack> {
     override suspend fun loadPage(
         item: ProviderMediaItem,
@@ -437,6 +466,16 @@ private class BoundProviderMediaItemDetailPort(
         )
     }
 
+    override suspend fun loadFavoriteState(item: ProviderMediaItem): ProviderDetailFavoriteState =
+        providerRepository.resourceState(item.favoriteResourceType(), item.id).toDetailFavoriteState()
+
+    override suspend fun setFavorite(
+        item: ProviderMediaItem,
+        favorite: Boolean,
+    ): ProviderDetailMutationResult = providerRepository
+        .setResourceFavorite(item.favoriteResourceType(), item.id, favorite)
+        .let { ProviderDetailMutationResult(it.success, it.message) }
+
     override fun itemId(item: ProviderMediaItem) = item.id
     override fun itemTitle(item: ProviderMediaItem) = item.title
     override fun itemProviderId(item: ProviderMediaItem) = item.providerId
@@ -448,6 +487,7 @@ private class BoundProviderMediaItemDetailPort(
         navigator.pop(AppRoute.MediaItem)
     }
     override fun playTracks(tracks: List<MusicTrack>, index: Int) = playbackQueue.playTracks(tracks, index)
+    override fun onProviderMutation(providerId: String) = onProviderMutation.invoke(providerId)
 }
 
 private class BoundProviderVideoDetailPort(
@@ -487,6 +527,8 @@ private fun CorePlaylistState<ProviderPlaylist, ProviderFeatureCategory, MusicTr
     nextOffset = nextOffset,
     hasMore = hasMore,
     isLoading = isLoading,
+    favoriteState = favoriteState,
+    isFavoriteLoading = isFavoriteLoading,
     message = message,
     errorMessage = errorMessage,
 )
@@ -511,6 +553,8 @@ private fun CoreMediaItemState<ProviderMediaItem, MusicTrack>.toUiState() = Prov
     albumsNextOffset = albumsNextOffset,
     albumsHasMore = albumsHasMore,
     isLoading = isLoading,
+    favoriteState = favoriteState,
+    isFavoriteLoading = isFavoriteLoading,
     message = message,
     errorMessage = errorMessage,
 )
@@ -582,3 +626,15 @@ private fun providerDetailError(throwable: Throwable, fallback: String, provider
     throwable.providerFailureOrNull(providerId)?.userMessage
         ?: throwable.message
         ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
+
+
+private fun ProviderResourceState.toDetailFavoriteState() = ProviderDetailFavoriteState(
+    isFavorite = isFavorite,
+    canFavorite = canFavorite,
+    canUnfavorite = canUnfavorite,
+)
+
+private fun ProviderMediaItem.favoriteResourceType(): String = when (type) {
+    ProviderMediaItemType.Artist -> "artist"
+    ProviderMediaItemType.Album -> "album"
+}
