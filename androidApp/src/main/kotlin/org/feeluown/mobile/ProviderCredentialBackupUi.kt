@@ -36,6 +36,7 @@ internal fun ProviderCredentialBackupOverlay(
     backup: AndroidProviderCredentialBackup,
     onImportFile: (((String) -> Unit) -> Unit),
     onExportFile: (String, String) -> Unit,
+    onRestored: (List<String>) -> Unit,
     onFeedback: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -116,6 +117,7 @@ internal fun ProviderCredentialBackupOverlay(
                             .onSuccess { result ->
                                 pendingImport = null
                                 importInspection = null
+                                onRestored(result.restoredProviderIds)
                                 val ignored = if (result.ignoredProviderIds.isEmpty()) "" else
                                     "，另有 ${result.ignoredProviderIds.size} 个当前版本不支持的音源已跳过"
                                 onFeedback("已恢复 ${result.restoredProviderIds.size} 个音源登录凭证$ignored")
