@@ -178,6 +178,50 @@ class KotlinProviderRepositoryReplacementTest {
     }
 
     @Test
+    fun smartReplacementTreatsMultipartCandidateAsSingleQueueTrack() {
+        val original = track(
+            source = "netease",
+            title = "Night Song",
+            artists = "Alice",
+            id = "netease:night-song",
+        )
+        val candidate = track(
+            source = "bilibili",
+            title = "Night Song",
+            artists = "Alice",
+            id = "bilibili:BV1multi",
+        )
+        val multipartPayload = PlaybackPayload(
+            url = "https://example.test/p1.m4a",
+            title = candidate.title,
+            artists = candidate.artists,
+            album = candidate.album,
+            source = candidate.source,
+            parts = listOf(
+                PlaybackPart("bilibili:paged_BV1multi__1", "P1", 200_000),
+                PlaybackPart("bilibili:paged_BV1multi__2", "P2", 180_000),
+            ),
+            currentPartIndex = 0,
+        )
+
+        val annotated = KotlinProviderRepository().annotateSmartReplacement(
+            payload = multipartPayload,
+            original = original,
+            candidate = candidate,
+            score = 0.9,
+            useOriginalMetadata = true,
+            useOriginalLyrics = true,
+        )
+
+        assertEquals("https://example.test/p1.m4a", annotated.url)
+        assertTrue(annotated.parts.isEmpty())
+        assertEquals(-1, annotated.currentPartIndex)
+        assertTrue(annotated.isSmartReplacement)
+        assertEquals(original.id, annotated.originalId)
+        assertEquals(candidate.id, annotated.replacementId)
+    }
+
+    @Test
     fun replacementSelectionResolvesInScoreOrderAndStopsAtFirstPlayableCandidate() = runTest {
         val low = track("bilibili", "Low", "Uploader", id = "low")
         val medium = track("ytmusic", "Medium", "Artist", id = "medium")
