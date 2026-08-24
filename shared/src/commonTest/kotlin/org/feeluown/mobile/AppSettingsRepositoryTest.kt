@@ -180,6 +180,28 @@ class AppSettingsRepositoryTest {
     }
 
     @Test
+    fun lyricsAssociationsRoundTrip() = runTest {
+        val store = FakeSettingsSnapshotStore()
+        val first = PersistentAppSettingsRepository(
+            store = store,
+            legacyLoader = null,
+            scope = backgroundScope,
+        )
+        first.awaitSettings()
+        first.update {
+            it.copy(lyricsAssociations = mapOf("bilibili:BVdemo" to "netease:123"))
+        }
+
+        val restored = PersistentAppSettingsRepository(
+            store = store,
+            legacyLoader = null,
+            scope = backgroundScope,
+        ).awaitSettings()
+
+        assertEquals("netease:123", restored.lyricsAssociations["bilibili:BVdemo"])
+    }
+
+    @Test
     fun incompatibleOrInvalidPlaylistPlaybackStatsAreDiscarded() {
         val legacy = AppSettings(
             playlistPlaybackStats = mapOf(
