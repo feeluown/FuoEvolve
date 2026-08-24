@@ -376,6 +376,7 @@ private class IosAppContainer(
         playlistActionPort = playlistActionPort,
         providerTrackActionPort = providerTrackActionPort,
         localMusicActionPort = localMusicFeatureController,
+        playbackLyricsPort = playbackFeatureOwner.lyrics,
         replacementActionPort = playbackFeatureOwner.replacement,
         debugLogFeatureController = debugLogFeatureController,
         providerCatalogFeatureController = providerCatalogFeatureController,
