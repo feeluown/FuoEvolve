@@ -271,6 +271,15 @@ class KotlinProviderRepository : ProviderMusicRepository {
         return providerMap[providerId]?.lyrics(lyricTrack)?.takeIf { it.isNotBlank() }
     }
 
+    override suspend fun lyricsSearchKeyword(track: MusicTrack): String? {
+        initialize()
+        val lyricTrack = track.asOriginalMediaTrack()
+        val providerId = lyricTrack.source.ifBlank {
+            splitResourceId(lyricTrack.providerId ?: lyricTrack.id).first
+        }
+        return providerMap[providerId]?.lyricsSearchKeyword(lyricTrack)?.takeIf { it.isNotBlank() }
+    }
+
     override suspend fun authState(providerId: String): ProviderAuthState = requireProvider(providerId).authState()
 
     override suspend fun refreshAuthState(providerId: String): ProviderAuthState = requireProvider(providerId).authState()
