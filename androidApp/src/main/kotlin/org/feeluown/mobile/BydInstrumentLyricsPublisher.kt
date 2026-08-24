@@ -276,7 +276,6 @@ private class BydInstrumentLyricsBridge(
 
     private var useMusicNameTransport = threeLineLyricsMethod == null
     private var lastMusicStateValue: Int? = null
-    private var musicSourceInitialized = false
 
     fun publish(window: InstrumentLyricsWindow, status: PlaybackSessionStatus): Boolean {
         if (!useMusicNameTransport) {
@@ -290,8 +289,7 @@ private class BydInstrumentLyricsBridge(
         }
 
         val nameMethod = musicNameMethod ?: return false
-        initializeMusicSourceIfAvailable()
-        publishMusicStateIfAvailable(status)
+        refreshMusicSession(status)
         return invokeRequired(nameMethod, window.current)
     }
 
@@ -301,18 +299,26 @@ private class BydInstrumentLyricsBridge(
             if (method != null && invokeOptional(method, "", "", "")) return
         }
         musicNameMethod?.let { invokeOptional(it, "") }
-        publishMusicStateValueIfAvailable(musicStopValue)
+        publishMusicStateValueIfAvailable(musicStopValue, force = true)
+        lastMusicStateValue = null
     }
 
-    private fun initializeMusicSourceIfAvailable() {
-        if (musicSourceInitialized) return
-        musicSourceInitialized = true
+    private fun refreshMusicSession(status: PlaybackSessionStatus) {
+        // The publisher suppresses identical track/window/status snapshots, so this runs only
+        // for a lyric transition or playback lifecycle change. Reasserting source/state here
+        // lets DiLink reclaim third-party music display after firmware/media interruptions
+        // without introducing a high-frequency heartbeat.
+        publishMusicSourceIfAvailable()
+        publishMusicStateIfAvailable(status, force = true)
+    }
+
+    private fun publishMusicSourceIfAvailable() {
         val method = musicSourceMethod ?: return
         val value = musicSourceOthersValue ?: return
         invokeOptional(method, value)
     }
 
-    private fun publishMusicStateIfAvailable(status: PlaybackSessionStatus) {
+    private fun publishMusicStateIfAvailable(status: PlaybackSessionStatus, force: Boolean = false) {
         val value = when (status) {
             PlaybackSessionStatus.Playing -> musicPlayValue
             PlaybackSessionStatus.Paused -> musicPauseValue
@@ -322,13 +328,13 @@ private class BydInstrumentLyricsBridge(
             -> musicStopValue
             PlaybackSessionStatus.Loading -> null
         }
-        publishMusicStateValueIfAvailable(value)
+        publishMusicStateValueIfAvailable(value, force)
     }
 
-    private fun publishMusicStateValueIfAvailable(value: Int?) {
+    private fun publishMusicStateValueIfAvailable(value: Int?, force: Boolean = false) {
         val method = musicStateMethod ?: return
         val stateValue = value ?: return
-        if (lastMusicStateValue == stateValue) return
+        if (!force && lastMusicStateValue == stateValue) return
         if (invokeOptional(method, stateValue)) lastMusicStateValue = stateValue
     }
 
