@@ -19,9 +19,8 @@ import org.feeluown.mobile.provider.core.ProviderCredentials
 import java.security.SecureRandom
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
+import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 internal enum class ProviderCredentialExportMode {
@@ -169,6 +168,8 @@ internal class AndroidProviderCredentialBackup(
                     put(NAME_FIELD, JsonPrimitive(PBKDF2_NAME))
                     put(ITERATIONS_FIELD, JsonPrimitive(PBKDF2_ITERATIONS))
                     put(SALT_FIELD, JsonPrimitive(base64(salt)))
+                    put(PASSWORD_ENCODING_FIELD, JsonPrimitive(PASSWORD_ENCODING))
+                    put(KEY_BITS_FIELD, JsonPrimitive(AES_KEY_BITS))
                 })
                 put(CIPHER_FIELD, buildJsonObject {
                     put(NAME_FIELD, JsonPrimitive(AES_GCM_NAME))
@@ -186,6 +187,8 @@ internal class AndroidProviderCredentialBackup(
     private fun decrypt(root: JsonObject, password: String): String {
         val kdf = root.objectValue(KDF_FIELD)
         require(kdf.string(NAME_FIELD) == PBKDF2_NAME) { "不支持的备份密钥派生算法" }
+        require(kdf.string(PASSWORD_ENCODING_FIELD) == PASSWORD_ENCODING) { "不支持的备份密码编码" }
+        require(kdf.int(KEY_BITS_FIELD) == AES_KEY_BITS) { "备份密钥长度无效" }
         val iterations = kdf.int(ITERATIONS_FIELD)
         require(iterations in MIN_ACCEPTED_ITERATIONS..MAX_ACCEPTED_ITERATIONS) { "备份密钥派生参数无效" }
         val salt = decodeBase64(kdf.string(SALT_FIELD), "备份盐值无效")
@@ -213,12 +216,31 @@ internal class AndroidProviderCredentialBackup(
         }
     }
 
+    /** PBKDF2-HMAC-SHA256 implemented with HmacSHA256 so it also works on API 24-25. */
     private fun deriveKey(password: String, salt: ByteArray, iterations: Int): ByteArray {
-        val spec = PBEKeySpec(password.toCharArray(), salt, iterations, AES_KEY_BITS)
-        return try {
-            SecretKeyFactory.getInstance(PBKDF2_JCA_NAME).generateSecret(spec).encoded
+        require(iterations > 0) { "PBKDF2 iterations must be positive" }
+        val passwordBytes = password.toByteArray(Charsets.UTF_8)
+        val blockInput = ByteArray(salt.size + PBKDF2_BLOCK_INDEX_BYTES)
+        salt.copyInto(blockInput)
+        blockInput[blockInput.lastIndex] = 1
+        val mac = Mac.getInstance(HMAC_SHA256)
+        try {
+            mac.init(SecretKeySpec(passwordBytes, HMAC_SHA256))
+            var u = mac.doFinal(blockInput)
+            val derived = u.copyOf()
+            repeat(iterations - 1) {
+                val next = mac.doFinal(u)
+                u.fill(0)
+                u = next
+                for (index in derived.indices) {
+                    derived[index] = (derived[index].toInt() xor u[index].toInt()).toByte()
+                }
+            }
+            u.fill(0)
+            return derived
         } finally {
-            spec.clearPassword()
+            passwordBytes.fill(0)
+            blockInput.fill(0)
         }
     }
 
@@ -271,13 +293,17 @@ internal class AndroidProviderCredentialBackup(
         const val NAME_FIELD = "name"
         const val ITERATIONS_FIELD = "iterations"
         const val SALT_FIELD = "salt"
+        const val PASSWORD_ENCODING_FIELD = "passwordEncoding"
+        const val KEY_BITS_FIELD = "keyBits"
         const val IV_FIELD = "iv"
         const val TAG_BITS_FIELD = "tagBits"
         const val PBKDF2_NAME = "PBKDF2-HMAC-SHA256"
-        const val PBKDF2_JCA_NAME = "PBKDF2WithHmacSHA256"
+        const val PASSWORD_ENCODING = "UTF-8"
         const val PBKDF2_ITERATIONS = 210_000
         const val MIN_ACCEPTED_ITERATIONS = 100_000
         const val MAX_ACCEPTED_ITERATIONS = 2_000_000
+        const val PBKDF2_BLOCK_INDEX_BYTES = 4
+        const val HMAC_SHA256 = "HmacSHA256"
         const val AES_GCM_NAME = "AES-256-GCM"
         const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
         const val AES_KEY_BITS = 256
