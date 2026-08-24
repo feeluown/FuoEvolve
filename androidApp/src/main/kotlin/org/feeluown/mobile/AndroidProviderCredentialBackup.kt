@@ -191,29 +191,32 @@ internal class AndroidProviderCredentialBackup(
      * fails while the device is offline.
      */
     private suspend fun refreshProviderCredentialState(providerId: String, credentials: ProviderCredentials) {
+        val headerFileJson = credentials.headerFileJson
+        val oauthClientId = credentials.oauthClientId
+        val oauthClientSecret = credentials.oauthClientSecret
+        val authorization = credentials.authorization
+        val cookieHeader = credentials.cookieHeader
         runCatching {
             when {
-                !credentials.headerFileJson.isNullOrBlank() -> providerRepository.loginWithHeaderFile(
+                !headerFileJson.isNullOrBlank() -> providerRepository.loginWithHeaderFile(
                     providerId = providerId,
-                    headerFileJson = credentials.headerFileJson,
+                    headerFileJson = headerFileJson,
                 )
-                credentials.hasOAuthAccess() &&
-                    !credentials.oauthClientId.isNullOrBlank() &&
-                    !credentials.oauthClientSecret.isNullOrBlank() -> providerRepository.loginWithOAuth(
-                    providerId = providerId,
-                    accessToken = credentials.oauthAccessToken.orEmpty(),
-                    refreshToken = credentials.oauthRefreshToken.orEmpty(),
-                    expiresAtMillis = credentials.oauthExpiresAtMillis,
-                    scope = credentials.oauthScope,
-                    clientId = credentials.oauthClientId,
-                    clientSecret = credentials.oauthClientSecret,
-                )
-                !credentials.authorization.isNullOrBlank() && !credentials.cookieHeader.isNullOrBlank() ->
-                    providerRepository.loginWithHeaders(
+                credentials.hasOAuthAccess() && !oauthClientId.isNullOrBlank() && !oauthClientSecret.isNullOrBlank() ->
+                    providerRepository.loginWithOAuth(
                         providerId = providerId,
-                        authorization = credentials.authorization,
-                        cookie = credentials.cookieHeader,
+                        accessToken = credentials.oauthAccessToken.orEmpty(),
+                        refreshToken = credentials.oauthRefreshToken.orEmpty(),
+                        expiresAtMillis = credentials.oauthExpiresAtMillis,
+                        scope = credentials.oauthScope,
+                        clientId = oauthClientId,
+                        clientSecret = oauthClientSecret,
                     )
+                !authorization.isNullOrBlank() && !cookieHeader.isNullOrBlank() -> providerRepository.loginWithHeaders(
+                    providerId = providerId,
+                    authorization = authorization,
+                    cookie = cookieHeader,
+                )
                 credentials.cookies.isNotEmpty() -> providerRepository.loginWithCookies(
                     providerId = providerId,
                     cookiesJson = JsonObject(credentials.cookies.mapValues { JsonPrimitive(it.value) }).toString(),
