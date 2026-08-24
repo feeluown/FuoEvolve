@@ -67,6 +67,7 @@ internal class PlaybackLyricsController(
     private var selectionJob: Job? = null
     private var loadedForTrackId: String? = null
     private var associationSearchTrack: MusicTrack? = null
+    private var associationQueryEdited = false
 
     fun resetForPlaybackRequest() {
         loadJob?.cancel()
@@ -77,6 +78,7 @@ internal class PlaybackLyricsController(
         selectionJob = null
         loadedForTrackId = null
         associationSearchTrack = null
+        associationQueryEdited = false
         mutableAssociationState.value = LyricsAssociationUiState()
     }
 
@@ -156,6 +158,7 @@ internal class PlaybackLyricsController(
 
     override fun openAssociationSearch(track: MusicTrack) {
         associationSearchTrack = track
+        associationQueryEdited = false
         val previous = mutableAssociationState.value.takeIf { it.trackId == track.id }
         mutableAssociationState.value = LyricsAssociationUiState(
             trackId = track.id,
@@ -175,12 +178,17 @@ internal class PlaybackLyricsController(
                 ?.takeIf { it.isNotBlank() }
                 ?: sourceTrack.title.trim()
             if (associationSearchTrack?.id != track.id || currentTrackId() != track.id) return@launch
+            if (associationQueryEdited) {
+                mutableAssociationState.value = mutableAssociationState.value.copy(isSearching = false)
+                return@launch
+            }
             mutableAssociationState.value = mutableAssociationState.value.copy(query = keyword)
             performSearch(track, keyword)
         }
     }
 
     override fun updateAssociationQuery(query: String) {
+        associationQueryEdited = true
         mutableAssociationState.value = mutableAssociationState.value.copy(
             query = query,
             message = null,
@@ -246,6 +254,7 @@ internal class PlaybackLyricsController(
         searchJob = null
         selectionJob = null
         associationSearchTrack = null
+        associationQueryEdited = false
         mutableAssociationState.value = mutableAssociationState.value.copy(
             isSearchOpen = false,
             isSearching = false,
