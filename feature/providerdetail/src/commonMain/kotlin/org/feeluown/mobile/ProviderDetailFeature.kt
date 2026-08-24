@@ -56,8 +56,6 @@ interface ProviderFeatureDetailFeatureOwner<Feature, Content, Track> {
     fun prefetchIfNeeded(visibleIndex: Int)
     fun play(index: Int)
     fun playAll()
-    fun canToggleFavorite(): Boolean
-    fun toggleFavorite()
 }
 
 fun <Feature, Content, Track> createProviderFeatureDetailFeatureOwner(
@@ -740,6 +738,8 @@ interface ProviderMediaItemDetailFeatureOwner<Item, Track> {
     fun prefetchAlbumsIfNeeded(visibleIndex: Int)
     fun play(index: Int)
     fun playAll()
+    fun canToggleFavorite(): Boolean
+    fun toggleFavorite()
 }
 
 fun <Item, Track> createProviderMediaItemDetailFeatureOwner(
@@ -755,6 +755,7 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
     override val state: StateFlow<ProviderMediaItemDetailFeatureState<Item, Track>> = mutableState.asStateFlow()
     private var tracksJob: Job? = null
     private var albumsJob: Job? = null
+    private var favoriteJob: Job? = null
 
     override fun open(item: Item) {
         port.open(item)
@@ -772,6 +773,7 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
     override fun close() {
         tracksJob?.cancel()
         albumsJob?.cancel()
+        favoriteJob?.cancel()
         mutableState.value = ProviderMediaItemDetailFeatureState()
         port.close()
     }
@@ -806,6 +808,61 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
         }
     }
 
+    override fun canToggleFavorite(): Boolean {
+        val current = state.value
+        return !current.isFavoriteLoading && when {
+            current.favoriteState.isFavorite -> current.favoriteState.canUnfavorite
+            else -> current.favoriteState.canFavorite
+        }
+    }
+
+    override fun toggleFavorite() {
+        val item = state.value.item ?: return
+        if (!canToggleFavorite()) return
+        val favorite = !state.value.favoriteState.isFavorite
+        favoriteJob?.cancel()
+        favoriteJob = scope.launch {
+            mutableState.value = state.value.copy(isFavoriteLoading = true, errorMessage = null)
+            runCatching { port.setFavorite(item, favorite) }
+                .onSuccess { result ->
+                    if (state.value.item?.let(port::itemId) != port.itemId(item)) return@onSuccess
+                    if (result.success) {
+                        mutableState.value = state.value.copy(
+                            favoriteState = ProviderDetailFavoriteState(
+                                isFavorite = favorite,
+                                canFavorite = !favorite,
+                                canUnfavorite = favorite,
+                            ),
+                            isFavoriteLoading = false,
+                            message = result.message.ifBlank { if (favorite) "收藏成功" else "已取消收藏" },
+                            errorMessage = null,
+                        )
+                        port.itemProviderId(item)?.let(port::onProviderMutation)
+                    } else {
+                        val error = result.message.ifBlank { if (favorite) "收藏失败" else "取消收藏失败" }
+                        mutableState.value = state.value.copy(
+                            isFavoriteLoading = false,
+                            message = error,
+                            errorMessage = error,
+                        )
+                    }
+                }
+                .onFailure {
+                    if (state.value.item?.let(port::itemId) == port.itemId(item)) {
+                        mutableState.value = state.value.copy(
+                            isFavoriteLoading = false,
+                            errorMessage = port.errorMessage(
+                                it,
+                                if (favorite) "收藏失败" else "取消收藏失败",
+                                port.itemProviderId(item),
+                            ),
+                        )
+                    }
+                }
+        }
+    }
+
+
     private fun loadInitial(item: Item) {
         tracksJob?.cancel()
         albumsJob?.cancel()
@@ -833,6 +890,7 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
                         if (page.albums.isNotEmpty()) add("${page.albums.size} 张专辑")
                     }.joinToString(" · ").ifBlank { "${port.itemTitle(page.item)} 暂无内容" },
                 )
+                refreshFavoriteState(page.item)
             }.onFailure {
                 if (state.value.item?.let(port::itemId) == port.itemId(item)) {
                     mutableState.value = state.value.copy(
@@ -840,6 +898,19 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
                         errorMessage = port.errorMessage(it, "加载失败", port.itemProviderId(item)),
                     )
                 }
+            }
+        }
+    }
+
+    private fun refreshFavoriteState(item: Item) {
+        favoriteJob?.cancel()
+        favoriteJob = scope.launch {
+            val favoriteState = runCatching { port.loadFavoriteState(item) }.getOrNull() ?: return@launch
+            if (state.value.item?.let(port::itemId) == port.itemId(item)) {
+                mutableState.value = state.value.copy(
+                    favoriteState = favoriteState,
+                    isFavoriteLoading = false,
+                )
             }
         }
     }
