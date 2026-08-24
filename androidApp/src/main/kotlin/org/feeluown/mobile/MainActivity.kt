@@ -62,12 +62,7 @@ class MainActivity : ComponentActivity() {
             var hasImagePermission by remember { mutableStateOf(hasImagePermission()) }
             var hasMicrophonePermission by remember { mutableStateOf(hasMicrophonePermission()) }
             val appViewModel = fuoApplication.appViewModel
-            val providerCredentialBackup = remember(fuoApplication) {
-                AndroidProviderCredentialBackup(
-                    credentialStore = AndroidProviderCredentialStore(this@MainActivity),
-                    providerRepository = fuoApplication.providerRepository,
-                )
-            }
+            val providerCredentialBackup = fuoApplication.providerCredentialBackup
             remember { AndroidPredictiveBackPreference.initialize(this@MainActivity); Unit }
             val predictiveBackEnabled by AndroidPredictiveBackPreference.enabled
 
@@ -131,21 +126,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            var providerCredentialImportHandler by remember { mutableStateOf<((String) -> Unit)?>(null) }
-            var pendingProviderCredentialExport by remember { mutableStateOf<ProviderCredentialBackupFile?>(null) }
             val providerCredentialImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                val handler = providerCredentialImportHandler
-                providerCredentialImportHandler = null
-                if (uri != null && handler != null) {
+                if (uri != null) {
                     val content = readText(uri)
                     if (content.isBlank()) appViewModel.showFeedback("无法读取登录凭证备份文件")
-                    else handler(content)
+                    else providerCredentialBackup.stageImport(content)
                 }
             }
             val providerCredentialExportLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.CreateDocument(PROVIDER_CREDENTIAL_BACKUP_MIME_TYPE),
             ) { uri ->
-                val pending = pendingProviderCredentialExport
+                val pending = providerCredentialBackup.consumePendingExport()
                 if (uri != null && pending != null) {
                     runCatching {
                         contentResolver.openOutputStream(uri)?.use { output ->
@@ -157,7 +148,6 @@ class MainActivity : ComponentActivity() {
                         appViewModel.showFeedback(it.message ?: "导出登录凭证失败")
                     }
                 }
-                pendingProviderCredentialExport = null
             }
 
             var pendingLocalPlaylistExport by remember { mutableStateOf<PendingLocalPlaylistExport?>(null) }
@@ -244,14 +234,12 @@ class MainActivity : ComponentActivity() {
                 if (appUiState.backStack.lastOrNull() == AppRoute.Settings) {
                     ProviderCredentialBackupOverlay(
                         backup = providerCredentialBackup,
-                        onImportFile = { handler ->
-                            providerCredentialImportHandler = handler
+                        onImportFile = {
                             providerCredentialImportLauncher.launch(
                                 arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
                             )
                         },
-                        onExportFile = { fileName, content ->
-                            pendingProviderCredentialExport = ProviderCredentialBackupFile(fileName, content)
+                        onExportFile = { fileName ->
                             providerCredentialExportLauncher.launch(fileName)
                         },
                         onRestored = { restoredProviderIds ->
