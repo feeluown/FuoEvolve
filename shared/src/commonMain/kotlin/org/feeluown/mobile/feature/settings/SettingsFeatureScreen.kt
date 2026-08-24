@@ -110,6 +110,7 @@ private sealed interface FeatureSettingsRoute : NavKey {
     @Serializable data object Main : FeatureSettingsRoute
     @Serializable data class Category(val category: FeatureSettingsCategory) : FeatureSettingsRoute
     @Serializable data object Theme : FeatureSettingsRoute
+    @Serializable data object CredentialBackup : FeatureSettingsRoute
     @Serializable data class Provider(val providerId: String) : FeatureSettingsRoute
 }
 
@@ -150,6 +151,7 @@ fun SettingsFeatureScreen(
     val settingsState by settingsController.uiState.collectAsStateWithLifecycle()
     val catalogState by providerCatalog.uiState.collectAsStateWithLifecycle()
     val authState by providerAuth.uiState.collectAsStateWithLifecycle()
+    val credentialBackupActions = LocalProviderCredentialBackupActions.current
     val layoutInfo = LocalAppLayoutInfo.current
     val predictiveBackPreference = rememberPredictiveBackPreference()
     var backStack by remember { mutableStateOf<List<FeatureSettingsRoute>>(listOf(FeatureSettingsRoute.Main)) }
@@ -193,6 +195,7 @@ fun SettingsFeatureScreen(
                         },
                         onOpenTheme = { push(FeatureSettingsRoute.Theme) },
                         onOpenProvider = { push(FeatureSettingsRoute.Provider(it.providerId)) },
+                        onOpenCredentialBackup = { push(FeatureSettingsRoute.CredentialBackup) },
                         onBack = settingsController::close,
                         settingsController = settingsController,
                         providerCatalog = providerCatalog,
@@ -206,6 +209,7 @@ fun SettingsFeatureScreen(
                         providerCatalog = providerCatalog,
                         onOpenTheme = { push(FeatureSettingsRoute.Theme) },
                         onOpenProvider = { push(FeatureSettingsRoute.Provider(it.providerId)) },
+                        onOpenCredentialBackup = { push(FeatureSettingsRoute.CredentialBackup) },
                         onBack = ::pop,
                     )
                     FeatureSettingsRoute.Theme -> SettingsScaffold(
@@ -218,6 +222,18 @@ fun SettingsFeatureScreen(
                                 state = settingsState,
                                 controller = settingsController,
                                 predictiveBackPreference = predictiveBackPreference,
+                            )
+                        }
+                    }
+                    FeatureSettingsRoute.CredentialBackup -> SettingsScaffold(
+                        title = "登录凭证备份与恢复",
+                        onBack = ::pop,
+                        isLoading = catalogState.isLoading,
+                    ) { bodyModifier ->
+                        SettingsDetailColumn(modifier = bodyModifier) {
+                            ProviderCredentialBackupSettings(
+                                state = catalogState,
+                                actions = credentialBackupActions,
                             )
                         }
                     }
@@ -270,6 +286,7 @@ private fun SettingsMainPage(
     onSelectCategory: (FeatureSettingsCategory) -> Unit,
     onOpenTheme: () -> Unit,
     onOpenProvider: (ProviderInfo) -> Unit,
+    onOpenCredentialBackup: () -> Unit,
     onBack: () -> Unit,
     settingsController: SettingsFeatureController,
     providerCatalog: ProviderCatalogFeatureController,
@@ -322,6 +339,7 @@ private fun SettingsMainPage(
                             providerCatalog = providerCatalog,
                             onOpenTheme = onOpenTheme,
                             onOpenProvider = onOpenProvider,
+                            onOpenCredentialBackup = onOpenCredentialBackup,
                         )
                     }
                 }
@@ -349,6 +367,7 @@ private fun SettingsCategoryPage(
     providerCatalog: ProviderCatalogFeatureController,
     onOpenTheme: () -> Unit,
     onOpenProvider: (ProviderInfo) -> Unit,
+    onOpenCredentialBackup: () -> Unit,
     onBack: () -> Unit,
 ) {
     SettingsScaffold(
@@ -366,6 +385,7 @@ private fun SettingsCategoryPage(
             providerCatalog = providerCatalog,
             onOpenTheme = onOpenTheme,
             onOpenProvider = onOpenProvider,
+            onOpenCredentialBackup = onOpenCredentialBackup,
             modifier = bodyModifier,
         )
     }
@@ -486,6 +506,7 @@ private fun SettingsCategoryDetail(
     providerCatalog: ProviderCatalogFeatureController,
     onOpenTheme: () -> Unit,
     onOpenProvider: (ProviderInfo) -> Unit,
+    onOpenCredentialBackup: () -> Unit,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     SettingsDetailColumn(modifier = modifier) {
@@ -504,6 +525,7 @@ private fun SettingsCategoryDetail(
                 state = catalog,
                 controller = providerCatalog,
                 onOpenProvider = onOpenProvider,
+                onOpenCredentialBackup = onOpenCredentialBackup,
             )
             FeatureSettingsCategory.Playback -> PlaybackFeatureSettings(
                 state = settings,
@@ -542,7 +564,9 @@ private fun ProviderCatalogSettings(
     state: ProviderCatalogUiState,
     controller: ProviderCatalogFeatureController,
     onOpenProvider: (ProviderInfo) -> Unit,
+    onOpenCredentialBackup: () -> Unit,
 ) {
+    val credentialBackupActions = LocalProviderCredentialBackupActions.current
     val ordered = remember(state.availableProviders, state.providerOrderIds) {
         val order = state.providerOrderIds.withIndex().associate { it.value to it.index }
         state.availableProviders.sortedBy { order[it.providerId] ?: Int.MAX_VALUE }
@@ -626,6 +650,23 @@ private fun ProviderCatalogSettings(
             if (index < ordered.lastIndex) SettingsDivider()
         }
     }
+    if (credentialBackupActions.isAvailable) {
+        SettingsGroup(title = "登录凭证") {
+            SettingsRow(
+                title = "登录凭证备份与恢复",
+                supportingText = "加密备份全部或单个音源，也可从备份文件恢复",
+                leadingContent = { Icon(Icons.Filled.ManageAccounts, contentDescription = null) },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = onOpenCredentialBackup,
+            )
+        }
+    }
     SettingsGroup(title = "说明") {
         SettingsRow(
             title = "长按拖动调整音源优先级",
@@ -638,6 +679,96 @@ private fun ProviderCatalogSettings(
             controller = controller,
             provider = provider,
             onDismissRequest = { configuringProvider = null },
+        )
+    }
+}
+
+@Composable
+private fun ProviderCredentialBackupSettings(
+    state: ProviderCatalogUiState,
+    actions: ProviderCredentialBackupActions,
+) {
+    val orderedLoggedInProviders = remember(state.availableProviders, state.providerOrderIds, state.sessions.authStates) {
+        val order = state.providerOrderIds.withIndex().associate { it.value to it.index }
+        state.availableProviders
+            .filter { provider -> state.sessions.authStates[provider.providerId]?.isLoggedIn == true }
+            .sortedBy { provider -> order[provider.providerId] ?: Int.MAX_VALUE }
+    }
+    val exportAll = actions.exportAll
+    val exportProvider = actions.exportProvider
+    val importBackup = actions.importBackup
+
+    SettingsGroup(title = "备份") {
+        SettingsRow(
+            title = "导出全部登录凭证",
+            supportingText = if (orderedLoggedInProviders.isEmpty()) {
+                "当前没有已登录的音源"
+            } else {
+                "${orderedLoggedInProviders.size} 个已登录音源 · 默认使用密码加密"
+            },
+            enabled = exportAll != null && orderedLoggedInProviders.isNotEmpty(),
+            leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            onClick = exportAll,
+        )
+    }
+
+    SettingsGroup(title = "单独导出") {
+        if (orderedLoggedInProviders.isEmpty()) {
+            SettingsRow(
+                title = "暂无可导出的音源",
+                supportingText = "登录音源后可在这里单独备份对应凭证",
+            )
+        } else {
+            orderedLoggedInProviders.forEachIndexed { index, provider ->
+                val auth = state.sessions.authStates[provider.providerId]
+                SettingsRow(
+                    title = provider.providerName,
+                    supportingText = auth?.userName?.takeIf { it.isNotBlank() }?.let { "已登录 · $it" }
+                        ?: "仅导出此音源的登录凭证",
+                    enabled = exportProvider != null,
+                    leadingContent = { Icon(Icons.Filled.ManageAccounts, contentDescription = null) },
+                    trailingContent = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    onClick = exportProvider?.let { action -> { action(provider) } },
+                )
+                if (index < orderedLoggedInProviders.lastIndex) SettingsDivider()
+            }
+        }
+    }
+
+    SettingsGroup(title = "恢复") {
+        SettingsRow(
+            title = "从备份文件恢复",
+            supportingText = "支持全部音源备份和单个音源备份；恢复前会再次确认覆盖",
+            enabled = importBackup != null,
+            leadingContent = { Icon(Icons.Filled.Settings, contentDescription = null) },
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            onClick = importBackup,
+        )
+    }
+
+    SettingsGroup(title = "安全说明") {
+        SettingsRow(
+            title = "默认使用加密备份",
+            supportingText = "备份可能包含 Cookie、访问令牌、Refresh Token、Authorization 和 OAuth client_secret。明文导出仅用于可信第三方应用，并需要额外风险确认。",
         )
     }
 }
@@ -1188,6 +1319,7 @@ private fun ProviderAccountSettings(
     onStartYtmusicOAuth: (() -> Unit)?,
 ) {
     val uriHandler = LocalUriHandler.current
+    val credentialBackupActions = LocalProviderCredentialBackupActions.current
     val auth = authController.authStateFor(provider)
     val busy = authController.isBusy(provider.providerId)
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
@@ -1211,6 +1343,25 @@ private fun ProviderAccountSettings(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("退出登录") }
             }
+        }
+    }
+
+    if (auth.isLoggedIn && credentialBackupActions.exportProvider != null) {
+        SettingsGroup(title = "登录凭证") {
+            SettingsRow(
+                title = "导出此音源登录凭证",
+                supportingText = "仅备份 ${provider.providerName}，默认使用密码加密",
+                enabled = !busy,
+                leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = { credentialBackupActions.exportProvider.invoke(provider) },
+            )
         }
     }
 
