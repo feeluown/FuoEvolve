@@ -302,7 +302,8 @@ private class DefaultProviderPlaylistDetailFeatureOwner<Playlist, Category, Trac
     override val state: StateFlow<ProviderPlaylistDetailFeatureState<Playlist, Category, Track>> = mutableState.asStateFlow()
     private var loadJob: Job? = null
     private var playbackPaginationJob: Job? = null
-    private var favoriteJob: Job? = null
+    private var favoriteStateJob: Job? = null
+    private var favoriteMutationJob: Job? = null
 
     override fun open(playlist: Playlist, category: Category?) {
         port.open(playlist, category)
@@ -321,7 +322,8 @@ private class DefaultProviderPlaylistDetailFeatureOwner<Playlist, Category, Trac
     override fun close() {
         loadJob?.cancel()
         playbackPaginationJob?.cancel()
-        favoriteJob?.cancel()
+        favoriteStateJob?.cancel()
+        favoriteMutationJob?.cancel()
         mutableState.value = ProviderPlaylistDetailFeatureState()
         port.close()
     }
@@ -441,8 +443,8 @@ private class DefaultProviderPlaylistDetailFeatureOwner<Playlist, Category, Trac
         val playlist = state.value.playlist ?: return
         if (!canToggleFavorite()) return
         val favorite = !state.value.favoriteState.isFavorite
-        favoriteJob?.cancel()
-        favoriteJob = scope.launch {
+        favoriteMutationJob?.cancel()
+        favoriteMutationJob = scope.launch {
             mutableState.value = state.value.copy(isFavoriteLoading = true, errorMessage = null)
             runCatching { port.setFavorite(playlist, favorite) }
                 .onSuccess { result ->
@@ -526,8 +528,8 @@ private class DefaultProviderPlaylistDetailFeatureOwner<Playlist, Category, Trac
     }
 
     private fun refreshFavoriteState(playlist: Playlist) {
-        favoriteJob?.cancel()
-        favoriteJob = scope.launch {
+        favoriteStateJob?.cancel()
+        favoriteStateJob = scope.launch {
             val favoriteState = runCatching { port.loadFavoriteState(playlist) }.getOrNull() ?: return@launch
             if (state.value.playlist?.let(port::playlistId) == port.playlistId(playlist)) {
                 mutableState.value = state.value.copy(
@@ -755,7 +757,8 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
     override val state: StateFlow<ProviderMediaItemDetailFeatureState<Item, Track>> = mutableState.asStateFlow()
     private var tracksJob: Job? = null
     private var albumsJob: Job? = null
-    private var favoriteJob: Job? = null
+    private var favoriteStateJob: Job? = null
+    private var favoriteMutationJob: Job? = null
 
     override fun open(item: Item) {
         port.open(item)
@@ -773,7 +776,8 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
     override fun close() {
         tracksJob?.cancel()
         albumsJob?.cancel()
-        favoriteJob?.cancel()
+        favoriteStateJob?.cancel()
+        favoriteMutationJob?.cancel()
         mutableState.value = ProviderMediaItemDetailFeatureState()
         port.close()
     }
@@ -820,8 +824,8 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
         val item = state.value.item ?: return
         if (!canToggleFavorite()) return
         val favorite = !state.value.favoriteState.isFavorite
-        favoriteJob?.cancel()
-        favoriteJob = scope.launch {
+        favoriteMutationJob?.cancel()
+        favoriteMutationJob = scope.launch {
             mutableState.value = state.value.copy(isFavoriteLoading = true, errorMessage = null)
             runCatching { port.setFavorite(item, favorite) }
                 .onSuccess { result ->
@@ -903,8 +907,8 @@ private class DefaultProviderMediaItemDetailFeatureOwner<Item, Track>(
     }
 
     private fun refreshFavoriteState(item: Item) {
-        favoriteJob?.cancel()
-        favoriteJob = scope.launch {
+        favoriteStateJob?.cancel()
+        favoriteStateJob = scope.launch {
             val favoriteState = runCatching { port.loadFavoriteState(item) }.getOrNull() ?: return@launch
             if (state.value.item?.let(port::itemId) == port.itemId(item)) {
                 mutableState.value = state.value.copy(
