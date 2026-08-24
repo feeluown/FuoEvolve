@@ -32,6 +32,7 @@ interface PlaybackFeatureOwner {
     val startFailureSource: PlaybackStartFailureSource
     val navigation: PlaybackNavigationPort
     val sleepTimer: PlaybackSleepTimerPort
+    val lyrics: PlaybackLyricsPort
     val replacement: ReplacementActionPort
 
     fun updateTrackCopies(trackId: String, updatedTrack: MusicTrack)
@@ -79,6 +80,7 @@ private class DefaultPlaybackFeatureOwner(
     private var playRequestSerial = 0L
     private var lastRecoveredPlaybackErrorKey: String? = null
     private var smartReplacementSelections: Map<String, SmartReplacementSelection> = emptyMap()
+    private var lyricsAssociations: Map<String, String> = emptyMap()
     private var pendingManualReplacementSwitch: PlaybackOwnerPendingManualReplacement? = null
     private var suppressPlaybackRecoveryRequestSerial: Long? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
@@ -98,6 +100,8 @@ private class DefaultPlaybackFeatureOwner(
         currentTrackId = { queueState.currentTrack()?.id ?: playbackState.value.currentTrack?.id },
         currentLyrics = { playbackState.value.lyrics },
         updateLyrics = { lyrics -> updatePlaybackState { it.copy(lyrics = lyrics) } },
+        associationForTrackId = { trackId -> lyricsAssociations[trackId] },
+        rememberAssociation = ::rememberLyricsAssociation,
     )
 
     private val startOwner = PlaybackStartCoordinator(
@@ -197,18 +201,23 @@ private class DefaultPlaybackFeatureOwner(
     override val startFailureSource: PlaybackStartFailureSource = startOwner
     override val navigation: PlaybackNavigationPort = navigationOwner
     override val sleepTimer: PlaybackSleepTimerPort = sleepTimerOwner
+    override val lyrics: PlaybackLyricsPort = lyricsOwner
     override val replacement: ReplacementActionPort = replacementOwner
 
     init {
         scope.launch {
             val settings = settingsRepository.awaitSettings()
             smartReplacementSelections = settings.smartReplacementSelections
+            lyricsAssociations = settings.lyricsAssociations
             runCatching { playbackQueueStore.load() }
                 .onSuccess(::restorePlaybackQueue)
         }
         scope.launch {
             settingsRepository.state.collect { state ->
-                if (state.isLoaded) smartReplacementSelections = state.settings.smartReplacementSelections
+                if (state.isLoaded) {
+                    smartReplacementSelections = state.settings.smartReplacementSelections
+                    lyricsAssociations = state.settings.lyricsAssociations
+                }
             }
         }
         scope.launch {
@@ -320,6 +329,20 @@ private class DefaultPlaybackFeatureOwner(
             return if (isSmartReplacement) originalTrack else this
         }
         return originalTrack.withReplacementSelection(selection)
+    }
+
+    private fun rememberLyricsAssociation(sourceTrackId: String, lyricsTrackId: String?) {
+        lyricsAssociations = if (lyricsTrackId.isNullOrBlank()) {
+            lyricsAssociations - sourceTrackId
+        } else {
+            lyricsAssociations + (sourceTrackId to lyricsTrackId)
+        }
+        val nextAssociations = lyricsAssociations
+        scope.launch {
+            settingsRepository.update { current ->
+                current.copy(lyricsAssociations = nextAssociations)
+            }
+        }
     }
 
     private fun commitManualReplacementIfReady(engineState: PlaybackState) {
