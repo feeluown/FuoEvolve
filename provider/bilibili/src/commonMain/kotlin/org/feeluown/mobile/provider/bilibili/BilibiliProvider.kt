@@ -100,6 +100,24 @@ class BilibiliProvider(
         )
     }
 
+    override suspend fun lyricsSearchKeyword(track: org.feeluown.mobile.MusicTrack): String? {
+        val fallback = track.title.trim().takeIf { it.isNotBlank() }
+        val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
+        return runCatching {
+            val info = videoInfo(bvid).obj("data") ?: return@runCatching fallback
+            val pages = info.array("pages")
+            if (page != null && page !in 1..pages.size) return@runCatching fallback
+            val pageInfo = pages.getOrNull((page ?: 1) - 1)?.asObject()
+            val cid = pageInfo?.long("cid") ?: info.long("cid") ?: return@runCatching fallback
+            playerInfoData(bvid, cid)
+                ?.obj("bgm_info")
+                ?.stringOrNull("music_title")
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: fallback
+        }.getOrNull() ?: fallback
+    }
+
     override suspend fun resolve(track: org.feeluown.mobile.MusicTrack, qualityPolicy: String): PlaybackPayload? {
         val (bvid, page) = parsePaged(rawIdentifier(track.providerId ?: track.id))
         val info = videoInfo(bvid).obj("data") ?: return null
@@ -362,6 +380,27 @@ class BilibiliProvider(
         cacheKey = "bilibili:view:$bvid",
         cachePolicy = ProviderCachePolicies.detail,
     ).value.let { providerJson.parseToJsonElement(it).asObject() }
+
+    private suspend fun playerInfoData(
+        bvid: String,
+        cid: Long,
+    ): kotlinx.serialization.json.JsonObject? {
+        val response = http.getText(
+            ID,
+            queryUrl(
+                "$BASE/x/player/wbi/v2",
+                mapOf(
+                    "bvid" to bvid,
+                    "cid" to cid.toString(),
+                ),
+            ),
+            headers(),
+            cacheKey = "bilibili:player-info:$bvid:$cid",
+            cachePolicy = ProviderCachePolicies.detail,
+        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        if (response.int("code") != null && response.int("code") != 0) return null
+        return response.obj("data")
+    }
 
     private suspend fun playUrlData(
         bvid: String,
