@@ -259,7 +259,7 @@ class MainActivity : ComponentActivity() {
                         providerCredentialExportTargetKey = null
                         providerCredentialExportTargetName = ""
                     },
-                    onExportFile = providerCredentialExportLauncher::launch,
+                    onExportFile = { fileName -> providerCredentialExportLauncher.launch(fileName) },
                     onRestored = { restoredProviderIds ->
                         val restored = restoredProviderIds.toSet()
                         val providers = appViewModel.providerCatalogFeatureController.uiState.value.availableProviders
