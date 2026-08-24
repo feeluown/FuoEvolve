@@ -54,7 +54,7 @@ internal class QQMusicUserLibrary(
             return ProviderResourceState(providerId = ID, resourceId = resourceId)
         }
         val identifier = favoriteResourceIdentifier(type, resourceId)
-        if (identifier.isBlank()) {
+        if (identifier.isBlank() || !favoriteWriteSupported(type, identifier)) {
             return ProviderResourceState(providerId = ID, resourceId = resourceId)
         }
         if (type == FAVORITE_RESOURCE_PLAYLIST) {
@@ -88,6 +88,9 @@ internal class QQMusicUserLibrary(
         if (credentials.read(ID) == null) return ProviderMutationResult(false, "请先登录 QQ 音乐")
         val identifier = favoriteResourceIdentifier(type, resourceId)
         if (identifier.isBlank()) return ProviderMutationResult(false, "无法读取 QQ 音乐资源编号")
+        if (!favoriteWriteSupported(type, identifier)) {
+            return ProviderMutationResult(false, "QQ 音乐暂不支持收藏该资源")
+        }
         if (type == FAVORITE_RESOURCE_PLAYLIST) {
             val isOwned = runCatching {
                 snapshot().playlists.any { favoriteResourceIdentifier(type, it.id) == identifier }
@@ -188,10 +191,16 @@ internal class QQMusicUserLibrary(
     }
 
     private suspend fun mutateFavoriteAlbum(identifier: String, favorite: Boolean): Boolean {
-        val albumId = identifier.toLongOrNull() ?: return false
         val key = "favoriteAlbumWrite"
+        val uin = currentAccountIds().firstOrNull().orEmpty()
+        val target = identifier.toLongOrNull()?.let { albumId ->
+            "\"v_albumId\":[$albumId]"
+        } ?: "\"v_albumMid\":[${jsonString(identifier)}]"
+        val uinParam = uin.takeIf(String::isNotBlank)
+            ?.let { "\"uin\":${jsonString(it)}," }
+            .orEmpty()
         val root = rpc(
-            """{"$key":{"module":"music.musicasset.AlbumFavWrite","method":"${if (favorite) "FavAlbum" else "CancelFavAlbum"}","param":{"v_albumId":[$albumId]}}}""",
+            """{"$key":{"module":"music.musicasset.AlbumFavWrite","method":"${if (favorite) "FavAlbum" else "CancelFavAlbum"}","param":{$uinParam$target}}}""",
             ProviderRequestKind.Mutation,
         )
         return rpcMutationSucceeded(root, key)
@@ -245,6 +254,14 @@ internal class QQMusicUserLibrary(
         item.string("singerId"),
         item.string("id"),
     ).filter(String::isNotBlank).toSet()
+
+    private fun favoriteWriteSupported(type: String, identifier: String): Boolean = when (type) {
+        FAVORITE_RESOURCE_PLAYLIST -> identifier.toLongOrNull() != null
+        FAVORITE_RESOURCE_ARTIST,
+        FAVORITE_RESOURCE_ALBUM,
+        -> identifier.isNotBlank()
+        else -> false
+    }
 
     private fun normalizeFavoriteResourceType(resourceType: String): String? = when (resourceType.lowercase()) {
         "playlist", "playlists" -> FAVORITE_RESOURCE_PLAYLIST
