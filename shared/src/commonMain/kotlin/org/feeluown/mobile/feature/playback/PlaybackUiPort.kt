@@ -171,6 +171,31 @@ interface LocalMusicActionPort {
     fun openLocalMetadataEditor(track: MusicTrack)
 }
 
+data class LyricsAssociationUiState(
+    val trackId: String? = null,
+    val isLyricsUnavailable: Boolean = false,
+    val isManualAssociation: Boolean = false,
+    val associatedTrackId: String? = null,
+    val associatedTrackTitle: String? = null,
+    val isSearchOpen: Boolean = false,
+    val query: String = "",
+    val results: List<MusicTrack> = emptyList(),
+    val isSearching: Boolean = false,
+    val selectingTrackId: String? = null,
+    val message: String? = null,
+)
+
+/** Manual lyric lookup/association state owned by playback. */
+interface PlaybackLyricsPort {
+    val associationState: StateFlow<LyricsAssociationUiState>
+
+    fun openAssociationSearch(track: MusicTrack)
+    fun updateAssociationQuery(query: String)
+    fun searchAssociation()
+    fun selectAssociation(track: MusicTrack)
+    fun closeAssociationSearch()
+}
+
 /** Smart-replacement state/actions used by the now-playing surface. */
 interface ReplacementActionPort {
     val replacementCandidateState: ReplacementCandidateState
