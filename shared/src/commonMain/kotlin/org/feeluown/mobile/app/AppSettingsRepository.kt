@@ -134,6 +134,7 @@ internal fun AppSettings.toPersistedSettings(): PersistedSettingsV1 = PersistedS
     smartReplacementProviderIds = smartReplacementProviderIds,
     smartReplacementMinScore = smartReplacementMinScore,
     smartReplacementSelections = smartReplacementSelections.mapValues { (_, selection) -> selection.toPersisted() },
+    lyricsAssociations = lyricsAssociations,
     pauseOnOtherAppPlayback = pauseOnOtherAppPlayback,
     lyricFontSize = lyricFontSize.name,
     statusBarLyricsEnabled = statusBarLyricsEnabled,
@@ -182,6 +183,7 @@ internal fun PersistedSettingsV1.toAppSettings(): AppSettings {
         smartReplacementSelections = smartReplacementSelections
             ?.mapValues { (_, selection) -> selection.toDomain() }
             ?: defaults.smartReplacementSelections,
+        lyricsAssociations = lyricsAssociations ?: defaults.lyricsAssociations,
         pauseOnOtherAppPlayback = pauseOnOtherAppPlayback ?: defaults.pauseOnOtherAppPlayback,
         lyricFontSize = lyricFontSize.enumOr(defaults.lyricFontSize),
         statusBarLyricsEnabled = statusBarLyricsEnabled ?: defaults.statusBarLyricsEnabled,
