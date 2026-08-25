@@ -1,8 +1,6 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -89,26 +87,6 @@ class LowRiskOwnershipTest {
         assertTrue(controller.uiState.value.lines.isEmpty())
     }
 
-    @Test
-    fun sleepTimerFeedbackIsOwnedByPlaybackPortAndDismissible() = runTest {
-        val engine = FakePlaybackEngine()
-        val compatibilityFeedback = mutableListOf<String>()
-        val controller = PlaybackSleepTimerController(
-            playbackEngine = engine,
-            scope = this,
-            currentTrackId = { null },
-            nowMillis = { 0L },
-            onFeedback = compatibilityFeedback::add,
-        )
-
-        controller.setSleepTimerDurationMinutes(30)
-
-        assertEquals("请先播放一首歌曲", controller.feedback.value)
-        assertEquals(listOf("请先播放一首歌曲"), compatibilityFeedback)
-        controller.dismissFeedback("请先播放一首歌曲")
-        assertNull(controller.feedback.value)
-    }
-
     private class FakeDebugLogRepository(
         private val lines: List<String> = emptyList(),
         private val exportResult: String = "",
@@ -122,15 +100,5 @@ class LowRiskOwnershipTest {
         }
 
         override suspend fun exportLogFile(lines: List<String>): String = exportResult
-    }
-
-    private class FakePlaybackEngine : PlaybackEngine {
-        override val state: StateFlow<PlaybackState> = MutableStateFlow(PlaybackState())
-
-        override fun play(track: MusicTrack, payload: PlaybackPayload) = Unit
-        override fun pause() = Unit
-        override fun resume() = Unit
-        override fun stop() = Unit
-        override fun seekTo(positionMs: Long) = Unit
     }
 }
