@@ -3,79 +3,87 @@ package org.feeluown.mobile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+
+internal data class PlaylistControllerSnapshot(
+    val localPlaylists: List<LocalPlaylist> = emptyList(),
+    val selectedLocalPlaylist: LocalPlaylist? = null,
+    val selectedLocalPlaylistTracks: List<MusicTrack> = emptyList(),
+    val selectedLocalPlaylistError: String? = null,
+    val playlistTargetTrack: MusicTrack? = null,
+    val playlistTargetType: PlaylistTargetType = PlaylistTargetType.Provider,
+    val playlistTargetPickerShowSwitcher: Boolean = true,
+    val playlistOperationTargets: List<ProviderPlaylist> = emptyList(),
+    val playlistOperationError: String? = null,
+    val localPlaylistOperationError: String? = null,
+    val localPlaylistImportPreview: LocalPlaylistImportPreview? = null,
+)
 
 internal class PlaylistControllerState {
     private var localPlaylistChangeListener: (() -> Unit)? = null
+    private val mutableState = MutableStateFlow(PlaylistControllerSnapshot())
+    val state: StateFlow<PlaylistControllerSnapshot> = mutableState.asStateFlow()
 
-    private var localPlaylistsState: List<LocalPlaylist> = emptyList()
     var localPlaylists: List<LocalPlaylist>
-        get() = localPlaylistsState
+        get() = mutableState.value.localPlaylists
         set(value) {
-            localPlaylistsState = value
+            update { it.copy(localPlaylists = value) }
             localPlaylistChanged()
         }
 
-    private var selectedLocalPlaylistState: LocalPlaylist? = null
     var selectedLocalPlaylist: LocalPlaylist?
-        get() = selectedLocalPlaylistState
+        get() = mutableState.value.selectedLocalPlaylist
         set(value) {
-            selectedLocalPlaylistState = value
+            update { it.copy(selectedLocalPlaylist = value) }
             localPlaylistChanged()
         }
 
-    private var selectedLocalPlaylistTracksState: List<MusicTrack> = emptyList()
     var selectedLocalPlaylistTracks: List<MusicTrack>
-        get() = selectedLocalPlaylistTracksState
+        get() = mutableState.value.selectedLocalPlaylistTracks
         set(value) {
-            selectedLocalPlaylistTracksState = value
+            update { it.copy(selectedLocalPlaylistTracks = value) }
             localPlaylistChanged()
         }
 
-    private var selectedLocalPlaylistErrorState: String? = null
     var selectedLocalPlaylistError: String?
-        get() = selectedLocalPlaylistErrorState
+        get() = mutableState.value.selectedLocalPlaylistError
         set(value) {
-            selectedLocalPlaylistErrorState = value
+            update { it.copy(selectedLocalPlaylistError = value) }
             localPlaylistChanged()
         }
 
-    private var playlistTargetTrackState: MusicTrack? = null
     var playlistTargetTrack: MusicTrack?
-        get() = playlistTargetTrackState
+        get() = mutableState.value.playlistTargetTrack
         set(value) {
-            playlistTargetTrackState = value
+            update { it.copy(playlistTargetTrack = value) }
             playlistTargetPickerChanged()
         }
 
-    private var playlistTargetTypeState = PlaylistTargetType.Provider
     var playlistTargetType: PlaylistTargetType
-        get() = playlistTargetTypeState
+        get() = mutableState.value.playlistTargetType
         set(value) {
-            playlistTargetTypeState = value
+            update { it.copy(playlistTargetType = value) }
             playlistTargetPickerChanged()
         }
 
-    private var playlistTargetPickerShowSwitcherState = true
     var playlistTargetPickerShowSwitcher: Boolean
-        get() = playlistTargetPickerShowSwitcherState
+        get() = mutableState.value.playlistTargetPickerShowSwitcher
         set(value) {
-            playlistTargetPickerShowSwitcherState = value
+            update { it.copy(playlistTargetPickerShowSwitcher = value) }
             playlistTargetPickerChanged()
         }
 
-    private var playlistOperationTargetsState: List<ProviderPlaylist> = emptyList()
     var playlistOperationTargets: List<ProviderPlaylist>
-        get() = playlistOperationTargetsState
+        get() = mutableState.value.playlistOperationTargets
         set(value) {
-            playlistOperationTargetsState = value
+            update { it.copy(playlistOperationTargets = value) }
             playlistTargetPickerChanged()
         }
 
-    private var playlistOperationErrorState: String? = null
     var playlistOperationError: String?
-        get() = playlistOperationErrorState
+        get() = mutableState.value.playlistOperationError
         set(value) {
-            playlistOperationErrorState = value
+            update { it.copy(playlistOperationError = value) }
             playlistTargetPickerChanged()
         }
 
@@ -91,20 +99,18 @@ internal class PlaylistControllerState {
             mutablePlaylistOperationFeedback.value = value
         }
 
-    private var localPlaylistOperationErrorState: String? = null
     var localPlaylistOperationError: String?
-        get() = localPlaylistOperationErrorState
+        get() = mutableState.value.localPlaylistOperationError
         set(value) {
-            localPlaylistOperationErrorState = value
+            update { it.copy(localPlaylistOperationError = value) }
             localPlaylistChanged()
             playlistTargetPickerChanged()
         }
 
-    private var localPlaylistImportPreviewState: LocalPlaylistImportPreview? = null
     var localPlaylistImportPreview: LocalPlaylistImportPreview?
-        get() = localPlaylistImportPreviewState
+        get() = mutableState.value.localPlaylistImportPreview
         set(value) {
-            localPlaylistImportPreviewState = value
+            update { it.copy(localPlaylistImportPreview = value) }
             localPlaylistChanged()
         }
 
@@ -118,13 +124,18 @@ internal class PlaylistControllerState {
     }
 
     private fun playlistTargetPickerChanged() {
+        val current = mutableState.value
         mutablePlaylistTargetPickerState.value = PlaylistTargetPickerUiState(
-            track = playlistTargetTrackState,
-            targetType = playlistTargetTypeState,
-            showSwitcher = playlistTargetPickerShowSwitcherState,
-            providerTargets = playlistOperationTargetsState,
-            providerError = playlistOperationErrorState,
-            localError = localPlaylistOperationErrorState,
+            track = current.playlistTargetTrack,
+            targetType = current.playlistTargetType,
+            showSwitcher = current.playlistTargetPickerShowSwitcher,
+            providerTargets = current.playlistOperationTargets,
+            providerError = current.playlistOperationError,
+            localError = current.localPlaylistOperationError,
         )
+    }
+
+    private inline fun update(crossinline transform: (PlaylistControllerSnapshot) -> PlaylistControllerSnapshot) {
+        mutableState.update { current -> transform(current) }
     }
 }
