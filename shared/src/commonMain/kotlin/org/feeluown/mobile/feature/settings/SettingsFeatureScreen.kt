@@ -877,6 +877,14 @@ private fun PlaybackFeatureSettings(
         }
     }
 
+    if (state.bydVoiceControl.available) {
+        BydVoiceControlFeatureSettings(
+            state = state.bydVoiceControl,
+            enabled = !busy,
+            onEnabledChange = settingsController::setBydVoiceControlEnabled,
+        )
+    }
+
     SmartReplacementFeatureSettings(
         settings = settings,
         catalog = catalog,
@@ -884,6 +892,81 @@ private fun PlaybackFeatureSettings(
         settingsController = settingsController,
         providerCatalog = providerCatalog,
     )
+}
+
+@Composable
+private fun BydVoiceControlFeatureSettings(
+    state: BydVoiceControlSettingsState,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    var showPermissionGuide by remember { mutableStateOf(false) }
+    SettingsGroup(title = "比亚迪 DiLink") {
+        SettingsToggleRow(
+            title = "小迪语音控制",
+            supportingText = when {
+                state.enabled && state.readLogsGranted -> "已启用，可通过小迪控制播放、暂停、切歌和点歌"
+                state.enabled -> "等待 READ_LOGS 授权，点击下方查看 ADB 命令"
+                state.readLogsGranted -> "READ_LOGS 已授权，开启后读取小迪媒体语音指令"
+                else -> "需要通过 ADB 授予 READ_LOGS 权限"
+            },
+            checked = state.enabled,
+            enabled = enabled,
+        ) { checked ->
+            onEnabledChange(checked)
+            if (checked && !state.readLogsGranted) showPermissionGuide = true
+        }
+        if (state.enabled && !state.readLogsGranted) {
+            SettingsDivider(startPadding = FuoSpacing.lg)
+            SettingsRow(
+                title = "开启 READ_LOGS 权限",
+                supportingText = "授权后会自动检测，无需重启应用",
+                enabled = enabled,
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = { showPermissionGuide = true },
+            )
+        }
+    }
+
+    if (showPermissionGuide) {
+        AlertDialog(
+            onDismissRequest = { showPermissionGuide = false },
+            title = { Text("开启小迪语音控制") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.md)) {
+                    Text(
+                        "READ_LOGS 是系统级日志权限。FuoEvolve 仅在此功能开启时读取小迪 com.byd.vrassistant 进程日志，用于识别媒体控制指令。",
+                    )
+                    Text("连接车机 ADB 后执行：", style = MaterialTheme.typography.bodyMedium)
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Text(
+                            state.grantCommand,
+                            modifier = Modifier.padding(FuoSpacing.md),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Text(
+                        "执行成功后保持此开关开启，权限状态会自动刷新。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPermissionGuide = false }) { Text("知道了") }
+            },
+        )
+    }
 }
 
 @Composable
