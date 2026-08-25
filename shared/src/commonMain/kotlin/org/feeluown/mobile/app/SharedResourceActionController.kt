@@ -19,14 +19,14 @@ object NoOpSharedResourceActionPort : SharedResourceActionPort {
 }
 
 fun createSharedResourceActionPort(
-    providerRepository: ProviderMusicRepository,
+    providerRegistry: ProviderRegistryRepository,
     providerCatalog: ProviderCatalogFeatureController,
     providerDetails: ProviderDetailOwners,
     searchController: SearchFeatureController,
     settingsRepository: AppSettingsRepository,
     scope: CoroutineScope,
 ): SharedResourceActionPort = DefaultSharedResourceActionController(
-    providerRepository = providerRepository,
+    providerRegistry = providerRegistry,
     providerCatalog = providerCatalog,
     providerDetails = providerDetails,
     searchController = searchController,
@@ -35,7 +35,7 @@ fun createSharedResourceActionPort(
 )
 
 private class DefaultSharedResourceActionController(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRegistry: ProviderRegistryRepository,
     private val providerCatalog: ProviderCatalogFeatureController,
     private val providerDetails: ProviderDetailOwners,
     private val searchController: SearchFeatureController,
@@ -76,18 +76,16 @@ private class DefaultSharedResourceActionController(
     private suspend fun ensureProviderReady(providerId: String) {
         val catalogState = providerCatalog.uiState.value
         val available = catalogState.availableProviders.ifEmpty {
-            providerRepository.initialize()
-            providerRepository.availableProviders()
+            providerRegistry.initialize()
+            providerRegistry.availableProviders()
         }
-        if (available.none { it.providerId == providerId }) {
-            error("未找到 provider：$providerId")
-        }
+        if (available.none { it.providerId == providerId }) error("未找到 provider：$providerId")
 
         val settings = settingsRepository.awaitSettings()
         if (providerId in settings.enabledProviderIds) return
 
         val enabled = settings.enabledProviderIds + providerId
-        providerRepository.updateEnabledProviders(enabled)
+        providerRegistry.updateEnabledProviders(enabled)
         settingsRepository.update { current -> current.copy(enabledProviderIds = enabled) }
         providerCatalog.refresh()
     }
