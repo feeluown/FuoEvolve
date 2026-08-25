@@ -60,6 +60,8 @@ interface PlaybackQueueUiPort {
     val repeatMode: RepeatMode
     val isFmQueueActive: Boolean
     val trackChangeDirection: TrackChangeDirection
+    val queueStateFlow: StateFlow<PlaybackQueueState>?
+        get() = null
     val feedback: StateFlow<String?>
         get() = EMPTY_FEEDBACK_FLOW
 
@@ -104,6 +106,8 @@ interface PlaybackQueueUiPort {
 /** Sleep-timer state, commands and transient feedback owned by playback. */
 interface PlaybackSleepTimerPort {
     val sleepTimerState: SleepTimerState
+    val sleepTimerStateFlow: StateFlow<SleepTimerState>?
+        get() = null
     val feedback: StateFlow<String?>
         get() = EMPTY_FEEDBACK_FLOW
 
@@ -201,6 +205,8 @@ interface PlaybackLyricsPort {
 /** Smart-replacement state/actions used by the now-playing surface. */
 interface ReplacementActionPort {
     val replacementCandidateState: ReplacementCandidateState
+    val replacementCandidateStateFlow: StateFlow<ReplacementCandidateState>?
+        get() = null
 
     fun loadReplacementCandidates(track: MusicTrack)
     fun selectReplacementCandidate(track: MusicTrack, candidate: ReplacementCandidate)

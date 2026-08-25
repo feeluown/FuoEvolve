@@ -1,11 +1,11 @@
 package org.feeluown.mobile
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
@@ -21,8 +21,11 @@ internal class PlaybackReplacementController(
     private val openTrackDetail: (MusicTrack) -> Unit,
     private val failureMessage: (Throwable, String, String?) -> String,
 ) : ReplacementActionPort {
-    override var replacementCandidateState by mutableStateOf(ReplacementCandidateState())
-        private set
+    private val mutableReplacementCandidateState = MutableStateFlow(ReplacementCandidateState())
+    override val replacementCandidateStateFlow: StateFlow<ReplacementCandidateState> =
+        mutableReplacementCandidateState.asStateFlow()
+    override val replacementCandidateState: ReplacementCandidateState
+        get() = mutableReplacementCandidateState.value
 
     private var candidatesJob: Job? = null
 
@@ -30,7 +33,7 @@ internal class PlaybackReplacementController(
         val originalTrack = track.originalDetailTrackForNavigation()
         val trackId = originalTrack.id
         candidatesJob?.cancel()
-        replacementCandidateState = ReplacementCandidateState(
+        mutableReplacementCandidateState.value = ReplacementCandidateState(
             trackId = trackId,
             isLoading = true,
         )
@@ -45,7 +48,7 @@ internal class PlaybackReplacementController(
                 }
             }.onSuccess { candidates ->
                 if (replacementCandidateState.trackId == trackId) {
-                    replacementCandidateState = ReplacementCandidateState(
+                    mutableReplacementCandidateState.value = ReplacementCandidateState(
                         trackId = trackId,
                         candidates = candidates
                             .sortedByDescending { candidate -> candidate.score }
@@ -55,7 +58,7 @@ internal class PlaybackReplacementController(
             }.onFailure { throwable ->
                 if (throwable is CancellationException) return@onFailure
                 if (replacementCandidateState.trackId == trackId) {
-                    replacementCandidateState = ReplacementCandidateState(
+                    mutableReplacementCandidateState.value = ReplacementCandidateState(
                         trackId = trackId,
                         errorMessage = failureMessage(throwable, "查询失败", originalTrack.source),
                     )
@@ -68,7 +71,7 @@ internal class PlaybackReplacementController(
         val previousTrack = currentTrack() ?: return
         val originalTrack = track.originalDetailTrackForNavigation()
         val selection = candidate.toSmartReplacementSelection()
-        replacementCandidateState = replacementCandidateState.copy(isLoading = false)
+        mutableReplacementCandidateState.value = replacementCandidateState.copy(isLoading = false)
         startManualReplacement(
             originalTrack.withReplacementSelection(selection),
             selection,

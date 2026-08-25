@@ -37,6 +37,47 @@ class PlaybackQueueControllerTest {
     }
 
     @Test
+    fun stateFlowPublishesDurableQueueMutations() {
+        val first = track("netease:1", "First")
+        val second = track("netease:2", "Second")
+        val controller = PlaybackQueueController()
+
+        controller.mainQueue = listOf(first, second)
+        controller.mainQueueIndex = 1
+        controller.repeatMode = RepeatMode.SINGLE
+
+        assertEquals(listOf(first, second), controller.state.value.mainQueue)
+        assertEquals(1, controller.state.value.mainQueueIndex)
+        assertEquals(RepeatMode.SINGLE, controller.state.value.repeatMode)
+        assertEquals(second, controller.currentTrack())
+    }
+
+    @Test
+    fun restoredSnapshotIsPublishedAsSingleStateSnapshot() {
+        val first = track("netease:1", "First")
+        val second = track("netease:2", "Second")
+        val snapshot = PlaybackQueueSnapshot(
+            mainQueue = listOf(first, second),
+            originalMainQueue = listOf(second, first),
+            upNextQueue = emptyList(),
+            queueIndex = 1,
+            shuffleEnabled = true,
+            repeatMode = RepeatMode.SINGLE,
+            isFmQueue = false,
+            shuffleBeforeFm = null,
+        )
+        val controller = PlaybackQueueController()
+
+        assertTrue(controller.restore(snapshot))
+
+        assertEquals(listOf(first, second), controller.state.value.mainQueue)
+        assertEquals(listOf(second, first), controller.state.value.originalMainQueue)
+        assertEquals(1, controller.state.value.mainQueueIndex)
+        assertTrue(controller.state.value.shuffleEnabled)
+        assertEquals(RepeatMode.SINGLE, controller.state.value.repeatMode)
+    }
+
+    @Test
     fun delayedStartupRestoreDoesNotOverwriteNewPlaylistSelection() {
         val restoredTrack = track("netease:old", "Restored")
         val oldSnapshot = PlaybackQueueController().apply {

@@ -1,8 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -18,13 +15,15 @@ internal class PlaybackSleepTimerController(
     private val nowMillis: () -> Long,
     private val onFeedback: (String) -> Unit,
 ) : PlaybackSleepTimerPort, PlaybackEndSleepTimer {
-    var state by mutableStateOf(SleepTimerState())
+    private val mutableState = MutableStateFlow(SleepTimerState())
+    override val sleepTimerStateFlow: StateFlow<SleepTimerState> = mutableState.asStateFlow()
+    override val sleepTimerState: SleepTimerState
+        get() = mutableState.value
+    val state: SleepTimerState
+        get() = mutableState.value
 
     private val mutableFeedback = MutableStateFlow<String?>(null)
     override val feedback: StateFlow<String?> = mutableFeedback.asStateFlow()
-
-    override val sleepTimerState: SleepTimerState
-        get() = state
 
     private var timerJob: Job? = null
     private var timerSerial: Long = 0L
@@ -81,7 +80,7 @@ internal class PlaybackSleepTimerController(
         timerSerial += 1L
         timerJob?.cancel()
         timerJob = null
-        state = SleepTimerState()
+        mutableState.value = SleepTimerState()
         playbackEngine.setStopAfterCurrentTrack(false)
     }
 
@@ -117,7 +116,7 @@ internal class PlaybackSleepTimerController(
 
     private fun replace(nextState: SleepTimerState) {
         clear()
-        state = nextState
+        mutableState.value = nextState
         playbackEngine.setStopAfterCurrentTrack(nextState.mode == SleepTimerMode.EndOfTrack)
         if (nextState.mode != SleepTimerMode.Duration) return
         val deadlineMs = nextState.deadlineMs ?: return
@@ -131,7 +130,7 @@ internal class PlaybackSleepTimerController(
                     publishFeedback("睡眠定时已结束，播放已暂停")
                     break
                 }
-                state = state.copy(remainingMs = remainingMs)
+                mutableState.value = state.copy(remainingMs = remainingMs)
                 delay(minOf(remainingMs, 1_000L))
             }
         }

@@ -49,6 +49,7 @@ internal class PlaybackQueueCoordinator(
     override var trackChangeDirection by mutableStateOf(TrackChangeDirection.Next)
         private set
     override val feedback: StateFlow<String?> = mutableFeedback.asStateFlow()
+    override val queueStateFlow: StateFlow<PlaybackQueueState> = queueState.state
 
     override val currentQueueTrack: MusicTrack?
         get() = queueState.currentTrack()
