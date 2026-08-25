@@ -352,12 +352,13 @@ private fun LyricsAssociationDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                val message = state.message
                 when {
                     state.isSearching -> CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.CenterHorizontally),
                     )
-                    state.message != null -> Text(
-                        text = state.message,
+                    message != null -> Text(
+                        text = message,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
