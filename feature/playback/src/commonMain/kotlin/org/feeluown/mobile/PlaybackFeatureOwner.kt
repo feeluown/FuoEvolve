@@ -48,7 +48,7 @@ fun createPlaybackFeatureOwner(
     playbackQueueStore = playbackQueueStore,
     settings = settings,
     downloads = downloads,
-    navigation = navigation,
+    navigationOwner = navigation,
     scope = scope,
     openTrackDetail = openTrackDetail,
     nowMillis = nowMillis,
