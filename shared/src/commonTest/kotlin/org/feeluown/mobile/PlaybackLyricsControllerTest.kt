@@ -144,6 +144,46 @@ class PlaybackLyricsControllerTest {
     }
 
     @Test
+    fun changingAssociatedLyricsResetsAndPersistsAlignmentOffset() = runTest {
+        val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
+        val currentTarget = providerTrack("netease:123", "旧歌词歌曲", "netease")
+        val replacementTarget = providerTrack("qqmusic:456", "新歌词歌曲", "qqmusic")
+        val repository = FakePlaybackLyricsRepository(
+            details = mapOf(currentTarget.id to currentTarget),
+            lyrics = mapOf(
+                currentTarget.id to "[00:00.00]旧歌词",
+                replacementTarget.id to "[00:00.00]新歌词",
+            ),
+        )
+        val rememberedOffsets = mutableListOf<Pair<String, Long>>()
+        val controller = PlaybackLyricsController(
+            repository = repository,
+            scope = this,
+            currentRequestSerial = { 1L },
+            currentTrackId = { source.id },
+            currentLyrics = { null },
+            updateLyrics = {},
+            associationForTrackId = { if (it == source.id) currentTarget.id else null },
+            rememberAssociation = { _, _ -> },
+            alignmentOffsetForTrackId = { if (it == source.id) 1_250L else 0L },
+            rememberAlignmentOffset = { sourceId, offsetMs -> rememberedOffsets += sourceId to offsetMs },
+        )
+
+        controller.maybeLoad(source)
+        advanceUntilIdle()
+        assertEquals(1_250L, controller.associationState.value.alignmentOffsetMs)
+
+        controller.openAssociationSearch(source)
+        advanceUntilIdle()
+        controller.selectAssociation(replacementTarget)
+        advanceUntilIdle()
+
+        assertEquals(replacementTarget.id, controller.associationState.value.associatedTrackId)
+        assertEquals(0L, controller.associationState.value.alignmentOffsetMs)
+        assertEquals(listOf(source.id to 0L), rememberedOffsets)
+    }
+
+    @Test
     fun persistentStateRefreshRestoresAssociationLoadedAfterPlaybackState() = runTest {
         val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
         val target = providerTrack("netease:123", "歌词歌曲", "netease")
