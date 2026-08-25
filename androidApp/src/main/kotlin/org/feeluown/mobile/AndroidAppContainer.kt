@@ -70,6 +70,8 @@ internal class AndroidAppContainer(
     val settingsRepository: AppSettingsRepository by lazy { createAndroidAppSettingsRepository(context, appScope) }
     private val providerSessionRepository: ProviderSessionRepository by lazy { DefaultProviderSessionRepository(providerRepository) }
     private val navigator by lazy { AppNavigator() }
+    private val trackNavigationPort: TrackNavigationPort by lazy { createTrackNavigationPort(navigator) }
+    private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant by lazy { AndroidOAuthDeviceCodeAssistant(context) }
 
     private val playbackQueueStore: AndroidPlaybackQueueStore by lazy { AndroidPlaybackQueueStore(context) }
@@ -144,8 +146,8 @@ internal class AndroidAppContainer(
             settingsRepository = settingsRepository,
             providers = { providerCatalogFeatureController.uiState.value.providers },
             isLocalMusicSectionActive = {
-                val state = homeFeatureController.uiState.value
-                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+                val settings = settingsRepository.state.value.settings
+                settings.homeSection == HomeSection.Mine && settings.mineSection == MineSection.LocalMusic
             },
             scope = appScope,
             onTrackUpdated = { trackId, track -> playbackFeatureOwner.updateTrackCopies(trackId, track) },
@@ -161,8 +163,8 @@ internal class AndroidAppContainer(
             settingsRepository = settingsRepository,
             scope = appScope,
             isLocalMusicSectionActive = {
-                val state = homeFeatureController.uiState.value
-                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+                val settings = settingsRepository.state.value.settings
+                settings.homeSection == HomeSection.Mine && settings.mineSection == MineSection.LocalMusic
             },
         )
     }
@@ -175,7 +177,7 @@ internal class AndroidAppContainer(
             settingsRepository = settingsRepository,
             downloadActions = downloadActionPort,
             scope = appScope,
-            openTrackDetail = { track -> providerDetailOwners.track.open(track) },
+            openTrackDetail = trackNavigationPort::open,
         )
     }
 
@@ -187,7 +189,7 @@ internal class AndroidAppContainer(
             providerCatalog = providerCatalogFeatureController,
             navigator = navigator,
             scope = appScope,
-            onProviderMutation = { homeFeatureController.refreshMine() },
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
@@ -212,7 +214,7 @@ internal class AndroidAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = appScope,
-            onProviderMutation = { homeFeatureController.refreshMine() },
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
@@ -225,7 +227,7 @@ internal class AndroidAppContainer(
             playbackNavigation = playbackFeatureOwner.navigation,
             playbackQueue = playbackFeatureOwner.transport,
             scope = appScope,
-            refreshMineContent = homeFeatureController::refreshMine,
+            refreshMineContent = homeRefreshPort::refreshMine,
         )
     }
 
@@ -239,11 +241,7 @@ internal class AndroidAppContainer(
                 providerCatalogFeatureController.uiState.value.availableProviders
                     .firstOrNull { it.providerId == providerId }?.providerName ?: providerId
             },
-            onSessionChanged = {
-                homeFeatureController.refreshHome(HomeSection.Recommend)
-                homeFeatureController.refreshHome(HomeSection.Music)
-                homeFeatureController.refreshMine()
-            },
+            onSessionChanged = homeRefreshPort::refreshAll,
         )
     }
 
