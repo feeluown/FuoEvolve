@@ -147,12 +147,14 @@ internal class PlaybackLyricsController(
         currentSourceTrackId = lyricTrack.id
 
         if (loadedForTrackId == track.id && loadedAssociationTrackId == associatedTrackId) {
+            val current = mutableAssociationState.value
+            val effectiveAlignmentOffsetMs = if (current.isManualAssociation) alignmentOffsetMs else 0L
             if (
-                mutableAssociationState.value.trackId == track.id &&
-                mutableAssociationState.value.alignmentOffsetMs != alignmentOffsetMs
+                current.trackId == track.id &&
+                current.alignmentOffsetMs != effectiveAlignmentOffsetMs
             ) {
-                mutableAssociationState.value = mutableAssociationState.value.copy(
-                    alignmentOffsetMs = alignmentOffsetMs,
+                mutableAssociationState.value = current.copy(
+                    alignmentOffsetMs = effectiveAlignmentOffsetMs,
                 )
             }
             return
@@ -166,7 +168,6 @@ internal class PlaybackLyricsController(
         if (associatedTrackId != null) {
             mutableAssociationState.value = LyricsAssociationUiState(
                 trackId = track.id,
-                alignmentOffsetMs = alignmentOffsetMs,
             )
             loadJob = scope.launch {
                 val associatedTrack = repository.trackDetail(associatedTrackId)
@@ -196,7 +197,7 @@ internal class PlaybackLyricsController(
                 mutableAssociationState.value = LyricsAssociationUiState(
                     trackId = track.id,
                     isLyricsUnavailable = fallbackLyrics == null,
-                    alignmentOffsetMs = alignmentOffsetMs,
+                    alignmentOffsetMs = 0L,
                 )
             }
             return
@@ -205,7 +206,7 @@ internal class PlaybackLyricsController(
         currentLyrics()?.takeIf { it.isNotBlank() }?.let {
             mutableAssociationState.value = LyricsAssociationUiState(
                 trackId = track.id,
-                alignmentOffsetMs = alignmentOffsetMs,
+                alignmentOffsetMs = 0L,
             )
             return
         }
@@ -213,7 +214,7 @@ internal class PlaybackLyricsController(
             updateLyrics(it)
             mutableAssociationState.value = LyricsAssociationUiState(
                 trackId = track.id,
-                alignmentOffsetMs = alignmentOffsetMs,
+                alignmentOffsetMs = 0L,
             )
             return
         }
@@ -227,7 +228,7 @@ internal class PlaybackLyricsController(
             mutableAssociationState.value = LyricsAssociationUiState(
                 trackId = track.id,
                 isLyricsUnavailable = lyrics == null,
-                alignmentOffsetMs = alignmentOffsetMs,
+                alignmentOffsetMs = 0L,
             )
         }
     }
