@@ -2,13 +2,29 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.flow.StateFlow
 
-/** Provider surface needed by playback resolution and lyrics. */
-interface ProviderPlaybackRepository {
+/**
+ * Provider primitive used by playback. Implementations resolve one concrete provider track only;
+ * replacement search/ranking/fallback policy belongs to :feature:playback.
+ */
+interface PlaybackProviderSourcePort {
+    suspend fun resolveTrack(track: MusicTrack): PlaybackPayload?
+    suspend fun lyrics(track: MusicTrack): String? = null
+    suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
+}
+
+/**
+ * Playback-owned provider surface. Stable provider capabilities are composed with a concrete-track
+ * resolver, while unavailable-track and smart-replacement policy stays inside this feature.
+ */
+interface PlaybackProviderPort :
+    ProviderRegistryRepository,
+    ProviderSearchRepository,
+    ProviderCatalogRepository {
     suspend fun replacementCandidates(
         track: MusicTrack,
         smartReplacementProviderIds: Set<String> = emptySet(),
         smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-    ): List<ReplacementCandidate> = emptyList()
+    ): List<ReplacementCandidate>
 
     suspend fun resolve(
         track: MusicTrack,
@@ -24,29 +40,11 @@ interface ProviderPlaybackRepository {
         smartReplacementUseOriginalMetadata: Boolean = true,
         smartReplacementUseOriginalLyrics: Boolean = true,
         smartReplacementProviderIds: Set<String> = emptySet(),
-    ): PlaybackPayload = resolve(
-        track = track,
-        unavailablePolicy = UnavailablePlaybackPolicy.Skip,
-        smartReplacementProviderIds = smartReplacementProviderIds,
-        smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
-        smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
-    )
+    ): PlaybackPayload
 
     suspend fun lyrics(track: MusicTrack): String? = null
-
     suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
-}
 
-/**
- * Playback-owned provider port. It composes only stable provider capabilities actually required by
- * queue extension, lyrics and playback resolution; the application aggregate repository stays in
- * the integration layer.
- */
-interface PlaybackProviderPort :
-    ProviderRegistryRepository,
-    ProviderSearchRepository,
-    ProviderCatalogRepository,
-    ProviderPlaybackRepository {
     fun failureMessage(throwable: Throwable, fallback: String, providerId: String? = null): String
 }
 
