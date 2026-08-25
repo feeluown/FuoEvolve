@@ -382,8 +382,13 @@ internal class AndroidAppContainer(
         }
 
         appScope.launch {
-            session.state.map { it.currentTrack?.id to it.lyrics }.distinctUntilChanged().collect { (trackId, lyrics) ->
-                if (trackId != null) playbackEngine.publishLockScreenLyrics(trackId, lyrics)
+            session.state.map { state ->
+                Triple(state.currentTrack?.id, state.lyrics, state.lyricsAlignmentOffsetMs)
+            }.distinctUntilChanged().collect { (trackId, lyrics, alignmentOffsetMs) ->
+                if (trackId != null) {
+                    val platformLyrics = toTimedLineLrc(lyrics, alignmentOffsetMs) ?: lyrics
+                    playbackEngine.publishLockScreenLyrics(trackId, platformLyrics)
+                }
             }
         }
         appScope.launch {

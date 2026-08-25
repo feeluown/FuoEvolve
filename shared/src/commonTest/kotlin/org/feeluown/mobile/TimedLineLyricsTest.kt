@@ -48,6 +48,23 @@ class TimedLineLyricsTest {
     }
 
     @Test
+    fun appliesAlignmentOffsetToPlatformTimeline() {
+        val lyrics = """
+            [00:01.000]First
+            [00:03.000]Second
+        """.trimIndent()
+
+        assertEquals(
+            "[00:02.250]First\n[00:04.250]Second",
+            toTimedLineLrc(lyrics, alignmentOffsetMs = 1_250L),
+        )
+        assertEquals(
+            "[00:00.000]First\n[00:01.500]Second",
+            toTimedLineLrc(lyrics, alignmentOffsetMs = -1_500L),
+        )
+    }
+
+    @Test
     fun ignoresUntimedLyricsForLockScreenTimeline() {
         assertNull(toTimedLineLrc("plain lyrics without timestamps"))
     }

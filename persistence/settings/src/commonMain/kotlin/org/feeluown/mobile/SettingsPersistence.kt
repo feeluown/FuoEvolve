@@ -69,6 +69,7 @@ data class PersistedSettingsV1(
     val smartReplacementMinScore: Double? = null,
     val smartReplacementSelections: Map<String, PersistedSmartReplacementSelection>? = null,
     val lyricsAssociations: Map<String, String>? = null,
+    val lyricsAlignmentOffsetsMs: Map<String, Long>? = null,
     val pauseOnOtherAppPlayback: Boolean? = null,
     val lyricFontSize: String? = null,
     val statusBarLyricsEnabled: Boolean? = null,

@@ -16,6 +16,8 @@ data class PlaybackSessionState(
     val status: PlaybackSessionStatus = PlaybackSessionStatus.Idle,
     val currentTrack: TrackRef? = null,
     val positionMs: Long = 0L,
+    val lyricsPositionMs: Long = positionMs,
+    val lyricsAlignmentOffsetMs: Long = 0L,
     val durationMs: Long = 0L,
     val bufferedMs: Long = 0L,
     val lyrics: String? = null,

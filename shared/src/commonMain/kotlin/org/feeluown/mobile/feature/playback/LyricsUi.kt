@@ -4,27 +4,38 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.roundToInt
 
 @Composable
 fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifier) {
@@ -45,13 +57,22 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
     val associationState by lyricsPort.associationState.collectAsStateWithLifecycle()
     val lines = remember(state.lyrics) { parseLyrics(state.lyrics) }
     val listState = rememberLazyListState()
+    val currentTrack = state.currentTrack
+    val associationMatchesTrack = associationState.trackId == currentTrack?.id
+    val lyricOffsetMs = if (associationMatchesTrack) associationState.alignmentOffsetMs else 0L
+    var alignmentPanelOpen by remember(currentTrack?.id) { mutableStateOf(false) }
     val renderPositionMs = rememberKaraokePositionMs(
         positionMs = state.positionMs,
         isPlaying = state.status == PlayerStatus.Playing,
     )
-    val currentIndex by remember(lines, renderPositionMs) {
-        androidx.compose.runtime.derivedStateOf {
-            currentLyricIndex(lines, renderPositionMs.value)
+    val alignedPositionMs = remember(renderPositionMs, lyricOffsetMs) {
+        derivedStateOf {
+            (renderPositionMs.value - lyricOffsetMs).coerceAtLeast(0L)
+        }
+    }
+    val currentIndex by remember(lines, alignedPositionMs) {
+        derivedStateOf {
+            currentLyricIndex(lines, alignedPositionMs.value)
         }
     }
     val activeStyle = when (fontSize) {
@@ -79,8 +100,6 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
         LyricFontSize.Medium -> 7.dp
         LyricFontSize.Large -> 8.dp
     }
-    val currentTrack = state.currentTrack
-    val associationMatchesTrack = associationState.trackId == currentTrack?.id
 
     LaunchedEffect(currentIndex, lines.size) {
         if (currentIndex < 0) return@LaunchedEffect
@@ -152,7 +171,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                                 if (active && !line.romanizationWords.isNullOrEmpty()) {
                                     KaraokeLyricText(
                                         words = line.romanizationWords,
-                                        positionMs = renderPositionMs,
+                                        positionMs = alignedPositionMs,
                                         style = romanizationStyle,
                                         activeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
                                         inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
@@ -176,7 +195,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                             if (active && !line.words.isNullOrEmpty()) {
                                 KaraokeLyricText(
                                     words = line.words,
-                                    positionMs = renderPositionMs,
+                                    positionMs = alignedPositionMs,
                                     style = activeStyle,
                                     activeColor = MaterialTheme.colorScheme.primary,
                                     inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
@@ -216,13 +235,74 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                     associationMatchesTrack &&
                     associationState.isManualAssociation
                 ) {
-                    TextButton(
-                        onClick = { lyricsPort.openAssociationSearch(currentTrack) },
+                    Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(FuoSpacing.sm),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("更换歌词")
+                        IconButton(onClick = { lyricsPort.openAssociationSearch(currentTrack) }) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "更换歌词",
+                            )
+                        }
+                        IconButton(onClick = { alignmentPanelOpen = !alignmentPanelOpen }) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "微调歌词对齐",
+                            )
+                        }
+                    }
+                    if (alignmentPanelOpen) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 60.dp, end = FuoSpacing.sm)
+                                .width(280.dp),
+                            shape = MaterialTheme.shapes.medium,
+                            tonalElevation = 3.dp,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(FuoSpacing.md),
+                                verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
+                            ) {
+                                Text(
+                                    text = "歌词对齐：${lyricOffsetLabel(lyricOffsetMs)}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Slider(
+                                    value = lyricOffsetMs.toFloat(),
+                                    onValueChange = { value ->
+                                        lyricsPort.updateAlignmentOffset(
+                                            ((value / 250f).roundToInt() * 250L).coerceIn(-3_000L, 3_000L),
+                                        )
+                                    },
+                                    valueRange = -3_000f..3_000f,
+                                    steps = 23,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "提前 3 秒",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    TextButton(onClick = { lyricsPort.updateAlignmentOffset(0L) }) {
+                                        Text("归零")
+                                    }
+                                    Text(
+                                        text = "延后 3 秒",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -343,6 +423,20 @@ private fun LyricsAssociationDialog(
             }
         },
     )
+}
+
+private fun lyricOffsetLabel(offsetMs: Long): String {
+    if (offsetMs == 0L) return "0 秒"
+    val absolute = kotlin.math.abs(offsetMs)
+    val seconds = absolute / 1_000L
+    val remainder = absolute % 1_000L
+    val value = if (remainder == 0L) {
+        seconds.toString()
+    } else {
+        "$seconds.${remainder.toString().padStart(3, '0').trimEnd('0')}"
+    }
+    val direction = if (offsetMs > 0L) "延后" else "提前"
+    return "$direction $value 秒"
 }
 
 @Composable

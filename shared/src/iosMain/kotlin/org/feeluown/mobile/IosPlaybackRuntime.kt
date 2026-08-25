@@ -100,6 +100,7 @@ private fun PlaybackState.toPlaybackRuntimeOverlay(): PlaybackRuntimeOverlay =
     PlaybackRuntimeOverlay(
         currentTrack = currentTrack?.toTrackRef(),
         lyrics = lyrics,
+        lyricsAlignmentOffsetMs = lyricsAlignmentOffsetMs,
         queueTrackIds = queue.map(MusicTrack::id),
         queueIndex = queueIndex,
     )

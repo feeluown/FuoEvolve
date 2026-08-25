@@ -26,6 +26,7 @@ class DefaultPlaybackRuntimeTest {
             PlaybackRuntimeOverlay(
                 currentTrack = track("a"),
                 lyrics = "merged lyrics",
+                lyricsAlignmentOffsetMs = 1_250,
                 queueTrackIds = listOf("a", "b"),
                 queueIndex = 0,
             ),
@@ -35,6 +36,8 @@ class DefaultPlaybackRuntimeTest {
         assertEquals(PlaybackSessionStatus.Playing, runtime.state.value.status)
         assertEquals("a", runtime.state.value.currentTrack?.id)
         assertEquals(12_000, runtime.state.value.positionMs)
+        assertEquals(10_750, runtime.state.value.lyricsPositionMs)
+        assertEquals(1_250, runtime.state.value.lyricsAlignmentOffsetMs)
         assertEquals(180_000, runtime.state.value.durationMs)
         assertEquals("merged lyrics", runtime.state.value.lyrics)
         assertEquals(listOf("a", "b"), runtime.state.value.queueTrackIds)
@@ -42,10 +45,13 @@ class DefaultPlaybackRuntimeTest {
         overlay.value = overlay.value.copy(
             currentTrack = track("b"),
             lyrics = null,
+            lyricsAlignmentOffsetMs = -500,
             queueTrackIds = listOf("b"),
         )
 
         assertEquals("b", runtime.state.value.currentTrack?.id)
+        assertEquals(12_500, runtime.state.value.lyricsPositionMs)
+        assertEquals(-500, runtime.state.value.lyricsAlignmentOffsetMs)
         assertEquals(null, runtime.state.value.lyrics)
         assertEquals(listOf("b"), runtime.state.value.queueTrackIds)
         scope.cancel()

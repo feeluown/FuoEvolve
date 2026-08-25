@@ -176,7 +176,7 @@ private fun RuntimeMiniPlayerProgress(
 @Composable
 private fun RuntimeMiniPlayerLyricLine(state: PlaybackSessionState) {
     val lines = remember(state.lyrics) { parseLyrics(state.lyrics) }
-    val currentIndex = currentLyricIndex(lines, state.positionMs)
+    val currentIndex = currentLyricIndex(lines, state.lyricsPositionMs)
     val currentLine = lines.getOrNull(currentIndex)?.text?.takeIf { it.isNotBlank() } ?: return
 
     AnimatedContent(

@@ -177,6 +177,7 @@ data class LyricsAssociationUiState(
     val isManualAssociation: Boolean = false,
     val associatedTrackId: String? = null,
     val associatedTrackTitle: String? = null,
+    val alignmentOffsetMs: Long = 0L,
     val isSearchOpen: Boolean = false,
     val query: String = "",
     val results: List<MusicTrack> = emptyList(),
@@ -194,6 +195,7 @@ interface PlaybackLyricsPort {
     fun searchAssociation()
     fun selectAssociation(track: MusicTrack)
     fun closeAssociationSearch()
+    fun updateAlignmentOffset(offsetMs: Long)
 }
 
 /** Smart-replacement state/actions used by the now-playing surface. */

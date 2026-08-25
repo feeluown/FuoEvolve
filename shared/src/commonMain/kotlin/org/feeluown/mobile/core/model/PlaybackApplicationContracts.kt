@@ -49,6 +49,7 @@ data class PlaybackState(
     val queueIndex: Int = -1,
     val playMode: PlayMode = PlayMode.ListLoop,
     val lyrics: String? = null,
+    val lyricsAlignmentOffsetMs: Long = 0L,
     val audioQuality: String? = null,
     val audioFormatInfo: AudioFormatInfo? = null,
     val audioDecoderInfo: AudioDecoderInfo? = null,

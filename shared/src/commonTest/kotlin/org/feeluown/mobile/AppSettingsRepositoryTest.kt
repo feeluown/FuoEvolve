@@ -100,6 +100,7 @@ class AppSettingsRepositoryTest {
         assertFalse(settings.statusBarLyricsEnabled)
         assertTrue(settings.pauseOnOtherAppPlayback)
         assertTrue(settings.smartReplacementSelections.isEmpty())
+        assertTrue(settings.lyricsAlignmentOffsetsMs.isEmpty())
     }
 
     @Test
@@ -180,7 +181,7 @@ class AppSettingsRepositoryTest {
     }
 
     @Test
-    fun lyricsAssociationsRoundTrip() = runTest {
+    fun lyricsAssociationsAndAlignmentOffsetsRoundTrip() = runTest {
         val store = FakeSettingsSnapshotStore()
         val first = PersistentAppSettingsRepository(
             store = store,
@@ -189,7 +190,10 @@ class AppSettingsRepositoryTest {
         )
         first.awaitSettings()
         first.update {
-            it.copy(lyricsAssociations = mapOf("bilibili:BVdemo" to "netease:123"))
+            it.copy(
+                lyricsAssociations = mapOf("bilibili:BVdemo" to "netease:123"),
+                lyricsAlignmentOffsetsMs = mapOf("bilibili:BVdemo" to 1_250L),
+            )
         }
 
         val restored = PersistentAppSettingsRepository(
@@ -199,6 +203,7 @@ class AppSettingsRepositoryTest {
         ).awaitSettings()
 
         assertEquals("netease:123", restored.lyricsAssociations["bilibili:BVdemo"])
+        assertEquals(1_250L, restored.lyricsAlignmentOffsetsMs["bilibili:BVdemo"])
     }
 
     @Test

@@ -23,6 +23,7 @@ data class PlaybackRuntimeEngineState(
 data class PlaybackRuntimeOverlay(
     val currentTrack: TrackRef? = null,
     val lyrics: String? = null,
+    val lyricsAlignmentOffsetMs: Long = 0L,
     val queueTrackIds: List<String> = emptyList(),
     val queueIndex: Int = -1,
 )
@@ -114,6 +115,8 @@ private fun composeState(
     status = engine.status,
     currentTrack = overlay.currentTrack,
     positionMs = engine.positionMs,
+    lyricsPositionMs = (engine.positionMs - overlay.lyricsAlignmentOffsetMs).coerceAtLeast(0L),
+    lyricsAlignmentOffsetMs = overlay.lyricsAlignmentOffsetMs,
     durationMs = engine.durationMs,
     bufferedMs = engine.bufferedMs,
     lyrics = overlay.lyrics,

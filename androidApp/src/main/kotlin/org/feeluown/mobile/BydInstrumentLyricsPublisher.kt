@@ -72,7 +72,7 @@ internal class BydInstrumentLyricsPublisher(
                     permissionGranted = permissionGranted,
                     status = state.status,
                     track = state.currentTrack,
-                    positionMs = state.positionMs,
+                    positionMs = state.lyricsPositionMs,
                     durationMs = state.durationMs,
                     lyrics = state.lyrics,
                 )

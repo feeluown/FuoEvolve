@@ -39,6 +39,7 @@ class SettingsPersistenceTest {
         assertEquals("Highest", result.snapshot.wifiAudioQualityPolicy)
         assertEquals("Dark", result.snapshot.themeMode)
         assertEquals(true, result.snapshot.statusBarLyricsEnabled)
+        assertEquals(null, result.snapshot.lyricsAlignmentOffsetsMs)
     }
 
     @Test
@@ -70,6 +71,7 @@ class SettingsPersistenceTest {
                 ),
             ),
             lyricsAssociations = mapOf("bilibili:BVdemo" to "netease:1"),
+            lyricsAlignmentOffsetsMs = mapOf("bilibili:BVdemo" to -750L),
             playlistPlaybackStats = mapOf(
                 "netease::playlist:1" to PersistedPlaylistPlaybackStat(2, 1234),
             ),

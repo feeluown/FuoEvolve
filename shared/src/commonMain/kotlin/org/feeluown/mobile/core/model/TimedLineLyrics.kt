@@ -9,14 +9,17 @@ package org.feeluown.mobile
  * `rawLyric` is intentionally omitted until FuoEvolve can serialize a compatible
  * word timeline rather than passing provider-specific YRC through unchanged.
  */
-fun toTimedLineLrc(rawLyrics: String?): String? {
+fun toTimedLineLrc(
+    rawLyrics: String?,
+    alignmentOffsetMs: Long = 0L,
+): String? {
     val timedLines = parseLyrics(rawLyrics)
         .filter { it.timeMs != Long.MAX_VALUE && it.text.isNotBlank() }
     if (timedLines.isEmpty()) return null
 
     return buildString {
         timedLines.forEach { line ->
-            val timestamp = formatLrcTimestamp(line.timeMs)
+            val timestamp = formatLrcTimestamp(line.timeMs + alignmentOffsetMs)
             append(timestamp)
             append(line.text.trim())
             append('\n')
