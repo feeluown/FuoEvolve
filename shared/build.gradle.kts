@@ -50,6 +50,7 @@ kotlin {
             api(project(":feature:settings"))
             api(project(":feature:onboarding"))
             api(project(":feature:home"))
+            api(project(":feature:playback"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.animation)
@@ -124,7 +125,7 @@ val p4RequiredContractFiles = listOf(
     "persistence/settings/src/commonMain/kotlin/org/feeluown/mobile/SettingsPersistence.kt",
     "persistence/settings/src/commonTest/kotlin/org/feeluown/mobile/SettingsPersistenceTest.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/AppSettingsContracts.kt",
-    "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/PlaybackApplicationContracts.kt",
+    "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackApplicationContracts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/ProviderApplicationContracts.kt",
     "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/RepositoryContracts.kt",
 )
@@ -231,7 +232,7 @@ tasks.register("checkP4ContractBoundaries") {
         rootProject.file("provider/runtime/src"),
     )
     val playbackApplicationContractsFile = rootProject.file(
-        "shared/src/commonMain/kotlin/org/feeluown/mobile/core/model/PlaybackApplicationContracts.kt",
+        "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackApplicationContracts.kt",
     )
 
     inputs.files(requiredFiles)
@@ -444,6 +445,7 @@ tasks.register("checkP4ContractBoundaries") {
 
 tasks.named("allTests") {
     dependsOn("checkP4ContractBoundaries")
+    dependsOn(":feature:playback:allTests")
     dependsOn(":persistence:settings:allTests")
     dependsOn(":provider:bilibili:allTests")
     dependsOn(":provider:netease:allTests")
