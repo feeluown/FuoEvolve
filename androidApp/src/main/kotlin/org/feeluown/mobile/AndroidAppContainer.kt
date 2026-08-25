@@ -5,8 +5,10 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -20,6 +22,7 @@ internal class AndroidAppContainer(
 ) : AutoCloseable {
     private val context: Context = application.applicationContext
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var assistantSearchJob: Job? = null
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
     private var bydInstrumentLyricsPublisher: BydInstrumentLyricsPublisher? = null
 
@@ -82,6 +85,52 @@ internal class AndroidAppContainer(
         createDebugLogFeatureController(debugLogRepository, appScope)
     }
     private val audioRecognitionRepository: AndroidAudioRecognitionRepository by lazy { AndroidAudioRecognitionRepository(context) }
+
+    private val assistantPlaybackController: AssistantPlaybackController by lazy {
+        AssistantPlaybackController(
+            providerSearchRepository = providerRepository,
+            localSearch = localRepository::search,
+            providerIdsForSearch = {
+                settingsRepository.awaitSettings().searchProviderIdsForFeature()
+            },
+            startPlayback = { track ->
+                playbackFeatureOwner.transport.playTracks(listOf(track), 0)
+            },
+        )
+    }
+
+    private val bydVoiceControlManager = BydVoiceControlManager(
+        context = context,
+        scope = appScope,
+        onPlay = { playbackSession.play() },
+        onPause = { playbackSession.pause() },
+        onPrevious = { playbackSession.previous() },
+        onNext = { playbackSession.next() },
+        onSearch = { query -> assistantPlaybackController.playFromSearch(query) },
+    ).also(BydVoiceControlManager::start)
+
+    init {
+        FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
+            override fun toggle() = playbackSession.toggle()
+            override fun play() = playbackSession.play()
+            override fun pause() = playbackSession.pause()
+            override fun previous() = playbackSession.previous()
+            override fun next() = playbackSession.next()
+
+            override fun playFromSearch(query: String, onComplete: (Boolean) -> Unit) {
+                assistantSearchJob?.cancel()
+                assistantSearchJob = appScope.launch {
+                    try {
+                        onComplete(assistantPlaybackController.playFromSearch(query))
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        onComplete(false)
+                    }
+                }
+            }
+        }
+    }
 
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
@@ -258,6 +307,7 @@ internal class AndroidAppContainer(
             navigator = navigator,
             scope = appScope,
             bydInstrumentLyricsAvailable = isBydInstrumentLyricsAvailable(),
+            bydVoiceControlSettingsPort = bydVoiceControlManager,
         )
     }
 
@@ -373,14 +423,6 @@ internal class AndroidAppContainer(
             ).also(BydInstrumentLyricsPublisher::start)
         }
 
-        FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
-            override fun toggle() = session.toggle()
-            override fun play() = session.play()
-            override fun pause() = session.pause()
-            override fun previous() = session.previous()
-            override fun next() = session.next()
-        }
-
         appScope.launch {
             session.state.map { state ->
                 Triple(state.currentTrack?.id, state.lyrics, state.lyricsAlignmentOffsetMs)
@@ -406,7 +448,10 @@ internal class AndroidAppContainer(
     }
 
     override fun close() {
+        assistantSearchJob?.cancel()
+        assistantSearchJob = null
         FuoPlaybackService.transportControls = null
+        bydVoiceControlManager.close()
         bydInstrumentLyricsPublisher?.close()
         bydInstrumentLyricsPublisher = null
         lyriconLyricsPublisher?.close()
