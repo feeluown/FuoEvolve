@@ -321,8 +321,12 @@ internal class PlaybackLyricsController(
                 return@launch
             }
 
-            val alignmentOffsetMs = mutableAssociationState.value.alignmentOffsetMs
+            val currentAssociation = mutableAssociationState.value
+            val associationChanged = currentAssociation.associatedTrackId != null &&
+                currentAssociation.associatedTrackId != track.id
+            val alignmentOffsetMs = if (associationChanged) 0L else currentAssociation.alignmentOffsetMs
             rememberAssociation(sourceTrack.id, track.id)
+            if (associationChanged) rememberAlignmentOffset(sourceTrack.id, 0L)
             loadedForTrackId = playbackTrack.id
             loadedAssociationTrackId = track.id
             updateLyrics(lyrics)
