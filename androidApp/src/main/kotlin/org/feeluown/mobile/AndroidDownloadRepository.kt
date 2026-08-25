@@ -34,7 +34,7 @@ import kotlin.coroutines.coroutineContext
 
 class AndroidDownloadRepository(
     private val context: Context,
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRepository: PlaybackProviderPort,
     private val onBackgroundWorkChanged: (List<DownloadTask>) -> Unit = {},
 ) : DownloadRepository {
     private val records = linkedMapOf<String, DownloadRecord>()
@@ -626,12 +626,12 @@ class AndroidDownloadRepository(
             "file" -> uri.path?.let(::File)?.isFile == true
             "content" -> runCatching {
                 context.contentResolver.query(
-            uri,
-            arrayOf(MediaStore.MediaColumns._ID),
-            null,
-            null,
-            null,
-        )?.use { cursor -> cursor.moveToFirst() } ?: false
+                    uri,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor -> cursor.moveToFirst() } ?: false
             }.getOrDefault(false)
             else -> false
         }
