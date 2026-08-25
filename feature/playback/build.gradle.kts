@@ -48,6 +48,7 @@ val playbackRequiredFiles = listOf(
     "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackApplicationContracts.kt",
     "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackFeatureOwner.kt",
     "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackFeaturePorts.kt",
+    "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackSmartReplacementPolicy.kt",
     "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackUiContracts.kt",
     "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackQueueController.kt",
     "feature/playback/src/commonMain/kotlin/org/feeluown/mobile/PlaybackQueueCoordinator.kt",
@@ -68,15 +69,19 @@ val retiredSharedPlaybackBusinessFiles = listOf(
     "PlaybackReplacementController.kt",
     "PlaybackSleepTimerController.kt",
     "PlaybackStartCoordinator.kt",
+    "ReplacementTieBreak.kt",
 ).map { name -> rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/$name") }
 
 val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundaries") {
     group = "verification"
-    description = "Reject shared/app dependencies or restoration of playback business ownership in :shared."
+    description = "Reject shared/app dependencies, provider aggregation, or restoration of playback business ownership in :shared."
 
     inputs.files(playbackRequiredFiles.map(rootProject::file))
     inputs.dir(rootProject.file("feature/playback/src/commonMain/kotlin"))
     inputs.files(retiredSharedPlaybackBusinessFiles)
+    inputs.dir(rootProject.file("shared/src/commonMain/kotlin"))
+    inputs.dir(rootProject.file("provider"))
+    inputs.dir(rootProject.file("androidApp/src/main/kotlin"))
 
     doLast {
         val missing = playbackRequiredFiles.map(rootProject::file).filterNot { it.isFile }
@@ -102,7 +107,7 @@ val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundar
             check(dependency !in buildText) { ":feature:playback must not depend upward/across on $dependency" }
         }
 
-        val sourceText = rootProject.file("feature/playback/src/commonMain/kotlin")
+        val featureSourceText = rootProject.file("feature/playback/src/commonMain/kotlin")
             .walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
             .joinToString("\n") { it.readText() }
@@ -114,7 +119,7 @@ val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundar
             "AppNavigator",
             "ProviderDetailOwners",
         ).forEach { symbol ->
-            check(!Regex("\\b${Regex.escape(symbol)}\\b").containsMatchIn(sourceText)) {
+            check(!Regex("\\b${Regex.escape(symbol)}\\b").containsMatchIn(featureSourceText)) {
                 ":feature:playback leaked app/shared collaborator: $symbol"
             }
         }
@@ -124,6 +129,47 @@ val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundar
             buildString {
                 appendLine("Playback business ownership moved back into :shared:")
                 restored.forEach { appendLine(" - ${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}") }
+            }
+        }
+
+        val applicationSourceRoots = listOf(
+            rootProject.file("shared/src/commonMain/kotlin"),
+            rootProject.file("shared/src/iosMain/kotlin"),
+            rootProject.file("androidApp/src/main/kotlin"),
+        )
+        val aggregateLeaks = applicationSourceRoots
+            .flatMap { root -> root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (Regex("\\b(?:ProviderMusicRepository|ProviderSearchRepositoryView|ProviderPlaybackRepositoryView|ProviderAuthRepositoryView)\\b")
+                            .containsMatchIn(line)) {
+                        "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1}"
+                    } else null
+                }
+            }
+        check(aggregateLeaks.isEmpty()) {
+            buildString {
+                appendLine("Retired provider aggregate/compatibility adapters were restored:")
+                aggregateLeaks.forEach { appendLine(" - $it") }
+            }
+        }
+
+        val replacementPolicyLeaks = listOf(
+            rootProject.file("shared/src/commonMain/kotlin"),
+            rootProject.file("provider"),
+        ).flatMap { root -> root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (Regex("\\b(?:bilibiliReplacementScore|rankReplacementCandidates|selectRankedReplacementCandidate|replacementTieBreakConfidence|sortReplacementScoreTies)\\b")
+                            .containsMatchIn(line)) {
+                        "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1}"
+                    } else null
+                }
+            }
+        check(replacementPolicyLeaks.isEmpty()) {
+            buildString {
+                appendLine("Smart-replacement policy must remain owned by :feature:playback:")
+                replacementPolicyLeaks.forEach { appendLine(" - $it") }
             }
         }
     }
