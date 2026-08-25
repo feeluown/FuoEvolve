@@ -31,7 +31,9 @@ class PlaybackLyricsControllerTest {
             updateLyrics = { currentLyrics = it },
             associationForTrackId = { if (it == source.id) target.id else null },
             rememberAssociation = { _, _ -> },
-            alignmentOffsetForTrackId = { if (it == source.id) 1_250L else 0L },
+            alignmentOffsetForTrackId = {
+                if (it == lyricsAlignmentPersistenceKey(source.id, target.id)) 1_250L else 0L
+            },
         )
 
         controller.maybeLoad(source)
@@ -49,6 +51,7 @@ class PlaybackLyricsControllerTest {
         val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili").copy(
             lyrics = "[00:00.00]原始歌词",
         )
+        val missingAssociationId = "netease:missing"
         var currentLyrics: String? = null
         val controller = PlaybackLyricsController(
             repository = FakePlaybackLyricsRepository(),
@@ -57,9 +60,11 @@ class PlaybackLyricsControllerTest {
             currentTrackId = { source.id },
             currentLyrics = { currentLyrics },
             updateLyrics = { currentLyrics = it },
-            associationForTrackId = { if (it == source.id) "netease:missing" else null },
+            associationForTrackId = { if (it == source.id) missingAssociationId else null },
             rememberAssociation = { _, _ -> },
-            alignmentOffsetForTrackId = { if (it == source.id) 1_250L else 0L },
+            alignmentOffsetForTrackId = {
+                if (it == lyricsAlignmentPersistenceKey(source.id, missingAssociationId)) 1_250L else 0L
+            },
         )
 
         controller.maybeLoad(source)
@@ -115,7 +120,7 @@ class PlaybackLyricsControllerTest {
     }
 
     @Test
-    fun alignmentOffsetChangeIsRememberedForAssociatedSource() = runTest {
+    fun alignmentOffsetChangeIsRememberedForSpecificAssociation() = runTest {
         val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
         val target = providerTrack("netease:123", "歌词歌曲", "netease")
         val repository = FakePlaybackLyricsRepository(
@@ -132,19 +137,22 @@ class PlaybackLyricsControllerTest {
             updateLyrics = {},
             associationForTrackId = { if (it == source.id) target.id else null },
             rememberAssociation = { _, _ -> },
-            rememberAlignmentOffset = { sourceId, offsetMs -> rememberedOffsets += sourceId to offsetMs },
+            rememberAlignmentOffset = { associationKey, offsetMs -> rememberedOffsets += associationKey to offsetMs },
         )
 
         controller.maybeLoad(source)
         advanceUntilIdle()
         controller.updateAlignmentOffset(-750L)
 
-        assertEquals(listOf(source.id to -750L), rememberedOffsets)
+        assertEquals(
+            listOf(lyricsAlignmentPersistenceKey(source.id, target.id) to -750L),
+            rememberedOffsets,
+        )
         assertEquals(-750L, controller.associationState.value.alignmentOffsetMs)
     }
 
     @Test
-    fun changingAssociatedLyricsResetsAndPersistsAlignmentOffset() = runTest {
+    fun changingAssociatedLyricsRestoresEachLyricsOwnAlignmentOffset() = runTest {
         val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
         val currentTarget = providerTrack("netease:123", "旧歌词歌曲", "netease")
         val replacementTarget = providerTrack("qqmusic:456", "新歌词歌曲", "qqmusic")
@@ -155,7 +163,12 @@ class PlaybackLyricsControllerTest {
                 replacementTarget.id to "[00:00.00]新歌词",
             ),
         )
+        var persistedAssociation: String? = currentTarget.id
         val rememberedOffsets = mutableListOf<Pair<String, Long>>()
+        val savedOffsets = mapOf(
+            lyricsAlignmentPersistenceKey(source.id, currentTarget.id) to 1_250L,
+            lyricsAlignmentPersistenceKey(source.id, replacementTarget.id) to -500L,
+        )
         val controller = PlaybackLyricsController(
             repository = repository,
             scope = this,
@@ -163,10 +176,10 @@ class PlaybackLyricsControllerTest {
             currentTrackId = { source.id },
             currentLyrics = { null },
             updateLyrics = {},
-            associationForTrackId = { if (it == source.id) currentTarget.id else null },
-            rememberAssociation = { _, _ -> },
-            alignmentOffsetForTrackId = { if (it == source.id) 1_250L else 0L },
-            rememberAlignmentOffset = { sourceId, offsetMs -> rememberedOffsets += sourceId to offsetMs },
+            associationForTrackId = { if (it == source.id) persistedAssociation else null },
+            rememberAssociation = { _, targetId -> persistedAssociation = targetId },
+            alignmentOffsetForTrackId = { savedOffsets[it] ?: 0L },
+            rememberAlignmentOffset = { associationKey, offsetMs -> rememberedOffsets += associationKey to offsetMs },
         )
 
         controller.maybeLoad(source)
@@ -179,8 +192,58 @@ class PlaybackLyricsControllerTest {
         advanceUntilIdle()
 
         assertEquals(replacementTarget.id, controller.associationState.value.associatedTrackId)
-        assertEquals(0L, controller.associationState.value.alignmentOffsetMs)
-        assertEquals(listOf(source.id to 0L), rememberedOffsets)
+        assertEquals(-500L, controller.associationState.value.alignmentOffsetMs)
+        assertTrue(rememberedOffsets.isEmpty())
+
+        controller.openAssociationSearch(source)
+        advanceUntilIdle()
+        controller.selectAssociation(currentTarget)
+        advanceUntilIdle()
+
+        assertEquals(currentTarget.id, controller.associationState.value.associatedTrackId)
+        assertEquals(1_250L, controller.associationState.value.alignmentOffsetMs)
+        assertTrue(rememberedOffsets.isEmpty())
+    }
+
+    @Test
+    fun activeManualAssociationKeepsAssociatedLyricsOverEngineLyrics() = runTest {
+        val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
+        val target = providerTrack("netease:123", "歌词歌曲", "netease")
+        val associatedLyrics = "[00:00.00]手动关联歌词"
+        val repository = FakePlaybackLyricsRepository(
+            details = mapOf(target.id to target),
+            lyrics = mapOf(target.id to associatedLyrics),
+        )
+        var currentLyrics: String? = null
+        val controller = PlaybackLyricsController(
+            repository = repository,
+            scope = this,
+            currentRequestSerial = { 1L },
+            currentTrackId = { source.id },
+            currentLyrics = { currentLyrics },
+            updateLyrics = { currentLyrics = it },
+            associationForTrackId = { if (it == source.id) target.id else null },
+            rememberAssociation = { _, _ -> },
+        )
+
+        controller.maybeLoad(source)
+        advanceUntilIdle()
+        assertEquals(associatedLyrics, currentLyrics)
+        assertTrue(controller.associationState.value.isManualAssociation)
+
+        val merged = controller.mergedLyrics(
+            engineState = PlaybackState(
+                currentTrack = source,
+                lyrics = "[00:00.00]引擎原生歌词",
+            ),
+            currentQueueTrackId = source.id,
+            previousPlaybackState = PlaybackState(
+                currentTrack = source,
+                lyrics = associatedLyrics,
+            ),
+        )
+
+        assertEquals(associatedLyrics, merged)
     }
 
     @Test
@@ -203,7 +266,17 @@ class PlaybackLyricsControllerTest {
             updateLyrics = { currentLyrics = it },
             associationForTrackId = { persistedAssociation },
             rememberAssociation = { _, _ -> },
-            alignmentOffsetForTrackId = { persistedOffsetMs },
+            alignmentOffsetForTrackId = { key ->
+                val associationId = persistedAssociation
+                if (
+                    associationId != null &&
+                    key == lyricsAlignmentPersistenceKey(source.id, associationId)
+                ) {
+                    persistedOffsetMs
+                } else {
+                    0L
+                }
+            },
         )
 
         controller.maybeLoad(source)
