@@ -43,13 +43,12 @@ private class DefaultPlaybackProviderPort(
         } else {
             smartReplacementProviderIds
         }
-        val candidates = providerIds
-            .asSequence()
-            .filter { it != originalProviderId }
-            .flatMap { providerId ->
-                search.search("${original.title} ${original.artists}", providerId).asSequence()
+        val candidates = buildList {
+            for (providerId in providerIds) {
+                if (providerId == originalProviderId) continue
+                addAll(search.search("${original.title} ${original.artists}", providerId))
             }
-            .toList()
+        }
         return sortReplacementScoreTies(
             origin = original,
             ranked = rankReplacementCandidates(
@@ -281,10 +280,12 @@ private fun replacementScore(origin: MusicTrack, candidate: MusicTrack): Double 
         originArtists.contains(candidateArtists) || candidateArtists.contains(originArtists) -> 0.8
         else -> tokenSimilarity(originArtists, candidateArtists)
     }
-    val durationScore = if (origin.durationMs == null || candidate.durationMs == null) {
+    val originDurationMs = origin.durationMs
+    val candidateDurationMs = candidate.durationMs
+    val durationScore = if (originDurationMs == null || candidateDurationMs == null) {
         0.5
     } else {
-        (1.0 - (abs(origin.durationMs - candidate.durationMs).toDouble() / 30_000.0)).coerceIn(0.0, 1.0)
+        (1.0 - (abs(originDurationMs - candidateDurationMs).toDouble() / 30_000.0)).coerceIn(0.0, 1.0)
     }
     return titleScore * 0.55 + artistScore * 0.35 + durationScore * 0.10
 }
