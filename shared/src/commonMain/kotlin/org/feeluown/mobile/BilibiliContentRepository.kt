@@ -5,16 +5,17 @@ import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
 
 /**
- * Adds Bilibili browsing surfaces without changing the core provider repository.
- * Playback/search/auth still go through [delegate]; only Bilibili content
- * discovery and its virtual resources are routed to [bilibili].
+ * Adds Bilibili browsing surfaces at the catalog/library edge only. Search, auth, lifecycle and
+ * concrete-track playback resolution stay on the base provider capabilities.
  */
 internal class BilibiliContentRepository(
-    private val delegate: ProviderMusicRepository,
+    private val catalogDelegate: ProviderCatalogRepository,
+    private val libraryDelegate: ProviderLibraryRepository,
     private val bilibili: KotlinMusicProvider,
-) : ProviderMusicRepository by delegate {
+) : ProviderCatalogRepository by catalogDelegate,
+    ProviderLibraryRepository by libraryDelegate {
     override suspend fun features(): List<ProviderFeature> {
-        val base = delegate.features()
+        val base = catalogDelegate.features()
         if (base.none { it.providerId == BILIBILI_PROVIDER_ID }) return base
         val presentedBilibiliFeatures = bilibili.features.mapNotNull { feature ->
             when (feature.id) {
@@ -53,21 +54,19 @@ internal class BilibiliContentRepository(
             !section.isLoginRequired &&
             section.errorMessage == null
         ) {
-            section.copy(
-                playlists = (section.playlists + historyPlaylist()).distinctBy { it.id },
-            )
+            section.copy(playlists = (section.playlists + historyPlaylist()).distinctBy { it.id })
         } else {
             section
         }
     } else {
-        delegate.loadFeaturePage(feature, offset, limit)
+        catalogDelegate.loadFeaturePage(feature, offset, limit)
     }
 
     override suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> =
         if (feature.providerId == BILIBILI_PROVIDER_ID) {
             bilibili.loadFeature(feature, 0, PROVIDER_PAGE_SIZE).tracks
         } else {
-            delegate.loadMoreFeatureTracks(feature)
+            catalogDelegate.loadMoreFeatureTracks(feature)
         }
 
     override suspend fun playlistDetail(playlist: ProviderPlaylist): ProviderPlaylistDetail =
@@ -80,7 +79,7 @@ internal class BilibiliContentRepository(
     ): ProviderPlaylistDetail = when {
         playlist.isBilibiliHistoryPlaylist() -> loadHistoryPlaylistDetail(playlist, offset, limit)
         playlist.providerId == BILIBILI_PROVIDER_ID -> bilibili.playlistDetail(playlist, offset, limit)
-        else -> delegate.playlistDetailPage(playlist, offset, limit)
+        else -> catalogDelegate.playlistDetailPage(playlist, offset, limit)
     }
 
     override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = when {
@@ -90,14 +89,14 @@ internal class BilibiliContentRepository(
             limit = PROVIDER_PAGE_SIZE,
         ).tracks
         playlist.providerId == BILIBILI_PROVIDER_ID -> bilibili.playlistTracks(playlist)
-        else -> delegate.playlistTracks(playlist)
+        else -> catalogDelegate.playlistTracks(playlist)
     }
 
     override suspend fun playlistOperationTargets(track: MusicTrack): List<ProviderPlaylist> =
         if (track.source == BILIBILI_PROVIDER_ID) {
             bilibili.playlistOperationTargets(track)
         } else {
-            delegate.playlistOperationTargets(track)
+            libraryDelegate.playlistOperationTargets(track)
         }
 
     override suspend fun addTrackToPlaylist(
@@ -106,7 +105,7 @@ internal class BilibiliContentRepository(
     ): ProviderMutationResult = when {
         playlist.isBilibiliHistoryPlaylist() -> ProviderMutationResult(false, "历史记录不支持添加歌曲")
         playlist.providerId == BILIBILI_PROVIDER_ID -> bilibili.addTrackToPlaylist(playlist, track)
-        else -> delegate.addTrackToPlaylist(playlist, track)
+        else -> libraryDelegate.addTrackToPlaylist(playlist, track)
     }
 
     override suspend fun removeTrackFromPlaylist(
@@ -115,14 +114,14 @@ internal class BilibiliContentRepository(
     ): ProviderMutationResult = when {
         playlist.isBilibiliHistoryPlaylist() -> ProviderMutationResult(false, "历史记录不支持移除歌曲")
         playlist.providerId == BILIBILI_PROVIDER_ID -> bilibili.removeTrackFromPlaylist(playlist, track)
-        else -> delegate.removeTrackFromPlaylist(playlist, track)
+        else -> libraryDelegate.removeTrackFromPlaylist(playlist, track)
     }
 
     override suspend fun mediaItemDetail(item: ProviderMediaItem): ProviderMediaItemDetail =
         if (item.providerId == BILIBILI_PROVIDER_ID) {
             bilibili.mediaItemDetail(item, 0, 0, PROVIDER_PAGE_SIZE)
         } else {
-            delegate.mediaItemDetail(item)
+            catalogDelegate.mediaItemDetail(item)
         }
 
     override suspend fun mediaItemDetailPage(
@@ -133,14 +132,14 @@ internal class BilibiliContentRepository(
     ): ProviderMediaItemDetail = if (item.providerId == BILIBILI_PROVIDER_ID) {
         bilibili.mediaItemDetail(item, tracksOffset, albumsOffset, limit)
     } else {
-        delegate.mediaItemDetailPage(item, tracksOffset, albumsOffset, limit)
+        catalogDelegate.mediaItemDetailPage(item, tracksOffset, albumsOffset, limit)
     }
 
     override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> =
         if (item.providerId == BILIBILI_PROVIDER_ID) {
             bilibili.mediaItemTracks(item)
         } else {
-            delegate.mediaItemTracks(item)
+            catalogDelegate.mediaItemTracks(item)
         }
 
     private suspend fun loadHistoryPlaylistDetail(
@@ -151,9 +150,7 @@ internal class BilibiliContentRepository(
         val feature = bilibili.features.first { it.id == BILIBILI_HISTORY_FEATURE_ID }
         val section = bilibili.loadFeature(feature, offset, limit)
         return ProviderPlaylistDetail(
-            playlist = playlist.copy(
-                coverUrl = section.tracks.firstOrNull()?.coverUrl ?: playlist.coverUrl,
-            ),
+            playlist = playlist.copy(coverUrl = section.tracks.firstOrNull()?.coverUrl ?: playlist.coverUrl),
             tracks = section.tracks,
             tracksNextOffset = section.nextOffset,
             tracksHasMore = section.hasMore,
@@ -169,8 +166,7 @@ internal class BilibiliContentRepository(
         providerUrl = "https://www.bilibili.com/account/history",
     )
 
-    private fun ProviderPlaylist.isBilibiliHistoryPlaylist(): Boolean =
-        id == BILIBILI_HISTORY_PLAYLIST_ID
+    private fun ProviderPlaylist.isBilibiliHistoryPlaylist(): Boolean = id == BILIBILI_HISTORY_PLAYLIST_ID
 
     private companion object {
         const val BILIBILI_PROVIDER_ID = "bilibili"
@@ -181,12 +177,23 @@ internal class BilibiliContentRepository(
     }
 }
 
-fun createFuoProviderRepository(
+/** Composition-only holder; callers consume individual capability properties, never a broad repository API. */
+class FuoProviderGraph internal constructor(
+    val registry: ProviderRegistryRepository,
+    val search: ProviderSearchRepository,
+    val auth: ProviderAuthRepository,
+    val catalog: ProviderCatalogRepository,
+    val library: ProviderLibraryRepository,
+    val playbackSource: PlaybackProviderSourcePort,
+    val audioQuality: ProviderAudioQualityPort,
+)
+
+fun createFuoProviderGraph(
     credentials: ProviderCredentialStore,
     persistentCache: ProviderPersistentCache? = null,
     isCellularConnection: () -> Boolean = { false },
-): ProviderMusicRepository {
-    val delegate = createKotlinProviderRepository(
+): FuoProviderGraph {
+    val base = createKotlinProviderRepository(
         credentials = credentials,
         persistentCache = persistentCache,
         isCellularConnection = isCellularConnection,
@@ -195,5 +202,18 @@ fun createFuoProviderRepository(
         credentials = credentials,
         persistentCache = persistentCache,
     )
-    return BilibiliContentRepository(delegate, bilibili)
+    val content = BilibiliContentRepository(
+        catalogDelegate = base,
+        libraryDelegate = base,
+        bilibili = bilibili,
+    )
+    return FuoProviderGraph(
+        registry = base,
+        search = base,
+        auth = base,
+        catalog = content,
+        library = content,
+        playbackSource = base,
+        audioQuality = base,
+    )
 }
