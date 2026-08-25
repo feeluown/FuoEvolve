@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-internal data class PlaybackQueueControllerSnapshot(
+data class PlaybackQueueState(
     val mainQueue: List<MusicTrack> = emptyList(),
     val originalMainQueue: List<MusicTrack> = emptyList(),
     val upNextQueue: List<MusicTrack> = emptyList(),
@@ -29,8 +29,8 @@ internal data class PlaybackQueueControllerSnapshot(
 internal class PlaybackQueueController {
     private var applyingStartupSnapshot = false
     private var startupDirty = false
-    private val mutableState = MutableStateFlow(PlaybackQueueControllerSnapshot())
-    val state: StateFlow<PlaybackQueueControllerSnapshot> = mutableState.asStateFlow()
+    private val mutableState = MutableStateFlow(PlaybackQueueState())
+    val state: StateFlow<PlaybackQueueState> = mutableState.asStateFlow()
 
     var mainQueue: List<MusicTrack>
         get() = mutableState.value.mainQueue
@@ -71,21 +71,9 @@ internal class PlaybackQueueController {
 
     private var pendingPlaybackStartReason: PlaybackStartReason? = null
 
-    fun currentTrack(): MusicTrack? =
-        if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
+    fun currentTrack(): MusicTrack? = mutableState.value.currentTrack()
 
-    fun displayQueue(): List<MusicTrack> = buildList {
-        currentTrack()?.let(::add)
-        addAll(upNextQueue)
-        val nextMainIndex = when {
-            currentIsUpNext -> mainQueueIndex + 1
-            mainQueueIndex >= 0 -> mainQueueIndex + 1
-            else -> 0
-        }
-        if (nextMainIndex in 0..mainQueue.size) {
-            addAll(mainQueue.drop(nextMainIndex))
-        }
-    }
+    fun displayQueue(): List<MusicTrack> = mutableState.value.displayQueue()
 
     fun displayQueueIndex(): Int = if (currentTrack() != null) 0 else -1
 
@@ -127,7 +115,7 @@ internal class PlaybackQueueController {
         if (startupDirty) return false
         applyingStartupSnapshot = true
         try {
-            mutableState.value = PlaybackQueueControllerSnapshot(
+            mutableState.value = PlaybackQueueState(
                 mainQueue = snapshot.mainQueue,
                 originalMainQueue = snapshot.originalMainQueue,
                 upNextQueue = snapshot.upNextQueue,
@@ -159,9 +147,25 @@ internal class PlaybackQueueController {
     }
 
     private inline fun update(
-        crossinline transform: (PlaybackQueueControllerSnapshot) -> PlaybackQueueControllerSnapshot,
+        crossinline transform: (PlaybackQueueState) -> PlaybackQueueState,
     ) {
         if (!applyingStartupSnapshot) startupDirty = true
         mutableState.update { current -> transform(current) }
+    }
+}
+
+internal fun PlaybackQueueState.currentTrack(): MusicTrack? =
+    if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
+
+internal fun PlaybackQueueState.displayQueue(): List<MusicTrack> = buildList {
+    currentTrack()?.let(::add)
+    addAll(upNextQueue)
+    val nextMainIndex = when {
+        currentIsUpNext -> mainQueueIndex + 1
+        mainQueueIndex >= 0 -> mainQueueIndex + 1
+        else -> 0
+    }
+    if (nextMainIndex in 0..mainQueue.size) {
+        addAll(mainQueue.drop(nextMainIndex))
     }
 }
