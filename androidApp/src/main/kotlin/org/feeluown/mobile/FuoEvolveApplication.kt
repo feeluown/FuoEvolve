@@ -14,8 +14,8 @@ class FuoEvolveApplication : Application() {
     private fun container(): AndroidAppContainer =
         containerHolder ?: AndroidAppContainer(this).also { containerHolder = it }
 
-    internal val providerRepository: ProviderMusicRepository
-        get() = container().providerRepository
+    internal val playbackProvider: PlaybackProviderPort
+        get() = container().playbackProvider
 
     internal val providerCredentialBackup: AndroidProviderCredentialBackup
         get() = container().providerCredentialBackup
