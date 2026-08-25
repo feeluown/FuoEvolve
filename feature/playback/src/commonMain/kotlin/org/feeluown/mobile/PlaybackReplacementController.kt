@@ -124,7 +124,8 @@ internal fun MusicTrack.withReplacementSelection(selection: SmartReplacementSele
     isUnavailable = false,
 )
 
-internal fun MusicTrack.originalDetailTrackForNavigation(): MusicTrack {
+/** Reconstructs the provider-native track represented by a smart-replacement playback item. */
+fun MusicTrack.originalDetailTrackForNavigation(): MusicTrack {
     if (!isSmartReplacement) return this
     val detailId = originalId ?: providerId ?: id
     val detailSource = originalSource
