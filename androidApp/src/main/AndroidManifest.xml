@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.BYDAUTO_INSTRUMENT_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_INSTRUMENT_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_INSTRUMENT_SET" />
