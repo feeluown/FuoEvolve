@@ -9,6 +9,9 @@ import kotlinx.coroutines.launch
 
 private val LYRICS_ASSOCIATION_PROVIDER_IDS = setOf("netease", "qqmusic", "ytmusic")
 
+internal fun lyricsAlignmentPersistenceKey(sourceTrackId: String, lyricsTrackId: String): String =
+    "${sourceTrackId.length}:$sourceTrackId$lyricsTrackId"
+
 internal interface PlaybackLyricsRepository {
     suspend fun lyrics(track: MusicTrack): String?
     suspend fun search(keyword: String): List<MusicTrack>
@@ -27,11 +30,25 @@ private class ProviderPlaybackLyricsRepository(
     override suspend fun search(keyword: String): List<MusicTrack> {
         val enabledProviderIds = registryRepository.providers().mapTo(mutableSetOf()) { it.providerId }
         val results = mutableListOf<MusicTrack>()
+        var attemptedProviders = 0
+        var successfulProviders = 0
+        var firstFailure: Throwable? = null
         for (providerId in LYRICS_ASSOCIATION_PROVIDER_IDS) {
             if (providerId !in enabledProviderIds) continue
-            val providerResults = runCatching { searchRepository.search(keyword, providerId) }
-                .getOrDefault(emptyList())
-            results += providerResults
+            attemptedProviders += 1
+            runCatching { searchRepository.search(keyword, providerId) }
+                .fold(
+                    onSuccess = { providerResults ->
+                        successfulProviders += 1
+                        results += providerResults
+                    },
+                    onFailure = { throwable ->
+                        if (firstFailure == null) firstFailure = throwable
+                    },
+                )
+        }
+        if (attemptedProviders > 0 && successfulProviders == 0) {
+            throw firstFailure ?: IllegalStateException("歌词搜索失败")
         }
         return results.distinctBy { it.id }
     }
@@ -127,13 +144,22 @@ internal class PlaybackLyricsController(
         val currentId = currentQueueTrackId
             ?: engineTrackId
             ?: previousPlaybackState.currentTrack?.id
+        val previousTrackId = previousPlaybackState.currentTrack?.id
+        val previousLyrics = previousPlaybackState.lyrics?.takeIf {
+            it.isNotBlank() && previousTrackId != null && previousTrackId == currentId
+        }
+        val association = mutableAssociationState.value
+        if (
+            association.isManualAssociation &&
+            association.trackId == currentId &&
+            previousLyrics != null
+        ) {
+            return previousLyrics
+        }
         engineState.lyrics?.takeIf {
             it.isNotBlank() && (engineTrackId == null || engineTrackId == currentId)
         }?.let { return it }
-        val previousTrackId = previousPlaybackState.currentTrack?.id
-        return previousPlaybackState.lyrics?.takeIf {
-            it.isNotBlank() && previousTrackId != null && previousTrackId == currentId
-        }
+        return previousLyrics
     }
 
     fun maybeLoad(track: MusicTrack?) {
@@ -142,8 +168,11 @@ internal class PlaybackLyricsController(
         val associatedTrackId = associationForTrackId(lyricTrack.id)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-        val alignmentOffsetMs = alignmentOffsetForTrackId(lyricTrack.id)
-            .coerceIn(-3_000L, 3_000L)
+        val alignmentOffsetMs = associatedTrackId?.let { lyricsTrackId ->
+            alignmentOffsetForTrackId(
+                lyricsAlignmentPersistenceKey(lyricTrack.id, lyricsTrackId),
+            ).coerceIn(-3_000L, 3_000L)
+        } ?: 0L
         currentSourceTrackId = lyricTrack.id
 
         if (loadedForTrackId == track.id && loadedAssociationTrackId == associatedTrackId) {
@@ -239,8 +268,16 @@ internal class PlaybackLyricsController(
         val sourceTrack = lyricSourceTrackForPlayback(track)
         currentSourceTrackId = sourceTrack.id
         val previous = mutableAssociationState.value.takeIf { it.trackId == track.id }
+        val persistedAssociationTrackId = associationForTrackId(sourceTrack.id)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
         val alignmentOffsetMs = previous?.alignmentOffsetMs
-            ?: alignmentOffsetForTrackId(sourceTrack.id).coerceIn(-3_000L, 3_000L)
+            ?: persistedAssociationTrackId?.let { lyricsTrackId ->
+                alignmentOffsetForTrackId(
+                    lyricsAlignmentPersistenceKey(sourceTrack.id, lyricsTrackId),
+                ).coerceIn(-3_000L, 3_000L)
+            }
+            ?: 0L
         mutableAssociationState.value = LyricsAssociationUiState(
             trackId = track.id,
             isLyricsUnavailable = previous?.isLyricsUnavailable ?: currentLyrics().isNullOrBlank(),
@@ -321,12 +358,10 @@ internal class PlaybackLyricsController(
                 return@launch
             }
 
-            val currentAssociation = mutableAssociationState.value
-            val associationChanged = currentAssociation.associatedTrackId != null &&
-                currentAssociation.associatedTrackId != track.id
-            val alignmentOffsetMs = if (associationChanged) 0L else currentAssociation.alignmentOffsetMs
+            val alignmentOffsetMs = alignmentOffsetForTrackId(
+                lyricsAlignmentPersistenceKey(sourceTrack.id, track.id),
+            ).coerceIn(-3_000L, 3_000L)
             rememberAssociation(sourceTrack.id, track.id)
-            if (associationChanged) rememberAlignmentOffset(sourceTrack.id, 0L)
             loadedForTrackId = playbackTrack.id
             loadedAssociationTrackId = track.id
             updateLyrics(lyrics)
@@ -362,8 +397,13 @@ internal class PlaybackLyricsController(
         if (current.alignmentOffsetMs == clamped) return
         mutableAssociationState.value = current.copy(alignmentOffsetMs = clamped)
         if (current.isManualAssociation) {
-            currentSourceTrackId?.let { sourceTrackId ->
-                rememberAlignmentOffset(sourceTrackId, clamped)
+            val sourceTrackId = currentSourceTrackId
+            val lyricsTrackId = current.associatedTrackId
+            if (sourceTrackId != null && lyricsTrackId != null) {
+                rememberAlignmentOffset(
+                    lyricsAlignmentPersistenceKey(sourceTrackId, lyricsTrackId),
+                    clamped,
+                )
             }
         }
     }
