@@ -45,6 +45,36 @@ class PlaybackLyricsControllerTest {
     }
 
     @Test
+    fun unavailableRememberedAssociationDoesNotShiftNativeFallbackLyrics() = runTest {
+        val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili").copy(
+            lyrics = "[00:00.00]原始歌词",
+        )
+        var currentLyrics: String? = null
+        val controller = PlaybackLyricsController(
+            repository = FakePlaybackLyricsRepository(),
+            scope = this,
+            currentRequestSerial = { 1L },
+            currentTrackId = { source.id },
+            currentLyrics = { currentLyrics },
+            updateLyrics = { currentLyrics = it },
+            associationForTrackId = { if (it == source.id) "netease:missing" else null },
+            rememberAssociation = { _, _ -> },
+            alignmentOffsetForTrackId = { if (it == source.id) 1_250L else 0L },
+        )
+
+        controller.maybeLoad(source)
+        advanceUntilIdle()
+
+        assertEquals("[00:00.00]原始歌词", currentLyrics)
+        assertFalse(controller.associationState.value.isManualAssociation)
+        assertEquals(0L, controller.associationState.value.alignmentOffsetMs)
+
+        controller.refreshPersistentState(source)
+        advanceUntilIdle()
+        assertEquals(0L, controller.associationState.value.alignmentOffsetMs)
+    }
+
+    @Test
     fun unavailableLyricsCanSearchSelectAndRememberAssociation() = runTest {
         val source = providerTrack("bilibili:BVdemo", "视频标题", "bilibili")
         val target = providerTrack("qqmusic:42", "BGM 歌曲", "qqmusic")
