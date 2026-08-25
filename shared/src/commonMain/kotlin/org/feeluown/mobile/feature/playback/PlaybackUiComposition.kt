@@ -70,6 +70,13 @@ fun ProvideNarrowPlaybackUi(
     graph: PlaybackUiGraph = LocalPlaybackUiPort.current,
     content: @Composable () -> Unit,
 ) {
+    val queueStateFlow = graph.queue.queueStateFlow
+    val observedQueueState = if (queueStateFlow != null) {
+        val state by queueStateFlow.collectAsStateWithLifecycle()
+        state
+    } else {
+        null
+    }
     val sleepTimerStateFlow = graph.sleepTimer.sleepTimerStateFlow
     val observedSleepTimerState = if (sleepTimerStateFlow != null) {
         val state by sleepTimerStateFlow.collectAsStateWithLifecycle()
@@ -84,6 +91,18 @@ fun ProvideNarrowPlaybackUi(
     } else {
         graph.replacement.replacementCandidateState
     }
+    val observedQueue = observedQueueState?.let { queueState ->
+        remember(graph.queue, queueState) {
+            object : PlaybackQueueUiPort by graph.queue {
+                override val currentQueueTrack: MusicTrack? = queueState.currentTrack()
+                override val queue: List<MusicTrack> = queueState.displayQueue()
+                override val displayUpNextCount: Int = queueState.upNextQueue.size
+                override val isShuffleEnabled: Boolean = queueState.shuffleEnabled
+                override val repeatMode: RepeatMode = queueState.repeatMode
+                override val isFmQueueActive: Boolean = queueState.isFmQueue
+            }
+        }
+    } ?: graph.queue
     val observedSleepTimer = remember(graph.sleepTimer, observedSleepTimerState) {
         object : PlaybackSleepTimerPort by graph.sleepTimer {
             override val sleepTimerState: SleepTimerState = observedSleepTimerState
@@ -97,7 +116,7 @@ fun ProvideNarrowPlaybackUi(
     CompositionLocalProvider(
         LocalPlaybackNavigationPort provides graph.navigation,
         LocalPlaybackPresentationPort provides graph.presentation,
-        LocalPlaybackQueueUiPort provides graph.queue,
+        LocalPlaybackQueueUiPort provides observedQueue,
         LocalPlaybackSleepTimerPort provides observedSleepTimer,
         LocalDownloadActionPort provides graph.downloads,
         LocalPlaylistActionPort provides graph.playlists,
