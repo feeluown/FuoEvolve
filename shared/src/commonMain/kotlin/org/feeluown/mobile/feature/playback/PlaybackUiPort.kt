@@ -60,6 +60,8 @@ interface PlaybackQueueUiPort {
     val repeatMode: RepeatMode
     val isFmQueueActive: Boolean
     val trackChangeDirection: TrackChangeDirection
+    val queueStateFlow: StateFlow<PlaybackQueueState>?
+        get() = null
     val feedback: StateFlow<String?>
         get() = EMPTY_FEEDBACK_FLOW
 
