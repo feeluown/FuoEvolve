@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -35,6 +36,7 @@ data class SettingsFeatureUiState(
     val localMusic: LocalMusicUiState = LocalMusicUiState(viewMode = LocalMusicViewMode.All),
     val statusBarLyricsAvailable: Boolean = false,
     val bydInstrumentLyricsAvailable: Boolean = false,
+    val bydVoiceControl: BydVoiceControlSettingsState = BydVoiceControlSettingsState(),
     val debugLogViewerAvailable: Boolean = false,
     val isBusy: Boolean = false,
     val feedback: String? = null,
@@ -71,6 +73,7 @@ interface SettingsFeatureController {
     fun setStatusBarLyricsAvailability(available: Boolean)
     fun setStatusBarLyricsEnabled(enabled: Boolean)
     fun setBydInstrumentLyricsEnabled(enabled: Boolean)
+    fun setBydVoiceControlEnabled(enabled: Boolean)
     fun dismissFeedback(feedback: String)
 }
 
@@ -101,6 +104,7 @@ fun createSettingsFeatureController(
     navigator: AppNavigator,
     scope: CoroutineScope,
     bydInstrumentLyricsAvailable: Boolean = false,
+    bydVoiceControlSettingsPort: BydVoiceControlSettingsPort? = null,
 ): SettingsFeatureController {
     val owner = createSettingsFeatureOwner(
         preferences = BoundSettingsPreferencesPort(settingsRepository),
@@ -117,6 +121,7 @@ fun createSettingsFeatureController(
         settingsRepository = settingsRepository,
         scope = scope,
         bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
+        bydVoiceControlSettingsPort = bydVoiceControlSettingsPort,
     )
 }
 
@@ -125,16 +130,25 @@ private class BoundSettingsFeatureController(
     private val settingsRepository: AppSettingsRepository,
     private val scope: CoroutineScope,
     private val bydInstrumentLyricsAvailable: Boolean,
+    private val bydVoiceControlSettingsPort: BydVoiceControlSettingsPort?,
 ) : SettingsFeatureController {
+    private val bydVoiceControlState = bydVoiceControlSettingsPort?.state
+        ?: MutableStateFlow(BydVoiceControlSettingsState())
+
     override val uiState: StateFlow<SettingsFeatureUiState> = combine(
         owner.state,
         settingsRepository.state,
-    ) { state, settingsState ->
-        toUiState(state, settingsState.settings)
+        bydVoiceControlState,
+    ) { state, settingsState, bydVoiceControl ->
+        toUiState(state, settingsState.settings, bydVoiceControl)
     }.stateIn(
         scope = scope,
         started = SharingStarted.Eagerly,
-        initialValue = toUiState(owner.state.value, settingsRepository.state.value.settings),
+        initialValue = toUiState(
+            owner.state.value,
+            settingsRepository.state.value.settings,
+            bydVoiceControlState.value,
+        ),
     )
 
     override fun close() = owner.close()
@@ -187,11 +201,15 @@ private class BoundSettingsFeatureController(
             settingsRepository.update { settings -> settings.copy(bydInstrumentLyricsEnabled = enabled) }
         }
     }
+    override fun setBydVoiceControlEnabled(enabled: Boolean) {
+        bydVoiceControlSettingsPort?.setEnabled(enabled)
+    }
     override fun dismissFeedback(feedback: String) = owner.dismissFeedback(feedback)
 
     private fun toUiState(
         state: BoundCoreState,
         appSettings: AppSettings,
+        bydVoiceControl: BydVoiceControlSettingsState,
     ): SettingsFeatureUiState = SettingsFeatureUiState(
         settings = appSettings,
         cacheUsage = state.cacheUsage,
@@ -199,6 +217,7 @@ private class BoundSettingsFeatureController(
         localMusic = state.localMusic,
         statusBarLyricsAvailable = state.statusBarLyricsAvailable,
         bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
+        bydVoiceControl = bydVoiceControl,
         debugLogViewerAvailable = state.debugLogViewerAvailable,
         isBusy = state.isBusy,
         feedback = state.feedback,
