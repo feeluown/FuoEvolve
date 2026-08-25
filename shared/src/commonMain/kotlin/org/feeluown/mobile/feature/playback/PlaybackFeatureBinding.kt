@@ -7,12 +7,27 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
-/** Application binding kept in :shared while playback business ownership lives in :feature:playback. */
-fun createPlaybackFeatureOwner(
+/** App-layer construction of the playback provider policy from narrow provider capabilities. */
+fun createAppPlaybackProviderPort(
     providerRegistry: ProviderRegistryRepository,
     providerSearch: ProviderSearchRepository,
     providerCatalog: ProviderCatalogRepository,
     providerPlaybackSource: PlaybackProviderSourcePort,
+): PlaybackProviderPort = createPlaybackProviderPort(
+    registry = providerRegistry,
+    search = providerSearch,
+    catalog = providerCatalog,
+    source = providerPlaybackSource,
+    failureMessage = { throwable, fallback, providerId ->
+        throwable.providerFailureOrNull(providerId)?.userMessage
+            ?: throwable.message
+            ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
+    },
+)
+
+/** Application binding kept in :shared while playback business ownership lives in :feature:playback. */
+fun createPlaybackFeatureOwner(
+    playbackProvider: PlaybackProviderPort,
     playbackEngine: PlaybackEngine,
     playbackQueueStore: PlaybackQueueStore,
     settingsRepository: AppSettingsRepository,
@@ -21,17 +36,7 @@ fun createPlaybackFeatureOwner(
     openTrackDetail: (MusicTrack) -> Unit,
     nowMillis: () -> Long = ::currentTimeMillis,
 ): PlaybackFeatureOwner = createPlaybackFeatureOwner(
-    providerRepository = createPlaybackProviderPort(
-        registry = providerRegistry,
-        search = providerSearch,
-        catalog = providerCatalog,
-        source = providerPlaybackSource,
-        failureMessage = { throwable, fallback, providerId ->
-            throwable.providerFailureOrNull(providerId)?.userMessage
-                ?: throwable.message
-                ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
-        },
-    ),
+    providerRepository = playbackProvider,
     playbackEngine = playbackEngine,
     playbackQueueStore = playbackQueueStore,
     settings = AppPlaybackSettingsPort(settingsRepository, scope),
@@ -56,8 +61,7 @@ private class AppPlaybackSettingsPort(
             initialValue = delegate.state.value.settings.toPlaybackFeatureSettings(),
         )
 
-    override suspend fun awaitSettings(): PlaybackFeatureSettings =
-        delegate.awaitSettings().toPlaybackFeatureSettings()
+    override suspend fun awaitSettings(): PlaybackFeatureSettings = delegate.awaitSettings().toPlaybackFeatureSettings()
 
     override suspend fun storeSmartReplacementSelections(value: Map<String, SmartReplacementSelection>) {
         delegate.update { current -> current.copy(smartReplacementSelections = value) }
