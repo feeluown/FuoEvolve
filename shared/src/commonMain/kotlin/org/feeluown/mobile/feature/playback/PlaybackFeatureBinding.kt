@@ -9,7 +9,10 @@ import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
 /** Application binding kept in :shared while playback business ownership lives in :feature:playback. */
 fun createPlaybackFeatureOwner(
-    providerRepository: ProviderMusicRepository,
+    providerRegistry: ProviderRegistryRepository,
+    providerSearch: ProviderSearchRepository,
+    providerCatalog: ProviderCatalogRepository,
+    providerPlaybackSource: PlaybackProviderSourcePort,
     playbackEngine: PlaybackEngine,
     playbackQueueStore: PlaybackQueueStore,
     settingsRepository: AppSettingsRepository,
@@ -18,7 +21,17 @@ fun createPlaybackFeatureOwner(
     openTrackDetail: (MusicTrack) -> Unit,
     nowMillis: () -> Long = ::currentTimeMillis,
 ): PlaybackFeatureOwner = createPlaybackFeatureOwner(
-    providerRepository = AppPlaybackProviderPort(providerRepository),
+    providerRepository = createPlaybackProviderPort(
+        registry = providerRegistry,
+        search = providerSearch,
+        catalog = providerCatalog,
+        source = providerPlaybackSource,
+        failureMessage = { throwable, fallback, providerId ->
+            throwable.providerFailureOrNull(providerId)?.userMessage
+                ?: throwable.message
+                ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
+        },
+    ),
     playbackEngine = playbackEngine,
     playbackQueueStore = playbackQueueStore,
     settings = AppPlaybackSettingsPort(settingsRepository, scope),
@@ -30,19 +43,6 @@ fun createPlaybackFeatureOwner(
     openTrackDetail = openTrackDetail,
     nowMillis = nowMillis,
 )
-
-private class AppPlaybackProviderPort(
-    private val delegate: ProviderMusicRepository,
-) : PlaybackProviderPort,
-    ProviderRegistryRepository by delegate,
-    ProviderSearchRepository by delegate,
-    ProviderCatalogRepository by delegate,
-    ProviderPlaybackRepository by delegate {
-    override fun failureMessage(throwable: Throwable, fallback: String, providerId: String?): String =
-        throwable.providerFailureOrNull(providerId)?.userMessage
-            ?: throwable.message
-            ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
-}
 
 private class AppPlaybackSettingsPort(
     private val delegate: AppSettingsRepository,
