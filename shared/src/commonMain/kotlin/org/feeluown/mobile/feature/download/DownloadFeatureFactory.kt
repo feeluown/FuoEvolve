@@ -18,7 +18,7 @@ data class DownloadManagerUiState(
 
 /** Composition-root binding from application repositories/models to the physical download feature. */
 fun createDownloadActionPort(
-    providerRepository: ProviderMusicRepository,
+    playbackProvider: PlaybackProviderPort,
     downloadRepository: DownloadRepository,
     localRepository: LocalMusicRepository,
     localMusicController: LocalMusicFeatureController,
@@ -43,7 +43,7 @@ fun createDownloadActionPort(
     val resolver = object : DownloadMediaResolver<MusicTrack, PlaybackPayload> {
         override suspend fun resolve(track: MusicTrack): PlaybackPayload {
             val settings = settingsRepository.state.value.settings
-            return providerRepository.resolve(
+            return playbackProvider.resolve(
                 track,
                 settings.unavailablePlaybackPolicy,
                 settings.effectiveReplacementProviderIds(),
@@ -104,13 +104,8 @@ fun createDownloadActionPort(
 
 internal class ObservableDownloadStates<T>(initialValue: Map<String, T>) {
     private var snapshotValue by mutableStateOf(initialValue)
-
-    val value: Map<String, T>
-        get() = snapshotValue
-
-    fun update(value: Map<String, T>) {
-        snapshotValue = value
-    }
+    val value: Map<String, T> get() = snapshotValue
+    fun update(value: Map<String, T>) { snapshotValue = value }
 }
 
 private class BoundDownloadActionPort(
@@ -119,23 +114,15 @@ private class BoundDownloadActionPort(
 ) : DownloadActionPort {
     private val observableDownloadStates = ObservableDownloadStates(owner.state.value.states)
 
-    override val downloadStates: Map<String, DownloadState>
-        get() = observableDownloadStates.value
+    override val downloadStates: Map<String, DownloadState> get() = observableDownloadStates.value
 
     override val managerState: StateFlow<DownloadManagerUiState> = owner.state
         .map { state -> DownloadManagerUiState(tasks = state.tasks, queueFeedback = state.queueFeedback) }
-        .stateIn(
-            scope = scope,
-            started = SharingStarted.Eagerly,
-            initialValue = DownloadManagerUiState(),
-        )
+        .stateIn(scope, SharingStarted.Eagerly, DownloadManagerUiState())
 
     init {
         scope.launch {
-            owner.state
-                .map { it.states }
-                .distinctUntilChanged()
-                .collect(observableDownloadStates::update)
+            owner.state.map { it.states }.distinctUntilChanged().collect(observableDownloadStates::update)
         }
     }
 
