@@ -1,8 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,11 +22,6 @@ internal class ProviderTrackActionController(
     private val setMessage: (String) -> Unit,
     private val onError: (Throwable) -> Unit,
 ) : ProviderTrackActionPort {
-    var artistTargetTrack by mutableStateOf<MusicTrack?>(null)
-        private set
-    var artistTargets by mutableStateOf<List<TrackArtistTarget>>(emptyList())
-        private set
-
     private val mutableArtistTargetPickerState = MutableStateFlow(ArtistTargetPickerUiState())
     override val artistTargetPickerState: StateFlow<ArtistTargetPickerUiState> =
         mutableArtistTargetPickerState.asStateFlow()
@@ -41,13 +33,11 @@ internal class ProviderTrackActionController(
     }
 
     override fun closeArtistTargetPicker() {
-        artistTargetTrack = null
-        artistTargets = emptyList()
-        publishArtistTargetPickerState()
+        mutableArtistTargetPickerState.value = ArtistTargetPickerUiState()
     }
 
     override fun openArtistTarget(target: TrackArtistTarget) {
-        val track = artistTargetTrack ?: return
+        val track = mutableArtistTargetPickerState.value.track ?: return
         closeArtistTargetPicker()
         navigation.closeFullPlayer()
         target.mediaItem?.let(openMediaItem)
@@ -120,9 +110,10 @@ internal class ProviderTrackActionController(
             return
         }
         if (targets.size > 1) {
-            artistTargetTrack = track
-            artistTargets = targets
-            publishArtistTargetPickerState()
+            mutableArtistTargetPickerState.value = ArtistTargetPickerUiState(
+                track = track,
+                targets = targets,
+            )
             return
         }
         targets.singleOrNull()?.mediaItem?.let {
@@ -193,13 +184,6 @@ internal class ProviderTrackActionController(
         return names.mapIndexed { index, name ->
             TrackArtistTarget(name, firstItem.takeIf { index == 0 })
         }
-    }
-
-    private fun publishArtistTargetPickerState() {
-        mutableArtistTargetPickerState.value = ArtistTargetPickerUiState(
-            track = artistTargetTrack,
-            targets = artistTargets,
-        )
     }
 
     private fun publishFeedback(message: String) {
