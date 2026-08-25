@@ -356,28 +356,30 @@ private class DefaultPlaybackFeatureOwner(
     }
 
     private fun rememberLyricsAssociation(sourceTrackId: String, lyricsTrackId: String?) {
-        lyricsAssociations = if (lyricsTrackId.isNullOrBlank()) {
+        val nextAssociations = if (lyricsTrackId.isNullOrBlank()) {
             lyricsAssociations - sourceTrackId
         } else {
             lyricsAssociations + (sourceTrackId to lyricsTrackId)
         }
+        lyricsAssociations = nextAssociations
         scope.launch {
             settingsRepository.update { current ->
-                current.copy(lyricsAssociations = lyricsAssociations)
+                current.copy(lyricsAssociations = nextAssociations)
             }
         }
     }
 
     private fun rememberLyricsAlignmentOffset(sourceTrackId: String, offsetMs: Long) {
         val clamped = offsetMs.coerceIn(-3_000L, 3_000L)
-        lyricsAlignmentOffsetsMs = if (clamped == 0L) {
+        val nextOffsets = if (clamped == 0L) {
             lyricsAlignmentOffsetsMs - sourceTrackId
         } else {
             lyricsAlignmentOffsetsMs + (sourceTrackId to clamped)
         }
+        lyricsAlignmentOffsetsMs = nextOffsets
         scope.launch {
             settingsRepository.update { current ->
-                current.copy(lyricsAlignmentOffsetsMs = lyricsAlignmentOffsetsMs)
+                current.copy(lyricsAlignmentOffsetsMs = nextOffsets)
             }
         }
     }
