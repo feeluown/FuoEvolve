@@ -416,12 +416,11 @@ private class BydInstrumentLyricsBridge(
         private const val MUSIC_NAME_REFRESH_BASE_MS = 2_800L
         private const val MUSIC_NAME_REFRESH_PER_CHAR_MS = 140L
         private const val MUSIC_NAME_REFRESH_MIN_MS = 4_000L
-        private const val MUSIC_NAME_REFRESH_MAX_MS = 7_500L
 
         private fun musicNameRefreshIntervalMs(text: String): Long {
             val charCount = text.codePointCount(0, text.length).coerceAtLeast(1)
             return (MUSIC_NAME_REFRESH_BASE_MS + charCount * MUSIC_NAME_REFRESH_PER_CHAR_MS)
-                .coerceIn(MUSIC_NAME_REFRESH_MIN_MS, MUSIC_NAME_REFRESH_MAX_MS)
+                .coerceAtLeast(MUSIC_NAME_REFRESH_MIN_MS)
         }
 
         fun create(context: Context): Result<BydInstrumentLyricsBridge> = runCatching {
