@@ -27,18 +27,28 @@ internal class AndroidAppContainer(
         AndroidProviderCredentialStore(context)
     }
 
-    val providerRepository: ProviderMusicRepository by lazy {
-        createFuoProviderRepository(
+    private val providerGraph: FuoProviderGraph by lazy {
+        createFuoProviderGraph(
             credentials = providerCredentialStore,
             persistentCache = AndroidProviderCacheStore(context),
             isCellularConnection = ::isCellularConnection,
         )
     }
 
+    val playbackProvider: PlaybackProviderPort by lazy {
+        createAppPlaybackProviderPort(
+            providerRegistry = providerGraph.registry,
+            providerSearch = providerGraph.search,
+            providerCatalog = providerGraph.content,
+            providerPlaybackSource = providerGraph.playbackSource,
+        )
+    }
+
     val providerCredentialBackup: AndroidProviderCredentialBackup by lazy {
         AndroidProviderCredentialBackup(
             credentialStore = providerCredentialStore,
-            providerRepository = providerRepository,
+            providerRegistry = providerGraph.registry,
+            providerAuth = providerGraph.auth,
         )
     }
 
@@ -61,14 +71,14 @@ internal class AndroidAppContainer(
     }
     private val localPlaylistRepository: AndroidLocalPlaylistRepository by lazy { AndroidLocalPlaylistRepository(context) }
     private val rawDownloadRepository: AndroidDownloadRepository by lazy {
-        AndroidDownloadRepository(context, providerRepository) { tasks -> FuoDownloadService.update(context, tasks) }
+        AndroidDownloadRepository(context, playbackProvider) { tasks -> FuoDownloadService.update(context, tasks) }
     }
     private val downloadRepository: DownloadRepository by lazy {
         AndroidOfflineAwareDownloadRepository(delegate = rawDownloadRepository, assetStore = offlineAssetStore, scope = appScope)
     }
     private val playbackEngine: AndroidNativeAudioEngine by lazy { AndroidNativeAudioEngine(context, appScope) }
     val settingsRepository: AppSettingsRepository by lazy { createAndroidAppSettingsRepository(context, appScope) }
-    private val providerSessionRepository: ProviderSessionRepository by lazy { DefaultProviderSessionRepository(providerRepository) }
+    private val providerSessionRepository: ProviderSessionRepository by lazy { DefaultProviderSessionRepository(providerGraph.auth) }
     private val navigator by lazy { AppNavigator() }
     private val trackNavigationPort: TrackNavigationPort by lazy { createTrackNavigationPort(navigator) }
     private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
@@ -88,7 +98,7 @@ internal class AndroidAppContainer(
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
         createSearchFeatureController(
-            providerRepository = providerRepository,
+            providerRepository = providerGraph.search,
             localRepository = localRepository,
             scope = appScope,
             providerIdsForSearch = {
@@ -122,7 +132,8 @@ internal class AndroidAppContainer(
 
     private val providerCatalogFeatureController: ProviderCatalogFeatureController by lazy {
         createProviderCatalogFeatureController(
-            providerRepository = providerRepository,
+            providerRegistry = providerGraph.registry,
+            providerCatalog = providerGraph.content,
             sessionRepository = providerSessionRepository,
             settingsRepository = settingsRepository,
             scope = appScope,
@@ -141,7 +152,8 @@ internal class AndroidAppContainer(
     private val localMusicFeatureController: LocalMusicFeatureController by lazy {
         createLocalMusicFeatureController(
             repository = localRepository,
-            providerRepository = providerRepository,
+            providerSearch = providerGraph.search,
+            providerPlaybackSource = providerGraph.playbackSource,
             navigator = navigator,
             settingsRepository = settingsRepository,
             providers = { providerCatalogFeatureController.uiState.value.providers },
@@ -156,7 +168,7 @@ internal class AndroidAppContainer(
 
     private val downloadActionPort: DownloadActionPort by lazy {
         createDownloadActionPort(
-            providerRepository = providerRepository,
+            playbackProvider = playbackProvider,
             downloadRepository = downloadRepository,
             localRepository = localRepository,
             localMusicController = localMusicFeatureController,
@@ -171,7 +183,7 @@ internal class AndroidAppContainer(
 
     private val playbackFeatureOwner: PlaybackFeatureOwner by lazy {
         createPlaybackFeatureOwner(
-            providerRepository = providerRepository,
+            playbackProvider = playbackProvider,
             playbackEngine = playbackEngine,
             playbackQueueStore = playbackQueueStore,
             settingsRepository = settingsRepository,
@@ -183,7 +195,7 @@ internal class AndroidAppContainer(
 
     private val providerDetailOwners: ProviderDetailOwners by lazy {
         createProviderDetailOwners(
-            providerRepository = providerRepository,
+            providerRepository = providerGraph.content,
             playbackQueue = playbackFeatureOwner.transport,
             settingsRepository = settingsRepository,
             providerCatalog = providerCatalogFeatureController,
@@ -195,7 +207,7 @@ internal class AndroidAppContainer(
 
     private val homeFeatureController: HomeFeatureController by lazy {
         createHomeFeatureController(
-            providerRepository = providerRepository,
+            providerRepository = providerGraph.content,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             playbackQueue = playbackFeatureOwner.transport,
@@ -209,7 +221,7 @@ internal class AndroidAppContainer(
 
     private val playlistActionPort: PlaylistActionPort by lazy {
         createPlaylistActionPort(
-            providerRepository = providerRepository,
+            providerLibrary = providerGraph.content,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
@@ -220,7 +232,8 @@ internal class AndroidAppContainer(
 
     private val providerTrackActionPort: ProviderTrackActionPort by lazy {
         createProviderTrackActionPort(
-            providerRepository = providerRepository,
+            providerCatalogRepository = providerGraph.content,
+            providerLibrary = providerGraph.content,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             searchController = searchController,
@@ -233,7 +246,7 @@ internal class AndroidAppContainer(
 
     private val providerAuthFeatureController: ProviderAuthFeatureController by lazy {
         createProviderAuthFeatureController(
-            providerRepository = providerRepository,
+            providerAuth = providerGraph.auth,
             sessionRepository = providerSessionRepository,
             oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
             scope = appScope,
@@ -248,7 +261,7 @@ internal class AndroidAppContainer(
     private val settingsFeatureController: SettingsFeatureController by lazy {
         createSettingsFeatureController(
             settingsRepository = settingsRepository,
-            providerRepository = providerRepository,
+            providerAudioQuality = providerGraph.audioQuality,
             downloadRepository = downloadRepository,
             resourceCacheRepository = resourceCacheRepository,
             localMusicController = localMusicFeatureController,
@@ -261,7 +274,7 @@ internal class AndroidAppContainer(
 
     private val onboardingFeatureController: OnboardingFeatureController by lazy {
         createOnboardingFeatureController(
-            providerRepository = providerRepository,
+            providerRegistry = providerGraph.registry,
             settingsRepository = settingsRepository,
             providerCatalog = providerCatalogFeatureController,
             scope = appScope,
@@ -270,7 +283,7 @@ internal class AndroidAppContainer(
 
     private val sharedResourceActionPort: SharedResourceActionPort by lazy {
         createSharedResourceActionPort(
-            providerRepository = providerRepository,
+            providerRegistry = providerGraph.registry,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             searchController = searchController,
@@ -294,7 +307,7 @@ internal class AndroidAppContainer(
     private val recognitionAppPort: RecognitionAppPort by lazy {
         DefaultRecognitionAppPort(
             isProviderEnabled = { providerId -> providerSessionRepository.state.value.providers.any { it.providerId == providerId } },
-            loadTrackDetail = providerRepository::trackDetail,
+            loadTrackDetail = providerGraph.content::trackDetail,
             navigator = navigator,
         )
     }
