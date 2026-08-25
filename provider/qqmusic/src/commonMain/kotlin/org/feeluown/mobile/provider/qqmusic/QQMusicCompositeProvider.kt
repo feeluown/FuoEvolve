@@ -24,6 +24,7 @@ internal class QQMusicCompositeProvider(
 ) : KotlinMusicProvider {
     private val content = QQMusicContentProvider(dependencies.http, dependencies.credentials)
     private val userLibrary = QQMusicUserLibrary(dependencies.http, dependencies.credentials)
+    private val followedArtists = QQMusicFollowedArtistsLoader(dependencies.http, dependencies.credentials)
     private val artistDetails = QQMusicArtistDetailProvider(dependencies.http, dependencies.credentials)
 
     override val id: String get() = content.id
@@ -90,7 +91,7 @@ internal class QQMusicCompositeProvider(
                 when (featureId) {
                     USER_PLAYLISTS_FEATURE_ID -> userLibrary.loadPlaylists(feature, offset, limit)
                     FAVORITE_PLAYLISTS_FEATURE_ID -> userLibrary.loadFavoritePlaylists(feature, offset, limit)
-                    FOLLOWED_ARTISTS_FEATURE_ID -> userLibrary.loadFollowedArtists(feature, offset, limit)
+                    FOLLOWED_ARTISTS_FEATURE_ID -> followedArtists.load(feature, offset, limit)
                     FAVORITE_ALBUMS_FEATURE_ID -> userLibrary.loadFavoriteAlbums(feature, offset, limit)
                     else -> ProviderContentSection(feature = feature)
                 }
