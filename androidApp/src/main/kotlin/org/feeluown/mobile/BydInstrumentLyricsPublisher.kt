@@ -182,6 +182,7 @@ internal class BydInstrumentLyricsPublisher(
                 }
                 if (!publishAtPosition(snapshot, estimatedPositionMs())) break
                 bridge?.refreshSessionLease(snapshot.status)
+                bridge?.refreshLyricDisplayLease(snapshot.status)
                 delay(POSITION_SYNC_INTERVAL_MS)
             }
         }
@@ -278,6 +279,8 @@ private class BydInstrumentLyricsBridge(
     private var useMusicNameTransport = threeLineLyricsMethod == null
     private var lastMusicStateValue: Int? = null
     private var lastMusicSessionRefreshRealtimeMs = 0L
+    private var lastPublishedMusicName: String? = null
+    private var lastMusicNameRefreshRealtimeMs = 0L
 
     fun publish(window: InstrumentLyricsWindow, status: PlaybackSessionStatus): Boolean {
         if (!useMusicNameTransport) {
@@ -291,8 +294,14 @@ private class BydInstrumentLyricsBridge(
         }
 
         val nameMethod = musicNameMethod ?: return false
-        refreshMusicSession(status)
-        return invokeRequired(nameMethod, window.current)
+        val realtimeMs = SystemClock.elapsedRealtime()
+        refreshMusicSession(status, realtimeMs)
+        val success = invokeRequired(nameMethod, window.current)
+        if (success) {
+            lastPublishedMusicName = window.current
+            lastMusicNameRefreshRealtimeMs = realtimeMs
+        }
+        return success
     }
 
     fun refreshSessionLease(
@@ -309,6 +318,27 @@ private class BydInstrumentLyricsBridge(
         refreshMusicSession(status, realtimeMs)
     }
 
+    fun refreshLyricDisplayLease(
+        status: PlaybackSessionStatus,
+        realtimeMs: Long = SystemClock.elapsedRealtime(),
+    ) {
+        if (!useMusicNameTransport || status != PlaybackSessionStatus.Playing) return
+        val lyric = lastPublishedMusicName?.takeIf { it.isNotBlank() } ?: return
+        val intervalMs = musicNameRefreshIntervalMs(lyric)
+        if (
+            lastMusicNameRefreshRealtimeMs != 0L &&
+            realtimeMs - lastMusicNameRefreshRealtimeMs < intervalMs
+        ) {
+            return
+        }
+
+        // DiLink 4 restores the native media title after one marquee cycle. Refresh only after
+        // the estimated display cycle has elapsed, so the current lyric is restored without
+        // repeatedly restarting a long line while it is still scrolling.
+        lastMusicNameRefreshRealtimeMs = realtimeMs
+        musicNameMethod?.let { invokeOptional(it, lyric) }
+    }
+
     fun clear() {
         if (!useMusicNameTransport) {
             val method = threeLineLyricsMethod
@@ -318,6 +348,8 @@ private class BydInstrumentLyricsBridge(
         publishMusicStateValueIfAvailable(musicStopValue, force = true)
         lastMusicStateValue = null
         lastMusicSessionRefreshRealtimeMs = 0L
+        lastPublishedMusicName = null
+        lastMusicNameRefreshRealtimeMs = 0L
     }
 
     private fun refreshMusicSession(
@@ -325,8 +357,8 @@ private class BydInstrumentLyricsBridge(
         realtimeMs: Long = SystemClock.elapsedRealtime(),
     ) {
         // Reassert source/state on actual lyric/status changes, then maintain the same ownership
-        // with a low-frequency lease while playing. The lease intentionally never resends
-        // sendMusicName, so long scrolling lyrics are not restarted.
+        // with a low-frequency lease while playing. The text display has a separate adaptive
+        // keepalive because DiLink can restore the native title after a completed marquee cycle.
         lastMusicSessionRefreshRealtimeMs = realtimeMs
         publishMusicSourceIfAvailable()
         publishMusicStateIfAvailable(status, force = true)
@@ -381,6 +413,16 @@ private class BydInstrumentLyricsBridge(
     companion object {
         private const val TAG = "BydInstrumentLyrics"
         private const val MUSIC_SESSION_LEASE_INTERVAL_MS = 5_000L
+        private const val MUSIC_NAME_REFRESH_BASE_MS = 2_800L
+        private const val MUSIC_NAME_REFRESH_PER_CHAR_MS = 140L
+        private const val MUSIC_NAME_REFRESH_MIN_MS = 4_000L
+        private const val MUSIC_NAME_REFRESH_MAX_MS = 7_500L
+
+        private fun musicNameRefreshIntervalMs(text: String): Long {
+            val charCount = text.codePointCount(0, text.length).coerceAtLeast(1)
+            return (MUSIC_NAME_REFRESH_BASE_MS + charCount * MUSIC_NAME_REFRESH_PER_CHAR_MS)
+                .coerceIn(MUSIC_NAME_REFRESH_MIN_MS, MUSIC_NAME_REFRESH_MAX_MS)
+        }
 
         fun create(context: Context): Result<BydInstrumentLyricsBridge> = runCatching {
             val instrumentClass = Class.forName(BYD_INSTRUMENT_DEVICE_CLASS)
