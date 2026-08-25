@@ -48,6 +48,9 @@ interface PlaybackProviderPort :
     fun failureMessage(throwable: Throwable, fallback: String, providerId: String? = null): String
 }
 
+/** Internal owner/controller dependency name while those collaborators are progressively renamed. */
+internal typealias ProviderPlaybackRepository = PlaybackProviderPort
+
 data class PlaybackFeatureSettings(
     val enabledProviderIds: Set<String> = emptySet(),
     val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
