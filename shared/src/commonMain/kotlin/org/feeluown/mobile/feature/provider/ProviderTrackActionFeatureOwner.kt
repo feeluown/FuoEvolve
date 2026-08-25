@@ -3,7 +3,8 @@ package org.feeluown.mobile
 import kotlinx.coroutines.CoroutineScope
 
 fun createProviderTrackActionPort(
-    providerRepository: ProviderMusicRepository,
+    providerCatalogRepository: ProviderCatalogRepository,
+    providerLibrary: ProviderLibraryRepository,
     providerCatalog: ProviderCatalogFeatureController,
     providerDetails: ProviderDetailOwners,
     searchController: SearchFeatureController,
@@ -12,7 +13,8 @@ fun createProviderTrackActionPort(
     scope: CoroutineScope,
     refreshMineContent: () -> Unit = {},
 ): ProviderTrackActionPort = ProviderTrackActionController(
-    providerRepository = providerRepository,
+    providerCatalogRepository = providerCatalogRepository,
+    providerLibrary = providerLibrary,
     scope = scope,
     navigation = playbackNavigation,
     providerCapabilities = { providerCatalog.uiState.value.capabilities },
