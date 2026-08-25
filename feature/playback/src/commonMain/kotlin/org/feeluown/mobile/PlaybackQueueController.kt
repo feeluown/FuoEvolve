@@ -154,10 +154,12 @@ internal class PlaybackQueueController {
     }
 }
 
-internal fun PlaybackQueueState.currentTrack(): MusicTrack? =
+/** Read-only projection used by app/player presentation outside the playback module. */
+fun PlaybackQueueState.currentTrack(): MusicTrack? =
     if (currentIsUpNext) currentUpNextTrack else mainQueue.getOrNull(mainQueueIndex)
 
-internal fun PlaybackQueueState.displayQueue(): List<MusicTrack> = buildList {
+/** Read-only display ordering used by app/player presentation outside the playback module. */
+fun PlaybackQueueState.displayQueue(): List<MusicTrack> = buildList {
     currentTrack()?.let(::add)
     addAll(upNextQueue)
     val nextMainIndex = when {

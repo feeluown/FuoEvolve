@@ -136,6 +136,8 @@ private class IosAppContainer(
     private val playbackEngine = IosNativeAudioEngine(scope, audioOutput, settingsRepository)
     private val providerSessionRepository = DefaultProviderSessionRepository(providerRepository)
     private val navigator = AppNavigator()
+    private val trackNavigationPort: TrackNavigationPort = createTrackNavigationPort(navigator)
+    private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant = IosOAuthDeviceCodeAssistant(oauthDeviceCodeOutput)
     private val playbackQueueStore = IosPlaybackQueueStore()
     private val resourceCacheRepository = IosResourceCacheRepository()
@@ -196,8 +198,8 @@ private class IosAppContainer(
             settingsRepository = settingsRepository,
             providers = { providerCatalogFeatureController.uiState.value.providers },
             isLocalMusicSectionActive = {
-                val state = homeFeatureController.uiState.value
-                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+                val settings = settingsRepository.state.value.settings
+                settings.homeSection == HomeSection.Mine && settings.mineSection == MineSection.LocalMusic
             },
             scope = scope,
             onTrackUpdated = { trackId, track -> playbackFeatureOwner.updateTrackCopies(trackId, track) },
@@ -213,8 +215,8 @@ private class IosAppContainer(
             settingsRepository = settingsRepository,
             scope = scope,
             isLocalMusicSectionActive = {
-                val state = homeFeatureController.uiState.value
-                state.homeSection == HomeSection.Mine && state.mineSection == MineSection.LocalMusic
+                val settings = settingsRepository.state.value.settings
+                settings.homeSection == HomeSection.Mine && settings.mineSection == MineSection.LocalMusic
             },
         )
     }
@@ -227,7 +229,7 @@ private class IosAppContainer(
             settingsRepository = settingsRepository,
             downloadActions = downloadActionPort,
             scope = scope,
-            openTrackDetail = { track -> providerDetailOwners.track.open(track) },
+            openTrackDetail = trackNavigationPort::open,
         )
     }
 
@@ -239,7 +241,7 @@ private class IosAppContainer(
             providerCatalog = providerCatalogFeatureController,
             navigator = navigator,
             scope = scope,
-            onProviderMutation = { homeFeatureController.refreshMine() },
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
@@ -264,7 +266,7 @@ private class IosAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = scope,
-            onProviderMutation = { homeFeatureController.refreshMine() },
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
@@ -277,7 +279,7 @@ private class IosAppContainer(
             playbackNavigation = playbackFeatureOwner.navigation,
             playbackQueue = playbackFeatureOwner.transport,
             scope = scope,
-            refreshMineContent = homeFeatureController::refreshMine,
+            refreshMineContent = homeRefreshPort::refreshMine,
         )
     }
 
@@ -291,11 +293,7 @@ private class IosAppContainer(
                 providerCatalogFeatureController.uiState.value.availableProviders.firstOrNull { it.providerId == providerId }?.providerName
                     ?: providerId
             },
-            onSessionChanged = {
-                homeFeatureController.refreshHome(HomeSection.Recommend)
-                homeFeatureController.refreshHome(HomeSection.Music)
-                homeFeatureController.refreshMine()
-            },
+            onSessionChanged = homeRefreshPort::refreshAll,
         )
     }
 

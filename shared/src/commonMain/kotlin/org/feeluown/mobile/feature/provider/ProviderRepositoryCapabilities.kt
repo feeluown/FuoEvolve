@@ -1,40 +1,5 @@
 package org.feeluown.mobile
 
-/** Provider surface needed by playback resolution and lyrics. */
-interface ProviderPlaybackRepository {
-    suspend fun replacementCandidates(
-        track: MusicTrack,
-        smartReplacementProviderIds: Set<String> = emptySet(),
-        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-    ): List<ReplacementCandidate> = emptyList()
-
-    suspend fun resolve(
-        track: MusicTrack,
-        unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
-        smartReplacementProviderIds: Set<String> = emptySet(),
-        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-        smartReplacementUseOriginalMetadata: Boolean = true,
-        smartReplacementUseOriginalLyrics: Boolean = true,
-    ): PlaybackPayload
-
-    suspend fun resolveSelectedReplacement(
-        track: MusicTrack,
-        smartReplacementUseOriginalMetadata: Boolean = true,
-        smartReplacementUseOriginalLyrics: Boolean = true,
-        smartReplacementProviderIds: Set<String> = emptySet(),
-    ): PlaybackPayload = resolve(
-        track = track,
-        unavailablePolicy = UnavailablePlaybackPolicy.Skip,
-        smartReplacementProviderIds = smartReplacementProviderIds,
-        smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
-        smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
-    )
-
-    suspend fun lyrics(track: MusicTrack): String? = null
-
-    suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
-}
-
 /** Compatibility adapters while the application aggregate repository is being retired. */
 internal class ProviderSearchRepositoryView(
     private val delegate: ProviderMusicRepository,

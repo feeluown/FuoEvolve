@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
 private const val PLAYBACK_OWNER_DYNAMIC_QUEUE_PREFETCH_REMAINING = 2
 
@@ -20,12 +19,7 @@ private data class PlaybackOwnerPendingManualReplacement(
     val selection: SmartReplacementSelection,
 )
 
-/**
- * Playback-scoped composition boundary.
- *
- * This owner only coordinates playback state/policy. App navigation, provider catalog/content,
- * settings UI, downloads and playlist mutations stay in their dedicated feature owners.
- */
+/** Playback-scoped application owner, independent from app shell and concrete providers. */
 interface PlaybackFeatureOwner {
     val playbackState: StateFlow<PlaybackState>
     val transport: PlaybackTransportCoordinator
@@ -39,38 +33,40 @@ interface PlaybackFeatureOwner {
 }
 
 fun createPlaybackFeatureOwner(
-    providerRepository: ProviderMusicRepository,
+    providerRepository: PlaybackProviderPort,
     playbackEngine: PlaybackEngine,
     playbackQueueStore: PlaybackQueueStore,
-    settingsRepository: AppSettingsRepository,
-    downloadActions: DownloadActionPort,
+    settings: PlaybackSettingsPort,
+    downloads: PlaybackDownloadPort,
+    navigation: PlaybackNavigationPort,
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
-    nowMillis: () -> Long = ::currentTimeMillis,
+    nowMillis: () -> Long,
 ): PlaybackFeatureOwner = DefaultPlaybackFeatureOwner(
     providerRepository = providerRepository,
     playbackEngine = playbackEngine,
     playbackQueueStore = playbackQueueStore,
-    settingsRepository = settingsRepository,
-    downloadActions = downloadActions,
+    settings = settings,
+    downloads = downloads,
+    navigationOwner = navigation,
     scope = scope,
     openTrackDetail = openTrackDetail,
     nowMillis = nowMillis,
 )
 
 private class DefaultPlaybackFeatureOwner(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRepository: PlaybackProviderPort,
     private val playbackEngine: PlaybackEngine,
     private val playbackQueueStore: PlaybackQueueStore,
-    private val settingsRepository: AppSettingsRepository,
-    private val downloadActions: DownloadActionPort,
+    private val settings: PlaybackSettingsPort,
+    private val downloads: PlaybackDownloadPort,
+    private val navigationOwner: PlaybackNavigationPort,
     private val scope: CoroutineScope,
     private val openTrackDetail: (MusicTrack) -> Unit,
     nowMillis: () -> Long,
 ) : PlaybackFeatureOwner {
     private val queueState = PlaybackQueueController()
-    private val navigationOwner = DefaultPlaybackNavigationPort()
-    private val playbackRepository: ProviderPlaybackRepository = ProviderPlaybackRepositoryView(providerRepository)
+    private val playbackRepository: ProviderPlaybackRepository = providerRepository
     private val mutablePlaybackState = MutableStateFlow(PlaybackState())
     private val playbackFeedback = MutableStateFlow<String?>(null)
     override val playbackState: StateFlow<PlaybackState> = mutablePlaybackState.asStateFlow()
@@ -193,11 +189,7 @@ private class DefaultPlaybackFeatureOwner(
         },
         closePlayer = navigationOwner::closeFullPlayer,
         openTrackDetail = openTrackDetail,
-        failureMessage = { throwable, fallback, providerId ->
-            throwable.providerFailureOrNull(providerId)?.userMessage
-                ?: throwable.message
-                ?: fallback
-        },
+        failureMessage = providerRepository::failureMessage,
     )
 
     private val lifecycleOwner = PlaybackLifecycleCoordinator(
@@ -216,22 +208,20 @@ private class DefaultPlaybackFeatureOwner(
 
     init {
         scope.launch {
-            val settings = settingsRepository.awaitSettings()
-            smartReplacementSelections = settings.smartReplacementSelections
-            lyricsAssociations = settings.lyricsAssociations
-            lyricsAlignmentOffsetsMs = settings.lyricsAlignmentOffsetsMs
+            val initialSettings = settings.awaitSettings()
+            smartReplacementSelections = initialSettings.smartReplacementSelections
+            lyricsAssociations = initialSettings.lyricsAssociations
+            lyricsAlignmentOffsetsMs = initialSettings.lyricsAlignmentOffsetsMs
             runCatching { playbackQueueStore.load() }
                 .onSuccess(::restorePlaybackQueue)
             lyricsOwner.refreshPersistentState(playbackState.value.currentTrack)
         }
         scope.launch {
-            settingsRepository.state.collect { state ->
-                if (state.isLoaded) {
-                    smartReplacementSelections = state.settings.smartReplacementSelections
-                    lyricsAssociations = state.settings.lyricsAssociations
-                    lyricsAlignmentOffsetsMs = state.settings.lyricsAlignmentOffsetsMs
-                    lyricsOwner.refreshPersistentState(playbackState.value.currentTrack)
-                }
+            settings.state.collect { state ->
+                smartReplacementSelections = state.smartReplacementSelections
+                lyricsAssociations = state.lyricsAssociations
+                lyricsAlignmentOffsetsMs = state.lyricsAlignmentOffsetsMs
+                lyricsOwner.refreshPersistentState(playbackState.value.currentTrack)
             }
         }
         scope.launch {
@@ -328,20 +318,24 @@ private class DefaultPlaybackFeatureOwner(
         )
     }
 
-    private fun currentSettings(): AppSettings = settingsRepository.state.value.settings
+    private fun currentSettings(): PlaybackFeatureSettings = settings.state.value
 
     private fun selectedSmartReplacementProviderIds(): Set<String> {
-        val settings = currentSettings()
-        val enabled = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
-        return settings.smartReplacementProviderIds.intersect(enabled).ifEmpty { enabled }
+        val current = currentSettings()
+        val enabled = current.enabledProviderIds
+        return if (enabled.isEmpty()) {
+            current.smartReplacementProviderIds
+        } else {
+            current.smartReplacementProviderIds.intersect(enabled).ifEmpty { enabled }
+        }
     }
 
     private fun MusicTrack.preferDownloaded(): MusicTrack {
         if (isSmartReplacement) return this
-        val downloaded = downloadActions.downloadStates[id] as? DownloadState.Downloaded ?: return this
+        val uri = downloads.downloadedUri(id) ?: return this
         return copy(
             sourceType = TrackSourceType.Downloaded,
-            localUri = downloaded.uri,
+            localUri = uri,
             providerId = providerId ?: id,
         )
     }
@@ -362,11 +356,7 @@ private class DefaultPlaybackFeatureOwner(
             lyricsAssociations + (sourceTrackId to lyricsTrackId)
         }
         lyricsAssociations = nextAssociations
-        scope.launch {
-            settingsRepository.update { current ->
-                current.copy(lyricsAssociations = nextAssociations)
-            }
-        }
+        scope.launch { settings.storeLyricsAssociations(nextAssociations) }
     }
 
     private fun rememberLyricsAlignmentOffset(sourceTrackId: String, offsetMs: Long) {
@@ -377,11 +367,7 @@ private class DefaultPlaybackFeatureOwner(
             lyricsAlignmentOffsetsMs + (sourceTrackId to clamped)
         }
         lyricsAlignmentOffsetsMs = nextOffsets
-        scope.launch {
-            settingsRepository.update { current ->
-                current.copy(lyricsAlignmentOffsetsMs = nextOffsets)
-            }
-        }
+        scope.launch { settings.storeLyricsAlignmentOffsetsMs(nextOffsets) }
     }
 
     private fun commitManualReplacementIfReady(engineState: PlaybackState) {
@@ -393,9 +379,7 @@ private class DefaultPlaybackFeatureOwner(
         smartReplacementSelections = smartReplacementSelections + (pending.originalTrackId to pending.selection)
         pendingManualReplacementSwitch = null
         val nextSelections = smartReplacementSelections
-        scope.launch {
-            settingsRepository.update { current -> current.copy(smartReplacementSelections = nextSelections) }
-        }
+        scope.launch { settings.storeSmartReplacementSelections(nextSelections) }
     }
 
     private fun rollbackManualReplacement(requestSerial: Long): Boolean {
@@ -453,9 +437,11 @@ private class DefaultPlaybackFeatureOwner(
             playbackFeedback.value = "${feature.title} 加载超时，请重试"
             FEATURE_QUEUE_APPEND_FAILED
         } catch (throwable: Throwable) {
-            playbackFeedback.value = throwable.providerFailureOrNull(feature.providerId)?.userMessage
-                ?: throwable.message
-                ?: "${feature.title} 加载后续歌曲失败"
+            playbackFeedback.value = providerRepository.failureMessage(
+                throwable,
+                "${feature.title} 加载后续歌曲失败",
+                feature.providerId,
+            )
             FEATURE_QUEUE_APPEND_FAILED
         }
     }
@@ -586,9 +572,7 @@ private class DefaultPlaybackFeatureOwner(
                 currentSettings().unavailablePlaybackPolicy == UnavailablePlaybackPolicy.SmartReplace)
 
     private fun playbackFailureMessage(throwable: Throwable): String =
-        throwable.providerFailureOrNull()?.userMessage
-            ?: throwable.message
-            ?: throwable::class.simpleName.orEmpty().ifBlank { "播放失败" }
+        providerRepository.failureMessage(throwable, "播放失败")
 
     private fun publishPlaybackError(message: String) {
         updatePlaybackState { it.copy(status = PlayerStatus.Error, errorMessage = message) }

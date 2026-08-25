@@ -25,16 +25,6 @@ data class ArtistTargetPickerUiState(
     val targets: List<TrackArtistTarget> = emptyList(),
 )
 
-/** UI-only player navigation state. */
-interface PlaybackNavigationPort {
-    val isFullPlayerOpen: Boolean
-    val isQueueOpen: Boolean
-
-    fun openFullPlayer()
-    fun closeFullPlayer()
-    fun toggleQueue()
-}
-
 /** Rich playback presentation that intentionally stays outside the narrow PlaybackSession API. */
 interface PlaybackPresentationPort {
     val currentTrack: MusicTrack?
@@ -48,73 +38,6 @@ interface PlaybackPresentationPort {
     val audioDecoderInfo: AudioDecoderInfo?
 
     fun seekTo(positionMs: Long)
-}
-
-/** Queue state and queue-edit actions owned by the playback feature. */
-interface PlaybackQueueUiPort {
-    /** Durable queue-owned track, including restored state and queue-side metadata updates. */
-    val currentQueueTrack: MusicTrack?
-    val queue: List<MusicTrack>
-    val displayUpNextCount: Int
-    val isShuffleEnabled: Boolean
-    val repeatMode: RepeatMode
-    val isFmQueueActive: Boolean
-    val trackChangeDirection: TrackChangeDirection
-    val queueStateFlow: StateFlow<PlaybackQueueState>?
-        get() = null
-    val feedback: StateFlow<String?>
-        get() = EMPTY_FEEDBACK_FLOW
-
-    /** Replace the active source queue and start the selected item through the queue owner. */
-    fun playTracks(tracks: List<MusicTrack>, index: Int)
-
-    /**
-     * Replace the active queue from a durable playlist while preserving playlist playback context.
-     * Implementations that do not track playlist context can safely fall back to [playTracks].
-     */
-    fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) =
-        playTracks(tracks, index)
-
-    /**
-     * Start a durable playlist with Play All semantics instead of pinning a selected item.
-     * The distinction matters while shuffle is enabled: selecting a row keeps that row first,
-     * while Play All starts from a newly shuffled queue, matching the pre-refactor behavior.
-     */
-    fun playAllPlaylistTracks(tracks: List<MusicTrack>, sourcePlaylistId: String) =
-        playPlaylistTracks(tracks, 0, sourcePlaylistId)
-
-    /** Append lazily loaded playlist tracks only when the same playlist still owns the queue. */
-    fun appendPlaylistTracks(sourcePlaylistId: String, tracks: List<MusicTrack>) = Unit
-
-    /**
-     * Replace the active queue from a provider feature while preserving dynamic-queue identity.
-     * This is required by FM/daily-recommendation style features whose queue is extended lazily.
-     */
-    fun playFeatureTracks(tracks: List<MusicTrack>, index: Int, sourceFeature: ProviderFeature) =
-        playTracks(tracks, index)
-
-    fun toggleShuffle()
-    fun toggleRepeat()
-    fun clearQueue()
-    fun playQueueIndex(index: Int)
-    fun removeFromQueue(track: MusicTrack)
-    fun playPlaybackPart(index: Int)
-    fun addToUpNext(track: MusicTrack)
-    fun dismissFeedback(feedback: String) = Unit
-}
-
-/** Sleep-timer state, commands and transient feedback owned by playback. */
-interface PlaybackSleepTimerPort {
-    val sleepTimerState: SleepTimerState
-    val sleepTimerStateFlow: StateFlow<SleepTimerState>?
-        get() = null
-    val feedback: StateFlow<String?>
-        get() = EMPTY_FEEDBACK_FLOW
-
-    fun setSleepTimerDurationMinutes(minutes: Int)
-    fun clearSleepTimer()
-    fun setSleepTimerToEndOfTrack()
-    fun dismissFeedback(feedback: String) = Unit
 }
 
 /** Download state/actions used by player UI and the download-manager feature. */
@@ -173,42 +96,4 @@ interface ProviderTrackActionPort {
 /** Local-library actions surfaced from now playing. */
 interface LocalMusicActionPort {
     fun openLocalMetadataEditor(track: MusicTrack)
-}
-
-data class LyricsAssociationUiState(
-    val trackId: String? = null,
-    val isLyricsUnavailable: Boolean = false,
-    val isManualAssociation: Boolean = false,
-    val associatedTrackId: String? = null,
-    val associatedTrackTitle: String? = null,
-    val alignmentOffsetMs: Long = 0L,
-    val isSearchOpen: Boolean = false,
-    val query: String = "",
-    val results: List<MusicTrack> = emptyList(),
-    val isSearching: Boolean = false,
-    val selectingTrackId: String? = null,
-    val message: String? = null,
-)
-
-/** Manual lyric lookup/association state owned by playback. */
-interface PlaybackLyricsPort {
-    val associationState: StateFlow<LyricsAssociationUiState>
-
-    fun openAssociationSearch(track: MusicTrack)
-    fun updateAssociationQuery(query: String)
-    fun searchAssociation()
-    fun selectAssociation(track: MusicTrack)
-    fun closeAssociationSearch()
-    fun updateAlignmentOffset(offsetMs: Long)
-}
-
-/** Smart-replacement state/actions used by the now-playing surface. */
-interface ReplacementActionPort {
-    val replacementCandidateState: ReplacementCandidateState
-    val replacementCandidateStateFlow: StateFlow<ReplacementCandidateState>?
-        get() = null
-
-    fun loadReplacementCandidates(track: MusicTrack)
-    fun selectReplacementCandidate(track: MusicTrack, candidate: ReplacementCandidate)
-    fun openReplacementTrackDetail(track: MusicTrack)
 }
