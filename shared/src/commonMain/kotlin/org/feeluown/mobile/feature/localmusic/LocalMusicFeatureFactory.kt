@@ -23,7 +23,8 @@ typealias LocalMusicUiState = LocalMusicFeatureState<
 
 fun createLocalMusicFeatureController(
     repository: LocalMusicRepository,
-    providerRepository: ProviderMusicRepository,
+    providerSearch: ProviderSearchRepository,
+    providerPlaybackSource: PlaybackProviderSourcePort,
     navigator: AppNavigator,
     settingsRepository: AppSettingsRepository,
     providers: () -> List<ProviderInfo>,
@@ -31,76 +32,44 @@ fun createLocalMusicFeatureController(
     scope: CoroutineScope,
     onTrackUpdated: (String, MusicTrack) -> Unit = { _, _ -> },
 ): LocalMusicFeatureController {
-    val providerSearchRepository = ProviderSearchRepositoryView(providerRepository)
-    val providerPlaybackRepository = ProviderPlaybackRepositoryView(providerRepository)
-
     val featureRepository = object : LocalMusicRepositoryPort<MusicTrack, LocalMusicDirectory> {
         override val mediaChangeEvents = repository.mediaChangeEvents
-
         override suspend fun updateScanSettings(excludedDirectoryIds: Set<String>, minDurationSeconds: Int) {
-            repository.updateScanSettings(
-                LocalMusicScanSettings(
-                    excludedDirectoryIds = excludedDirectoryIds,
-                    minDurationSeconds = minDurationSeconds,
-                ),
-            )
+            repository.updateScanSettings(LocalMusicScanSettings(excludedDirectoryIds, minDurationSeconds))
         }
-
         override suspend fun isDatabaseReady(): Boolean = repository.isDatabaseReady()
         override suspend fun isDatabaseStale(): Boolean = repository.isDatabaseStale()
         override suspend fun refreshDatabase(): List<MusicTrack> = repository.refreshDatabase()
         override suspend fun tracks(): List<MusicTrack> = repository.tracks()
         override suspend fun directories(): List<LocalMusicDirectory> = repository.directories()
-
-        override suspend fun updateMetadata(
-            track: MusicTrack,
-            title: String,
-            artists: String,
-            album: String,
-        ) {
-            repository.updateMetadata(track, LocalTrackMetadata(title = title, artists = artists, album = album))
+        override suspend fun updateMetadata(track: MusicTrack, title: String, artists: String, album: String) {
+            repository.updateMetadata(track, LocalTrackMetadata(title, artists, album))
         }
-
-        override suspend fun saveLyrics(track: MusicTrack, lyrics: String) {
-            repository.saveLyrics(track, lyrics)
-        }
+        override suspend fun saveLyrics(track: MusicTrack, lyrics: String) { repository.saveLyrics(track, lyrics) }
     }
 
     val providerPort = object : LocalMusicProviderPort<MusicTrack> {
         override suspend fun search(keyword: String, providerId: String): List<MusicTrack> =
-            providerSearchRepository.search(keyword, providerId)
-
-        override suspend fun lyrics(track: MusicTrack): String? = providerPlaybackRepository.lyrics(track)
+            providerSearch.search(keyword, providerId)
+        override suspend fun lyrics(track: MusicTrack): String? = providerPlaybackSource.lyrics(track)
     }
 
-    val operations = object : LocalMusicFeatureOperations<
-        MusicTrack,
-        ProviderInfo,
-        LocalMusicDirectory,
-        LocalMusicViewMode,
-        LocalMusicCollectionSelection
-    > {
-        override fun trackId(track: MusicTrack): String = track.id
-        override fun trackTitle(track: MusicTrack): String = track.title
-        override fun trackArtists(track: MusicTrack): String = track.artists
-        override fun trackAlbum(track: MusicTrack): String = track.album
-        override fun isProviderTrack(track: MusicTrack): Boolean = track.sourceType == TrackSourceType.Provider
-        override fun providerTrackId(track: MusicTrack): String? = track.providerId ?: track.id
-        override fun withProviderTrackId(track: MusicTrack, providerTrackId: String): MusicTrack =
-            track.copy(providerId = providerTrackId)
-        override fun withMetadata(
-            track: MusicTrack,
-            title: String,
-            artists: String,
-            album: String,
-        ): MusicTrack = track.copy(title = title, artists = artists, album = album)
-        override fun withLyrics(track: MusicTrack, lyrics: String): MusicTrack = track.copy(lyrics = lyrics)
-        override fun providerId(provider: ProviderInfo): String = provider.providerId
-        override fun directoryId(directory: LocalMusicDirectory): String = directory.id
-        override fun defaultViewMode(): LocalMusicViewMode = LocalMusicViewMode.All
-        override fun isAllViewMode(viewMode: LocalMusicViewMode): Boolean = viewMode == LocalMusicViewMode.All
-        override fun collection(viewMode: LocalMusicViewMode, key: String): LocalMusicCollectionSelection =
-            LocalMusicCollectionSelection(viewMode, key)
+    val operations = object : LocalMusicFeatureOperations<MusicTrack, ProviderInfo, LocalMusicDirectory, LocalMusicViewMode, LocalMusicCollectionSelection> {
+        override fun trackId(track: MusicTrack) = track.id
+        override fun trackTitle(track: MusicTrack) = track.title
+        override fun trackArtists(track: MusicTrack) = track.artists
+        override fun trackAlbum(track: MusicTrack) = track.album
+        override fun isProviderTrack(track: MusicTrack) = track.sourceType == TrackSourceType.Provider
+        override fun providerTrackId(track: MusicTrack) = track.providerId ?: track.id
+        override fun withProviderTrackId(track: MusicTrack, providerTrackId: String) = track.copy(providerId = providerTrackId)
+        override fun withMetadata(track: MusicTrack, title: String, artists: String, album: String) =
+            track.copy(title = title, artists = artists, album = album)
+        override fun withLyrics(track: MusicTrack, lyrics: String) = track.copy(lyrics = lyrics)
+        override fun providerId(provider: ProviderInfo) = provider.providerId
+        override fun directoryId(directory: LocalMusicDirectory) = directory.id
+        override fun defaultViewMode() = LocalMusicViewMode.All
+        override fun isAllViewMode(viewMode: LocalMusicViewMode) = viewMode == LocalMusicViewMode.All
+        override fun collection(viewMode: LocalMusicViewMode, key: String) = LocalMusicCollectionSelection(viewMode, key)
     }
 
     val owner = createLocalMusicFeatureOwner(
@@ -118,9 +87,7 @@ fun createLocalMusicFeatureController(
                 settingsRepository.update { current ->
                     current.copy(
                         localMusicViewMode = viewMode,
-                        excludedLocalMusicDirectoryIds = excludedDirectoryIds
-                            .mapNotNull(::canonicalLocalMusicDirectoryId)
-                            .toSet(),
+                        excludedLocalMusicDirectoryIds = excludedDirectoryIds.mapNotNull(::canonicalLocalMusicDirectoryId).toSet(),
                         localMusicMinDurationSeconds = minDurationSeconds,
                     )
                 }
@@ -148,4 +115,13 @@ fun createLocalMusicFeatureController(
 
 private class BoundLocalMusicFeatureController(
     private val delegate: CoreLocalMusicFeatureController,
-) : LocalMusicFeatureController, CoreLocalMusicFeatureController by delegate
+) : LocalMusicFeatureController, CoreLocalMusicFeatureController by delegate {
+    override val localMetadataEditorState = delegate.localMetadataEditorState
+    override fun canEditLocalMetadata(track: MusicTrack) = delegate.canEditLocalMetadata(track)
+    override fun openLocalMetadataEditor(track: MusicTrack) = delegate.openLocalMetadataEditor(track)
+    override fun closeLocalMetadataEditor() = delegate.closeLocalMetadataEditor()
+    override fun onLocalMetadataTitleChange(value: String) = delegate.onLocalMetadataTitleChange(value)
+    override fun onLocalMetadataArtistsChange(value: String) = delegate.onLocalMetadataArtistsChange(value)
+    override fun onLocalMetadataAlbumChange(value: String) = delegate.onLocalMetadataAlbumChange(value)
+    override fun saveLocalMetadata() = delegate.saveLocalMetadata()
+}
