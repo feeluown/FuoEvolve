@@ -6,7 +6,7 @@ import kotlinx.coroutines.launch
 
 /** Owns provider/local playlist mutations initiated from the now-playing surface. */
 internal class PlaylistActionController(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRepository: ProviderLibraryRepository,
     private val localPlaylistController: LocalPlaylistController,
     private val state: PlaylistControllerState,
     private val scope: CoroutineScope,
@@ -26,27 +26,18 @@ internal class PlaylistActionController(
     override val feedback: StateFlow<String?> = state.playlistOperationFeedbackFlow
     override val targetPickerState: StateFlow<PlaylistTargetPickerUiState> = state.playlistTargetPickerFlow
 
-    override fun canAddTrackToPlaylist(track: MusicTrack): Boolean =
-        canAddTrackToProviderPlaylist(track) || canAddTrackToLocalPlaylist(track)
-
+    override fun canAddTrackToPlaylist(track: MusicTrack): Boolean = canAddTrackToProviderPlaylist(track) || canAddTrackToLocalPlaylist(track)
     override fun canAddTrackToProviderPlaylist(track: MusicTrack): Boolean {
         val providerId = trackProviderId(track) ?: return false
-        return track.sourceType == TrackSourceType.Provider &&
-            isProviderLoggedIn(providerId) &&
+        return track.sourceType == TrackSourceType.Provider && isProviderLoggedIn(providerId) &&
             providerCapabilities()[providerId]?.canAddSongToPlaylist == true
     }
-
-    override fun canAddTrackToLocalPlaylist(track: MusicTrack): Boolean =
-        localPlaylistController.canAddTrack(track)
+    override fun canAddTrackToLocalPlaylist(track: MusicTrack) = localPlaylistController.canAddTrack(track)
 
     override fun openPlaylistTargetPicker(track: MusicTrack) {
         if (!canAddTrackToPlaylist(track)) return
         state.playlistTargetTrack = track
-        state.playlistTargetType = if (canAddTrackToProviderPlaylist(track)) {
-            PlaylistTargetType.Provider
-        } else {
-            PlaylistTargetType.Local
-        }
+        state.playlistTargetType = if (canAddTrackToProviderPlaylist(track)) PlaylistTargetType.Provider else PlaylistTargetType.Local
         state.playlistTargetPickerShowSwitcher = true
         state.playlistOperationTargets = emptyList()
         state.playlistOperationError = null
@@ -80,8 +71,7 @@ internal class PlaylistActionController(
 
     override fun playlistProviderName(track: MusicTrack): String {
         val providerId = trackProviderId(track)
-        return state.playlistOperationTargets.firstOrNull()?.providerName
-            ?.takeIf { it.isNotBlank() }
+        return state.playlistOperationTargets.firstOrNull()?.providerName?.takeIf { it.isNotBlank() }
             ?: providerId?.let(providerName)?.takeIf { it.isNotBlank() && it != providerId }
             ?: track.providerName?.takeIf { it.isNotBlank() }
             ?: providerId.orEmpty().ifBlank { "Provider" }
@@ -92,9 +82,7 @@ internal class PlaylistActionController(
         if (type == PlaylistTargetType.Provider && !canAddTrackToProviderPlaylist(track)) return
         if (type == PlaylistTargetType.Local && !canAddTrackToLocalPlaylist(track)) return
         state.playlistTargetType = type
-        if (type == PlaylistTargetType.Local) {
-            state.localPlaylistOperationError = if (state.localPlaylists.isEmpty()) "请先新建本地歌单" else null
-        }
+        if (type == PlaylistTargetType.Local) state.localPlaylistOperationError = if (state.localPlaylists.isEmpty()) "请先新建本地歌单" else null
     }
 
     override fun addTrackToProviderPlaylist(playlist: ProviderPlaylist) {
@@ -106,28 +94,21 @@ internal class PlaylistActionController(
                 .onSuccess { result ->
                     if (result.success) {
                         val feedback = result.message.ifBlank { "已添加到：${playlist.title}" }
-                        setMessage(feedback)
-                        updateFeedback(feedback)
-                        closePlaylistTargetPicker()
-                        refreshAfterProviderMutation(playlist.providerId)
+                        setMessage(feedback); updateFeedback(feedback); closePlaylistTargetPicker(); refreshAfterProviderMutation(playlist.providerId)
                     } else {
                         state.playlistOperationError = result.message.ifBlank { "添加失败" }
-                        setMessage(state.playlistOperationError.orEmpty())
-                        updateFeedback(state.playlistOperationError)
+                        setMessage(state.playlistOperationError.orEmpty()); updateFeedback(state.playlistOperationError)
                     }
                 }
                 .onFailure {
                     val feedback = playlistMutationErrorMessage(it, playlist.providerId)
-                    state.playlistOperationError = feedback
-                    onError(it)
-                    updateFeedback(feedback)
+                    state.playlistOperationError = feedback; onError(it); updateFeedback(feedback)
                 }
             setLoading(false)
         }
     }
 
-    override fun addTrackToLocalPlaylist(playlist: LocalPlaylist) =
-        localPlaylistController.addTargetTrackTo(playlist)
+    override fun addTrackToLocalPlaylist(playlist: LocalPlaylist) = localPlaylistController.addTargetTrackTo(playlist)
 
     override fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean {
         val playlist = selectedPlaylist() ?: return false
@@ -142,50 +123,29 @@ internal class PlaylistActionController(
         val playlist = selectedPlaylist() ?: return
         if (!canRemoveTrackFromSelectedPlaylist(track)) return
         scope.launch {
-            setLoading(true)
-            setMessage("正在从歌单移除")
+            setLoading(true); setMessage("正在从歌单移除")
             runCatching { providerRepository.removeTrackFromPlaylist(playlist, track) }
                 .onSuccess { result ->
                     if (result.success) {
                         updateSelectedPlaylistTracks(selectedPlaylistTracks().filterNot { it.id == track.id })
                         val feedback = result.message.ifBlank { "已从歌单移除：${track.title}" }
-                        setMessage(feedback)
-                        updateFeedback(feedback)
-                        refreshAfterProviderMutation(playlist.providerId)
+                        setMessage(feedback); updateFeedback(feedback); refreshAfterProviderMutation(playlist.providerId)
                     } else {
                         val error = result.message.ifBlank { "移除失败" }
-                        updateSelectedPlaylistError(error)
-                        setMessage(error)
-                        updateFeedback(error)
+                        updateSelectedPlaylistError(error); setMessage(error); updateFeedback(error)
                     }
                 }
-                .onFailure {
-                    val feedback = playlistMutationErrorMessage(it, playlist.providerId)
-                    onError(it)
-                    updateFeedback(feedback)
-                }
+                .onFailure { val feedback = playlistMutationErrorMessage(it, playlist.providerId); onError(it); updateFeedback(feedback) }
             setLoading(false)
         }
     }
 
-    override fun dismissFeedback(feedback: String) {
-        if (state.playlistOperationFeedback == feedback) {
-            updateFeedback(null)
-        }
-    }
-
-    private fun updateFeedback(feedback: String?) {
-        state.playlistOperationFeedback = feedback
-    }
-
+    override fun dismissFeedback(feedback: String) { if (state.playlistOperationFeedback == feedback) updateFeedback(null) }
+    private fun updateFeedback(feedback: String?) { state.playlistOperationFeedback = feedback }
     private fun trackProviderId(track: MusicTrack): String? =
-        track.source.takeIf { it.isNotBlank() }
-            ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
+        track.source.takeIf { it.isNotBlank() } ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
 }
 
-internal fun playlistMutationErrorMessage(
-    throwable: Throwable,
-    providerId: String,
-): String = throwable.providerFailureOrNull(providerId)?.userMessage
-    ?: throwable.message
+internal fun playlistMutationErrorMessage(throwable: Throwable, providerId: String): String =
+    throwable.providerFailureOrNull(providerId)?.userMessage ?: throwable.message
     ?: throwable::class.simpleName.orEmpty().ifBlank { "操作失败" }
