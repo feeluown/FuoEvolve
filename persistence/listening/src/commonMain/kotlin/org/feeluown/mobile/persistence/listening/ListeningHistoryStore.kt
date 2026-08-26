@@ -11,6 +11,7 @@ import org.feeluown.mobile.ListeningHistoryEvent
 import org.feeluown.mobile.ListeningHistoryRecord
 import org.feeluown.mobile.ListeningHistoryRepository
 import org.feeluown.mobile.ListeningInsights
+import org.feeluown.mobile.ListeningLegacyPlaylistStat
 import org.feeluown.mobile.ListeningResourceRelationType
 import org.feeluown.mobile.ListeningResourceSnapshot
 import org.feeluown.mobile.ListeningResourceStat
@@ -20,6 +21,11 @@ import org.feeluown.mobile.ListeningStartReason
 import org.feeluown.mobile.ListeningTimeRange
 import org.feeluown.mobile.ListeningTrendPoint
 import org.feeluown.mobile.persistence.listening.db.ListeningHistoryDatabase
+
+private const val LEGACY_PLAYLIST_MIGRATION_KEY = "legacy_playlist_stats_v1"
+private const val MIGRATION_COMPLETE = "complete"
+private const val LEGACY_PLAYLIST_QUERY_FLOOR = 500
+private const val FALLBACK_PLAYLIST_SOURCE = "context"
 
 interface ListeningHistoryDriverFactory {
     fun createDriver(): SqlDriver
@@ -76,6 +82,42 @@ class SqlDelightListeningHistoryStore(
                                 relationType = relation.relation.name,
                             )
                         }
+                }
+            }
+        }
+    }
+
+    override suspend fun migrateLegacyPlaylistStats(stats: List<ListeningLegacyPlaylistStat>) {
+        withContext(dispatcher) {
+            mutex.withLock {
+                val queries = database.listeningHistoryQueries
+                if (queries.selectMetadataValue(LEGACY_PLAYLIST_MIGRATION_KEY).executeAsOneOrNull() == MIGRATION_COMPLETE) {
+                    return@withLock
+                }
+                database.transaction {
+                    stats.asSequence()
+                        .filter { stat ->
+                            stat.sourceId.isNotBlank() &&
+                                stat.sourceResourceId.isNotBlank() &&
+                                stat.playCount > 0L &&
+                                stat.lastPlayedAtMillis > 0L
+                        }
+                        .distinctBy { it.sourceId to it.sourceResourceId }
+                        .forEach { stat ->
+                            // Old and new counters co-existed in preview builds. Subtract context sessions already
+                            // represented by real events so migration preserves only the missing historical baseline.
+                            val representedSessions = queries.selectExistingPlaylistContextSessionCount(
+                                sourceResourceId = stat.sourceResourceId,
+                                sourceId = stat.sourceId,
+                            ).executeAsOne()
+                            queries.upsertLegacyPlaylistStat(
+                                sourceId = stat.sourceId,
+                                sourceResourceId = stat.sourceResourceId,
+                                playCount = (stat.playCount - representedSessions).coerceAtLeast(0L),
+                                lastPlayedAt = stat.lastPlayedAtMillis,
+                            )
+                        }
+                    queries.upsertMetadata(LEGACY_PLAYLIST_MIGRATION_KEY, MIGRATION_COMPLETE)
                 }
             }
         }
@@ -157,14 +199,29 @@ class SqlDelightListeningHistoryStore(
         limit: Int,
     ): List<ListeningResourceStat> = withContext(dispatcher) {
         mutex.withLock {
-            database.listeningHistoryQueries.selectResourceStats(
+            val safeLimit = limit.coerceAtLeast(0)
+            if (safeLimit == 0) return@withLock emptyList()
+            val queries = database.listeningHistoryQueries
+            val queryLimit = if (resourceType == ListeningResourceType.Playlist && range == ListeningTimeRange.All) {
+                maxOf(safeLimit * 2, LEGACY_PLAYLIST_QUERY_FLOOR)
+            } else {
+                safeLimit
+            }
+            val actual = queries.selectResourceStats(
                 startAt = range.startInclusiveMillis,
                 endAt = range.endExclusiveMillis,
                 resourceType = resourceType.name,
                 relationType = relationFor(resourceType).name,
-                limit = limit.coerceAtLeast(0).toLong(),
+                limit = queryLimit.toLong(),
                 mapper = ::resourceStat,
             ).executeAsList()
+            if (resourceType != ListeningResourceType.Playlist || range != ListeningTimeRange.All) {
+                return@withLock actual.take(safeLimit)
+            }
+            val legacy = queries.selectLegacyPlaylistStats { sourceId, sourceResourceId, playCount, lastPlayedAt ->
+                LegacyPlaylistBaseline(sourceId, sourceResourceId, playCount, lastPlayedAt)
+            }.executeAsList()
+            mergePlaylistBaselines(actual, legacy, safeLimit)
         }
     }
 
@@ -221,9 +278,13 @@ class SqlDelightListeningHistoryStore(
         withContext(dispatcher) {
             mutex.withLock {
                 database.transaction {
-                    database.listeningHistoryQueries.clearEventRelations()
-                    database.listeningHistoryQueries.clearEvents()
-                    database.listeningHistoryQueries.clearResources()
+                    val queries = database.listeningHistoryQueries
+                    queries.clearEventRelations()
+                    queries.clearEvents()
+                    queries.clearResources()
+                    queries.clearLegacyPlaylistStats()
+                    // Clearing history must not resurrect old settings counters on the next read.
+                    queries.upsertMetadata(LEGACY_PLAYLIST_MIGRATION_KEY, MIGRATION_COMPLETE)
                 }
             }
         }
@@ -261,6 +322,89 @@ class SqlDelightListeningHistoryStore(
         contextSessionCount = contextSessionCount,
     )
 }
+
+private data class LegacyPlaylistBaseline(
+    val sourceId: String,
+    val sourceResourceId: String,
+    val playCount: Long,
+    val lastPlayedAtMillis: Long,
+)
+
+private fun mergePlaylistBaselines(
+    actual: List<ListeningResourceStat>,
+    legacy: List<LegacyPlaylistBaseline>,
+    limit: Int,
+): List<ListeningResourceStat> {
+    val legacyByResourceId = legacy.groupBy(LegacyPlaylistBaseline::sourceResourceId)
+    val merged = linkedMapOf<Pair<String, String>, ListeningResourceStat>()
+
+    actual.forEach { stat ->
+        val legacyIdentity = stat.resource
+            .takeIf { it.sourceId == FALLBACK_PLAYLIST_SOURCE }
+            ?.let { resource -> legacyByResourceId[resource.sourceResourceId]?.singleOrNull() }
+        val normalized = if (legacyIdentity != null) {
+            stat.copy(
+                resource = stat.resource.copy(
+                    resourceKey = playlistResourceKey(legacyIdentity.sourceId, legacyIdentity.sourceResourceId),
+                    sourceId = legacyIdentity.sourceId,
+                    sourceResourceId = legacyIdentity.sourceResourceId,
+                ),
+            )
+        } else {
+            stat
+        }
+        val key = normalized.resource.sourceId to normalized.resource.sourceResourceId
+        merged[key] = merged[key]?.mergeWith(normalized) ?: normalized
+    }
+
+    legacy.forEach { baseline ->
+        val key = baseline.sourceId to baseline.sourceResourceId
+        val current = merged[key]
+        if (current != null) {
+            merged[key] = current.copy(
+                contextSessionCount = current.contextSessionCount + baseline.playCount,
+                lastPlayedAtMillis = maxOf(current.lastPlayedAtMillis, baseline.lastPlayedAtMillis),
+            )
+        } else if (baseline.playCount > 0L) {
+            merged[key] = ListeningResourceStat(
+                resource = ListeningResourceSnapshot(
+                    resourceKey = playlistResourceKey(baseline.sourceId, baseline.sourceResourceId),
+                    type = ListeningResourceType.Playlist,
+                    sourceId = baseline.sourceId,
+                    sourceResourceId = baseline.sourceResourceId,
+                    // Legacy settings did not retain display metadata. Mine maps this identity back to
+                    // the currently loaded provider playlist, which supplies the real title and cover.
+                    title = baseline.sourceResourceId,
+                ),
+                eventCount = 0L,
+                qualifiedPlayCount = 0L,
+                playedMs = 0L,
+                lastPlayedAtMillis = baseline.lastPlayedAtMillis,
+                contextSessionCount = baseline.playCount,
+            )
+        }
+    }
+
+    return merged.values
+        .sortedWith(
+            compareByDescending<ListeningResourceStat> { it.contextSessionCount }
+                .thenByDescending { it.qualifiedPlayCount }
+                .thenByDescending { it.playedMs }
+                .thenByDescending { it.lastPlayedAtMillis },
+        )
+        .take(limit)
+}
+
+private fun ListeningResourceStat.mergeWith(other: ListeningResourceStat): ListeningResourceStat = copy(
+    eventCount = eventCount + other.eventCount,
+    qualifiedPlayCount = qualifiedPlayCount + other.qualifiedPlayCount,
+    playedMs = playedMs + other.playedMs,
+    lastPlayedAtMillis = maxOf(lastPlayedAtMillis, other.lastPlayedAtMillis),
+    contextSessionCount = contextSessionCount + other.contextSessionCount,
+)
+
+private fun playlistResourceKey(sourceId: String, resourceId: String): String =
+    "${ListeningResourceType.Playlist.name}:${sourceId.length}:$sourceId:$resourceId"
 
 private fun resourceSnapshot(
     resourceKey: String,
