@@ -34,6 +34,7 @@ class AppShellPolicyTest {
             NavigationVideo(
                 id = "bilibili:BV1",
                 title = "Video",
+                artists = "Uploader",
                 providerId = "bilibili:BV1",
                 providerName = "哔哩哔哩",
             )
