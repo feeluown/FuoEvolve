@@ -83,7 +83,7 @@ interface PlaybackSettingsPort {
 
     suspend fun awaitSettings(): PlaybackFeatureSettings
     suspend fun storeSmartReplacementSelections(value: Map<String, SmartReplacementSelection>)
-    suspend fun storeLyricsAssociations(value: Map<String, String?>)
+    suspend fun storeLyricsAssociations(value: Map<String, String>)
     suspend fun storeLyricsAlignmentOffsetsMs(value: Map<String, Long>)
 }
 
