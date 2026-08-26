@@ -1,8 +1,6 @@
 package org.feeluown.mobile
 
 import android.app.Application
-import org.feeluown.mobile.persistence.listening.AndroidListeningHistoryDriverFactory
-import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
 
 /**
  * Thin Android process host.
@@ -12,15 +10,6 @@ import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
  */
 class FuoEvolveApplication : Application() {
     private var containerHolder: AndroidAppContainer? = null
-
-    override fun onCreate() {
-        super.onCreate()
-        installAppListeningHistorySink(
-            SqlDelightListeningHistoryStore(
-                AndroidListeningHistoryDriverFactory(this),
-            )
-        )
-    }
 
     private fun container(): AndroidAppContainer =
         containerHolder ?: AndroidAppContainer(this).also { containerHolder = it }
@@ -44,7 +33,6 @@ class FuoEvolveApplication : Application() {
     override fun onTerminate() {
         containerHolder?.close()
         containerHolder = null
-        resetAppListeningHistorySink()
         super.onTerminate()
     }
 }
