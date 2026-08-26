@@ -323,8 +323,8 @@ internal class AndroidAppContainer(
 
     private val playbackSession: PlaybackSession by lazy(::wirePlaybackRuntime)
 
-    val appViewModel: FuoAppViewModel by lazy {
-        FuoAppViewModel(
+    val appUiGraph: AppUiGraph by lazy {
+        createAppUiGraph(
             playbackSession = playbackSession,
             playbackNavigationPort = playbackFeatureOwner.navigation,
             playbackPresentationPort = playbackPresentationPort,
@@ -347,12 +347,33 @@ internal class AndroidAppContainer(
             homeFeatureController = homeFeatureController,
             sharedResourceActionPort = sharedResourceActionPort,
             searchController = searchController,
-            recognitionController = recognitionController,
             searchAppPort = searchAppPort,
+            recognitionController = recognitionController,
             recognitionAppPort = recognitionAppPort,
-            settingsRepository = settingsRepository,
-            providerSessionRepository = providerSessionRepository,
+        )
+    }
+
+    private val appBackCoordinator: AppBackCoordinator by lazy {
+        createAppBackCoordinator(
             navigator = navigator,
+            playbackNavigationPort = playbackFeatureOwner.navigation,
+            playlistActionPort = playlistActionPort,
+            providerTrackActionPort = providerTrackActionPort,
+            localMusicFeatureController = localMusicFeatureController,
+            providerDetailOwners = providerDetailOwners,
+            searchAppPort = searchAppPort,
+            recognitionController = recognitionController,
+            settingsFeatureController = settingsFeatureController,
+            localPlaylistFeatureController = localPlaylistFeatureController,
+        )
+    }
+
+    val appViewModel: FuoAppViewModel by lazy {
+        FuoAppViewModel(
+            settingsRepository = settingsRepository,
+            navigator = navigator,
+            recognitionController = recognitionController,
+            backCoordinator = appBackCoordinator,
         )
     }
 

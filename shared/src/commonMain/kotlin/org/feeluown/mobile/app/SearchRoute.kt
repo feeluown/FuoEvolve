@@ -7,17 +7,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /** App-shell composition for the search feature. */
 @Composable
 internal fun SearchRoute(
-    appViewModel: FuoAppViewModel,
-    appPort: SearchAppPort,
+    graph: SearchRouteGraph,
+    onOpenRecognition: () -> Unit,
 ) {
-    val uiState by appViewModel.searchUiState.collectAsStateWithLifecycle()
+    val uiState by graph.controller.uiState.collectAsStateWithLifecycle()
+    val appPort = graph.appPort
 
     SearchFeatureScreen(
         uiState = uiState,
         providers = appPort.providers,
         downloadStates = appPort.downloadStates,
         actions = SearchFeatureActions(
-            dispatch = appViewModel::dispatchSearch,
+            dispatch = graph.controller::dispatch,
             onBack = appPort::closeSearch,
             onPlayResult = appPort::playResult,
             onAddToUpNext = appPort::addToUpNext,
@@ -43,6 +44,6 @@ internal fun SearchRoute(
             onOpenPlaylist = appPort::openPlaylist,
             onOpenVideo = appPort::openVideo,
         ),
-        onOpenRecognition = appViewModel::openRecognition,
+        onOpenRecognition = onOpenRecognition,
     )
 }

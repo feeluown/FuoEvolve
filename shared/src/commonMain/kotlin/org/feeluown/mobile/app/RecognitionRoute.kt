@@ -17,19 +17,20 @@ import kotlinx.coroutines.launch
 /** App-shell composition for the recognition feature. */
 @Composable
 internal fun RecognitionRoute(
-    appViewModel: FuoAppViewModel,
-    appPort: RecognitionAppPort,
+    graph: RecognitionRouteGraph,
+    onBack: () -> Unit,
+    onSearchSong: (RecognizedSong) -> Unit,
     hasMicrophonePermission: Boolean,
     onRequestMicrophonePermission: () -> Unit,
 ) {
-    val uiState by appViewModel.recognitionUiState.collectAsStateWithLifecycle()
-    val detailLoadState by appPort.detailLoadState.collectAsStateWithLifecycle()
+    val uiState by graph.controller.uiState.collectAsStateWithLifecycle()
+    val detailLoadState by graph.appPort.detailLoadState.collectAsStateWithLifecycle()
     val detailScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(detailLoadState.errorMessage) {
         val message = detailLoadState.errorMessage ?: return@LaunchedEffect
-        appPort.clearDetailLoadError()
+        graph.appPort.clearDetailLoadError()
         snackbarHostState.showSnackbar("资源详情加载失败：$message")
     }
 
@@ -37,12 +38,12 @@ internal fun RecognitionRoute(
         AudioRecognitionFeatureScreen(
             uiState = uiState,
             actions = RecognitionFeatureActions(
-                dispatch = appViewModel::dispatchRecognition,
-                onBack = appViewModel::closeRecognition,
-                onSearchSong = appViewModel::searchRecognizedSong,
-                canOpenNeteaseDetail = appPort::canOpenNeteaseDetail,
+                dispatch = graph.controller::dispatch,
+                onBack = onBack,
+                onSearchSong = onSearchSong,
+                canOpenNeteaseDetail = graph.appPort::canOpenNeteaseDetail,
                 onOpenNeteaseDetail = { song ->
-                    detailScope.launch { appPort.openNeteaseDetail(song) }
+                    detailScope.launch { graph.appPort.openNeteaseDetail(song) }
                 },
             ),
             hasMicrophonePermission = hasMicrophonePermission,
