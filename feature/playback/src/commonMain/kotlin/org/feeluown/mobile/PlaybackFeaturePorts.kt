@@ -12,20 +12,8 @@ interface PlaybackProviderSourcePort {
     suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
 }
 
-/**
- * Playback-owned provider surface. Stable provider capabilities are composed with a concrete-track
- * resolver, while unavailable-track and smart-replacement policy stays inside this feature.
- */
-interface PlaybackProviderPort :
-    ProviderRegistryRepository,
-    ProviderSearchRepository,
-    ProviderCatalogRepository {
-    suspend fun replacementCandidates(
-        track: MusicTrack,
-        smartReplacementProviderIds: Set<String> = emptySet(),
-        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-    ): List<ReplacementCandidate>
-
+/** Resolution policy required by the playback start pipeline. */
+interface PlaybackResolutionPort {
     suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
@@ -41,15 +29,43 @@ interface PlaybackProviderPort :
         smartReplacementUseOriginalLyrics: Boolean = true,
         smartReplacementProviderIds: Set<String> = emptySet(),
     ): PlaybackPayload
+}
 
+/** Candidate discovery required by manual and automatic smart replacement. */
+interface PlaybackReplacementProviderPort {
+    suspend fun replacementCandidates(
+        track: MusicTrack,
+        smartReplacementProviderIds: Set<String> = emptySet(),
+        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    ): List<ReplacementCandidate>
+}
+
+/** Provider-backed lyrics operations owned by the playback feature. */
+interface PlaybackLyricsProviderPort {
     suspend fun lyrics(track: MusicTrack): String? = null
     suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
+}
 
+/** Composite policy surface used while playback collaborators migrate to their narrow sub-ports. */
+interface PlaybackPolicyPort :
+    PlaybackResolutionPort,
+    PlaybackReplacementProviderPort,
+    PlaybackLyricsProviderPort
+
+/**
+ * Playback-owned provider surface. Stable provider capabilities are composed with a concrete-track
+ * resolver, while unavailable-track and smart-replacement policy stays inside this feature.
+ */
+interface PlaybackProviderPort :
+    ProviderRegistryRepository,
+    ProviderSearchRepository,
+    ProviderCatalogRepository,
+    PlaybackPolicyPort {
     fun failureMessage(throwable: Throwable, fallback: String, providerId: String? = null): String
 }
 
 /** Internal owner/controller dependency name while those collaborators are progressively renamed. */
-internal typealias ProviderPlaybackRepository = PlaybackProviderPort
+internal typealias ProviderPlaybackRepository = PlaybackPolicyPort
 
 data class PlaybackFeatureSettings(
     val enabledProviderIds: Set<String> = emptySet(),
@@ -67,7 +83,7 @@ interface PlaybackSettingsPort {
 
     suspend fun awaitSettings(): PlaybackFeatureSettings
     suspend fun storeSmartReplacementSelections(value: Map<String, SmartReplacementSelection>)
-    suspend fun storeLyricsAssociations(value: Map<String, String>)
+    suspend fun storeLyricsAssociations(value: Map<String, String?>)
     suspend fun storeLyricsAlignmentOffsetsMs(value: Map<String, Long>)
 }
 
