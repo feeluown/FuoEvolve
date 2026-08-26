@@ -143,7 +143,7 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
         }
         if (!initialPlaylistLoadStarted) return@LaunchedEffect
 
-        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+        if (state.playlistFilter != PlaylistFilter.Local) {
             listState.scrollToItem(0)
         }
         initialPlaylistLoadPending = false
