@@ -73,44 +73,47 @@ private fun IosApp(
     }
     AppRoot(
         appViewModel = container.appViewModel,
-        hasAudioPermission = container.hasAudioPermission,
-        onRequestAudioPermission = container::requestAudioPermission,
-        hasMicrophonePermission = container.hasMicrophonePermission,
-        onRequestMicrophonePermission = container::requestMicrophonePermission,
-        onOpenProviderWebLogin = container::openProviderWebLogin,
-        onLogoutProvider = container::logoutProvider,
-        onImportYtmusicHeaderFile = {
-            localPlaylistFileOutput.importFile { _, content ->
-                handleIosJsonImportResult(
-                    content = content,
-                    onImport = container.appViewModel.providerAuthFeatureController::loginYtmusicWithHeaderFile,
-                    onReadFailure = { container.appViewModel.showFeedback("无法读取 ytmusic_header.json") },
-                )
-            }
-        },
-        onImportYtmusicOAuthFile = {
-            localPlaylistFileOutput.importFile { _, content ->
-                handleIosJsonImportResult(
-                    content = content,
-                    onImport = container.appViewModel.providerAuthFeatureController::importYtmusicOAuthRelatedJson,
-                    onReadFailure = { container.appViewModel.showFeedback("无法读取 OAuth JSON") },
-                )
-            }
-        },
-        onStartYtmusicOAuth = container.appViewModel.providerAuthFeatureController::startYtmusicTvOAuthLogin,
-        onImportLocalPlaylistFile = {
-            localPlaylistFileOutput.importFile { fileName, content ->
-                handleIosLocalPlaylistImportResult(
-                    fileName = fileName,
-                    content = content,
-                    onImport = container.appViewModel.localPlaylistFeatureController::prepareImport,
-                    onReadFailure = { container.appViewModel.showFeedback("无法读取本地歌单文件") },
-                )
-            }
-        },
-        onExportLocalPlaylistFile = localPlaylistFileOutput::exportFile,
-        onShareLocalPlaylistFile = localPlaylistFileOutput::shareFile,
-        onShareText = shareOutput::share,
+        uiGraph = container.appUiGraph,
+        platform = AppPlatformBindings(
+            hasAudioPermission = container.hasAudioPermission,
+            onRequestAudioPermission = container::requestAudioPermission,
+            hasMicrophonePermission = container.hasMicrophonePermission,
+            onRequestMicrophonePermission = container::requestMicrophonePermission,
+            onOpenProviderWebLogin = container::openProviderWebLogin,
+            onLogoutProvider = container::logoutProvider,
+            onImportYtmusicHeaderFile = {
+                localPlaylistFileOutput.importFile { _, content ->
+                    handleIosJsonImportResult(
+                        content = content,
+                        onImport = container.appUiGraph.providerAuth::loginYtmusicWithHeaderFile,
+                        onReadFailure = { container.appViewModel.showFeedback("无法读取 ytmusic_header.json") },
+                    )
+                }
+            },
+            onImportYtmusicOAuthFile = {
+                localPlaylistFileOutput.importFile { _, content ->
+                    handleIosJsonImportResult(
+                        content = content,
+                        onImport = container.appUiGraph.providerAuth::importYtmusicOAuthRelatedJson,
+                        onReadFailure = { container.appViewModel.showFeedback("无法读取 OAuth JSON") },
+                    )
+                }
+            },
+            onStartYtmusicOAuth = container.appUiGraph.providerAuth::startYtmusicTvOAuthLogin,
+            onImportLocalPlaylistFile = {
+                localPlaylistFileOutput.importFile { fileName, content ->
+                    handleIosLocalPlaylistImportResult(
+                        fileName = fileName,
+                        content = content,
+                        onImport = container.appUiGraph.localPlaylist::prepareImport,
+                        onReadFailure = { container.appViewModel.showFeedback("无法读取本地歌单文件") },
+                    )
+                }
+            },
+            onExportLocalPlaylistFile = localPlaylistFileOutput::exportFile,
+            onShareLocalPlaylistFile = localPlaylistFileOutput::shareFile,
+            onShareText = shareOutput::share,
+        ),
     )
 }
 
@@ -378,35 +381,56 @@ private class IosAppContainer(
         DefaultPlaybackPresentationPort(playbackEngine, playbackFeatureOwner.transport, settingsRepository, scope)
     }
 
+    val appUiGraph: AppUiGraph by lazy {
+        createAppUiGraph(
+            playbackSession = playbackSession,
+            playbackNavigationPort = playbackFeatureOwner.navigation,
+            playbackPresentationPort = playbackPresentationPort,
+            playbackQueueUiPort = playbackFeatureOwner.transport,
+            playbackSleepTimerPort = playbackFeatureOwner.sleepTimer,
+            downloadActionPort = downloadActionPort,
+            playlistActionPort = playlistActionPort,
+            providerTrackActionPort = providerTrackActionPort,
+            localMusicActionPort = localMusicFeatureController,
+            playbackLyricsPort = playbackFeatureOwner.lyrics,
+            replacementActionPort = playbackFeatureOwner.replacement,
+            debugLogFeatureController = debugLogFeatureController,
+            providerCatalogFeatureController = providerCatalogFeatureController,
+            providerAuthFeatureController = providerAuthFeatureController,
+            settingsFeatureController = settingsFeatureController,
+            onboardingFeatureController = onboardingFeatureController,
+            providerDetailOwners = providerDetailOwners,
+            localMusicFeatureController = localMusicFeatureController,
+            localPlaylistFeatureController = localPlaylistFeatureController,
+            homeFeatureController = homeFeatureController,
+            sharedResourceActionPort = sharedResourceActionPort,
+            searchController = searchController,
+            searchAppPort = searchAppPort,
+            recognitionController = recognitionController,
+            recognitionAppPort = recognitionAppPort,
+        )
+    }
+
+    private val appBackCoordinator: AppBackCoordinator by lazy {
+        createAppBackCoordinator(
+            navigator = navigator,
+            playbackNavigationPort = playbackFeatureOwner.navigation,
+            playlistActionPort = playlistActionPort,
+            providerTrackActionPort = providerTrackActionPort,
+            localMusicFeatureController = localMusicFeatureController,
+            providerDetailOwners = providerDetailOwners,
+            searchAppPort = searchAppPort,
+            recognitionController = recognitionController,
+            settingsFeatureController = settingsFeatureController,
+            localPlaylistFeatureController = localPlaylistFeatureController,
+        )
+    }
+
     val appViewModel = FuoAppViewModel(
-        playbackSession = playbackSession,
-        playbackNavigationPort = playbackFeatureOwner.navigation,
-        playbackPresentationPort = playbackPresentationPort,
-        playbackQueueUiPort = playbackFeatureOwner.transport,
-        playbackSleepTimerPort = playbackFeatureOwner.sleepTimer,
-        downloadActionPort = downloadActionPort,
-        playlistActionPort = playlistActionPort,
-        providerTrackActionPort = providerTrackActionPort,
-        localMusicActionPort = localMusicFeatureController,
-        playbackLyricsPort = playbackFeatureOwner.lyrics,
-        replacementActionPort = playbackFeatureOwner.replacement,
-        debugLogFeatureController = debugLogFeatureController,
-        providerCatalogFeatureController = providerCatalogFeatureController,
-        providerAuthFeatureController = providerAuthFeatureController,
-        settingsFeatureController = settingsFeatureController,
-        onboardingFeatureController = onboardingFeatureController,
-        providerDetailOwners = providerDetailOwners,
-        localMusicFeatureController = localMusicFeatureController,
-        localPlaylistFeatureController = localPlaylistFeatureController,
-        homeFeatureController = homeFeatureController,
-        sharedResourceActionPort = sharedResourceActionPort,
-        searchController = searchController,
-        recognitionController = recognitionController,
-        searchAppPort = searchAppPort,
-        recognitionAppPort = recognitionAppPort,
         settingsRepository = settingsRepository,
-        providerSessionRepository = providerSessionRepository,
         navigator = navigator,
+        recognitionController = recognitionController,
+        backCoordinator = appBackCoordinator,
     )
 
     var hasMicrophonePermission by mutableStateOf(audioRecognitionOutput.hasPermission())
