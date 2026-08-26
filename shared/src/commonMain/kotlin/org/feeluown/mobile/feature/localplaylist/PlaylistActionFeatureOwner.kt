@@ -7,14 +7,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 fun createPlaylistActionPort(
-    providerRepository: ProviderMusicRepository,
+    providerLibrary: ProviderLibraryRepository,
     providerCatalog: ProviderCatalogFeatureController,
     providerDetails: ProviderDetailOwners,
     localPlaylist: LocalPlaylistFeatureOwner,
     scope: CoroutineScope,
     onProviderMutation: (String) -> Unit = {},
 ): PlaylistActionPort = DefaultPlaylistActionOwner(
-    providerRepository = providerRepository,
+    providerLibrary = providerLibrary,
     providerCatalog = providerCatalog,
     providerDetails = providerDetails,
     localPlaylist = localPlaylist,
@@ -23,7 +23,7 @@ fun createPlaylistActionPort(
 )
 
 private class DefaultPlaylistActionOwner(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerLibrary: ProviderLibraryRepository,
     private val providerCatalog: ProviderCatalogFeatureController,
     private val providerDetails: ProviderDetailOwners,
     private val localPlaylist: LocalPlaylistFeatureOwner,
@@ -61,7 +61,7 @@ private class DefaultPlaylistActionOwner(
         )
         if (!canProvider) return
         scope.launch {
-            runCatching { providerRepository.playlistOperationTargets(track) }
+            runCatching { providerLibrary.playlistOperationTargets(track) }
                 .onSuccess { targets ->
                     if (targetPickerState.value.track?.id == track.id) {
                         mutableTargetPickerState.value = targetPickerState.value.copy(
@@ -105,9 +105,7 @@ private class DefaultPlaylistActionOwner(
             targetType = type,
             localError = if (type == PlaylistTargetType.Local && localPlaylist.uiState.value.playlists.isEmpty()) {
                 "请先新建本地歌单"
-            } else {
-                null
-            },
+            } else null,
         )
     }
 
@@ -115,11 +113,9 @@ private class DefaultPlaylistActionOwner(
         val track = targetPickerState.value.track ?: return
         if (!canAddTrackToProviderPlaylist(track)) return
         scope.launch {
-            runCatching { providerRepository.addTrackToPlaylist(playlist, track) }
+            runCatching { providerLibrary.addTrackToPlaylist(playlist, track) }
                 .onSuccess { result ->
-                    val message = result.message.ifBlank {
-                        if (result.success) "已添加到：${playlist.title}" else "添加失败"
-                    }
+                    val message = result.message.ifBlank { if (result.success) "已添加到：${playlist.title}" else "添加失败" }
                     mutableFeedback.value = message
                     if (result.success) {
                         closePlaylistTargetPicker()
@@ -141,30 +137,21 @@ private class DefaultPlaylistActionOwner(
         if (!localPlaylist.canAddTrack(track)) return
         scope.launch {
             val result = localPlaylist.addTrack(playlist, track)
-            val message = result.message.ifBlank {
-                if (result.success) "已添加到：${playlist.title}" else "添加失败"
-            }
+            val message = result.message.ifBlank { if (result.success) "已添加到：${playlist.title}" else "添加失败" }
             mutableFeedback.value = message
-            if (result.success) {
-                closePlaylistTargetPicker()
-            } else if (targetPickerState.value.track?.id == track.id) {
+            if (result.success) closePlaylistTargetPicker()
+            else if (targetPickerState.value.track?.id == track.id) {
                 mutableTargetPickerState.value = targetPickerState.value.copy(localError = message)
             }
         }
     }
 
-    override fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack): Boolean =
-        providerDetails.playlist.canRemove(track)
-
-    override fun removeTrackFromSelectedPlaylist(track: MusicTrack) {
-        providerDetails.playlist.remove(track)
-    }
-
+    override fun canRemoveTrackFromSelectedPlaylist(track: MusicTrack) = providerDetails.playlist.canRemove(track)
+    override fun removeTrackFromSelectedPlaylist(track: MusicTrack) = providerDetails.playlist.remove(track)
     override fun dismissFeedback(feedback: String) {
         if (mutableFeedback.value == feedback) mutableFeedback.value = null
     }
 
     private fun trackProviderId(track: MusicTrack): String? =
-        track.source.takeIf { it.isNotBlank() }
-            ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
+        track.source.takeIf { it.isNotBlank() } ?: track.providerId?.substringBefore(":")?.takeIf { it.isNotBlank() }
 }

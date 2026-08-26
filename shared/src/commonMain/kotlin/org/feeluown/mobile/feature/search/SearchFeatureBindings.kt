@@ -29,7 +29,7 @@ fun SearchUiState(
 
 /** Composition-root binding from application repositories to the physical Search feature module. */
 fun createSearchFeatureController(
-    providerRepository: ProviderMusicRepository,
+    providerRepository: ProviderSearchRepository,
     localRepository: LocalMusicRepository,
     scope: CoroutineScope,
     providerIdsForSearch: () -> List<String>,

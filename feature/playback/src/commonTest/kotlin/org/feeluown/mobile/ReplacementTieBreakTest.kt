@@ -28,184 +28,84 @@ class ReplacementTieBreakTest {
     @Test
     fun higherLegacyScoreStillWinsWhenRecordingStructureIsEquivalent() {
         val original = track("netease", "Song", "Alice", album = "Album", durationMs = 180_000)
-        val higherLegacy = ReplacementCandidate(
-            track("ytmusic", "Different", "Other", id = "higher"),
-            0.81,
-        )
+        val higherLegacy = ReplacementCandidate(track("ytmusic", "Different", "Other", id = "higher"), 0.81)
         val lowerLegacyButPerfectMetadata = ReplacementCandidate(
             track("qqmusic", "Song", "Alice", album = "Album", durationMs = 180_000, id = "lower"),
             0.80,
         )
-
         val sorted = sortReplacementScoreTies(original, listOf(lowerLegacyButPerfectMetadata, higherLegacy))
-
         assertEquals("higher", sorted.first().track.id)
         assertEquals(0.81, sorted.first().score, 0.0001)
     }
 
     @Test
     fun studioVersionBeatsHigherScoredOfficialLiveUpload() {
-        val original = track(
-            source = "netease",
-            title = "学不会",
-            artists = "林俊杰",
-            durationMs = 240_000,
-        )
-        val officialLive = track(
-            source = "bilibili",
-            title = "学不会 LIVE",
-            artists = "林俊杰",
-            durationMs = 240_000,
-            id = "live",
-        )
-        val studioReupload = track(
-            source = "bilibili",
-            title = "林俊杰 - 学不会 Hi-Res",
-            artists = "音乐搬运",
-            durationMs = 240_000,
-            id = "studio",
-        )
+        val original = track("netease", "学不会", "林俊杰", durationMs = 240_000)
+        val officialLive = track("bilibili", "学不会 LIVE", "林俊杰", durationMs = 240_000, id = "live")
+        val studioReupload = track("bilibili", "林俊杰 - 学不会 Hi-Res", "音乐搬运", durationMs = 240_000, id = "studio")
         val liveScore = bilibiliReplacementScore(original, officialLive)
         val studioScore = bilibiliReplacementScore(original, studioReupload)
-
         assertTrue(liveScore > studioScore)
-
         val sorted = sortReplacementScoreTies(
             original,
-            listOf(
-                ReplacementCandidate(officialLive, liveScore),
-                ReplacementCandidate(studioReupload, studioScore),
-            ),
+            listOf(ReplacementCandidate(officialLive, liveScore), ReplacementCandidate(studioReupload, studioScore)),
         )
-
         assertEquals("studio", sorted.first().track.id)
     }
 
     @Test
     fun fullCollaborationBeatsHigherScoredSingleArtistUpload() {
-        val original = track(
-            source = "netease",
-            title = "雀跃",
-            artists = "任然 / 小来",
-            durationMs = 215_000,
-        )
-        val officialSolo = track(
-            source = "bilibili",
-            title = "雀跃",
-            artists = "任然",
-            durationMs = 215_000,
-            id = "solo",
-        )
-        val duetReupload = track(
-            source = "bilibili",
-            title = "任然 / 小来 - 雀跃 Hi-Res",
-            artists = "音乐搬运",
-            durationMs = 215_000,
-            id = "duet",
-        )
+        val original = track("netease", "雀跃", "任然 / 小来", durationMs = 215_000)
+        val officialSolo = track("bilibili", "雀跃", "任然", durationMs = 215_000, id = "solo")
+        val duetReupload = track("bilibili", "任然 / 小来 - 雀跃 Hi-Res", "音乐搬运", durationMs = 215_000, id = "duet")
         val soloScore = bilibiliReplacementScore(original, officialSolo)
         val duetScore = bilibiliReplacementScore(original, duetReupload)
-
         assertTrue(soloScore > duetScore)
-
         val sorted = sortReplacementScoreTies(
             original,
-            listOf(
-                ReplacementCandidate(officialSolo, soloScore),
-                ReplacementCandidate(duetReupload, duetScore),
-            ),
+            listOf(ReplacementCandidate(officialSolo, soloScore), ReplacementCandidate(duetReupload, duetScore)),
         )
-
         assertEquals("duet", sorted.first().track.id)
     }
 
     @Test
     fun explicitVersionOriginStillPrefersSameVersion() {
         val original = track("netease", "学不会 Live", "林俊杰", durationMs = 240_000)
-        val matchingLive = ReplacementCandidate(
-            track("bilibili", "学不会 LIVE", "林俊杰", durationMs = 240_000, id = "live"),
-            0.75,
-        )
-        val studio = ReplacementCandidate(
-            track("bilibili", "林俊杰 - 学不会", "音乐搬运", durationMs = 240_000, id = "studio"),
-            0.90,
-        )
-
-        val sorted = sortReplacementScoreTies(original, listOf(studio, matchingLive))
-
-        assertEquals("live", sorted.first().track.id)
+        val matchingLive = ReplacementCandidate(track("bilibili", "学不会 LIVE", "林俊杰", durationMs = 240_000, id = "live"), 0.75)
+        val studio = ReplacementCandidate(track("bilibili", "林俊杰 - 学不会", "音乐搬运", durationMs = 240_000, id = "studio"), 0.90)
+        assertEquals("live", sortReplacementScoreTies(original, listOf(studio, matchingLive)).first().track.id)
     }
 
     @Test
     fun candidateAlbumVersionMarkerPreventsFalseStudioMatch() {
         val original = track("netease", "Song", "Alice")
-        val albumMarkedLive = ReplacementCandidate(
-            track(
-                source = "ytmusic",
-                title = "Song",
-                artists = "Alice",
-                album = "Live at Arena",
-                id = "album-live",
-            ),
-            0.90,
-        )
-        val studio = ReplacementCandidate(
-            track("qqmusic", "Song", "Alice", id = "studio"),
-            0.80,
-        )
-
-        val sorted = sortReplacementScoreTies(original, listOf(albumMarkedLive, studio))
-
-        assertEquals("studio", sorted.first().track.id)
+        val albumMarkedLive = ReplacementCandidate(track("ytmusic", "Song", "Alice", album = "Live at Arena", id = "album-live"), 0.90)
+        val studio = ReplacementCandidate(track("qqmusic", "Song", "Alice", id = "studio"), 0.80)
+        assertEquals("studio", sortReplacementScoreTies(original, listOf(albumMarkedLive, studio)).first().track.id)
     }
 
     @Test
     fun candidateTagsAreCombinedWithTitleVersionMarkers() {
         val original = track("netease", "Song Live", "Alice")
         val liveCover = ReplacementCandidate(
-            track(
-                source = "bilibili",
-                title = "Song LIVE",
-                artists = "Alice",
-                id = "live-cover",
-                providerTags = listOf("翻唱"),
-            ),
+            track("bilibili", "Song LIVE", "Alice", id = "live-cover", providerTags = listOf("翻唱")),
             0.90,
         )
-        val matchingLive = ReplacementCandidate(
-            track("bilibili", "Song LIVE", "Alice", id = "live"),
-            0.80,
-        )
-
-        val sorted = sortReplacementScoreTies(original, listOf(liveCover, matchingLive))
-
-        assertEquals("live", sorted.first().track.id)
+        val matchingLive = ReplacementCandidate(track("bilibili", "Song LIVE", "Alice", id = "live"), 0.80)
+        assertEquals("live", sortReplacementScoreTies(original, listOf(liveCover, matchingLive)).first().track.id)
     }
 
     @Test
     fun yoasobiOfficialOriginalStillBeatsTaggedCover() {
-        val original = track(
-            source = "netease",
-            title = "ハルジオン",
-            artists = "YOASOBI",
-            durationMs = 198_000,
-        )
+        val original = track("netease", "ハルジオン", "YOASOBI", durationMs = 198_000)
         val official = track(
-            source = "bilibili",
-            title = "YOASOBI ハルジオン(Halzion) Official Music Video",
-            artists = "Ayase-YOASOBI",
-            durationMs = 203_000,
-            id = "official",
+            "bilibili", "YOASOBI ハルジオン(Halzion) Official Music Video", "Ayase-YOASOBI",
+            durationMs = 203_000, id = "official",
         )
         val cover = track(
-            source = "bilibili",
-            title = "【七海】ハルジオン／春紫菀 【YOASOBI】（人声增强）",
-            artists = "七海Nana7mi",
-            durationMs = 197_000,
-            id = "cover",
-            providerTags = listOf("YOASOBI", "ハルジオン", "翻唱"),
+            "bilibili", "【七海】ハルジオン／春紫菀 【YOASOBI】（人声增强）", "七海Nana7mi",
+            durationMs = 197_000, id = "cover", providerTags = listOf("YOASOBI", "ハルジオン", "翻唱"),
         )
-
         val sorted = sortReplacementScoreTies(
             original,
             listOf(
@@ -213,7 +113,6 @@ class ReplacementTieBreakTest {
                 ReplacementCandidate(official, bilibiliReplacementScore(original, official)),
             ),
         )
-
         assertEquals("official", sorted.first().track.id)
     }
 
@@ -222,11 +121,7 @@ class ReplacementTieBreakTest {
         val original = track("netease", "abc", "Artist")
         val ordered = track("qqmusic", "abc", "Artist", id = "ordered")
         val reordered = track("ytmusic", "cba", "Artist", id = "reordered")
-
-        assertTrue(
-            replacementTieBreakConfidence(original, ordered) >
-                replacementTieBreakConfidence(original, reordered),
-        )
+        assertTrue(replacementTieBreakConfidence(original, ordered) > replacementTieBreakConfidence(original, reordered))
     }
 
     private fun track(

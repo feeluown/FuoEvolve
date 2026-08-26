@@ -12,7 +12,7 @@ import platform.Foundation.NSUserDefaults
 import kotlin.coroutines.resume
 
 class IosDownloadRepository(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRepository: PlaybackProviderPort,
     private val output: IosDownloadOutput,
 ) : DownloadRepository {
     private val mutableStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())

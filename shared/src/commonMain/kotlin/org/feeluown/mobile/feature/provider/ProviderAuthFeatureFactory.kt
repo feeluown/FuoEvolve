@@ -56,7 +56,7 @@ interface ProviderAuthFeatureController {
 }
 
 fun createProviderAuthFeatureController(
-    providerRepository: ProviderMusicRepository,
+    providerAuth: ProviderAuthRepository,
     sessionRepository: ProviderSessionRepository,
     oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant,
     scope: CoroutineScope,
@@ -65,7 +65,7 @@ fun createProviderAuthFeatureController(
 ): ProviderAuthFeatureController {
     val owner = createProviderAuthFeatureOwner(
         sessionPort = ProviderAuthSessionBinding(sessionRepository),
-        deviceAuthorizationPort = ProviderDeviceAuthorizationBinding(ProviderAuthRepositoryView(providerRepository)),
+        deviceAuthorizationPort = ProviderDeviceAuthorizationBinding(providerAuth),
         deviceCodeAssistant = ProviderDeviceCodeAssistantBinding(oauthDeviceCodeAssistant),
         oauthImportPort = ProviderOAuthImportBinding,
         scope = scope,
@@ -103,11 +103,8 @@ private class BoundProviderAuthFeatureController(
     override fun isBusy(providerId: String): Boolean = owner.isBusy(providerId)
     override fun authError(providerId: String): String? = owner.authError(providerId)
     override fun cookieInput(providerId: String): String = owner.cookieInput(providerId)
-
     override fun headerInput(providerId: String): ProviderHeaderInput = owner.headerInput(providerId).toAppInput()
-
     override fun oauthInput(providerId: String): ProviderOAuthInput = owner.oauthInput(providerId).toAppInput()
-
     override fun onCookiesChange(providerId: String, value: String) = owner.onCookiesChange(providerId, value)
     override fun onHeaderAuthorizationChange(providerId: String, value: String) =
         owner.onHeaderAuthorizationChange(providerId, value)

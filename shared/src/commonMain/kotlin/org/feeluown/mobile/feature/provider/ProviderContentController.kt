@@ -7,7 +7,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
 internal class ProviderContentController(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRepository: ProviderCatalogRepository,
     private val state: ProviderControllerState,
     private val localPlaylistController: LocalPlaylistController,
     private val scope: CoroutineScope,

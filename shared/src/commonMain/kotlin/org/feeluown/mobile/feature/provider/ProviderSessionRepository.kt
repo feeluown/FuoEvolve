@@ -74,16 +74,10 @@ interface ProviderSessionRepository {
     ): ProviderAuthState = loginWithOAuthJson("ytmusic", oauthJson, clientId, clientSecret)
 }
 
-/**
- * 音源登录态的唯一写入入口。
- *
- * 所有刷新、登录和退出操作都通过同一把互斥锁提交，避免慢刷新覆盖刚完成的登录结果，
- * 也避免登录与退出并发时界面最终显示旧状态。
- */
+/** Serializes provider auth mutations so slow refreshes cannot overwrite newer login/logout state. */
 class DefaultProviderSessionRepository(
-    providerRepository: ProviderMusicRepository,
+    private val providerRepository: ProviderAuthRepository,
 ) : ProviderSessionRepository {
-    private val providerRepository: ProviderAuthRepository = ProviderAuthRepositoryView(providerRepository)
     private val operationMutex = Mutex()
     private val mutableState = MutableStateFlow(ProviderSessionState())
 
@@ -110,17 +104,11 @@ class DefaultProviderSessionRepository(
 
     override suspend fun refresh(providerId: String, refreshUserInfo: Boolean): ProviderAuthState =
         mutate(providerId, ProviderSessionOperation.Refresh) {
-            if (refreshUserInfo) {
-                providerRepository.refreshAuthState(providerId)
-            } else {
-                providerRepository.authState(providerId)
-            }
+            if (refreshUserInfo) providerRepository.refreshAuthState(providerId) else providerRepository.authState(providerId)
         }
 
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
-        mutate(providerId, ProviderSessionOperation.Login) {
-            providerRepository.loginWithCookies(providerId, cookiesJson)
-        }
+        mutate(providerId, ProviderSessionOperation.Login) { providerRepository.loginWithCookies(providerId, cookiesJson) }
 
     override suspend fun loginWithHeaders(
         providerId: String,
@@ -165,9 +153,7 @@ class DefaultProviderSessionRepository(
     }
 
     override suspend fun logout(providerId: String): ProviderAuthState =
-        mutate(providerId, ProviderSessionOperation.Logout) {
-            providerRepository.logout(providerId)
-        }
+        mutate(providerId, ProviderSessionOperation.Logout) { providerRepository.logout(providerId) }
 
     private suspend fun mutate(
         providerId: String,

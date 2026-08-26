@@ -38,11 +38,12 @@ class BilibiliContentRepositoryTest {
         val credentials = InMemoryProviderCredentialStore()
         val delegate = KotlinProviderRepository(client, credentials)
         delegate.updateEnabledProviders(setOf("bilibili"))
+        delegate.loginWithCookies("bilibili", """{"SESSDATA":"session","bili_jct":"csrf"}""")
         val repository = BilibiliContentRepository(
-            delegate = delegate,
+            catalogDelegate = delegate,
+            libraryDelegate = delegate,
             bilibili = BilibiliContentProvider(client, credentials),
         )
-        repository.loginWithCookies("bilibili", """{"SESSDATA":"session","bili_jct":"csrf"}""")
 
         val features = repository.features()
         assertFalse(features.any { it.id == "bilibili_history" })

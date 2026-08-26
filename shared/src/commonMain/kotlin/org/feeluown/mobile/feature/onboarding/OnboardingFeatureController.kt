@@ -23,14 +23,14 @@ interface OnboardingFeatureController {
 }
 
 fun createOnboardingFeatureController(
-    providerRepository: ProviderMusicRepository,
+    providerRegistry: ProviderRegistryRepository,
     settingsRepository: AppSettingsRepository,
     providerCatalog: ProviderCatalogFeatureController,
     scope: CoroutineScope,
 ): OnboardingFeatureController {
     val owner = createOnboardingFeatureOwner(
         preferences = BoundOnboardingPreferencesPort(settingsRepository),
-        providerRuntime = BoundOnboardingProviderRuntimePort(providerRepository, providerCatalog),
+        providerRuntime = BoundOnboardingProviderRuntimePort(providerRegistry, providerCatalog),
         smartReplacePolicy = UnavailablePlaybackPolicy.SmartReplace,
         scope = scope,
     )
@@ -42,27 +42,14 @@ private class BoundOnboardingFeatureController(
     private val providerCatalog: ProviderCatalogFeatureController,
 ) : OnboardingFeatureController {
     override val uiState: StateFlow<OnboardingUiState> = owner.state
-
-    override fun initialize(catalog: ProviderCatalogUiState) {
-        owner.initialize(catalog.availableProviders.map(ProviderInfo::providerId))
-    }
-
-    override fun setProviderSelected(providerId: String, selected: Boolean) {
-        owner.setProviderSelected(providerId, selected)
-    }
-
-    override fun setBilibiliReplacementOnly(enabled: Boolean) {
-        owner.setBilibiliReplacementOnly(enabled)
-    }
-
+    override fun initialize(catalog: ProviderCatalogUiState) = owner.initialize(catalog.availableProviders.map(ProviderInfo::providerId))
+    override fun setProviderSelected(providerId: String, selected: Boolean) = owner.setProviderSelected(providerId, selected)
+    override fun setBilibiliReplacementOnly(enabled: Boolean) = owner.setBilibiliReplacementOnly(enabled)
     override fun applyProviderSelection(onComplete: (Boolean) -> Unit) {
-        val availableProviderIds = providerCatalog.uiState.value.availableProviders
-            .mapTo(mutableSetOf(), ProviderInfo::providerId)
+        val availableProviderIds = providerCatalog.uiState.value.availableProviders.mapTo(mutableSetOf(), ProviderInfo::providerId)
         owner.applyProviderSelection(availableProviderIds, onComplete)
     }
-
     override fun complete() = owner.complete()
-
     override fun dismissFeedback(feedback: String) = owner.dismissFeedback(feedback)
 }
 
@@ -88,22 +75,15 @@ private class BoundOnboardingPreferencesPort(
         }
     }
 
-    override suspend fun markCompleted() {
-        repository.update { it.copy(onboardingCompleted = true) }
-    }
+    override suspend fun markCompleted() { repository.update { it.copy(onboardingCompleted = true) } }
 }
 
 private class BoundOnboardingProviderRuntimePort(
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRegistry: ProviderRegistryRepository,
     private val providerCatalog: ProviderCatalogFeatureController,
 ) : CoreProviderRuntimePort {
-    override suspend fun updateEnabledProviders(providerIds: Set<String>) {
-        providerRepository.updateEnabledProviders(providerIds)
-    }
-
-    override fun refreshCatalog() {
-        providerCatalog.refresh()
-    }
+    override suspend fun updateEnabledProviders(providerIds: Set<String>) = providerRegistry.updateEnabledProviders(providerIds)
+    override fun refreshCatalog() = providerCatalog.refresh()
 }
 
 private fun AppSettings.toOnboardingProviderPreferences(): BoundProviderPreferences = CoreProviderPreferences(
@@ -120,17 +100,11 @@ private class OnboardingMappedStateFlow<Source, Target>(
     private val source: StateFlow<Source>,
     private val transform: (Source) -> Target,
 ) : StateFlow<Target> {
-    override val value: Target
-        get() = transform(source.value)
-
-    override val replayCache: List<Target>
-        get() = listOf(value)
-
+    override val value: Target get() = transform(source.value)
+    override val replayCache: List<Target> get() = listOf(value)
     override suspend fun collect(collector: FlowCollector<Target>): Nothing = source.collect(
         object : FlowCollector<Source> {
-            override suspend fun emit(value: Source) {
-                collector.emit(transform(value))
-            }
+            override suspend fun emit(value: Source) { collector.emit(transform(value)) }
         },
     )
 }

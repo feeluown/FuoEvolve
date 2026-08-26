@@ -65,7 +65,8 @@ internal data class ProviderCredentialBackupTarget(
  */
 internal class AndroidProviderCredentialBackup(
     private val credentialStore: ProviderCredentialStore,
-    private val providerRepository: ProviderMusicRepository,
+    private val providerRegistry: ProviderRegistryRepository,
+    private val providerAuth: ProviderAuthRepository,
 ) {
     private val json = Json {
         prettyPrint = true
@@ -101,7 +102,7 @@ internal class AndroidProviderCredentialBackup(
         password: String = "",
         providerId: String? = null,
     ): ProviderCredentialBackupFile = withContext(Dispatchers.IO) {
-        val providers = providerRepository.availableProviders()
+        val providers = providerRegistry.availableProviders()
         val selectedProviders = if (providerId == null) {
             providers
         } else {
@@ -164,7 +165,7 @@ internal class AndroidProviderCredentialBackup(
 
         val providers = providersObject(plaintextRoot)
         require(providers.isNotEmpty()) { "备份中没有登录凭证" }
-        val knownProviderIds = providerRepository.availableProviders().mapTo(linkedSetOf()) { it.providerId }
+        val knownProviderIds = providerRegistry.availableProviders().mapTo(linkedSetOf()) { it.providerId }
         val decoded = providers.mapValues { (providerId, element) ->
             require(element is JsonObject) { "$providerId 登录凭证格式无效" }
             json.decodeFromJsonElement(ProviderCredentials.serializer(), element)
@@ -198,12 +199,12 @@ internal class AndroidProviderCredentialBackup(
         val cookieHeader = credentials.cookieHeader
         runCatching {
             when {
-                !headerFileJson.isNullOrBlank() -> providerRepository.loginWithHeaderFile(
+                !headerFileJson.isNullOrBlank() -> providerAuth.loginWithHeaderFile(
                     providerId = providerId,
                     headerFileJson = headerFileJson,
                 )
                 credentials.hasOAuthAccess() && !oauthClientId.isNullOrBlank() && !oauthClientSecret.isNullOrBlank() ->
-                    providerRepository.loginWithOAuth(
+                    providerAuth.loginWithOAuth(
                         providerId = providerId,
                         accessToken = credentials.oauthAccessToken.orEmpty(),
                         refreshToken = credentials.oauthRefreshToken.orEmpty(),
@@ -212,12 +213,12 @@ internal class AndroidProviderCredentialBackup(
                         clientId = oauthClientId,
                         clientSecret = oauthClientSecret,
                     )
-                !authorization.isNullOrBlank() && !cookieHeader.isNullOrBlank() -> providerRepository.loginWithHeaders(
+                !authorization.isNullOrBlank() && !cookieHeader.isNullOrBlank() -> providerAuth.loginWithHeaders(
                     providerId = providerId,
                     authorization = authorization,
                     cookie = cookieHeader,
                 )
-                credentials.cookies.isNotEmpty() -> providerRepository.loginWithCookies(
+                credentials.cookies.isNotEmpty() -> providerAuth.loginWithCookies(
                     providerId = providerId,
                     cookiesJson = JsonObject(credentials.cookies.mapValues { JsonPrimitive(it.value) }).toString(),
                 )

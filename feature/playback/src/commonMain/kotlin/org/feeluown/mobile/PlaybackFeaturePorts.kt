@@ -2,14 +2,18 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.flow.StateFlow
 
-/** Provider surface needed by playback resolution and lyrics. */
-interface ProviderPlaybackRepository {
-    suspend fun replacementCandidates(
-        track: MusicTrack,
-        smartReplacementProviderIds: Set<String> = emptySet(),
-        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
-    ): List<ReplacementCandidate> = emptyList()
+/**
+ * Provider primitive used by playback. Implementations resolve one concrete provider track only;
+ * replacement search/ranking/fallback policy belongs to :feature:playback.
+ */
+interface PlaybackProviderSourcePort {
+    suspend fun resolveTrack(track: MusicTrack): PlaybackPayload?
+    suspend fun lyrics(track: MusicTrack): String? = null
+    suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
+}
 
+/** Resolution policy required by the playback start pipeline. */
+interface PlaybackResolutionPort {
     suspend fun resolve(
         track: MusicTrack,
         unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
@@ -24,31 +28,44 @@ interface ProviderPlaybackRepository {
         smartReplacementUseOriginalMetadata: Boolean = true,
         smartReplacementUseOriginalLyrics: Boolean = true,
         smartReplacementProviderIds: Set<String> = emptySet(),
-    ): PlaybackPayload = resolve(
-        track = track,
-        unavailablePolicy = UnavailablePlaybackPolicy.Skip,
-        smartReplacementProviderIds = smartReplacementProviderIds,
-        smartReplacementUseOriginalMetadata = smartReplacementUseOriginalMetadata,
-        smartReplacementUseOriginalLyrics = smartReplacementUseOriginalLyrics,
-    )
+    ): PlaybackPayload
+}
 
+/** Candidate discovery required by manual and automatic smart replacement. */
+interface PlaybackReplacementProviderPort {
+    suspend fun replacementCandidates(
+        track: MusicTrack,
+        smartReplacementProviderIds: Set<String> = emptySet(),
+        smartReplacementMinScore: Double = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
+    ): List<ReplacementCandidate>
+}
+
+/** Provider-backed lyrics operations owned by the playback feature. */
+interface PlaybackLyricsProviderPort {
     suspend fun lyrics(track: MusicTrack): String? = null
-
     suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
 }
 
+/** Composite policy surface used while playback collaborators migrate to their narrow sub-ports. */
+interface PlaybackPolicyPort :
+    PlaybackResolutionPort,
+    PlaybackReplacementProviderPort,
+    PlaybackLyricsProviderPort
+
 /**
- * Playback-owned provider port. It composes only stable provider capabilities actually required by
- * queue extension, lyrics and playback resolution; the application aggregate repository stays in
- * the integration layer.
+ * Playback-owned provider surface. Stable provider capabilities are composed with a concrete-track
+ * resolver, while unavailable-track and smart-replacement policy stays inside this feature.
  */
 interface PlaybackProviderPort :
     ProviderRegistryRepository,
     ProviderSearchRepository,
     ProviderCatalogRepository,
-    ProviderPlaybackRepository {
+    PlaybackPolicyPort {
     fun failureMessage(throwable: Throwable, fallback: String, providerId: String? = null): String
 }
+
+/** Internal owner/controller dependency name while those collaborators are progressively renamed. */
+internal typealias ProviderPlaybackRepository = PlaybackPolicyPort
 
 data class PlaybackFeatureSettings(
     val enabledProviderIds: Set<String> = emptySet(),

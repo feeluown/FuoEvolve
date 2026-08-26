@@ -14,8 +14,9 @@ class FuoEvolveApplication : Application() {
     private fun container(): AndroidAppContainer =
         containerHolder ?: AndroidAppContainer(this).also { containerHolder = it }
 
-    internal val providerRepository: ProviderMusicRepository
-        get() = container().providerRepository
+    /** Playback-service provider surface; smart replacement policy is owned by :feature:playback. */
+    internal val providerRepository: PlaybackProviderPort
+        get() = container().playbackProvider
 
     internal val providerCredentialBackup: AndroidProviderCredentialBackup
         get() = container().providerCredentialBackup

@@ -124,17 +124,23 @@ private class IosAppContainer(
     oauthDeviceCodeOutput: IosOAuthDeviceCodeOutput,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val providerRepository = createFuoProviderRepository(
+    private val providerGraph = createFuoProviderGraph(
         credentials = IosProviderCredentialStore(),
         persistentCache = IosProviderCacheStore(),
         isCellularConnection = networkStatusOutput::isCellularConnection,
     )
+    private val playbackProvider = createAppPlaybackProviderPort(
+        providerRegistry = providerGraph.registry,
+        providerSearch = providerGraph.search,
+        providerCatalog = providerGraph.content,
+        providerPlaybackSource = providerGraph.playbackSource,
+    )
     private val localRepository = IosLocalMusicRepository(mediaLibraryOutput)
     private val localPlaylistRepository = IosLocalPlaylistRepository()
-    private val downloadRepository = IosDownloadRepository(providerRepository, downloadOutput)
+    private val downloadRepository = IosDownloadRepository(playbackProvider, downloadOutput)
     private val settingsRepository = createIosAppSettingsRepository(scope)
     private val playbackEngine = IosNativeAudioEngine(scope, audioOutput, settingsRepository)
-    private val providerSessionRepository = DefaultProviderSessionRepository(providerRepository)
+    private val providerSessionRepository = DefaultProviderSessionRepository(providerGraph.auth)
     private val navigator = AppNavigator()
     private val trackNavigationPort: TrackNavigationPort = createTrackNavigationPort(navigator)
     private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
@@ -147,7 +153,7 @@ private class IosAppContainer(
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
         createSearchFeatureController(
-            providerRepository = providerRepository,
+            providerRepository = providerGraph.search,
             localRepository = localRepository,
             scope = scope,
             providerIdsForSearch = {
@@ -178,7 +184,13 @@ private class IosAppContainer(
     }
 
     private val providerCatalogFeatureController by lazy {
-        createProviderCatalogFeatureController(providerRepository, providerSessionRepository, settingsRepository, scope)
+        createProviderCatalogFeatureController(
+            providerRegistry = providerGraph.registry,
+            providerCatalog = providerGraph.content,
+            sessionRepository = providerSessionRepository,
+            settingsRepository = settingsRepository,
+            scope = scope,
+        )
     }
 
     private val localPlaylistFeatureController: LocalPlaylistFeatureOwner by lazy {
@@ -193,7 +205,8 @@ private class IosAppContainer(
     private val localMusicFeatureController: LocalMusicFeatureController by lazy {
         createLocalMusicFeatureController(
             repository = localRepository,
-            providerRepository = providerRepository,
+            providerSearch = providerGraph.search,
+            providerPlaybackSource = providerGraph.playbackSource,
             navigator = navigator,
             settingsRepository = settingsRepository,
             providers = { providerCatalogFeatureController.uiState.value.providers },
@@ -208,7 +221,7 @@ private class IosAppContainer(
 
     private val downloadActionPort: DownloadActionPort by lazy {
         createDownloadActionPort(
-            providerRepository = providerRepository,
+            playbackProvider = playbackProvider,
             downloadRepository = downloadRepository,
             localRepository = localRepository,
             localMusicController = localMusicFeatureController,
@@ -223,7 +236,7 @@ private class IosAppContainer(
 
     private val playbackFeatureOwner: PlaybackFeatureOwner by lazy {
         createPlaybackFeatureOwner(
-            providerRepository = providerRepository,
+            playbackProvider = playbackProvider,
             playbackEngine = playbackEngine,
             playbackQueueStore = playbackQueueStore,
             settingsRepository = settingsRepository,
@@ -235,7 +248,7 @@ private class IosAppContainer(
 
     private val providerDetailOwners: ProviderDetailOwners by lazy {
         createProviderDetailOwners(
-            providerRepository = providerRepository,
+            providerRepository = providerGraph.content,
             playbackQueue = playbackFeatureOwner.transport,
             settingsRepository = settingsRepository,
             providerCatalog = providerCatalogFeatureController,
@@ -247,7 +260,7 @@ private class IosAppContainer(
 
     private val homeFeatureController: HomeFeatureController by lazy {
         createHomeFeatureController(
-            providerRepository = providerRepository,
+            providerRepository = providerGraph.content,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             playbackQueue = playbackFeatureOwner.transport,
@@ -261,7 +274,7 @@ private class IosAppContainer(
 
     private val playlistActionPort: PlaylistActionPort by lazy {
         createPlaylistActionPort(
-            providerRepository = providerRepository,
+            providerLibrary = providerGraph.content,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
@@ -272,7 +285,8 @@ private class IosAppContainer(
 
     private val providerTrackActionPort: ProviderTrackActionPort by lazy {
         createProviderTrackActionPort(
-            providerRepository = providerRepository,
+            providerCatalogRepository = providerGraph.content,
+            providerLibrary = providerGraph.content,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             searchController = searchController,
@@ -285,7 +299,7 @@ private class IosAppContainer(
 
     private val providerAuthFeatureController by lazy {
         createProviderAuthFeatureController(
-            providerRepository = providerRepository,
+            providerAuth = providerGraph.auth,
             sessionRepository = providerSessionRepository,
             oauthDeviceCodeAssistant = oauthDeviceCodeAssistant,
             scope = scope,
@@ -300,7 +314,7 @@ private class IosAppContainer(
     private val settingsFeatureController by lazy {
         createSettingsFeatureController(
             settingsRepository = settingsRepository,
-            providerRepository = providerRepository,
+            providerAudioQuality = providerGraph.audioQuality,
             downloadRepository = downloadRepository,
             resourceCacheRepository = resourceCacheRepository,
             localMusicController = localMusicFeatureController,
@@ -312,7 +326,7 @@ private class IosAppContainer(
 
     private val onboardingFeatureController: OnboardingFeatureController by lazy {
         createOnboardingFeatureController(
-            providerRepository = providerRepository,
+            providerRegistry = providerGraph.registry,
             settingsRepository = settingsRepository,
             providerCatalog = providerCatalogFeatureController,
             scope = scope,
@@ -321,7 +335,7 @@ private class IosAppContainer(
 
     private val sharedResourceActionPort: SharedResourceActionPort by lazy {
         createSharedResourceActionPort(
-            providerRepository = providerRepository,
+            providerRegistry = providerGraph.registry,
             providerCatalog = providerCatalogFeatureController,
             providerDetails = providerDetailOwners,
             searchController = searchController,
@@ -355,7 +369,7 @@ private class IosAppContainer(
     private val recognitionAppPort by lazy {
         DefaultRecognitionAppPort(
             isProviderEnabled = { id -> providerSessionRepository.state.value.providers.any { it.providerId == id } },
-            loadTrackDetail = providerRepository::trackDetail,
+            loadTrackDetail = providerGraph.content::trackDetail,
             navigator = navigator,
         )
     }
