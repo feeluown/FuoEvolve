@@ -116,12 +116,5 @@ fun createLocalMusicFeatureController(
 private class BoundLocalMusicFeatureController(
     private val delegate: CoreLocalMusicFeatureController,
 ) : LocalMusicFeatureController, CoreLocalMusicFeatureController by delegate {
-    override val localMetadataEditorState = delegate.localMetadataEditorState
-    override fun canEditLocalMetadata(track: MusicTrack) = delegate.canEditLocalMetadata(track)
     override fun openLocalMetadataEditor(track: MusicTrack) = delegate.openLocalMetadataEditor(track)
-    override fun closeLocalMetadataEditor() = delegate.closeLocalMetadataEditor()
-    override fun onLocalMetadataTitleChange(value: String) = delegate.onLocalMetadataTitleChange(value)
-    override fun onLocalMetadataArtistsChange(value: String) = delegate.onLocalMetadataArtistsChange(value)
-    override fun onLocalMetadataAlbumChange(value: String) = delegate.onLocalMetadataAlbumChange(value)
-    override fun saveLocalMetadata() = delegate.saveLocalMetadata()
 }
