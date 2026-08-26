@@ -173,7 +173,7 @@ private class IosAppContainer(
             },
             initialState = SearchUiState(
                 searchScope = initialSettings.searchScope,
-                selectedSearchProviderId = initialSettings.selectedSearchProviderId,
+                selectedProviderId = initialSettings.selectedSearchProviderId,
             ),
         )
     }
@@ -284,7 +284,7 @@ private class IosAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = scope,
-            onProviderMutation = homeRefreshPort::refreshMine,
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
