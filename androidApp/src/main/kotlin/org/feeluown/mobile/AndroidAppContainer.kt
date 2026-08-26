@@ -12,6 +12,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.persistence.listening.AndroidListeningHistoryDriverFactory
+import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
@@ -85,6 +87,9 @@ internal class AndroidAppContainer(
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant by lazy { AndroidOAuthDeviceCodeAssistant(context) }
 
     private val playbackQueueStore: AndroidPlaybackQueueStore by lazy { AndroidPlaybackQueueStore(context) }
+    private val listeningHistorySink: ListeningHistorySink by lazy {
+        SqlDelightListeningHistoryStore(AndroidListeningHistoryDriverFactory(context))
+    }
     private val playbackResumeStore: AndroidPlaybackResumeStore by lazy { AndroidPlaybackResumeStore(context) }
     private val resourceCacheRepository: AndroidResourceCacheRepository by lazy { AndroidResourceCacheRepository(context) }
     private val debugLogRepository: AndroidDebugLogRepository by lazy {
@@ -190,6 +195,7 @@ internal class AndroidAppContainer(
             downloadActions = downloadActionPort,
             scope = appScope,
             openTrackDetail = trackNavigationPort::open,
+            listeningHistorySink = listeningHistorySink,
         )
     }
 
