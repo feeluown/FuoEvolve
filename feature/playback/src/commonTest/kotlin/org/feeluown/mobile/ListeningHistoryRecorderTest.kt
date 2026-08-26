@@ -134,6 +134,49 @@ class ListeningHistoryRecorderTest {
     }
 
     @Test
+    fun multipartTransitionRemainsOneLogicalListeningSession() = runTest {
+        val sink = RecordingListeningHistorySink()
+        var wallClock = 1_900_000L
+        var monotonicClock = 0L
+        val recorder = ListeningHistoryRecorder(sink, backgroundScope, { wallClock }, { monotonicClock })
+        val track = track(durationMs = 180_000L)
+        val firstQueue = PlaybackQueueState(
+            lastPlaybackStartReason = PlaybackStartReason.USER_SELECTION,
+            playbackStartSequence = 1L,
+        )
+
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Playing, track, durationMs = 180_000L, currentPartIndex = 0),
+            firstQueue,
+        )
+        monotonicClock += 10_000L
+        wallClock += 10_000L
+        val secondQueue = firstQueue.copy(
+            lastPlaybackStartReason = PlaybackStartReason.AUTO_NEXT,
+            playbackStartSequence = 2L,
+        )
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Loading, track, durationMs = 180_000L, currentPartIndex = 1),
+            secondQueue,
+        )
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Playing, track, durationMs = 180_000L, currentPartIndex = 1),
+            secondQueue,
+        )
+        monotonicClock += 15_000L
+        wallClock += 15_000L
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Ended, track, durationMs = 180_000L, currentPartIndex = 1),
+            secondQueue,
+        )
+        runCurrent()
+
+        val sessions = sink.records.groupBy { it.sessionKey }
+        assertEquals(1, sessions.size)
+        assertEquals(25_000L, sink.records.last().playedMs)
+    }
+
+    @Test
     fun shortAccidentalPlaybackIsPersistedButNotQualified() = runTest {
         val sink = RecordingListeningHistorySink()
         var wallClock = 2_000_000L

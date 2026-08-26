@@ -48,9 +48,14 @@ class ListeningHistoryRecorder(
             val startSequenceChanged = queueState != null &&
                 currentActive.playbackStartSequence != queueState.playbackStartSequence
             val reason = queueState?.lastPlaybackStartReason
+            val playbackPartTransition = startSequenceChanged &&
+                currentActive.currentPartIndex >= 0 &&
+                state.currentPartIndex >= 0 &&
+                currentActive.currentPartIndex != state.currentPartIndex
             val transactionRestarted = startSequenceChanged &&
                 reason != PlaybackStartReason.RESUME &&
-                reason != PlaybackStartReason.RESTORE_SESSION
+                reason != PlaybackStartReason.RESTORE_SESSION &&
+                !playbackPartTransition
             if (resourceChanged || transactionRestarted) {
                 finalizeActive(ListeningCompletionReason.Changed)
             } else if (startSequenceChanged) {
@@ -107,6 +112,7 @@ class ListeningHistoryRecorder(
             startedAtMillis = startedAt,
             startReason = queueState?.lastPlaybackStartReason.toListeningStartReason(),
             playbackStartSequence = queueState?.playbackStartSequence ?: 0L,
+            currentPartIndex = state.currentPartIndex,
             durationMs = state.durationMs.takeIf { it > 0L } ?: track.durationMs,
             resources = track.listeningRelations(queueState),
             playingSinceMonotonicMs = monotonicMillis(),
@@ -125,6 +131,9 @@ class ListeningHistoryRecorder(
         val primary = track.logicalListeningResource()
         if (primary.resourceKey != session.primary.resourceKey) return
         session.primary = primary
+        if (state.currentPartIndex >= 0) {
+            session.currentPartIndex = state.currentPartIndex
+        }
         session.durationMs = state.durationMs.takeIf { it > 0L }
             ?: track.durationMs
             ?: session.durationMs
@@ -192,6 +201,7 @@ private data class ActiveListeningSession(
     val startedAtMillis: Long,
     val startReason: ListeningStartReason,
     var playbackStartSequence: Long,
+    var currentPartIndex: Int,
     var durationMs: Long?,
     var resources: List<ListeningResourceRelation>,
     var playedMs: Long = 0L,
