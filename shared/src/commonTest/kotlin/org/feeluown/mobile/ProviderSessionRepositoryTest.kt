@@ -65,29 +65,11 @@ class ProviderSessionRepositoryTest {
         assertTrue(provider.oauthLoggedIn)
     }
 
-    private class RacingProviderRepository : ProviderMusicRepository {
+    private class RacingProviderRepository : ProviderAuthRepository {
         var isLoggedIn = false
         var oauthLoggedIn = false
         val refreshStarted = CompletableDeferred<Unit>()
         val allowRefreshToFinish = CompletableDeferred<Unit>()
-
-        override suspend fun initialize() = Unit
-        override suspend fun providers(): List<ProviderInfo> = listOf(PROVIDER)
-        override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = emptyList()
-        override suspend fun resolve(
-            track: MusicTrack,
-            unavailablePolicy: UnavailablePlaybackPolicy,
-            smartReplacementProviderIds: Set<String>,
-            smartReplacementMinScore: Double,
-            smartReplacementUseOriginalMetadata: Boolean,
-            smartReplacementUseOriginalLyrics: Boolean,
-        ): PlaybackPayload = PlaybackPayload(
-            url = "",
-            title = track.title,
-            artists = track.artists,
-            album = track.album,
-            source = track.source,
-        )
 
         override suspend fun authState(providerId: String): ProviderAuthState = state(providerId, isLoggedIn || oauthLoggedIn)
 
@@ -131,18 +113,6 @@ class ProviderSessionRepositoryTest {
             oauthLoggedIn = false
             return state(providerId, false)
         }
-
-        override suspend fun updateAudioQualityPolicies(
-            wifiPolicy: AudioQualityPolicy,
-            cellularPolicy: AudioQualityPolicy,
-        ) = Unit
-
-        override suspend fun features(): List<ProviderFeature> = emptyList()
-        override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
-            ProviderContentSection(feature)
-
-        override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = emptyList()
-        override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> = emptyList()
 
         private fun state(providerId: String, loggedIn: Boolean) = ProviderAuthState(
             providerId = providerId,
