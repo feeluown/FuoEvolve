@@ -74,15 +74,52 @@ fun createPlaybackFeatureOwner(
 }
 
 /**
- * Composition-only decorator: write ownership stays in playback while read access is exposed to the
- * app graph without a mutable global service locator or a persistence-module dependency in :shared.
+ * Composition-only decorator: write ownership stays in playback while read access and rich playback
+ * context adaptation are exposed without a mutable global service locator or persistence dependency.
  */
 private class ListeningHistoryPlaybackTransport(
     private val delegate: PlaybackTransportCoordinator,
     private val repository: ListeningHistoryRepository?,
 ) : PlaybackTransportCoordinator by delegate {
+    private var contextHint: PlaybackContextSnapshot? = null
+
     override val listeningHistoryRepository: ListeningHistoryRepository?
         get() = repository
+
+    override fun setPlaybackContextHint(context: PlaybackContextSnapshot?) {
+        contextHint = context
+    }
+
+    override fun playTracks(tracks: List<MusicTrack>, index: Int) {
+        val context = contextHint
+        if (context != null && context.type != PlaybackContextType.Playlist) {
+            delegate.playTracks(tracks, index, context)
+        } else {
+            delegate.playTracks(tracks, index)
+        }
+    }
+
+    override fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) {
+        val context = contextHint?.takeIf {
+            it.type == PlaybackContextType.Playlist && it.resourceId == sourcePlaylistId
+        }
+        if (context != null) {
+            delegate.playPlaylistTracks(tracks, index, sourcePlaylistId, context)
+        } else {
+            delegate.playPlaylistTracks(tracks, index, sourcePlaylistId)
+        }
+    }
+
+    override fun playAllPlaylistTracks(tracks: List<MusicTrack>, sourcePlaylistId: String) {
+        val context = contextHint?.takeIf {
+            it.type == PlaybackContextType.Playlist && it.resourceId == sourcePlaylistId
+        }
+        if (context != null) {
+            delegate.playAllPlaylistTracks(tracks, sourcePlaylistId, context)
+        } else {
+            delegate.playAllPlaylistTracks(tracks, sourcePlaylistId)
+        }
+    }
 }
 
 private class AppPlaybackSettingsPort(
