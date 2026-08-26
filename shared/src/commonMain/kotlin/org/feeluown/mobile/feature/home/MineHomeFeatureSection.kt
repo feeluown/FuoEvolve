@@ -110,7 +110,10 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     val fileActions = LocalLocalPlaylistFileActions.current
     val listState = rememberLazyListState()
     var initialPlaylistLoadPending by remember {
-        mutableStateOf(state.minePlaylistSections.isEmpty() && state.mineFavoritePlaylistSections.isEmpty())
+        mutableStateOf(
+            state.isLoading ||
+                (state.minePlaylistSections.isEmpty() && state.mineFavoritePlaylistSections.isEmpty()),
+        )
     }
     var initialPlaylistLoadStarted by remember { mutableStateOf(false) }
     var createLocal by remember { mutableStateOf(false) }
