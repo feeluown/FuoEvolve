@@ -83,6 +83,7 @@ fun createAppUiGraph(
             home = homeFeatureController,
             providerCatalog = providerCatalogFeatureController,
             playbackQueue = playbackQueueUiPort,
+            listeningHistory = playbackQueueUiPort.listeningHistoryRepository ?: NoOpListeningHistoryRepository,
             downloads = downloadActionPort,
             playlists = playlistActionPort,
             providerTrackActions = providerTrackActionPort,

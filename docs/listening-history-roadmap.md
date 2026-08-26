@@ -2,16 +2,15 @@
 
 ## Goal
 
-FuoEvolve should own a provider-independent listening history that can later power recent playback,
-frequently played resources, rolling N-day statistics, listening insights, recommendations, backup,
-and cross-device continuity.
+FuoEvolve owns a provider-independent listening history that powers recent playback, frequently played
+resources, rolling statistics, listening insights, recommendation inputs, backup, and later cross-device
+continuity.
 
-The storage model is intentionally event-first. We persist what actually happened during playback and
-derive user-facing rankings later instead of permanently collapsing history into a single `playCount`.
+The storage model is event-first. We persist what actually happened during playback and derive
+user-facing rankings from those facts instead of permanently collapsing history into a single
+`playCount`.
 
-## Phase 1: persistence foundation
-
-This phase is implemented by the initial listening-history PR.
+## Phase 1: persistence foundation — implemented
 
 - Add a provider-neutral `ListeningHistoryRecord` contract in `:core:model`.
 - Record one logical track playback transaction from playback state transitions; replaying or actively
@@ -25,11 +24,11 @@ This phase is implemented by the initial listening-history PR.
 - Keep smart replacement as one logical track while also storing the resolved replacement as a
   separate relation.
 - Store resource dimensions independently from events so a single event can relate to a track,
-  artists, album, playlist context, feature context, local directory, and resolved source.
+  artists, album, playlist context, feature context, search context, local directory, and resolved source.
 - Persist playback start reason when it is available from the queue transaction.
 - Introduce `:persistence:listening` using SQLDelight 2.3.2. The schema and storage implementation are
-  Kotlin Multiplatform; Android is wired into the current process composition in this phase and an
-  iOS driver factory is already provided for later iOS bootstrap wiring.
+  Kotlin Multiplatform; Android is wired into the current process composition and an iOS driver factory
+  is available for later iOS bootstrap wiring.
 
 ### Qualified playback
 
@@ -40,83 +39,89 @@ each checkpoint/final record:
 - known duration of 30 seconds or less: not qualified;
 - unknown duration: use 30 seconds of actual playing time as a fallback.
 
-This lets a future recent-history UI use a lower threshold (for example 5 seconds) without losing raw
-facts, while frequent/statistical views can use `qualified = true`.
+Recent-history UI can therefore retain short activity while frequent/statistical views use
+`qualified = true`.
 
 ### Legacy playlist stats
 
 `AppSettings.playlistPlaybackStats` is not migrated. It does not contain event timestamps or listening
-duration, so synthesizing history would corrupt rolling-window statistics. The old map can continue to
-serve the existing Mine playlist ordering until the new read model replaces it, then be deleted.
+duration, so synthesizing history would corrupt rolling-window statistics. The new listening database
+starts fresh. The old map remains only as a compatibility input for the pre-existing Mine playlist
+ordering and can be deleted independently once that ordering is moved to the new read model.
 
-The new database starts fresh from the version that introduces this feature.
+## Phase 2: recent playback read model — implemented
 
-## Phase 2: recent playback read model
+The same database now exposes provider-neutral read contracts; no second history store is introduced.
 
-Add read/query contracts on top of the same database rather than another storage system.
+- `ListeningHistoryRepository.recentEvents` provides the raw chronological activity timeline.
+- `recentResources` provides latest-use projections for tracks and related resource dimensions.
+- Mine has a dedicated `听歌` entry with `最近 / 常听 / 统计` pages.
+- Recent activity is grouped by UTC civil day and can be filtered to songs, artists, albums, playlists,
+  and feature/recommendation resources.
+- Playback now carries an explicit ephemeral `PlaybackContextSnapshot` plus a monotonically increasing
+  context sequence. Child tracks from one source session share a stable `contextSessionKey`; starting a
+  new source context creates another context session.
+- Up-next insertions deliberately do not inherit the playlist/feature context session.
+- Static feature/recommendation contexts and search contexts are preserved. Local playlist callers pass
+  stable source/title metadata through the rich playlist overload; legacy playlist callers retain an
+  identifier fallback for source compatibility.
+- `PlaybackContextSnapshot` contains source, resource id, title, subtitle, and cover so provider/detail
+  callers can enrich playlist/album/artist contexts without changing the event schema.
 
-- Recent activity timeline ordered by event time and grouped by day.
-- Recent resources projection using the latest event per resource.
-- Initial Mine entry: `最近播放` with a full history page.
-- Allow filtering by resource type when useful.
-- Add explicit playback-context sessions so playlist/feature listening sessions can be counted without
-  equating every child-track play to another playlist play.
-- Enrich playlist context with stable source/provider/title/cover metadata instead of the phase-1
-  identifier-only fallback.
-- Preserve static feature/recommendation/search/album/artist contexts, not only the dynamic queue
-  context currently retained by playback.
+## Phase 3: frequently played and rolling statistics — implemented
 
-## Phase 3: frequently played and rolling statistics
+`ListeningTimeRange` is the generic inclusive-start/exclusive-end read boundary. It supports rolling
+N-day windows, calendar month/year ranges supplied by callers, arbitrary start/end ranges, and all time.
+The Mine UI exposes the planned presets: `7 天 / 30 天 / 90 天 / 今年 / 全部`.
 
-Expose a generic time range instead of hard-coding individual screens:
+All rankings are derived from the same events and relations:
 
-- rolling N days;
-- calendar month;
-- calendar year;
-- arbitrary start/end range;
-- all time.
-
-Initial UI presets should be `7 天 / 30 天 / 90 天 / 今年 / 全部`.
-
-Aggregate the same events across multiple resource types:
-
-- tracks and videos: qualified play count, played duration, last played time;
+- tracks: qualified play count, actual played duration, event count, and last played time;
 - artists and albums: derived through event-resource relations;
-- playlists/features: context session count, qualified child item count, played duration;
-- local directories: derived through resource relations;
-- future episodes/podcasts: use the same event and relation model without changing the base event table.
+- playlists/features: qualified child count, played duration, and distinct `contextSessionKey` count;
+- local directories: derived through the local-directory relation;
+- future videos/episodes/podcasts can use the same event/read contracts without a new history table.
 
-Default frequent ranking should remain explainable: qualified count first, then played duration, then
-last played time. Time-decay scoring can be added later if product behavior warrants it.
+Default frequent ordering is intentionally explainable: qualified count first, then played duration,
+then last played time. Raw short events remain visible in recent history but do not inflate frequent
+rankings.
 
-## Phase 4: listening insights and personalization
+## Phase 4: listening insights and personalization — implemented read model
 
-Once enough history exists, derive higher-level product capabilities without changing the write path:
+`ListeningHistoryRepository.insights` derives higher-level data without changing the write path:
 
-- monthly/yearly Replay-style summaries;
-- active listening days and total listening duration;
-- frequently played artists/albums/playlists;
-- source/provider share of actual playback;
-- user-selected vs automatic playback weighting;
-- recommendation seeds and overplay suppression;
-- listening trends over time.
+- Replay-style summaries for the selected range, including the `今年` yearly view;
+- active listening days and total actual listening duration;
+- frequently played tracks/artists/albums/playlists/features through the Phase 3 projection;
+- actual playback source share. Smart-replaced events are attributed to the resolved source when one
+  exists rather than incorrectly crediting the logical source;
+- user-selected (`UserSelection` / `PlaylistReplace`) versus automatic (`AutoNext`) playback counts;
+- fixed-size time buckets for listening trends;
+- recommendation seeds from explainable top qualified tracks;
+- an explicit high-frequency set (currently qualified plays >= 10 inside the selected range) that can
+  be used as an overplay-suppression/down-ranking input.
+
+The Mine `统计` page surfaces these primitives directly. Recommendation algorithms remain consumers of
+this read model; they do not write another taste-history format.
 
 ## Identity and smart replacement
 
-Phase 1 stores provider/resource identity and keeps both logical and resolved tracks. Later
+Raw history keeps provider/resource identity and both logical and resolved tracks. A later
 `CanonicalTrackIdentity` can group equivalent tracks across NetEase, QQ Music, YouTube Music,
 Bilibili, local files, and replacement sources.
 
-Canonical identity should be introduced above raw history rather than rewriting old events. That keeps
-history auditable and lets matching quality improve over time.
+Canonical identity belongs above raw history rather than rewriting old events. That keeps history
+auditable and lets matching quality improve over time.
 
 ## Privacy, backup, and lifecycle
 
-Listening history is local application data. Later product work should add:
+Listening history is local application data. Remaining lifecycle work is intentionally independent of
+Phases 2–4:
 
-- clear listening history;
+- expose clear-history in settings (the repository already implements `clear()`);
 - export/import as part of the broader Fuo backup format;
 - optional private-session / do-not-record mode;
-- iOS process bootstrap wiring;
-- retention policy only if real storage pressure appears; SQLite can comfortably retain years of
+- wire the existing SQLDelight native driver into the iOS process composition instead of the current
+  explicit no-op history repository;
+- add a retention policy only if real storage pressure appears; SQLite can comfortably retain years of
   normal playback events.

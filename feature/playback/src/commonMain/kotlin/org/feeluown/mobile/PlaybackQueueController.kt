@@ -14,6 +14,8 @@ data class PlaybackQueueState(
     val currentIsUpNext: Boolean = false,
     val queueFeature: ProviderFeature? = null,
     val queuePlaylistId: String? = null,
+    val listeningContext: PlaybackContextSnapshot? = null,
+    val listeningContextSequence: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
@@ -85,6 +87,16 @@ internal class PlaybackQueueController {
             current.copy(
                 lastPlaybackStartReason = reason,
                 playbackStartSequence = current.playbackStartSequence + 1L,
+            )
+        }
+    }
+
+    /** Starts a new logical playback-context session without making it part of durable queue state. */
+    fun beginListeningContext(context: PlaybackContextSnapshot?) {
+        updateEphemeral { current ->
+            current.copy(
+                listeningContext = context,
+                listeningContextSequence = current.listeningContextSequence + 1L,
             )
         }
     }
@@ -161,7 +173,7 @@ internal class PlaybackQueueController {
         mutableState.update { current -> transform(current) }
     }
 
-    /** Playback transaction metadata is observable but not part of durable queue mutation history. */
+    /** Playback transaction/context metadata is observable but not part of durable queue mutation history. */
     private inline fun updateEphemeral(
         crossinline transform: (PlaybackQueueState) -> PlaybackQueueState,
     ) {

@@ -114,6 +114,7 @@ class ListeningHistoryRecorder(
             playbackStartSequence = queueState?.playbackStartSequence ?: 0L,
             currentPartIndex = state.currentPartIndex,
             durationMs = state.durationMs.takeIf { it > 0L } ?: track.durationMs,
+            contextSessionKey = listeningContextSessionKey(queueState),
             resources = track.listeningRelations(queueState),
             playingSinceMonotonicMs = monotonicMillis(),
         )
@@ -138,6 +139,25 @@ class ListeningHistoryRecorder(
             ?: track.durationMs
             ?: session.durationMs
         session.resources = track.listeningRelations(queueState)
+    }
+
+    private fun listeningContextSessionKey(queueState: PlaybackQueueState?): String? {
+        val state = queueState ?: return null
+        val context = state.listeningContext ?: return null
+        if (state.currentIsUpNext) return null
+        return buildString {
+            append(recorderInstanceId)
+            append(":context:")
+            append(state.listeningContextSequence)
+            append(':')
+            append(context.type.name)
+            append(':')
+            append(context.sourceId.length)
+            append(':')
+            append(context.sourceId)
+            append(':')
+            append(context.resourceId)
+        }
     }
 
     private fun pauseAndCheckpoint(session: ActiveListeningSession) {
@@ -203,6 +223,7 @@ private data class ActiveListeningSession(
     var playbackStartSequence: Long,
     var currentPartIndex: Int,
     var durationMs: Long?,
+    val contextSessionKey: String?,
     var resources: List<ListeningResourceRelation>,
     var playedMs: Long = 0L,
     var playingSinceMonotonicMs: Long? = null,
@@ -221,6 +242,7 @@ private data class ActiveListeningSession(
         qualified = isQualifiedListening(playedMs, durationMs),
         startReason = startReason,
         completionReason = completionReason,
+        contextSessionKey = contextSessionKey,
         resources = resources,
         updatedAtMillis = updatedAtMillis,
     )
@@ -296,34 +318,39 @@ private fun MusicTrack.listeningRelations(queueState: PlaybackQueueState?): List
     }
 
     if (queueState?.currentIsUpNext != true) {
-        queueState?.queuePlaylistId?.takeIf { it.isNotBlank() }?.let { playlistId ->
-            add(
-                ListeningResourceRelation(
-                    resource = ListeningResourceSnapshot(
-                        resourceKey = listeningResourceKey(ListeningResourceType.Playlist, "context", playlistId),
-                        type = ListeningResourceType.Playlist,
-                        sourceId = "context",
-                        sourceResourceId = playlistId,
-                        title = playlistId,
-                    ),
-                    relation = ListeningResourceRelationType.PlaylistContext,
+        val explicitContext = queueState?.listeningContext
+        if (explicitContext != null) {
+            add(explicitContext.toListeningRelation())
+        } else {
+            queueState?.queuePlaylistId?.takeIf { it.isNotBlank() }?.let { playlistId ->
+                add(
+                    ListeningResourceRelation(
+                        resource = ListeningResourceSnapshot(
+                            resourceKey = listeningResourceKey(ListeningResourceType.Playlist, "context", playlistId),
+                            type = ListeningResourceType.Playlist,
+                            sourceId = "context",
+                            sourceResourceId = playlistId,
+                            title = playlistId,
+                        ),
+                        relation = ListeningResourceRelationType.PlaylistContext,
+                    )
                 )
-            )
-        }
-        queueState?.queueFeature?.let { feature ->
-            add(
-                ListeningResourceRelation(
-                    resource = ListeningResourceSnapshot(
-                        resourceKey = listeningResourceKey(ListeningResourceType.Feature, feature.providerId, feature.id),
-                        type = ListeningResourceType.Feature,
-                        sourceId = feature.providerId,
-                        sourceResourceId = feature.id,
-                        title = feature.title,
-                        subtitle = feature.providerName,
-                    ),
-                    relation = ListeningResourceRelationType.FeatureContext,
+            }
+            queueState?.queueFeature?.let { feature ->
+                add(
+                    ListeningResourceRelation(
+                        resource = ListeningResourceSnapshot(
+                            resourceKey = listeningResourceKey(ListeningResourceType.Feature, feature.providerId, feature.id),
+                            type = ListeningResourceType.Feature,
+                            sourceId = feature.providerId,
+                            sourceResourceId = feature.id,
+                            title = feature.title,
+                            subtitle = feature.providerName,
+                        ),
+                        relation = ListeningResourceRelationType.FeatureContext,
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -331,6 +358,29 @@ private fun MusicTrack.listeningRelations(queueState: PlaybackQueueState?): List
         add(ListeningResourceRelation(resolved, ListeningResourceRelationType.ResolvedSource))
     }
 }.distinctBy { relation -> relation.relation to relation.resource.resourceKey }
+
+private fun PlaybackContextSnapshot.toListeningRelation(): ListeningResourceRelation {
+    val (resourceType, relationType) = when (type) {
+        PlaybackContextType.Playlist -> ListeningResourceType.Playlist to ListeningResourceRelationType.PlaylistContext
+        PlaybackContextType.Feature -> ListeningResourceType.Feature to ListeningResourceRelationType.FeatureContext
+        PlaybackContextType.Album -> ListeningResourceType.Album to ListeningResourceRelationType.Album
+        PlaybackContextType.Artist -> ListeningResourceType.Artist to ListeningResourceRelationType.Artist
+        PlaybackContextType.Search -> ListeningResourceType.Search to ListeningResourceRelationType.SearchContext
+        PlaybackContextType.LocalDirectory -> ListeningResourceType.LocalDirectory to ListeningResourceRelationType.LocalDirectory
+    }
+    return ListeningResourceRelation(
+        resource = ListeningResourceSnapshot(
+            resourceKey = listeningResourceKey(resourceType, sourceId, resourceId),
+            type = resourceType,
+            sourceId = sourceId,
+            sourceResourceId = resourceId,
+            title = title,
+            subtitle = subtitle,
+            coverUrl = coverUrl,
+        ),
+        relation = relationType,
+    )
+}
 
 private fun MusicTrack.logicalListeningResource(): ListeningResourceSnapshot {
     val sourceId = logicalListeningSourceId()

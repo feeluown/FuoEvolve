@@ -5,6 +5,24 @@ import kotlinx.coroutines.flow.StateFlow
 
 private val EMPTY_PLAYBACK_FEEDBACK_FLOW: StateFlow<String?> = MutableStateFlow(null)
 
+enum class PlaybackContextType {
+    Playlist,
+    Feature,
+    Album,
+    Artist,
+    Search,
+    LocalDirectory,
+}
+
+data class PlaybackContextSnapshot(
+    val type: PlaybackContextType,
+    val sourceId: String,
+    val resourceId: String,
+    val title: String,
+    val subtitle: String = "",
+    val coverUrl: String? = null,
+)
+
 /** UI-only player navigation state implemented by the application presentation layer. */
 interface PlaybackNavigationPort {
     val isFullPlayerOpen: Boolean
@@ -26,16 +44,35 @@ interface PlaybackQueueUiPort {
     val trackChangeDirection: TrackChangeDirection
     val queueStateFlow: StateFlow<PlaybackQueueState>?
         get() = null
+    /** Read model exposed by the app playback binding; physical playback owners default to none. */
+    val listeningHistoryRepository: ListeningHistoryRepository?
+        get() = null
     val feedback: StateFlow<String?>
         get() = EMPTY_PLAYBACK_FEEDBACK_FLOW
 
     fun playTracks(tracks: List<MusicTrack>, index: Int)
 
+    fun playTracks(tracks: List<MusicTrack>, index: Int, context: PlaybackContextSnapshot) =
+        playTracks(tracks, index)
+
     fun playPlaylistTracks(tracks: List<MusicTrack>, index: Int, sourcePlaylistId: String) =
         playTracks(tracks, index)
 
+    fun playPlaylistTracks(
+        tracks: List<MusicTrack>,
+        index: Int,
+        sourcePlaylistId: String,
+        context: PlaybackContextSnapshot,
+    ) = playPlaylistTracks(tracks, index, sourcePlaylistId)
+
     fun playAllPlaylistTracks(tracks: List<MusicTrack>, sourcePlaylistId: String) =
         playPlaylistTracks(tracks, 0, sourcePlaylistId)
+
+    fun playAllPlaylistTracks(
+        tracks: List<MusicTrack>,
+        sourcePlaylistId: String,
+        context: PlaybackContextSnapshot,
+    ) = playPlaylistTracks(tracks, 0, sourcePlaylistId, context)
 
     fun appendPlaylistTracks(sourcePlaylistId: String, tracks: List<MusicTrack>) = Unit
 

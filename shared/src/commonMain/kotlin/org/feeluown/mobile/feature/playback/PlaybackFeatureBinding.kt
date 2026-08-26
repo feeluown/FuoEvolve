@@ -64,7 +64,25 @@ fun createPlaybackFeatureOwner(
             )
         }
     }
-    return owner
+    val wrappedTransport = ListeningHistoryPlaybackTransport(
+        delegate = owner.transport,
+        repository = listeningHistorySink as? ListeningHistoryRepository,
+    )
+    return object : PlaybackFeatureOwner by owner {
+        override val transport: PlaybackTransportCoordinator = wrappedTransport
+    }
+}
+
+/**
+ * Composition-only decorator: write ownership stays in playback while read access is exposed to the
+ * app graph without a mutable global service locator or a persistence-module dependency in :shared.
+ */
+private class ListeningHistoryPlaybackTransport(
+    private val delegate: PlaybackTransportCoordinator,
+    private val repository: ListeningHistoryRepository?,
+) : PlaybackTransportCoordinator by delegate {
+    override val listeningHistoryRepository: ListeningHistoryRepository?
+        get() = repository
 }
 
 private class AppPlaybackSettingsPort(
