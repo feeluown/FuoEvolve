@@ -81,7 +81,7 @@ internal class PlaybackQueueController {
 
     fun markNextPlaybackStart(reason: PlaybackStartReason) {
         pendingPlaybackStartReason = reason
-        update { current ->
+        updateEphemeral { current ->
             current.copy(
                 lastPlaybackStartReason = reason,
                 playbackStartSequence = current.playbackStartSequence + 1L,
@@ -158,6 +158,13 @@ internal class PlaybackQueueController {
         crossinline transform: (PlaybackQueueState) -> PlaybackQueueState,
     ) {
         if (!applyingStartupSnapshot) startupDirty = true
+        mutableState.update { current -> transform(current) }
+    }
+
+    /** Playback transaction metadata is observable but not part of durable queue mutation history. */
+    private inline fun updateEphemeral(
+        crossinline transform: (PlaybackQueueState) -> PlaybackQueueState,
+    ) {
         mutableState.update { current -> transform(current) }
     }
 }
