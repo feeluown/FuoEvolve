@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -21,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,6 +108,11 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     val local by graph.localPlaylist.uiState.collectAsStateWithLifecycle()
     val catalog by graph.providerCatalog.uiState.collectAsStateWithLifecycle()
     val fileActions = LocalLocalPlaylistFileActions.current
+    val listState = rememberLazyListState()
+    var initialPlaylistLoadPending by remember {
+        mutableStateOf(state.minePlaylistSections.isEmpty() && state.mineFavoritePlaylistSections.isEmpty())
+    }
+    var initialPlaylistLoadStarted by remember { mutableStateOf(false) }
     var createLocal by remember { mutableStateOf(false) }
     var createProvider by remember { mutableStateOf<String?>(null) }
     var name by remember { mutableStateOf("") }
@@ -124,9 +131,31 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
         it.category == ProviderFeatureCategory.Mine && it.contentType == ProviderContentType.Songs && it.providerId in selectedMineIds
     }
 
+    LaunchedEffect(state.homeSection, state.mineSection, state.isLoading) {
+        if (!initialPlaylistLoadPending || state.homeSection != HomeSection.Mine ||
+            (state.mineSection != MineSection.Playlists && state.mineSection != MineSection.Songs)
+        ) {
+            return@LaunchedEffect
+        }
+        if (state.isLoading) {
+            initialPlaylistLoadStarted = true
+            return@LaunchedEffect
+        }
+        if (!initialPlaylistLoadStarted) return@LaunchedEffect
+
+        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+            listState.scrollToItem(0)
+        }
+        initialPlaylistLoadPending = false
+    }
+
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (showFilter) MineFilterChips(home)
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             if (state.playlistFilter == PlaylistFilter.UserPlaylists && frequent.isNotEmpty()) {
                 item("mine-frequent") {
                     Text("我的常听", style = MaterialTheme.typography.titleMedium)
