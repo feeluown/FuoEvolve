@@ -38,7 +38,8 @@ class ProviderCatalogControllerTest {
         )
 
         val controller = createProviderCatalogFeatureController(
-            providerRepository = providerRepository,
+            providerRegistry = providerRepository,
+            providerCatalog = providerRepository,
             sessionRepository = sessionRepository,
             settingsRepository = settingsRepository,
             scope = backgroundScope,
@@ -51,29 +52,18 @@ class ProviderCatalogControllerTest {
         assertEquals(1, providerRepository.authStateCalls)
     }
 
-    private class PersistedLoginProviderRepository : ProviderMusicRepository {
+    private class PersistedLoginProviderRepository :
+        ProviderRegistryRepository,
+        ProviderCatalogRepository,
+        ProviderAuthRepository {
         var authStateCalls = 0
 
         override suspend fun initialize() = Unit
-
         override suspend fun providers(): List<ProviderInfo> = listOf(PROVIDER)
-
-        override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = emptyList()
-
-        override suspend fun resolve(
-            track: MusicTrack,
-            unavailablePolicy: UnavailablePlaybackPolicy,
-            smartReplacementProviderIds: Set<String>,
-            smartReplacementMinScore: Double,
-            smartReplacementUseOriginalMetadata: Boolean,
-            smartReplacementUseOriginalLyrics: Boolean,
-        ): PlaybackPayload = PlaybackPayload(
-            url = "",
-            title = track.title,
-            artists = track.artists,
-            album = track.album,
-            source = track.source,
-        )
+        override suspend fun features(): List<ProviderFeature> = emptyList()
+        override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection = ProviderContentSection(feature)
+        override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = emptyList()
+        override suspend fun mediaItemTracks(item: MediaRef): List<MusicTrack> = emptyList()
 
         override suspend fun authState(providerId: String): ProviderAuthState {
             authStateCalls += 1
@@ -93,20 +83,6 @@ class ProviderCatalogControllerTest {
             providerName = PROVIDER.providerName,
             isLoggedIn = false,
         )
-
-        override suspend fun updateAudioQualityPolicies(
-            wifiPolicy: AudioQualityPolicy,
-            cellularPolicy: AudioQualityPolicy,
-        ) = Unit
-
-        override suspend fun features(): List<ProviderFeature> = emptyList()
-
-        override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
-            ProviderContentSection(feature)
-
-        override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = emptyList()
-
-        override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> = emptyList()
     }
 
     private companion object {
