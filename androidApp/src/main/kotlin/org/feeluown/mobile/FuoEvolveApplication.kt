@@ -24,6 +24,9 @@ class FuoEvolveApplication : Application() {
     internal val settingsRepository: AppSettingsRepository
         get() = container().settingsRepository
 
+    internal val appUiGraph: AppUiGraph
+        get() = container().appUiGraph
+
     val appViewModel: FuoAppViewModel
         get() = container().appViewModel
 
