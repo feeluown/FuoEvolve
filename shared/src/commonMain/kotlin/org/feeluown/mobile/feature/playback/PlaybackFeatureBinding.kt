@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
 
 /** App-layer construction of the playback provider policy from narrow provider capabilities. */
@@ -35,19 +36,36 @@ fun createPlaybackFeatureOwner(
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
     nowMillis: () -> Long = ::currentTimeMillis,
-): PlaybackFeatureOwner = createPlaybackFeatureOwner(
-    providerRepository = playbackProvider,
-    playbackEngine = playbackEngine,
-    playbackQueueStore = playbackQueueStore,
-    settings = AppPlaybackSettingsPort(settingsRepository, scope),
-    downloads = PlaybackDownloadPort { trackId ->
-        (downloadActions.downloadStates[trackId] as? DownloadState.Downloaded)?.uri
-    },
-    navigation = DefaultPlaybackNavigationPort(),
-    scope = scope,
-    openTrackDetail = openTrackDetail,
-    nowMillis = nowMillis,
-)
+    listeningHistorySink: ListeningHistorySink = currentAppListeningHistorySink(),
+): PlaybackFeatureOwner {
+    val owner = createPlaybackFeatureOwner(
+        providerRepository = playbackProvider,
+        playbackEngine = playbackEngine,
+        playbackQueueStore = playbackQueueStore,
+        settings = AppPlaybackSettingsPort(settingsRepository, scope),
+        downloads = PlaybackDownloadPort { trackId ->
+            (downloadActions.downloadStates[trackId] as? DownloadState.Downloaded)?.uri
+        },
+        navigation = DefaultPlaybackNavigationPort(),
+        scope = scope,
+        openTrackDetail = openTrackDetail,
+        nowMillis = nowMillis,
+    )
+    val listeningHistoryRecorder = ListeningHistoryRecorder(
+        sink = listeningHistorySink,
+        scope = scope,
+        nowMillis = nowMillis,
+    )
+    scope.launch {
+        owner.playbackState.collect { state ->
+            listeningHistoryRecorder.onPlaybackState(
+                state = state,
+                queueState = owner.transport.queueStateFlow?.value,
+            )
+        }
+    }
+    return owner
+}
 
 private class AppPlaybackSettingsPort(
     private val delegate: AppSettingsRepository,

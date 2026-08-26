@@ -18,6 +18,7 @@ data class PlaybackQueueState(
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
+    val lastPlaybackStartReason: PlaybackStartReason? = null,
 )
 
 /**
@@ -79,6 +80,7 @@ internal class PlaybackQueueController {
 
     fun markNextPlaybackStart(reason: PlaybackStartReason) {
         pendingPlaybackStartReason = reason
+        update { it.copy(lastPlaybackStartReason = reason) }
     }
 
     fun consumePlaybackStartReason(): PlaybackStartReason =
