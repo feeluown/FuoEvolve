@@ -159,13 +159,13 @@ Cross-feature behavior must use the smallest stable contract. Examples:
 
 ## App shell and composition roots
 
-Android uses `AndroidAppContainer`; iOS uses `IosAppContainer`. They construct platform repositories/adapters and compose feature owners, playback runtime and app ports directly. Manual DI remains intentional; a dependency-injection framework is not required to hide this composition graph.
+Android uses `AndroidAppContainer`; iOS uses `IosAppContainer`. They construct platform repositories/adapters, feature owners, playback runtime and app ports directly. Manual DI remains intentional; a dependency-injection framework is not required to hide this composition graph.
 
-`AppRoot` is the canonical common Compose entry and renders typed routes. The P2-era `P2AppRoot` compatibility entry and `LegacyProviderDetailRouteBridge` are retired.
+`AppRoot` is the canonical common Compose bootstrap entry. It owns theme/startup/onboarding gating and delegates the initialized application to `AppShell`. Typed route rendering lives in `AppNavHost`; global player/dialog overlays and transient feedback are composed by dedicated shell components. The P2-era `P2AppRoot` compatibility entry and `LegacyProviderDetailRouteBridge` remain retired.
 
 `AppUiState` is intentionally app-scoped: initialization, onboarding, theme projection and navigation back stack. It must not again become a container for the full settings model, provider sessions or feature-local state.
 
-`FuoAppViewModel` still exposes application wiring required by `AppRoot`; feature business ownership nevertheless remains in feature owners. Future reductions should target demonstrated coupling rather than replacing explicit wiring with another broad facade.
+`FuoAppViewModel` owns only app-scoped state projection and app-level events. Presentation wiring is supplied separately through `AppUiGraph`, which groups existing feature owners and narrow UI ports without owning business state. `AppBackCoordinator` owns transient-overlay/route back precedence so platform hosts do not duplicate feature-specific back rules, while `AppPlatformBindings` carries permissions, file/share and provider-login callbacks into the common shell. This split must not be replaced by another generic controller, service locator or state aggregate. See [`app-shell-architecture.md`](app-shell-architecture.md) for the detailed shell structure.
 
 ## Architecture fitness checks
 
