@@ -1,5 +1,7 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -7,15 +9,21 @@ private const val LEGACY_PLAYLIST_KEY_SEPARATOR = "::"
 
 /**
  * Read-through adapter that guarantees the old settings counter is imported before any history read.
- * Recording itself stays fast and writes directly to the event store; the import is lazy, idempotent,
- * and serialized by the repository/database migration marker.
+ * Migration is also started eagerly when playback composition is created so the legacy snapshot is
+ * normally frozen before the user can start another playlist playback. Recording itself still writes
+ * directly to the event store.
  */
 internal class LegacyPlaylistStatsMigratingRepository(
     private val delegate: ListeningHistoryRepository,
     private val settingsRepository: AppSettingsRepository,
+    scope: CoroutineScope,
 ) : ListeningHistoryRepository {
     private val migrationMutex = Mutex()
     private var migrationChecked = false
+
+    init {
+        scope.launch { ensureLegacyMigration() }
+    }
 
     override suspend fun upsert(record: ListeningHistoryRecord) = delegate.upsert(record)
 
