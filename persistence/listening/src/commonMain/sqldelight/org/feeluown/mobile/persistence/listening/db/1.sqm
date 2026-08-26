@@ -1,0 +1,12 @@
+CREATE TABLE listening_legacy_playlist_stat (
+    source_id TEXT NOT NULL,
+    source_resource_id TEXT NOT NULL,
+    play_count INTEGER NOT NULL,
+    last_played_at INTEGER NOT NULL,
+    PRIMARY KEY (source_id, source_resource_id)
+);
+
+CREATE TABLE listening_metadata (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
