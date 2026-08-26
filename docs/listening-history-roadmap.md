@@ -14,11 +14,12 @@ derive user-facing rankings later instead of permanently collapsing history into
 This phase is implemented by the initial listening-history PR.
 
 - Add a provider-neutral `ListeningHistoryRecord` contract in `:core:model`.
-- Record one logical track session from playback state transitions.
-- Accumulate only time spent in `PlayerStatus.Playing`; paused time is excluded.
-- Checkpoint active sessions every 30 seconds and on pause so process death loses at most the latest
-  in-memory interval in normal operation.
-- Finalize sessions on natural end, track change, stop/idle, or playback error.
+- Record one logical track playback transaction from playback state transitions; replaying or actively
+  selecting the same logical track creates another event, while a true resume continues the event.
+- Accumulate only time spent in `PlayerStatus.Playing`; paused, loading, and buffering time is excluded.
+- Checkpoint active sessions every 30 seconds and on pause/non-playing transitions so process death
+  loses at most the latest in-memory interval in normal operation.
+- Finalize sessions on natural end, track change, a new playback transaction, stop/idle, or playback error.
 - Keep smart replacement as one logical track while also storing the resolved replacement as a
   separate relation.
 - Store resource dimensions independently from events so a single event can relate to a track,

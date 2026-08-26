@@ -16,12 +16,15 @@ class ListeningHistoryRecorderTest {
         var monotonicClock = 0L
         val recorder = ListeningHistoryRecorder(
             sink = sink,
-            scope = this,
+            scope = backgroundScope,
             nowMillis = { wallClock },
             monotonicMillis = { monotonicClock },
         )
         val track = track(durationMs = 60_000L)
-        val queue = PlaybackQueueState(lastPlaybackStartReason = PlaybackStartReason.USER_SELECTION)
+        val queue = PlaybackQueueState(
+            lastPlaybackStartReason = PlaybackStartReason.USER_SELECTION,
+            playbackStartSequence = 1L,
+        )
 
         recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 60_000L), queue)
         monotonicClock += 10_000L
@@ -30,10 +33,22 @@ class ListeningHistoryRecorderTest {
 
         monotonicClock += 20_000L
         wallClock += 20_000L
-        recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 60_000L), queue)
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Playing, track, durationMs = 60_000L),
+            queue.copy(
+                lastPlaybackStartReason = PlaybackStartReason.RESUME,
+                playbackStartSequence = 2L,
+            ),
+        )
         monotonicClock += 25_000L
         wallClock += 25_000L
-        recorder.onPlaybackState(PlaybackState(PlayerStatus.Ended, track, durationMs = 60_000L), queue)
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Ended, track, durationMs = 60_000L),
+            queue.copy(
+                lastPlaybackStartReason = PlaybackStartReason.RESUME,
+                playbackStartSequence = 2L,
+            ),
+        )
         runCurrent()
 
         val finalRecord = sink.records.last()
@@ -44,11 +59,86 @@ class ListeningHistoryRecorderTest {
     }
 
     @Test
+    fun loadingTimeIsNotCountedAsPlayingTime() = runTest {
+        val sink = RecordingListeningHistorySink()
+        var wallClock = 1_500_000L
+        var monotonicClock = 0L
+        val recorder = ListeningHistoryRecorder(sink, backgroundScope, { wallClock }, { monotonicClock })
+        val track = track(durationMs = 120_000L)
+        val queue = PlaybackQueueState(
+            lastPlaybackStartReason = PlaybackStartReason.USER_SELECTION,
+            playbackStartSequence = 1L,
+        )
+
+        recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 120_000L), queue)
+        monotonicClock += 10_000L
+        wallClock += 10_000L
+        recorder.onPlaybackState(PlaybackState(PlayerStatus.Loading, track, durationMs = 120_000L), queue)
+        monotonicClock += 20_000L
+        wallClock += 20_000L
+        recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 120_000L), queue)
+        monotonicClock += 5_000L
+        wallClock += 5_000L
+        recorder.onPlaybackState(PlaybackState(PlayerStatus.Ended, track, durationMs = 120_000L), queue)
+        runCurrent()
+
+        assertEquals(15_000L, sink.records.last().playedMs)
+    }
+
+    @Test
+    fun replayingSameTrackStartsAnotherListeningSession() = runTest {
+        val sink = RecordingListeningHistorySink()
+        var wallClock = 1_750_000L
+        var monotonicClock = 0L
+        val recorder = ListeningHistoryRecorder(sink, backgroundScope, { wallClock }, { monotonicClock })
+        val track = track(durationMs = 60_000L)
+        val firstQueue = PlaybackQueueState(
+            lastPlaybackStartReason = PlaybackStartReason.USER_SELECTION,
+            playbackStartSequence = 1L,
+        )
+
+        recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 60_000L), firstQueue)
+        monotonicClock += 20_000L
+        wallClock += 20_000L
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Loading, track, durationMs = 60_000L),
+            firstQueue.copy(
+                lastPlaybackStartReason = PlaybackStartReason.AUTO_NEXT,
+                playbackStartSequence = 2L,
+            ),
+        )
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Playing, track, durationMs = 60_000L),
+            firstQueue.copy(
+                lastPlaybackStartReason = PlaybackStartReason.AUTO_NEXT,
+                playbackStartSequence = 2L,
+            ),
+        )
+        monotonicClock += 30_000L
+        wallClock += 30_000L
+        recorder.onPlaybackState(
+            PlaybackState(PlayerStatus.Ended, track, durationMs = 60_000L),
+            firstQueue.copy(
+                lastPlaybackStartReason = PlaybackStartReason.AUTO_NEXT,
+                playbackStartSequence = 2L,
+            ),
+        )
+        runCurrent()
+
+        val sessions = sink.records.groupBy { it.sessionKey }
+        assertEquals(2, sessions.size)
+        val finalRecords = sessions.values.mapNotNull { records -> records.lastOrNull { it.endedAtMillis != null } }
+        assertEquals(2, finalRecords.size)
+        assertEquals(20_000L, finalRecords.first().playedMs)
+        assertEquals(30_000L, finalRecords.last().playedMs)
+    }
+
+    @Test
     fun shortAccidentalPlaybackIsPersistedButNotQualified() = runTest {
         val sink = RecordingListeningHistorySink()
         var wallClock = 2_000_000L
         var monotonicClock = 0L
-        val recorder = ListeningHistoryRecorder(sink, this, { wallClock }, { monotonicClock })
+        val recorder = ListeningHistoryRecorder(sink, backgroundScope, { wallClock }, { monotonicClock })
         val track = track(durationMs = 180_000L)
 
         recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 180_000L), PlaybackQueueState())
@@ -69,7 +159,7 @@ class ListeningHistoryRecorderTest {
         val sink = RecordingListeningHistorySink()
         var wallClock = 3_000_000L
         var monotonicClock = 0L
-        val recorder = ListeningHistoryRecorder(sink, this, { wallClock }, { monotonicClock })
+        val recorder = ListeningHistoryRecorder(sink, backgroundScope, { wallClock }, { monotonicClock })
         val track = track(durationMs = 180_000L).copy(
             id = "replacement-runtime-id",
             source = "bilibili",
@@ -105,7 +195,7 @@ class ListeningHistoryRecorderTest {
     @Test
     fun capturesArtistAlbumAndPlaylistDimensions() = runTest {
         val sink = RecordingListeningHistorySink()
-        val recorder = ListeningHistoryRecorder(sink, this, { 4_000_000L }, { 0L })
+        val recorder = ListeningHistoryRecorder(sink, backgroundScope, { 4_000_000L }, { 0L })
         val artist = MediaRef(
             id = "artist-1",
             title = "Artist One",
@@ -120,6 +210,7 @@ class ListeningHistoryRecorderTest {
         val queue = PlaybackQueueState(
             queuePlaylistId = "playlist-1",
             lastPlaybackStartReason = PlaybackStartReason.PLAYLIST_REPLACE,
+            playbackStartSequence = 1L,
         )
 
         recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 180_000L), queue)

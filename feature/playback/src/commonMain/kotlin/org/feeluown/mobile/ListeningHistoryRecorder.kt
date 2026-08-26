@@ -43,12 +43,19 @@ class ListeningHistoryRecorder(
         val currentTrack = state.currentTrack
         val currentPrimary = currentTrack?.logicalListeningResource()
         val currentActive = active
-        if (
-            currentActive != null &&
-            currentPrimary != null &&
-            currentActive.primary.resourceKey != currentPrimary.resourceKey
-        ) {
-            finalizeActive(ListeningCompletionReason.Changed)
+        if (currentActive != null && currentPrimary != null) {
+            val resourceChanged = currentActive.primary.resourceKey != currentPrimary.resourceKey
+            val startSequenceChanged = queueState != null &&
+                currentActive.playbackStartSequence != queueState.playbackStartSequence
+            val reason = queueState?.lastPlaybackStartReason
+            val transactionRestarted = startSequenceChanged &&
+                reason != PlaybackStartReason.RESUME &&
+                reason != PlaybackStartReason.RESTORE_SESSION
+            if (resourceChanged || transactionRestarted) {
+                finalizeActive(ListeningCompletionReason.Changed)
+            } else if (startSequenceChanged) {
+                currentActive.playbackStartSequence = queueState.playbackStartSequence
+            }
         }
 
         when (state.status) {
@@ -82,6 +89,7 @@ class ListeningHistoryRecorder(
             PlayerStatus.Loading -> {
                 val session = active ?: return
                 currentTrack?.let { refreshSession(session, it, state, queueState) }
+                pauseAndCheckpoint(session)
             }
         }
     }
@@ -98,6 +106,7 @@ class ListeningHistoryRecorder(
             primary = primary,
             startedAtMillis = startedAt,
             startReason = queueState?.lastPlaybackStartReason.toListeningStartReason(),
+            playbackStartSequence = queueState?.playbackStartSequence ?: 0L,
             durationMs = state.durationMs.takeIf { it > 0L } ?: track.durationMs,
             resources = track.listeningRelations(queueState),
             playingSinceMonotonicMs = monotonicMillis(),
@@ -123,10 +132,13 @@ class ListeningHistoryRecorder(
     }
 
     private fun pauseAndCheckpoint(session: ActiveListeningSession) {
+        val wasPlaying = session.playingSinceMonotonicMs != null
         accruePlayingTime(session, continuePlaying = false)
         checkpointJob?.cancel()
         checkpointJob = null
-        enqueue(session.snapshot(updatedAtMillis = nowMillis()))
+        if (wasPlaying) {
+            enqueue(session.snapshot(updatedAtMillis = nowMillis()))
+        }
     }
 
     private fun finalizeActive(reason: ListeningCompletionReason) {
@@ -179,6 +191,7 @@ private data class ActiveListeningSession(
     var primary: ListeningResourceSnapshot,
     val startedAtMillis: Long,
     val startReason: ListeningStartReason,
+    var playbackStartSequence: Long,
     var durationMs: Long?,
     var resources: List<ListeningResourceRelation>,
     var playedMs: Long = 0L,

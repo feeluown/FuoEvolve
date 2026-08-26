@@ -19,6 +19,7 @@ data class PlaybackQueueState(
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
     val lastPlaybackStartReason: PlaybackStartReason? = null,
+    val playbackStartSequence: Long = 0L,
 )
 
 /**
@@ -80,7 +81,12 @@ internal class PlaybackQueueController {
 
     fun markNextPlaybackStart(reason: PlaybackStartReason) {
         pendingPlaybackStartReason = reason
-        update { it.copy(lastPlaybackStartReason = reason) }
+        update { current ->
+            current.copy(
+                lastPlaybackStartReason = reason,
+                playbackStartSequence = current.playbackStartSequence + 1L,
+            )
+        }
     }
 
     fun consumePlaybackStartReason(): PlaybackStartReason =
