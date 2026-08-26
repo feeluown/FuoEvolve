@@ -127,7 +127,7 @@ internal fun AppNavHost(
                     AppRoute.Playlist,
                     AppRoute.Track,
                     AppRoute.Video,
-                    AppRoute.MediaItem -> StaleRouteKindGuard(appViewModel::onBack)
+                    AppRoute.MediaItem -> StaleRouteKindGuard { appViewModel.onBack() }
                 }
             }
         },
