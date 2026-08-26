@@ -44,10 +44,19 @@ Recent-history UI can therefore retain short activity while frequent/statistical
 
 ### Legacy playlist stats
 
-`AppSettings.playlistPlaybackStats` is not migrated. It does not contain event timestamps or listening
-duration, so synthesizing history would corrupt rolling-window statistics. The new listening database
-starts fresh. The old map remains only as a compatibility input for the pre-existing Mine playlist
-ordering and can be deleted independently once that ordering is moved to the new read model.
+The pre-event `AppSettings.playlistPlaybackStats` map contains only aggregate play count and last-played
+time, so it cannot be converted into trustworthy dated events or listening duration. It is now migrated
+once as a dedicated all-time playlist compatibility baseline rather than synthesizing fake events.
+
+- migration is lazy-read-safe and also starts eagerly with playback composition;
+- existing `contextSessionKey` rows are deducted from the imported baseline to avoid double-counting
+  preview builds where the legacy counter and the new recorder were both active;
+- the baseline contributes only to all-time playlist frequency/last-played ordering. Rolling 7/30/90-day,
+  calendar-year, duration, trend, source-share and raw-event statistics remain event-only;
+- the old settings map is retained as a downgrade-compatible shadow for now, but Mine ranking no longer
+  reads its count/timestamp values;
+- clearing listening history also clears the compatibility baseline and marks the migration complete so
+  old settings data cannot reappear after a clear.
 
 ## Phase 2: recent playback read model — implemented
 
@@ -83,8 +92,10 @@ All rankings are derived from the same events and relations:
 - future videos/episodes/podcasts can use the same event/read contracts without a new history table.
 
 Default frequent ordering is intentionally explainable: qualified count first, then played duration,
-then last played time. Raw short events remain visible in recent history but do not inflate frequent
-rankings.
+then last played time. Playlist frequency uses context-session count first because one playlist start is
+the user-level action being ranked; qualified child count, played duration and last-played time are its
+tie-breakers. The Mine `我的常听` block and regular Mine playlist recency ordering now use this new read
+model. Raw short events remain visible in recent history but do not inflate track frequent rankings.
 
 ## Phase 4: listening insights and personalization — implemented read model
 
