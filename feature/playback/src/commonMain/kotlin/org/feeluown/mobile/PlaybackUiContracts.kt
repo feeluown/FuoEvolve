@@ -50,6 +50,12 @@ interface PlaybackQueueUiPort {
     val feedback: StateFlow<String?>
         get() = EMPTY_PLAYBACK_FEEDBACK_FLOW
 
+    /**
+     * App-composition hint for legacy/detail play calls that do not carry their source resource.
+     * It is deliberately ephemeral and is never part of the durable queue snapshot.
+     */
+    fun setPlaybackContextHint(context: PlaybackContextSnapshot?) = Unit
+
     fun playTracks(tracks: List<MusicTrack>, index: Int)
 
     fun playTracks(tracks: List<MusicTrack>, index: Int, context: PlaybackContextSnapshot) =
