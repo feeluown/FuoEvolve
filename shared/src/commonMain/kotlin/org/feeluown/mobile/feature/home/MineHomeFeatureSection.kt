@@ -143,6 +143,7 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     var createLocal by remember { mutableStateOf(false) }
     var createProvider by remember { mutableStateOf<String?>(null) }
     var name by remember { mutableStateOf("") }
+    var playlistHistoryStats by remember { mutableStateOf<List<ListeningResourceStat>>(emptyList()) }
 
     val sections = when (state.playlistFilter) {
         PlaylistFilter.UserPlaylists, PlaylistFilter.All -> state.minePlaylistSections
@@ -151,11 +152,25 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     }
     val visible = sections.filterNot { it.isLoginRequired }
     val locked = sections.filter { it.isLoginRequired }.map { it.feature }.distinctBy { it.providerId }
-    val frequent = mineFrequentPlaylists(state)
+    val frequent = mineFrequentPlaylists(state, playlistHistoryStats)
     val selectedMineIds = (catalog.mineProviderIds.ifEmpty { catalog.availableProviders.mapTo(linkedSetOf()) { it.providerId } })
         .intersect(catalog.enabledProviderIds)
     val songEntries = catalog.features.filter {
         it.category == ProviderFeatureCategory.Mine && it.contentType == ProviderContentType.Songs && it.providerId in selectedMineIds
+    }
+
+    // The legacy settings map is kept as a downgrade-compatible shadow only. It is a refresh signal
+    // here; ordering/ranking data is read exclusively from the new listening-history repository.
+    LaunchedEffect(state.minePlaylistSections, state.mineFavoritePlaylistSections, state.playlistPlaybackStats) {
+        runCatching {
+            graph.listeningHistory.topResources(
+                resourceType = ListeningResourceType.Playlist,
+                range = ListeningTimeRange.All,
+                limit = 500,
+            )
+        }.onSuccess { stats ->
+            playlistHistoryStats = stats
+        }
     }
 
     LaunchedEffect(state.homeSection, state.mineSection, state.isLoading) {
@@ -222,7 +237,7 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
                 if (errorMessage != null) item("err:${section.feature.id}") { ProviderContentMessage(errorMessage) }
                 else if (section.playlists.isNotEmpty()) item("grid:${section.feature.id}") {
                     ProviderPlaylistGrid(
-                        mineSortPlaylists(section.playlists, state.playlistPlaybackStats),
+                        mineSortPlaylists(section.playlists, playlistHistoryStats),
                         { home.openPlaylist(it, section.feature.category) },
                     )
                 }
@@ -303,19 +318,51 @@ private fun MineOwnerMediaItems(home: HomeFeatureController, type: ProviderConte
 
 private fun mineKey(playlist: ProviderPlaylist) = "${playlist.providerId}::${playlist.id}"
 
-private fun mineSortPlaylists(playlists: List<ProviderPlaylist>, stats: Map<String, PlaylistPlaybackStat>) =
-    playlists.withIndex().sortedWith(
-        compareByDescending<IndexedValue<ProviderPlaylist>> { stats[mineKey(it.value)]?.lastPlayedAtMillis ?: 0L }
-            .thenBy { it.index }
-    ).map { it.value }
+private fun mineHistoryStat(
+    playlist: ProviderPlaylist,
+    stats: List<ListeningResourceStat>,
+): ListeningResourceStat? {
+    stats.firstOrNull { stat ->
+        stat.resource.sourceId == playlist.providerId && stat.resource.sourceResourceId == playlist.id
+    }?.let { return it }
+    // Early preview history used the source id "context" for playlist relations. Use an id-only
+    // fallback only when it is unambiguous, so those events remain useful without cross-provider joins.
+    return stats.filter { it.resource.sourceResourceId == playlist.id }.singleOrNull()
+}
 
-private fun mineFrequentPlaylists(state: HomeFeatureUiState): List<ProviderPlaylist> =
+private fun mineSortPlaylists(
+    playlists: List<ProviderPlaylist>,
+    stats: List<ListeningResourceStat>,
+) = playlists.withIndex().sortedWith(
+    compareByDescending<IndexedValue<ProviderPlaylist>> {
+        mineHistoryStat(it.value, stats)?.lastPlayedAtMillis ?: 0L
+    }.thenBy { it.index },
+).map { it.value }
+
+private fun mineFrequentPlaylists(
+    state: HomeFeatureUiState,
+    stats: List<ListeningResourceStat>,
+): List<ProviderPlaylist> =
     (state.minePlaylistSections + state.mineFavoritePlaylistSections)
         .filterNot { it.isLoginRequired }
         .flatMap { it.playlists }
         .distinctBy(::mineKey)
+        .mapIndexedNotNull { index, playlist ->
+            val stat = mineHistoryStat(playlist, stats)?.takeIf { it.contextSessionCount > 0L }
+                ?: return@mapIndexedNotNull null
+            MineListeningPlaylistRank(playlist, stat, index)
+        }
         .sortedWith(
-            compareByDescending<ProviderPlaylist> { state.playlistPlaybackStats[mineKey(it)]?.playCount ?: 0L }
-                .thenByDescending { state.playlistPlaybackStats[mineKey(it)]?.lastPlayedAtMillis ?: 0L }
+            compareByDescending<MineListeningPlaylistRank> { it.stat.contextSessionCount }
+                .thenByDescending { it.stat.qualifiedPlayCount }
+                .thenByDescending { it.stat.playedMs }
+                .thenByDescending { it.stat.lastPlayedAtMillis }
+                .thenBy { it.originalIndex },
         )
-        .filter { (state.playlistPlaybackStats[mineKey(it)]?.playCount ?: 0L) > 0L }
+        .map { it.playlist }
+
+private data class MineListeningPlaylistRank(
+    val playlist: ProviderPlaylist,
+    val stat: ListeningResourceStat,
+    val originalIndex: Int,
+)
