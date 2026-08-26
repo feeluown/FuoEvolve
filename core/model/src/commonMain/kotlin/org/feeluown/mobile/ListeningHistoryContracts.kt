@@ -145,6 +145,20 @@ data class ListeningResourceStat(
     val contextSessionCount: Long = 0L,
 )
 
+/**
+ * Aggregate-only compatibility input from the pre-event playlist counter.
+ *
+ * It deliberately carries no duration or event timestamps beyond the last-played marker because the
+ * legacy settings did not retain those facts. Persistence implementations may use it as an all-time
+ * baseline, but must not manufacture dated listening events from it.
+ */
+data class ListeningLegacyPlaylistStat(
+    val sourceId: String,
+    val sourceResourceId: String,
+    val playCount: Long,
+    val lastPlayedAtMillis: Long,
+)
+
 data class ListeningSourceShare(
     val sourceId: String,
     val eventCount: Long,
@@ -185,6 +199,9 @@ interface ListeningHistorySink {
  * projections so product ranking can evolve without rewriting raw history.
  */
 interface ListeningHistoryRepository : ListeningHistorySink {
+    /** One-time best-effort import of legacy aggregate playlist counters. */
+    suspend fun migrateLegacyPlaylistStats(stats: List<ListeningLegacyPlaylistStat>) = Unit
+
     suspend fun recentEvents(
         range: ListeningTimeRange = ListeningTimeRange.All,
         limit: Int = 200,
