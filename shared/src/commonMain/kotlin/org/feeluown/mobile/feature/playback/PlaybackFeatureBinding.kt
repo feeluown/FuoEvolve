@@ -35,8 +35,8 @@ fun createPlaybackFeatureOwner(
     downloadActions: DownloadActionPort,
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
+    listeningHistorySink: ListeningHistorySink,
     nowMillis: () -> Long = ::currentTimeMillis,
-    listeningHistorySink: ListeningHistorySink = currentAppListeningHistorySink(),
 ): PlaybackFeatureOwner {
     val owner = createPlaybackFeatureOwner(
         providerRepository = playbackProvider,
