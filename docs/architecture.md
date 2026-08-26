@@ -1,6 +1,6 @@
 # FuoEvolve architecture boundaries
 
-This document records the compile-time and ownership boundaries after P2 ownership migration, P3 physical feature modularization and P4 lower-boundary/app-shell cleanup.
+This document records the compile-time and ownership boundaries after P2 ownership migration, P3 physical feature modularization, P4 lower-boundary/app-shell cleanup, P5 concrete provider modularization, and the subsequent app-shell decomposition.
 
 ## Dependency direction
 
@@ -14,7 +14,11 @@ The current compile-time modules are:
 
 - `:core:model`: stable cross-feature media/model contracts and the dependency floor.
 - `:provider:api`: provider-neutral capability/result/failure contracts.
-- `:provider:runtime`: reusable provider network, retry/cache, credential/cache SPI, failure mapping and concrete-provider support infrastructure.
+- `:provider:runtime`: reusable provider network, retry/cache, credential/cache SPI, failure mapping and provider support infrastructure.
+- `:provider:netease`: NetEase concrete provider implementation and provider-specific tests.
+- `:provider:qqmusic`: QQ Music concrete provider implementation and provider-specific tests.
+- `:provider:bilibili`: Bilibili concrete provider implementation and provider-specific tests.
+- `:provider:ytmusic`: YouTube Music concrete provider implementation and provider-specific tests.
 - `:playback:api`: app-scoped playback session/value contracts.
 - `:playback:runtime`: controller-free playback session state/transport implementation.
 - `:persistence:settings`: stable settings storage schema and DataStore implementation boundary.
@@ -29,10 +33,10 @@ The current compile-time modules are:
 - `:feature:settings`: Settings state/orchestration behind feature-owned collaborator ports.
 - `:feature:onboarding`: startup provider-selection/rollback/completion orchestration.
 - `:feature:home`: Recommend/Explore/Mine aggregation, loading and playback-intent orchestration.
-- `:shared`: app shell, Compose/design primitives, concrete providers pending P5, and concrete application bindings for physical feature/lower modules.
+- `:shared`: app shell, Compose/design primitives and concrete application bindings for physical feature/provider/playback/persistence boundaries.
 - `:androidApp`: Android composition root and platform adapters.
 
-All physical feature modules have one-way dependency graphs. Application-domain types remain in the `:shared` binding layer when pushing them lower would unnecessarily widen a lower contract.
+All physical feature and provider modules have one-way dependency graphs. Application-domain types remain in the `:shared` binding layer when pushing them lower would unnecessarily widen a lower contract.
 
 ## P2 ownership result
 
@@ -115,7 +119,7 @@ The module is generic over provider, feature, content, track, playlist and playb
 
 `:provider:api` is the provider-neutral public contract boundary. `:provider:runtime` supplies reusable transport/cache/retry/credential infrastructure and depends downward on provider/playback contracts without depending on `:shared` or feature code.
 
-Concrete NetEase, QQ Music, Bilibili and YTMusic implementations remain in `:shared` until P5 gives them independent physical provider modules.
+P4 established this lower provider contract/runtime split. At P4 closeout the concrete provider implementations still lived in `:shared`; P5 subsequently moved them into independent provider modules without changing the provider-neutral application contracts.
 
 ### Settings persistence
 
@@ -124,6 +128,19 @@ Concrete NetEase, QQ Music, Bilibili and YTMusic implementations remain in `:sha
 `:shared` owns the application `AppSettings` read model and maps it to/from the persistence schema. The persisted file name and `app_settings_json_v1` preference key remain compatible with existing installations. Historical provider cookie/header draft fields are intentionally not part of the new schema and are never persisted by the new boundary.
 
 Platform code only constructs the storage implementation and legacy loader; storage policy does not live in Android/iOS hosts.
+
+## P5 concrete provider boundaries
+
+P5 extracted the four concrete providers into Kotlin Multiplatform modules:
+
+- `:provider:netease`;
+- `:provider:qqmusic`;
+- `:provider:bilibili`;
+- `:provider:ytmusic`.
+
+Each concrete provider depends downward on `:provider:runtime` / provider API contracts and its external libraries. Concrete providers must not depend upward on `:shared`, `:androidApp`, feature modules or persistence modules, and must not depend laterally on another concrete provider module.
+
+Provider-specific HTTP semantics, parsing, authentication details and provider-internal tests belong inside the concrete provider module. `:shared` remains responsible for application composition, provider-neutral capability binding and UI/application adaptation; it must not become a second home for concrete provider implementation details.
 
 ## Playback
 
@@ -186,14 +203,18 @@ P4 additionally enforces lower-contract/runtime/persistence and app-shell closeo
 - `checkP4CloseoutBoundaries` rejects restoration of `P2AppRoot` / `LegacyProviderDetailRouteBridge`, aggregate settings/provider-session fields in `AppUiState`, or platform hosts routing through the old app-root entry;
 - `:persistence:settings` tests protect historical settings-payload compatibility and corruption behavior.
 
+Concrete provider modules also own boundary gates. NetEase, QQ Music and YouTube Music use module-local `checkConcreteProviderBoundaries`; Bilibili uses `checkP5BilibiliBoundaries`. These reject upward/cross-provider dependencies and guard against concrete implementation code moving back into `:shared`.
+
 The Home gate requires the physical module source/test and shared binding, rejects `:feature:home -> :shared`, rejects concrete application identifiers from Home commonMain and rejects restoration of the old shared Home business implementation.
 
-Android and iOS CI run physical feature, playback runtime, provider runtime, persistence and shared tests in addition to architecture gates.
+Android and iOS CI run physical feature, concrete provider, playback runtime, provider runtime, persistence and shared tests in addition to architecture gates.
 
 ## Current phase
 
-P2 ownership migration, P3 feature modularization and P4 lower-boundary/app-shell cleanup are complete. `:shared` is now primarily application shell/UI, concrete provider implementations pending P5, and bindings to lower feature/provider/playback/persistence boundaries.
+P2 ownership migration, P3 feature modularization, P4 lower-boundary/app-shell cleanup, P5 concrete provider modularization and the app-shell decomposition are complete. `:shared` is now primarily the application shell/UI and the explicit application binding layer over feature/provider/playback/persistence boundaries.
 
-P5 may extract concrete providers into `:provider:netease`, `:provider:qqmusic`, `:provider:bilibili` and `:provider:ytmusic`, each depending only on provider API/runtime and lower stable contracts. Do not mechanically create additional modules unless they establish a real one-way dependency or independently testable ownership boundary.
+The current architecture should be treated as a stable baseline rather than the start of another mechanical modularization phase. New modules, facades, state aggregates or coordination layers should be introduced only when a concrete product change exposes a real dependency-direction, ownership, lifecycle or testability problem that the existing boundaries cannot express cleanly.
 
-P2/P3 sequencing is tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md); the completed P4 sequence is tracked in [`p4-architecture-roadmap.md`](p4-architecture-roadmap.md).
+Future architecture work should therefore be driven by observed development friction: repeated provider-specific branching outside provider modules, feature logic leaking back into `:shared`, duplicated platform coordination, unstable cross-feature contracts, or test seams that require broad implementation knowledge. Prefer the smallest boundary change that resolves the demonstrated problem.
+
+P2/P3 sequencing is tracked in [`p2-architecture-roadmap.md`](p2-architecture-roadmap.md); the completed P4 sequence is tracked in [`p4-architecture-roadmap.md`](p4-architecture-roadmap.md). P5 provider modularization landed through the concrete provider modules and their module-local boundary gates.
