@@ -4,6 +4,7 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 internal data class AppBackTarget(
@@ -21,9 +22,12 @@ class AppBackCoordinator internal constructor(
     private val transientTargets: List<AppBackTarget>,
     private val closeRoute: (AppRoute) -> Boolean,
 ) {
-    val hasTransientBack: Flow<Boolean> = combine(transientTargets.map(AppBackTarget::active)) { active ->
-        active.any { it }
-    }.distinctUntilChanged()
+    val hasTransientBack: Flow<Boolean> = if (transientTargets.isEmpty()) {
+        flowOf(false)
+    } else {
+        combine(transientTargets.map { it.active }) { active -> active.any { it } }
+            .distinctUntilChanged()
+    }
 
     val hasTransientBackNow: Boolean
         get() = transientTargets.any { it.isActiveNow() }
