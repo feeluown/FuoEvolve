@@ -57,6 +57,11 @@ internal fun AppNavHost(
     modifier: Modifier = Modifier,
 ) {
     val localPlaylistState by uiGraph.localPlaylist.uiState.collectAsStateWithLifecycle()
+    val activeRoute = backStack.lastOrNull()
+
+    LaunchedEffect(activeRoute, uiGraph.playback.queue) {
+        uiGraph.playback.queue.setPlaybackContextHint(activeRoute?.toPlaybackContextSnapshot())
+    }
 
     NavDisplay(
         backStack = backStack,
@@ -132,6 +137,44 @@ internal fun AppNavHost(
             }
         },
     )
+}
+
+private fun AppRoute.toPlaybackContextSnapshot(): PlaybackContextSnapshot? = when (this) {
+    is AppRoute.FeatureDetail -> PlaybackContextSnapshot(
+        type = PlaybackContextType.Feature,
+        sourceId = feature.providerId,
+        resourceId = feature.id,
+        title = feature.title,
+        subtitle = feature.providerName,
+    )
+    is AppRoute.PlaylistDetail -> PlaybackContextSnapshot(
+        type = PlaybackContextType.Playlist,
+        sourceId = playlist.providerId,
+        resourceId = playlist.id,
+        title = playlist.title,
+        subtitle = playlist.providerName,
+        coverUrl = playlist.coverUrl,
+    )
+    is AppRoute.MediaItemDetail -> when (item.type) {
+        MediaRefType.Album.name -> PlaybackContextSnapshot(
+            type = PlaybackContextType.Album,
+            sourceId = item.providerId,
+            resourceId = item.id,
+            title = item.title,
+            subtitle = item.providerName,
+            coverUrl = item.coverUrl,
+        )
+        MediaRefType.Artist.name -> PlaybackContextSnapshot(
+            type = PlaybackContextType.Artist,
+            sourceId = item.providerId,
+            resourceId = item.id,
+            title = item.title,
+            subtitle = item.providerName,
+            coverUrl = item.coverUrl,
+        )
+        else -> null
+    }
+    else -> null
 }
 
 @Composable
