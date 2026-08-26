@@ -41,6 +41,19 @@ CREATE TABLE listening_event_resource (
 
 CREATE INDEX listening_event_resource_resource_idx ON listening_event_resource(resource_key, relation_type);
 
+CREATE TABLE listening_legacy_playlist_stat (
+    source_id TEXT NOT NULL,
+    source_resource_id TEXT NOT NULL,
+    play_count INTEGER NOT NULL,
+    last_played_at INTEGER NOT NULL,
+    PRIMARY KEY (source_id, source_resource_id)
+);
+
+CREATE TABLE listening_metadata (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 upsertResource:
 INSERT OR REPLACE INTO listening_resource(
     resource_key,
@@ -105,6 +118,43 @@ INSERT OR REPLACE INTO listening_event_resource(
     :resourceKey,
     :relationType
 );
+
+selectMetadataValue:
+SELECT value FROM listening_metadata WHERE key = :key LIMIT 1;
+
+upsertMetadata:
+INSERT OR REPLACE INTO listening_metadata(key, value) VALUES (:key, :value);
+
+selectExistingPlaylistContextSessionCount:
+SELECT COUNT(DISTINCT e.context_session_key)
+FROM listening_event e
+JOIN listening_event_resource er ON er.session_key = e.session_key
+JOIN listening_resource r ON r.resource_key = er.resource_key
+WHERE er.relation_type = 'PlaylistContext'
+  AND r.resource_type = 'Playlist'
+  AND r.source_resource_id = :sourceResourceId
+  AND (r.source_id = :sourceId OR r.source_id = 'context')
+  AND e.context_session_key IS NOT NULL;
+
+upsertLegacyPlaylistStat:
+INSERT OR REPLACE INTO listening_legacy_playlist_stat(
+    source_id,
+    source_resource_id,
+    play_count,
+    last_played_at
+) VALUES (
+    :sourceId,
+    :sourceResourceId,
+    :playCount,
+    :lastPlayedAt
+);
+
+selectLegacyPlaylistStats:
+SELECT source_id, source_resource_id, play_count, last_played_at
+FROM listening_legacy_playlist_stat;
+
+clearLegacyPlaylistStats:
+DELETE FROM listening_legacy_playlist_stat;
 
 selectRecentEvents:
 SELECT
