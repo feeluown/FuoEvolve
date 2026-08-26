@@ -64,9 +64,15 @@ fun createPlaybackFeatureOwner(
             )
         }
     }
+    val listeningHistoryRepository = (listeningHistorySink as? ListeningHistoryRepository)?.let { repository ->
+        LegacyPlaylistStatsMigratingRepository(
+            delegate = repository,
+            settingsRepository = settingsRepository,
+        )
+    }
     val wrappedTransport = ListeningHistoryPlaybackTransport(
         delegate = owner.transport,
-        repository = listeningHistorySink as? ListeningHistoryRepository,
+        repository = listeningHistoryRepository,
     )
     return object : PlaybackFeatureOwner by owner {
         override val transport: PlaybackTransportCoordinator = wrappedTransport
