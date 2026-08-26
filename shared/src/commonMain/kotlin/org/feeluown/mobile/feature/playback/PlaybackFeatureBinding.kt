@@ -68,6 +68,7 @@ fun createPlaybackFeatureOwner(
         LegacyPlaylistStatsMigratingRepository(
             delegate = repository,
             settingsRepository = settingsRepository,
+            scope = scope,
         )
     }
     val wrappedTransport = ListeningHistoryPlaybackTransport(
