@@ -123,6 +123,7 @@ jobs:
           files: build/artifacts/*.apk
           fail_on_unmatched_files: true
           generate_release_notes: true
+          make_latest: true
 
   publish-fdroid-pages:
     name: Publish F-Droid repository to Pages
