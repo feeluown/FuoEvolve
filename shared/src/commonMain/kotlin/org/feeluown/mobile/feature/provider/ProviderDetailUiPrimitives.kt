@@ -105,6 +105,7 @@ fun ProviderDetailHeader(
     subtitle: String,
     description: String,
     placeholder: CoverPlaceholder = CoverPlaceholder.Song,
+    heroKey: ResourceCoverHeroKey? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     val descriptionExpanded = remember(description) { mutableStateOf(false) }
@@ -125,7 +126,7 @@ fun ProviderDetailHeader(
                 track = track,
                 modifier = Modifier
                     .size(112.dp)
-                    .fuoNavigationHero(track.detailCoverHeroKey(placeholder)),
+                    .fuoNavigationHero(heroKey ?: track.detailCoverHeroKey(placeholder)),
                 placeholder = placeholder,
             )
             Column(
