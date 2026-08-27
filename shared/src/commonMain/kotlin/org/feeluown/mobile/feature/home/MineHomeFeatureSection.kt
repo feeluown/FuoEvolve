@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,43 +46,29 @@ fun MineHomeSection(
     val state by home.uiState.collectAsStateWithLifecycle()
     val localMusicState by graph.localMusic.uiState.collectAsStateWithLifecycle()
     val wide = LocalAppLayoutInfo.current.useWideLayout
-    var showListeningHistory by remember { mutableStateOf(false) }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp)) {
         MineOwnerChips(
             home = home,
             includeSecondary = wide,
-            showListeningHistory = showListeningHistory,
-            onListeningHistorySelected = { showListeningHistory = true },
-            onMineSectionSelected = { section ->
-                showListeningHistory = false
-                home.setMineSection(section)
-            },
         )
-        if (showListeningHistory) {
-            ListeningHistoryMineContent(
-                repository = graph.listeningHistory,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-        } else {
-            PullToRefreshBox(
-                isRefreshing = state.isLoading || (state.mineSection == MineSection.LocalMusic && localMusicState.isLoading),
-                onRefresh = home::refreshMine,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
-                when (state.mineSection) {
-                    MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
-                    MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
-                    MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
-                    MineSection.LocalMusic -> LocalMusicSection(
-                        hasAudioPermission = hasAudioPermission,
-                        onRequestAudioPermission = onRequestAudioPermission,
-                        hasImagePermission = hasImagePermission,
-                        onRequestImagePermission = onRequestImagePermission,
-                        showModeFilter = !wide,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+        PullToRefreshBox(
+            isRefreshing = state.isLoading || (state.mineSection == MineSection.LocalMusic && localMusicState.isLoading),
+            onRefresh = home::refreshMine,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
+            when (state.mineSection) {
+                MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
+                MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
+                MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
+                MineSection.LocalMusic -> LocalMusicSection(
+                    hasAudioPermission = hasAudioPermission,
+                    onRequestAudioPermission = onRequestAudioPermission,
+                    hasImagePermission = hasImagePermission,
+                    onRequestImagePermission = onRequestImagePermission,
+                    showModeFilter = !wide,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }
@@ -91,21 +78,32 @@ fun MineHomeSection(
 private fun MineOwnerChips(
     home: HomeFeatureController,
     includeSecondary: Boolean,
-    showListeningHistory: Boolean,
-    onListeningHistorySelected: () -> Unit,
-    onMineSectionSelected: (MineSection) -> Unit,
 ) {
     val state by home.uiState.collectAsStateWithLifecycle()
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MineChip(!showListeningHistory && state.mineSection == MineSection.Playlists, { onMineSectionSelected(MineSection.Playlists) }, "歌单")
-        MineChip(!showListeningHistory && state.mineSection == MineSection.Artists, { onMineSectionSelected(MineSection.Artists) }, "歌手")
-        MineChip(!showListeningHistory && state.mineSection == MineSection.Albums, { onMineSectionSelected(MineSection.Albums) }, "专辑")
-        MineChip(!showListeningHistory && state.mineSection == MineSection.LocalMusic, { onMineSectionSelected(MineSection.LocalMusic) }, "本地")
-        MineChip(showListeningHistory, onListeningHistorySelected, "听歌")
-        if (includeSecondary && !showListeningHistory) {
-            Spacer(Modifier.width(12.dp))
-            if (state.mineSection == MineSection.LocalMusic) LocalMusicViewModeTabs()
-            else if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) MineFilterChips(home)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MineChip(state.mineSection == MineSection.Playlists, { home.setMineSection(MineSection.Playlists) }, "歌单")
+            MineChip(state.mineSection == MineSection.Artists, { home.setMineSection(MineSection.Artists) }, "歌手")
+            MineChip(state.mineSection == MineSection.Albums, { home.setMineSection(MineSection.Albums) }, "专辑")
+            MineChip(state.mineSection == MineSection.LocalMusic, { home.setMineSection(MineSection.LocalMusic) }, "本地")
+            if (includeSecondary) {
+                Spacer(Modifier.width(12.dp))
+                if (state.mineSection == MineSection.LocalMusic) LocalMusicViewModeTabs()
+                else if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) MineFilterChips(home)
+            }
+        }
+        TextButton(onClick = home::openPlaybackHistory) {
+            Text(
+                text = "播放记录",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
