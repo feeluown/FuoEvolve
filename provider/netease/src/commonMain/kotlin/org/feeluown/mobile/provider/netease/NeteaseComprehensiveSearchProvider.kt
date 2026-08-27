@@ -96,44 +96,44 @@ internal class NeteaseComprehensiveSearchProvider(
 
     private fun songValues(result: JsonObject): JsonArray = firstNonEmpty(
         result.array("songs"),
-        result.obj("song")?.array("songs").orEmpty(),
-        result.obj("song")?.array("items").orEmpty(),
-        result.obj("song")?.array("list").orEmpty(),
+        result.obj("song").arrayOrEmpty("songs"),
+        result.obj("song").arrayOrEmpty("items"),
+        result.obj("song").arrayOrEmpty("list"),
     )
 
     private fun artistValues(result: JsonObject): JsonArray = firstNonEmpty(
         result.array("artists"),
-        result.obj("artist")?.array("artists").orEmpty(),
-        result.obj("artist")?.array("items").orEmpty(),
-        result.obj("artist")?.array("list").orEmpty(),
+        result.obj("artist").arrayOrEmpty("artists"),
+        result.obj("artist").arrayOrEmpty("items"),
+        result.obj("artist").arrayOrEmpty("list"),
     )
 
     private fun albumValues(result: JsonObject): JsonArray = firstNonEmpty(
         result.array("albums"),
-        result.obj("album")?.array("albums").orEmpty(),
-        result.obj("album")?.array("items").orEmpty(),
-        result.obj("album")?.array("list").orEmpty(),
+        result.obj("album").arrayOrEmpty("albums"),
+        result.obj("album").arrayOrEmpty("items"),
+        result.obj("album").arrayOrEmpty("list"),
     )
 
     private fun playlistValues(result: JsonObject): JsonArray = firstNonEmpty(
         result.array("playlists"),
         result.array("playLists"),
-        result.obj("playlist")?.array("playlists").orEmpty(),
-        result.obj("playlist")?.array("playLists").orEmpty(),
-        result.obj("playList")?.array("playlists").orEmpty(),
-        result.obj("playList")?.array("playLists").orEmpty(),
-        result.obj("playList")?.array("items").orEmpty(),
+        result.obj("playlist").arrayOrEmpty("playlists"),
+        result.obj("playlist").arrayOrEmpty("playLists"),
+        result.obj("playList").arrayOrEmpty("playlists"),
+        result.obj("playList").arrayOrEmpty("playLists"),
+        result.obj("playList").arrayOrEmpty("items"),
     )
 
     private fun mvValues(result: JsonObject): JsonArray = firstNonEmpty(
         result.array("mvs"),
-        result.obj("mv")?.array("mvs").orEmpty(),
-        result.obj("mv")?.array("items").orEmpty(),
-        result.obj("mv")?.array("list").orEmpty(),
+        result.obj("mv").arrayOrEmpty("mvs"),
+        result.obj("mv").arrayOrEmpty("items"),
+        result.obj("mv").arrayOrEmpty("list"),
     )
 
     private fun nativeBestMatches(result: JsonObject, values: ProviderSearchResults): List<ProviderSearchHit> {
-        val order = result.array("order").map(JsonElement::asString).filter(String::isNotBlank)
+        val order = result.array("order").map { it.asString() }.filter(String::isNotBlank)
         if (order.isEmpty()) return emptyList()
         return order.asSequence().mapNotNull { key ->
             when (key.lowercase()) {
@@ -265,7 +265,10 @@ internal class NeteaseComprehensiveSearchProvider(
         )
     }
 
-    private fun firstNonEmpty(vararg values: JsonArray): JsonArray = values.firstOrNull { it.isNotEmpty() } ?: JsonArray(emptyList())
+    private fun JsonObject?.arrayOrEmpty(key: String): JsonArray = this?.array(key) ?: JsonArray(emptyList())
+
+    private fun firstNonEmpty(vararg values: JsonArray): JsonArray =
+        values.firstOrNull { it.isNotEmpty() } ?: JsonArray(emptyList())
 
     private fun normalize(value: String): String = value.trim().lowercase().replace(" ", "")
 
