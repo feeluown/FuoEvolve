@@ -5,7 +5,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -48,7 +52,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -62,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 
 private val HomePrimarySections = listOf(
     HomeSection.Recommend to "推荐",
@@ -70,6 +75,7 @@ private val HomePrimarySections = listOf(
 )
 
 private val HomeNavigationScrollThreshold = 28.dp
+private val HomeNavigationItemSpacing = 4.dp
 
 @Composable
 fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
@@ -140,7 +146,7 @@ fun HomeScreen(
             if (!layoutInfo.useWideLayout) {
                 ExpressiveHomeTopBar(
                     sections = HomePrimarySections,
-                    selectedIndex = pagerState.currentPage.coerceIn(0, HomePrimarySections.lastIndex),
+                    pagerState = pagerState,
                     compact = isNavigationCompact,
                     onSettings = home::openSettings,
                     onRecognition = onOpenRecognition,
@@ -186,7 +192,7 @@ fun HomeScreen(
 @Composable
 private fun ExpressiveHomeTopBar(
     sections: List<Pair<HomeSection, String>>,
-    selectedIndex: Int,
+    pagerState: PagerState,
     compact: Boolean,
     onSettings: () -> Unit,
     onRecognition: () -> Unit,
@@ -221,6 +227,7 @@ private fun ExpressiveHomeTopBar(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = containerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = elevation,
     ) {
         Row(
@@ -237,22 +244,14 @@ private fun ExpressiveHomeTopBar(
                 contentDescription = "设置",
                 icon = Icons.Filled.Settings,
             )
-            Row(
+            HomeNavigationTabs(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                sections.forEachIndexed { index, (section, label) ->
-                    HomeNavigationItem(
-                        modifier = Modifier.weight(1f),
-                        label = label,
-                        selected = index == selectedIndex,
-                        compact = compact,
-                        height = itemHeight,
-                        onClick = { onSectionClick(index, section) },
-                    )
-                }
-            }
+                sections = sections,
+                pagerState = pagerState,
+                compact = compact,
+                height = itemHeight,
+                onSectionClick = onSectionClick,
+            )
             HomeNavigationAction(
                 compact = compact,
                 onClick = onRecognition,
@@ -270,54 +269,83 @@ private fun ExpressiveHomeTopBar(
 }
 
 @Composable
+private fun HomeNavigationTabs(
+    sections: List<Pair<HomeSection, String>>,
+    pagerState: PagerState,
+    compact: Boolean,
+    height: Dp,
+    onSectionClick: (Int, HomeSection) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pagerPosition = (
+        pagerState.currentPage.toFloat() + pagerState.currentPageOffsetFraction
+        ).coerceIn(0f, sections.lastIndex.toFloat())
+    val selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex)
+    val selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer
+    val selectedContentColor = MaterialTheme.colorScheme.onSecondaryContainer
+    val unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    BoxWithConstraints(modifier = modifier.height(height)) {
+        val itemWidth = (
+            maxWidth - HomeNavigationItemSpacing * sections.lastIndex.toFloat()
+            ) / sections.size.toFloat()
+        val indicatorOffset = (itemWidth + HomeNavigationItemSpacing) * pagerPosition
+        Surface(
+            modifier = Modifier
+                .offset(x = indicatorOffset)
+                .width(itemWidth)
+                .fillMaxHeight(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = selectedContainerColor,
+        ) {}
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(HomeNavigationItemSpacing),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            sections.forEachIndexed { index, (section, label) ->
+                val emphasis = (1f - (pagerPosition - index).absoluteValue).coerceIn(0f, 1f)
+                HomeNavigationItem(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    label = label,
+                    selected = index == selectedIndex,
+                    compact = compact,
+                    contentColor = lerp(unselectedContentColor, selectedContentColor, emphasis),
+                    onClick = { onSectionClick(index, section) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun HomeNavigationItem(
     label: String,
     selected: Boolean,
     compact: Boolean,
-    height: Dp,
+    contentColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-        animationSpec = tween(FuoMotion.overlayFadeMillis),
-        label = "home navigation item color",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        animationSpec = tween(FuoMotion.overlayFadeMillis),
-        label = "home navigation item content color",
-    )
-
-    Surface(
-        modifier = modifier
-            .height(height)
-            .selectable(
-                selected = selected,
-                role = Role.Tab,
-                onClick = onClick,
-            ),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = containerColor,
-        contentColor = contentColor,
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier.selectable(
+            selected = selected,
+            interactionSource = interactionSource,
+            indication = null,
+            role = Role.Tab,
+            onClick = onClick,
+        ),
+        contentAlignment = Alignment.Center,
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = label,
-                style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text = label,
+            style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+            color = contentColor,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
