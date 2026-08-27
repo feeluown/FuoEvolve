@@ -26,6 +26,7 @@ internal fun AppShell(
 ) {
     val videoDetailState by uiGraph.providerDetail.owners.video.uiState.collectAsStateWithLifecycle()
     val playback = uiGraph.playback
+    val resourceHeroCoordinator = remember { ResourceHeroCoordinator() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val layoutInfo = remember(maxWidth, maxHeight) { appLayoutInfoFor(maxWidth, maxHeight) }
@@ -62,7 +63,10 @@ internal fun AppShell(
         ) {
             ProvideNarrowPlaybackUi(playback) {
                 SharedTransitionLayout(Modifier.fillMaxSize()) {
-                    CompositionLocalProvider(LocalAppSharedTransitionScope provides this) {
+                    CompositionLocalProvider(
+                        LocalAppSharedTransitionScope provides this,
+                        LocalResourceHeroCoordinator provides resourceHeroCoordinator,
+                    ) {
                         Box(Modifier.fillMaxSize()) {
                             AppNavHost(
                                 backStack = appUiState.backStack,
