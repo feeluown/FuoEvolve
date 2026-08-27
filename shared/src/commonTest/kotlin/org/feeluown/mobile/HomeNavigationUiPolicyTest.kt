@@ -37,4 +37,19 @@ class HomeNavigationUiPolicyTest {
         assertTrue(shouldShowMiniPlayerPreviousControl(420.dp, isWideLayout = false))
         assertTrue(shouldShowMiniPlayerPreviousControl(360.dp, isWideLayout = true))
     }
+
+    @Test
+    fun shortHomeRailDropsLabelsBeforeRecognitionAndKeepsSearchOutsidePolicy() {
+        val veryShort = homeRailLayoutPolicyFor(280.dp)
+        assertFalse(veryShort.showLabels)
+        assertFalse(veryShort.showRecognition)
+
+        val compactWithRecognition = homeRailLayoutPolicyFor(320.dp)
+        assertFalse(compactWithRecognition.showLabels)
+        assertTrue(compactWithRecognition.showRecognition)
+
+        val expanded = homeRailLayoutPolicyFor(400.dp)
+        assertTrue(expanded.showLabels)
+        assertTrue(expanded.showRecognition)
+    }
 }
