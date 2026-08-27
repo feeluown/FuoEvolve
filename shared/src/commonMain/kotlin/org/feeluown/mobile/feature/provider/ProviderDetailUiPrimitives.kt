@@ -123,7 +123,9 @@ fun ProviderDetailHeader(
         ) {
             CoverBox(
                 track = track,
-                modifier = Modifier.size(112.dp),
+                modifier = Modifier
+                    .size(112.dp)
+                    .fuoNavigationHero(track.detailCoverHeroKey(placeholder)),
                 placeholder = placeholder,
             )
             Column(
