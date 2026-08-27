@@ -90,11 +90,18 @@ jobs:
     needs: build-release-apks
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
+      pull-requests: read
+      copilot-requests: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Download release APK assets
         uses: actions/download-artifact@v8
         with:
@@ -117,10 +124,54 @@ jobs:
             exit 1
           fi
 
+      - name: Collect release context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/collect-release-context.sh "$GITHUB_REF_NAME" "$GITHUB_SHA" build/release-context.md
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Generate release highlights with Copilot
+        id: release_summary
+        continue-on-error: true
+        uses: actions/ai-inference@v3
+        with:
+          prompt-file: ./.github/prompts/release-summary.prompt.yml
+          file_input: |
+            release_context: ./build/release-context.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Prepare release intro
+        if: always()
+        env:
+          SUMMARY_OUTCOME: ${{ steps.release_summary.outcome }}
+          SUMMARY_FILE: ${{ steps.release_summary.outputs.response-file }}
+        run: |
+          : > build/release-intro.md
+          if [ "$SUMMARY_OUTCOME" = "success" ] && [ -n "$SUMMARY_FILE" ] && [ -s "$SUMMARY_FILE" ]; then
+            {
+              echo "## ✨ 重点改动"
+              echo
+              cat "$SUMMARY_FILE"
+              echo
+              echo
+              echo "---"
+              echo
+            } > build/release-intro.md
+          else
+            echo "::warning::Copilot release summary unavailable; publishing GitHub generated notes only."
+          fi
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: build/artifacts/*.apk
+          body_path: build/release-intro.md
           fail_on_unmatched_files: true
           generate_release_notes: true
           make_latest: true
