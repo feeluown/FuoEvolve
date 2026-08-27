@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -11,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
     val playback = uiGraph.playback
