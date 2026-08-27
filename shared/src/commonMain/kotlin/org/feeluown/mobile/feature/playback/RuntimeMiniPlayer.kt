@@ -121,7 +121,7 @@ internal fun RuntimeMiniPlayer(
                     state.currentTrack?.let { track ->
                         RuntimeMiniPlayerCover(
                             track = track,
-                            heroEnabled = !isFullPlayerOpen,
+                            heroVisible = !isFullPlayerOpen,
                             transitionDirection = transitionDirection,
                             isLoading = isLoadingAudio,
                             cornerRadius = if (isWideLayout) 10.dp else 18.dp,
@@ -284,7 +284,7 @@ private data class RuntimeMiniPlayerLyricState(
 @OptIn(ExperimentalSharedTransitionApi::class)
 private fun RuntimeMiniPlayerCover(
     track: TrackRef,
-    heroEnabled: Boolean,
+    heroVisible: Boolean,
     transitionDirection: TrackChangeDirection,
     isLoading: Boolean,
     cornerRadius: Dp,
@@ -298,14 +298,14 @@ private fun RuntimeMiniPlayerCover(
             displayedTrack = track
         }
     }
-    val sharedTransitionScope = LocalPlayerSharedTransitionScope.current
-    val sharedModifier = if (!heroEnabled || sharedTransitionScope == null) {
+    val sharedTransitionScope = LocalAppSharedTransitionScope.current
+    val sharedModifier = if (sharedTransitionScope == null) {
         modifier
     } else {
         with(sharedTransitionScope) {
             modifier.sharedElementWithCallerManagedVisibility(
                 sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = true,
+                visible = heroVisible,
             )
         }
     }
