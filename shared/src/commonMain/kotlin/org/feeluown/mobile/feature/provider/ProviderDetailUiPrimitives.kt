@@ -99,7 +99,7 @@ fun ShareTextButton(payload: SharePayload?) {
 }
 
 @Composable
-fun ProviderDetailHeader(
+internal fun ProviderDetailHeader(
     track: MusicTrack,
     title: String,
     subtitle: String,
