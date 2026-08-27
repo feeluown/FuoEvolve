@@ -94,7 +94,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-      copilot-requests: write
 
     steps:
       - name: Checkout
@@ -141,10 +140,11 @@ jobs:
         uses: actions/ai-inference@v3
         with:
           prompt-file: ./.github/prompts/release-summary.prompt.yml
+          model: ""
           file_input: |
             release_context: ./build/release-context.md
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
 
       - name: Prepare release intro
         if: always()
