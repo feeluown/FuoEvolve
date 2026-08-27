@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -12,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,10 +23,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -39,6 +37,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -52,8 +51,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -330,42 +332,90 @@ fun PlayPauseButton(
     prominent: Boolean = false,
 ) {
     val buttonSize = if (size < 48.dp) 48.dp else size
-    val cornerRadius by animateDpAsState(
-        targetValue = (buttonSize.value * if (isPlaying) 0.30f else 0.50f).dp,
-        animationSpec = FuoMotion.defaultSpatialSpec(),
-        label = "play pause button shape",
-    )
-    val shape = RoundedCornerShape(cornerRadius)
-    val content: @Composable () -> Unit = {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(iconSize),
-                strokeWidth = 2.dp,
-                color = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-            )
-        } else {
-            Icon(
-                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (isPlaying) "暂停" else "播放",
-                modifier = Modifier.size(iconSize),
-            )
+    if (isLoading) {
+        Surface(
+            modifier = Modifier.size(buttonSize),
+            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+            contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+            tonalElevation = if (prominent) 3.dp else 1.dp,
+            shape = CircleShape,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(iconSize),
+                    strokeWidth = 2.dp,
+                    color = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                )
+            }
         }
+        return
+    }
+    val content: @Composable () -> Unit = {
+        PlayPauseMorphIcon(
+            isPlaying = isPlaying,
+            modifier = Modifier.size(iconSize),
+        )
     }
     if (prominent) {
         FilledIconButton(
             onClick = onClick,
-            enabled = !isLoading,
             modifier = Modifier.size(buttonSize),
-            shape = shape,
+            shape = CircleShape,
             content = content,
         )
     } else {
         FilledTonalIconButton(
             onClick = onClick,
-            enabled = !isLoading,
             modifier = Modifier.size(buttonSize),
-            shape = shape,
+            shape = CircleShape,
             content = content,
+        )
+    }
+}
+
+@Composable
+private fun PlayPauseMorphIcon(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val morphProgress by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = FuoMotion.defaultSpatialSpec(),
+        label = "play pause icon morph",
+    )
+    val color = LocalContentColor.current
+    val description = if (isPlaying) "暂停" else "播放"
+    Canvas(
+        modifier = modifier.semantics { contentDescription = description },
+    ) {
+        val scaleX = size.width / 24f
+        val scaleY = size.height / 24f
+        fun lerp(start: Float, end: Float): Float = start + (end - start) * morphProgress
+        fun drawMorphPolygon(play: FloatArray, pause: FloatArray) {
+            val path = Path()
+            path.moveTo(
+                lerp(play[0], pause[0]) * scaleX,
+                lerp(play[1], pause[1]) * scaleY,
+            )
+            var index = 2
+            while (index < play.size) {
+                path.lineTo(
+                    lerp(play[index], pause[index]) * scaleX,
+                    lerp(play[index + 1], pause[index + 1]) * scaleY,
+                )
+                index += 2
+            }
+            path.close()
+            drawPath(path = path, color = color)
+        }
+
+        drawMorphPolygon(
+            play = floatArrayOf(7f, 4.5f, 18.5f, 12f, 7f, 12f, 7f, 4.5f),
+            pause = floatArrayOf(6.5f, 5f, 10.5f, 5f, 10.5f, 19f, 6.5f, 19f),
+        )
+        drawMorphPolygon(
+            play = floatArrayOf(7f, 12f, 18.5f, 12f, 7f, 19.5f, 7f, 12f),
+            pause = floatArrayOf(13.5f, 5f, 17.5f, 5f, 17.5f, 19f, 13.5f, 19f),
         )
     }
 }
