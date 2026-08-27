@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +23,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Mic
@@ -52,6 +50,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -76,6 +75,10 @@ private val HomePrimarySections = listOf(
 
 private val HomeNavigationScrollThreshold = 28.dp
 private val HomeNavigationItemSpacing = 4.dp
+private val HomeRailCompactHeightThreshold = 400.dp
+private val HomeRailRecognitionHeightThreshold = 320.dp
+private val HomeRailExpandedItemHeight = 64.dp
+private val HomeRailCompactItemHeight = 48.dp
 
 @Composable
 fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
@@ -323,7 +326,7 @@ private fun HomeNavigationItem(
     label: String,
     selected: Boolean,
     compact: Boolean,
-    contentColor: androidx.compose.ui.graphics.Color,
+    contentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -399,6 +402,16 @@ internal class HomeNavigationScrollAccumulator(
         accumulatedY = 0f
     }
 }
+
+internal data class HomeRailLayoutPolicy(
+    val showLabels: Boolean,
+    val showRecognition: Boolean,
+)
+
+internal fun homeRailLayoutPolicyFor(maxHeight: Dp): HomeRailLayoutPolicy = HomeRailLayoutPolicy(
+    showLabels = maxHeight >= HomeRailCompactHeightThreshold,
+    showRecognition = maxHeight >= HomeRailRecognitionHeightThreshold,
+)
 
 @Composable
 fun HomeSectionPager(
@@ -496,44 +509,91 @@ fun HomeSectionRail(
     Surface(
         modifier = Modifier.width(64.dp).fillMaxHeight(),
         color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
-        Column(
-            modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "设置") }
-            Spacer(Modifier.weight(1f))
-            sections.forEachIndexed { index, (section, label) ->
-                val selected = index == selectedIndex
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fuoInteractive()
-                        .clickable(role = Role.Tab) { onClick(index, section) }
-                        .padding(vertical = 4.dp),
-                    color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                    contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(homeSectionIcon(section), contentDescription = label)
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val policy = homeRailLayoutPolicyFor(maxHeight)
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(vertical = if (policy.showLabels) 8.dp else 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                IconButton(onClick = onSettings) {
+                    Icon(Icons.Filled.Settings, contentDescription = "设置")
+                }
+                Spacer(Modifier.weight(1f))
+                sections.forEachIndexed { index, (section, label) ->
+                    HomeSectionRailItem(
+                        section = section,
+                        label = label,
+                        selected = index == selectedIndex,
+                        showLabel = policy.showLabels,
+                        onClick = { onClick(index, section) },
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (policy.showRecognition) {
+                    IconButton(onClick = onRecognition) {
+                        Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
                     }
                 }
+                IconButton(onClick = onSearch) {
+                    Icon(Icons.Filled.Search, contentDescription = "搜索")
+                }
             }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRecognition) { Icon(Icons.Filled.Mic, contentDescription = "听歌识曲") }
-            IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "搜索") }
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionRailItem(
+    section: HomeSection,
+    label: String,
+    selected: Boolean,
+    showLabel: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (showLabel) HomeRailExpandedItemHeight else HomeRailCompactItemHeight)
+            .fuoInteractive()
+            .selectable(
+                selected = selected,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Tab,
+                onClick = onClick,
+            ),
+        color = if (selected) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        contentColor = if (selected) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(homeSectionIcon(section), contentDescription = if (showLabel) null else label)
+            if (showLabel) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
