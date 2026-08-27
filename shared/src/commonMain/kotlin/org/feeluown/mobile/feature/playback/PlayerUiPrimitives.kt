@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -74,14 +76,14 @@ fun PlayerSharedCover(
             displayedTrack = track
         }
     }
-    val sharedTransitionScope = LocalPlayerSharedTransitionScope.current
-    val sharedModifier = if (!heroEnabled || sharedTransitionScope == null) {
+    val sharedTransitionScope = LocalAppSharedTransitionScope.current
+    val sharedModifier = if (sharedTransitionScope == null) {
         modifier
     } else {
         with(sharedTransitionScope) {
             modifier.sharedElementWithCallerManagedVisibility(
                 sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = true,
+                visible = heroEnabled,
             )
         }
     }
@@ -327,32 +329,45 @@ fun PlayPauseButton(
     iconSize: androidx.compose.ui.unit.Dp = 28.dp,
     prominent: Boolean = false,
 ) {
-    if (isLoading) {
-        Surface(
-            modifier = Modifier.size(if (size < 48.dp) 48.dp else size),
-            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
-            contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-            tonalElevation = if (prominent) 3.dp else 1.dp,
-            shape = MaterialTheme.shapes.extraLarge,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(iconSize),
-                    strokeWidth = 2.dp,
-                    color = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-        return
-    }
-    RoundControlButton(
-        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-        contentDescription = if (isPlaying) "暂停" else "播放",
-        onClick = onClick,
-        size = size,
-        iconSize = iconSize,
-        prominent = prominent,
+    val buttonSize = if (size < 48.dp) 48.dp else size
+    val cornerRadius by animateDpAsState(
+        targetValue = (buttonSize.value * if (isPlaying) 0.30f else 0.50f).dp,
+        animationSpec = FuoMotion.defaultSpatialSpec(),
+        label = "play pause button shape",
     )
+    val shape = RoundedCornerShape(cornerRadius)
+    val content: @Composable () -> Unit = {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(iconSize),
+                strokeWidth = 2.dp,
+                color = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+            )
+        } else {
+            Icon(
+                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (isPlaying) "暂停" else "播放",
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    }
+    if (prominent) {
+        FilledIconButton(
+            onClick = onClick,
+            enabled = !isLoading,
+            modifier = Modifier.size(buttonSize),
+            shape = shape,
+            content = content,
+        )
+    } else {
+        FilledTonalIconButton(
+            onClick = onClick,
+            enabled = !isLoading,
+            modifier = Modifier.size(buttonSize),
+            shape = shape,
+            content = content,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
