@@ -8,9 +8,15 @@ import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 object NeteaseProviderFactory : KotlinProviderFactory {
     override val providerId: String = "netease"
 
-    override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider =
-        NeteaseProvider(
+    override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
+        val base = NeteaseProvider(
             http = dependencies.http,
             credentials = dependencies.credentials,
         )
+        return NeteaseComprehensiveSearchProvider(
+            delegate = base,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
+        )
+    }
 }
