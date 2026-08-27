@@ -159,7 +159,8 @@ fun ProviderPlaylistCard(
             track = playlist.toDisplayTrack(),
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f),
+                .aspectRatio(1f)
+                .fuoNavigationHero(playlist.coverHeroKey()),
             placeholder = CoverPlaceholder.Playlist,
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
@@ -271,7 +272,8 @@ fun ProviderMediaItemCard(
             track = item.toDisplayTrack(),
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f),
+                .aspectRatio(1f)
+                .fuoNavigationHero(item.coverHeroKey()),
             placeholder = when (item.type) {
                 ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
                 ProviderMediaItemType.Album -> CoverPlaceholder.Album
