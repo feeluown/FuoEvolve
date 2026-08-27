@@ -95,6 +95,7 @@ class KotlinProviderRepository :
             artists = results.flatMap { it.artists }.distinctBy { it.id },
             albums = results.flatMap { it.albums }.distinctBy { it.id },
             videos = results.flatMap { it.videos }.distinctBy { it.id },
+            bestMatches = results.flatMap { it.bestMatches }.distinctBy(::searchHitKey),
             errorMessage = results.mapNotNull { it.errorMessage }.firstOrNull(),
         )
     }
@@ -309,6 +310,14 @@ class KotlinProviderRepository :
         }
         return splitResourceId(resourceId, expectedPrefix).first
     }
+}
+
+private fun searchHitKey(hit: ProviderSearchHit): String = when (hit) {
+    is ProviderSearchHit.Track -> "track:${hit.value.id}"
+    is ProviderSearchHit.Artist -> "artist:${hit.value.id}"
+    is ProviderSearchHit.Album -> "album:${hit.value.id}"
+    is ProviderSearchHit.Playlist -> "playlist:${hit.value.id}"
+    is ProviderSearchHit.Video -> "video:${hit.value.id}"
 }
 
 private const val NETEASE_PROVIDER_ID = "netease"
