@@ -1,6 +1,8 @@
 package org.feeluown.mobile.provider.netease
 
 import io.ktor.http.Parameters
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -32,26 +34,47 @@ import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 
 /**
- * NetEase default search is a native comprehensive-search request (`type=1018`).
- * The old typed-search implementation remains the compatibility fallback for response variants
- * that do not expose any of the expected comprehensive buckets.
+ * NetEase default search uses cloud-search (`type=1018`) for the full result set and the native
+ * multimatch endpoint for the provider-ranked best match. The old typed-search implementation
+ * remains the compatibility fallback when the native comprehensive response cannot be consumed.
  */
 internal class NeteaseComprehensiveSearchProvider(
     private val delegate: NeteaseProvider,
     private val http: ProviderHttpClient,
     private val credentials: ProviderCredentialStore,
 ) : KotlinMusicProvider by delegate {
-    override suspend fun search(keyword: String): ProviderSearchResults {
-        if (keyword.isBlank()) return ProviderSearchResults()
-        val comprehensive = runCatching { comprehensiveSearch(keyword) }.getOrNull()
-        if (comprehensive != null && comprehensive.hasCatalogResults()) return comprehensive
-        return delegate.search(keyword).withFallbackBestMatch(keyword)
+    override suspend fun search(keyword: String): ProviderSearchResults = coroutineScope {
+        if (keyword.isBlank()) return@coroutineScope ProviderSearchResults()
+
+        val comprehensiveDeferred = async {
+            runCatching { comprehensiveSearch(keyword) }.getOrNull()
+        }
+        val multimatchDeferred = async {
+            runCatching { multimatchBestMatches(keyword) }.getOrElse { emptyList() }
+        }
+
+        val comprehensive = comprehensiveDeferred.await()
+        val multimatch = multimatchDeferred.await()
+        if (comprehensive != null && comprehensive.hasCatalogResults()) {
+            return@coroutineScope comprehensive.copy(
+                bestMatches = multimatch.ifEmpty {
+                    comprehensive.bestMatches.ifEmpty { comprehensive.fallbackBestMatches(keyword) }
+                },
+            )
+        }
+
+        val fallback = delegate.search(keyword)
+        fallback.copy(
+            bestMatches = multimatch.ifEmpty {
+                fallback.bestMatches.ifEmpty { fallback.fallbackBestMatches(keyword) }
+            },
+        )
     }
 
     private suspend fun comprehensiveSearch(keyword: String): ProviderSearchResults {
         val raw = http.postForm(
             providerId = ID,
-            url = "$BASE/api/search/get",
+            url = "$BASE/api/cloudsearch/pc",
             form = Parameters.build {
                 append("s", keyword)
                 append("type", COMPREHENSIVE_SEARCH_TYPE.toString())
@@ -65,25 +88,41 @@ internal class NeteaseComprehensiveSearchProvider(
         ).value
         val root = providerJson.parseToJsonElement(raw).asObject()
         val result = root.obj("result") ?: root
-
-        val tracks = songValues(result).mapNotNull(::toTrack).distinctBy { it.id }
-        val artists = artistValues(result).mapNotNull(::toArtist).distinctBy { it.id }
-        val albums = albumValues(result).mapNotNull(::toAlbum).distinctBy { it.id }
-        val playlists = playlistValues(result).mapNotNull(::toPlaylist).distinctBy { it.id }
-        val videos = mvValues(result).mapNotNull(::toVideo).distinctBy { it.id }
-        val resultValue = ProviderSearchResults(
-            tracks = tracks,
-            playlists = playlists,
-            artists = artists,
-            albums = albums,
-            videos = videos,
-        )
-        return resultValue.copy(
-            bestMatches = nativeBestMatches(result, resultValue).ifEmpty {
-                resultValue.fallbackBestMatches(keyword)
+        val values = searchResultsFrom(result)
+        return values.copy(
+            bestMatches = orderedBestMatches(result, values).ifEmpty {
+                values.fallbackBestMatches(keyword)
             },
         )
     }
+
+    private suspend fun multimatchBestMatches(keyword: String): List<ProviderSearchHit> {
+        val raw = http.postForm(
+            providerId = ID,
+            url = "$BASE/api/search/suggest/multimatch",
+            form = Parameters.build {
+                append("s", keyword)
+                append("type", "1")
+            },
+            headers = authenticatedHeaders(),
+            cacheKey = "netease:search:multimatch:$keyword",
+            cachePolicy = ProviderCachePolicies.search,
+        ).value
+        val root = providerJson.parseToJsonElement(raw).asObject()
+        val result = root.obj("result") ?: root
+        val values = searchResultsFrom(result)
+        return orderedBestMatches(result, values).ifEmpty {
+            values.fallbackBestMatches(keyword)
+        }
+    }
+
+    private fun searchResultsFrom(result: JsonObject): ProviderSearchResults = ProviderSearchResults(
+        tracks = songValues(result).mapNotNull(::toTrack).distinctBy { it.id },
+        playlists = playlistValues(result).mapNotNull(::toPlaylist).distinctBy { it.id },
+        artists = artistValues(result).mapNotNull(::toArtist).distinctBy { it.id },
+        albums = albumValues(result).mapNotNull(::toAlbum).distinctBy { it.id },
+        videos = mvValues(result).mapNotNull(::toVideo).distinctBy { it.id },
+    )
 
     private suspend fun authenticatedHeaders(): Map<String, String> {
         val cookie = cookieHeader(credentials.read(ID))
@@ -132,23 +171,23 @@ internal class NeteaseComprehensiveSearchProvider(
         result.obj("mv").arrayOrEmpty("list"),
     )
 
-    private fun nativeBestMatches(result: JsonObject, values: ProviderSearchResults): List<ProviderSearchHit> {
-        val order = result.array("order").map { it.asString() }.filter(String::isNotBlank)
+    private fun orderedBestMatches(result: JsonObject, values: ProviderSearchResults): List<ProviderSearchHit> {
+        val order = firstNonEmpty(result.array("orders"), result.array("order"))
+            .map { it.asString() }
+            .filter(String::isNotBlank)
         if (order.isEmpty()) return emptyList()
-        return order.asSequence().mapNotNull { key ->
-            when (key.lowercase()) {
-                "song", "songs" -> values.tracks.firstOrNull()?.let(ProviderSearchHit::Track)
-                "artist", "artists" -> values.artists.firstOrNull()?.let(ProviderSearchHit::Artist)
-                "album", "albums" -> values.albums.firstOrNull()?.let(ProviderSearchHit::Album)
-                "playlist", "playlists", "playlistresult" -> values.playlists.firstOrNull()?.let(ProviderSearchHit::Playlist)
-                "mv", "mvs", "video", "videos" -> values.videos.firstOrNull()?.let(ProviderSearchHit::Video)
-                else -> null
-            }
-        }.take(1).toList()
+        return order.asSequence().mapNotNull { key -> bestMatchForKey(key, values) }.take(1).toList()
     }
 
-    private fun ProviderSearchResults.withFallbackBestMatch(keyword: String): ProviderSearchResults =
-        copy(bestMatches = bestMatches.ifEmpty { fallbackBestMatches(keyword) })
+    private fun bestMatchForKey(key: String, values: ProviderSearchResults): ProviderSearchHit? =
+        when (key.lowercase()) {
+            "song", "songs" -> values.tracks.firstOrNull()?.let(ProviderSearchHit::Track)
+            "artist", "artists" -> values.artists.firstOrNull()?.let(ProviderSearchHit::Artist)
+            "album", "albums" -> values.albums.firstOrNull()?.let(ProviderSearchHit::Album)
+            "playlist", "playlists", "playlistresult" -> values.playlists.firstOrNull()?.let(ProviderSearchHit::Playlist)
+            "mv", "mvs", "video", "videos" -> values.videos.firstOrNull()?.let(ProviderSearchHit::Video)
+            else -> null
+        }
 
     private fun ProviderSearchResults.fallbackBestMatches(keyword: String): List<ProviderSearchHit> {
         val normalized = normalize(keyword)
