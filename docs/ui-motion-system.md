@@ -49,7 +49,7 @@ Hero transitions are reserved for a stable visual object that exists on both sid
 - Provider playlist, album, and artist cards share only their cover image with the corresponding detail header.
 - Resource Hero keys use resource type + provider ID + resource ID. Never use title or cover URL as identity because either can change while the resource remains the same.
 - Navigation Hero elements use the app-level `SharedTransitionLayout` together with Navigation3's `LocalNavAnimatedContentScope`, so normal pop and predictive-back navigation can drive the same shared element.
-- Detail loading indicators must not participate in the header's vertical layout. The Hero destination bounds stay fixed while refreshed metadata and content load.
+- Detail loading indicators must not participate in the header's vertical layout. The Hero destination bounds stay fixed while refreshed metadata and content load, and the original detail-header target position is preserved.
 - The full player is intentionally excluded from Hero transitions for now; it keeps the normal overlay enter/exit motion.
 
 Feature entries without a real cover and track rows whose primary click action is playback should not be forced into a Hero transition merely for decoration.
