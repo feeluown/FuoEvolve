@@ -43,6 +43,7 @@ interface HomeFeatureController {
     val uiState: StateFlow<HomeFeatureUiState>
     fun openSettings(providerId: String? = null)
     fun openSearch()
+    fun openPlaybackHistory()
     fun setHomeSection(section: HomeSection)
     fun setMineSection(section: MineSection)
     fun setPlaylistFilter(filter: PlaylistFilter)
@@ -114,6 +115,7 @@ private class BoundHomeFeatureController(
         }
     }
     override fun openSearch() = navigator.navigate(AppRoute.Search)
+    override fun openPlaybackHistory() = navigator.navigate(AppRoute.PlaybackHistory)
     override fun setHomeSection(section: HomeSection) = owner.setHomeSection(section.toCore())
     override fun setMineSection(section: MineSection) = owner.setMineSection(section.toCore())
     override fun setPlaylistFilter(filter: PlaylistFilter) = owner.setPlaylistFilter(filter.toCore())
