@@ -14,6 +14,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -74,6 +75,7 @@ internal fun RuntimeMiniPlayer(
     val state by playbackSession.state.collectAsStateWithLifecycle()
     val isLoadingAudio = state.status == PlaybackSessionStatus.Loading
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val openPlayerInteractionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -83,13 +85,19 @@ internal fun RuntimeMiniPlayer(
             )
             .animateContentSize(animationSpec = tween(220))
             .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onOpenFullPlayer),
+            .clickable(
+                interactionSource = openPlayerInteractionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onOpenFullPlayer,
+            ),
         shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.extraLarge,
         color = if (isWideLayout) {
             MaterialTheme.colorScheme.surfaceContainer
         } else {
             MaterialTheme.colorScheme.surfaceContainerHigh
         },
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = if (isWideLayout) 3.dp else 5.dp,
     ) {
         Column {
