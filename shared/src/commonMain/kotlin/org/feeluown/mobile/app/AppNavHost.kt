@@ -84,6 +84,10 @@ internal fun AppNavHost(
                         onRequestImagePermission = platform.onRequestImagePermission,
                         onOpenRecognition = appViewModel::openRecognition,
                     )
+                    AppRoute.PlaybackHistory -> ListeningHistoryScreen(
+                        repository = uiGraph.home.listeningHistory,
+                        onBack = { appViewModel.onBack() },
+                    )
                     AppRoute.Search -> SearchRoute(
                         graph = uiGraph.search,
                         onOpenRecognition = appViewModel::openRecognition,
