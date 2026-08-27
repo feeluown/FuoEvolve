@@ -8,6 +8,12 @@ import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 object QQMusicProviderFactory : KotlinProviderFactory {
     override val providerId: String = "qqmusic"
 
-    override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider =
-        QQMusicCompositeProvider(dependencies)
+    override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
+        val provider = QQMusicCompositeProvider(dependencies)
+        return QQMusicComprehensiveSearchProvider(
+            delegate = provider,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
+        )
+    }
 }

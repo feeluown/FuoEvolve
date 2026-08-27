@@ -36,9 +36,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 private const val MAX_SEARCH_HISTORY_ITEMS = 20
+private const val COMPREHENSIVE_SECTION_LIMIT = 6
 
 /**
  * Search feature UI contract.
@@ -255,7 +256,7 @@ internal fun SearchFeatureScreen(
                         }
                         Row(
                             modifier = Modifier
-                                .padding(start = 56.dp)
+                                .padding(start = FuoSpacing.sm)
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
@@ -427,27 +428,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
     compactTop: Boolean = false,
 ) {
     when (uiState.providerSearchTab.takeIf { uiState.searchScope != SearchScope.Local } ?: ProviderSearchTab.Songs) {
-        ProviderSearchTab.Songs -> {
-            if (uiState.searchResults.isEmpty()) {
-                item { EmptySearchHint(uiState.query, compactTop = compactTop) }
-            } else {
-                itemsIndexed(uiState.searchResults, key = { _, item -> item.id }) { index, track ->
-                    TrackRow(
-                        track = track,
-                        downloadState = downloadStates[track.id],
-                        onClick = { actions.onPlayResult(index) },
-                        onAddToUpNext = { actions.onAddToUpNext(track) },
-                        onDownload = { actions.onDownload(track) },
-                        onDeleteDownload = { actions.onDeleteDownload(track) },
-                        onOpenArtist = { actions.onOpenArtist(track) },
-                        onOpenAlbum = { actions.onOpenAlbum(track) },
-                        onOpenDetail = actions.onOpenTrackDetail(track),
-                        onAddToPlaylist = actions.onAddToPlaylist(track),
-                    )
-                    HorizontalDivider()
-                }
-            }
-        }
+        ProviderSearchTab.Comprehensive -> comprehensiveItems(actions, downloadStates, uiState, compactTop)
+        ProviderSearchTab.Songs -> songs(uiState.searchResults, actions, downloadStates, uiState.query, compactTop)
         ProviderSearchTab.Artists -> mediaItems(
             uiState.providerSearchResults.artists,
             "没有歌手结果",
@@ -463,6 +445,236 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchResultItems(
     }
 }
 
+private fun androidx.compose.foundation.lazy.LazyListScope.comprehensiveItems(
+    actions: SearchFeatureActions,
+    downloadStates: Map<String, DownloadState>,
+    uiState: SearchUiState,
+    compactTop: Boolean,
+) {
+    val providerResults = uiState.providerSearchResults
+    val isEmpty = uiState.searchResults.isEmpty() &&
+        providerResults.artists.isEmpty() &&
+        providerResults.albums.isEmpty() &&
+        providerResults.playlists.isEmpty() &&
+        providerResults.videos.isEmpty()
+    if (isEmpty) {
+        item { EmptySearchHint(uiState.query, compactTop = compactTop) }
+        return
+    }
+
+    val bestCardHits = providerResults.bestMatches.filter { hit ->
+        hit is ProviderSearchHit.Artist ||
+            hit is ProviderSearchHit.Album ||
+            hit is ProviderSearchHit.Playlist
+    }
+    val bestListHits = providerResults.bestMatches.filter { hit ->
+        hit is ProviderSearchHit.Track || hit is ProviderSearchHit.Video
+    }
+    if (bestCardHits.isNotEmpty() || bestListHits.isNotEmpty()) {
+        sectionTitle("最佳结果")
+        if (bestCardHits.isNotEmpty()) {
+            item(key = "best:cards") {
+                BestMatchCardGrid(bestCardHits, actions)
+            }
+        }
+        itemsIndexed(
+            bestListHits,
+            key = { _, hit -> "best:list:${bestMatchKey(hit)}" },
+        ) { _, hit ->
+            bestMatchListRow(hit, uiState, actions, downloadStates)
+            HorizontalDivider()
+        }
+    }
+
+    val tracks = uiState.searchResults.take(COMPREHENSIVE_SECTION_LIMIT)
+    if (tracks.isNotEmpty()) {
+        sectionTitle("歌曲")
+        itemsIndexed(tracks, key = { _, track -> "comprehensive-track:${track.id}" }) { _, track ->
+            val index = uiState.searchResults.indexOfFirst { it.id == track.id }
+            TrackRow(
+                track = track,
+                downloadState = downloadStates[track.id],
+                onClick = { if (index >= 0) actions.onPlayResult(index) },
+                onAddToUpNext = { actions.onAddToUpNext(track) },
+                onDownload = { actions.onDownload(track) },
+                onDeleteDownload = { actions.onDeleteDownload(track) },
+                onOpenArtist = { actions.onOpenArtist(track) },
+                onOpenAlbum = { actions.onOpenAlbum(track) },
+                onOpenDetail = actions.onOpenTrackDetail(track),
+                onAddToPlaylist = actions.onAddToPlaylist(track),
+            )
+            HorizontalDivider()
+        }
+    }
+
+    if (providerResults.artists.isNotEmpty()) {
+        sectionTitle("歌手")
+        item(key = "comprehensive:artists") {
+            ProviderMediaItemGrid(
+                items = providerResults.artists,
+                onClick = actions.onOpenMediaItem,
+                onMore = { actions.dispatch(SearchAction.ProviderTabChanged(ProviderSearchTab.Artists)) },
+                maxRows = 2,
+            )
+        }
+    }
+
+    if (providerResults.albums.isNotEmpty()) {
+        sectionTitle("专辑")
+        item(key = "comprehensive:albums") {
+            ProviderMediaItemGrid(
+                items = providerResults.albums,
+                onClick = actions.onOpenMediaItem,
+                onMore = { actions.dispatch(SearchAction.ProviderTabChanged(ProviderSearchTab.Albums)) },
+                maxRows = 2,
+            )
+        }
+    }
+
+    if (providerResults.playlists.isNotEmpty()) {
+        sectionTitle("歌单")
+        item(key = "comprehensive:playlists") {
+            ProviderPlaylistGrid(
+                playlists = providerResults.playlists,
+                onClick = actions.onOpenPlaylist,
+                onMore = { actions.dispatch(SearchAction.ProviderTabChanged(ProviderSearchTab.Playlists)) },
+                maxRows = 2,
+            )
+        }
+    }
+
+    val videoItems = providerResults.videos.take(COMPREHENSIVE_SECTION_LIMIT)
+    if (videoItems.isNotEmpty()) {
+        sectionTitle("视频")
+        item(key = "comprehensive:videos") {
+            ProviderVideoList(videoItems, actions.onOpenVideo)
+        }
+    }
+}
+
+@Composable
+private fun BestMatchCardGrid(
+    hits: List<ProviderSearchHit>,
+    actions: SearchFeatureActions,
+) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    val columns = layoutInfo.gridColumns.coerceAtLeast(1)
+    val spacing = if (layoutInfo.useWideLayout) FuoSpacing.sm else FuoSpacing.md
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        hits.chunked(columns).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                row.forEach { hit ->
+                    when (hit) {
+                        is ProviderSearchHit.Artist -> ProviderMediaItemCard(
+                            item = hit.value,
+                            onClick = { actions.onOpenMediaItem(hit.value) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        is ProviderSearchHit.Album -> ProviderMediaItemCard(
+                            item = hit.value,
+                            onClick = { actions.onOpenMediaItem(hit.value) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        is ProviderSearchHit.Playlist -> ProviderPlaylistCard(
+                            playlist = hit.value,
+                            onClick = { actions.onOpenPlaylist(hit.value) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        is ProviderSearchHit.Track,
+                        is ProviderSearchHit.Video -> Unit
+                    }
+                }
+                repeat(columns - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.sectionTitle(title: String) {
+    item(key = "section:$title") {
+        Text(
+            text = title,
+            modifier = Modifier.padding(top = FuoSpacing.md, bottom = FuoSpacing.xs),
+            style = MaterialTheme.typography.titleSmall,
+        )
+    }
+}
+
+@Composable
+private fun bestMatchListRow(
+    hit: ProviderSearchHit,
+    uiState: SearchUiState,
+    actions: SearchFeatureActions,
+    downloadStates: Map<String, DownloadState>,
+) {
+    when (hit) {
+        is ProviderSearchHit.Track -> {
+            val track = hit.value
+            val index = uiState.searchResults.indexOfFirst { it.id == track.id }
+            TrackRow(
+                track = track,
+                downloadState = downloadStates[track.id],
+                onClick = { if (index >= 0) actions.onPlayResult(index) },
+                onAddToUpNext = { actions.onAddToUpNext(track) },
+                onDownload = { actions.onDownload(track) },
+                onDeleteDownload = { actions.onDeleteDownload(track) },
+                onOpenArtist = { actions.onOpenArtist(track) },
+                onOpenAlbum = { actions.onOpenAlbum(track) },
+                onOpenDetail = actions.onOpenTrackDetail(track),
+                onAddToPlaylist = actions.onAddToPlaylist(track),
+            )
+        }
+        is ProviderSearchHit.Video -> ProviderVideoList(listOf(hit.value), actions.onOpenVideo)
+        is ProviderSearchHit.Artist,
+        is ProviderSearchHit.Album,
+        is ProviderSearchHit.Playlist -> Unit
+    }
+}
+
+private fun bestMatchKey(hit: ProviderSearchHit): String = when (hit) {
+    is ProviderSearchHit.Track -> "track:${hit.value.id}"
+    is ProviderSearchHit.Artist -> "artist:${hit.value.id}"
+    is ProviderSearchHit.Album -> "album:${hit.value.id}"
+    is ProviderSearchHit.Playlist -> "playlist:${hit.value.id}"
+    is ProviderSearchHit.Video -> "video:${hit.value.id}"
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.songs(
+    tracks: List<MusicTrack>,
+    actions: SearchFeatureActions,
+    downloadStates: Map<String, DownloadState>,
+    query: String,
+    compactTop: Boolean,
+) {
+    if (tracks.isEmpty()) {
+        item { EmptySearchHint(query, compactTop = compactTop) }
+    } else {
+        itemsIndexed(tracks, key = { _, item -> item.id }) { index, track ->
+            TrackRow(
+                track = track,
+                downloadState = downloadStates[track.id],
+                onClick = { actions.onPlayResult(index) },
+                onAddToUpNext = { actions.onAddToUpNext(track) },
+                onDownload = { actions.onDownload(track) },
+                onDeleteDownload = { actions.onDeleteDownload(track) },
+                onOpenArtist = { actions.onOpenArtist(track) },
+                onOpenAlbum = { actions.onOpenAlbum(track) },
+                onOpenDetail = actions.onOpenTrackDetail(track),
+                onAddToPlaylist = actions.onAddToPlaylist(track),
+            )
+            HorizontalDivider()
+        }
+    }
+}
+
 private fun androidx.compose.foundation.lazy.LazyListScope.mediaItems(
     items: List<ProviderMediaItem>,
     emptyMessage: String,
@@ -471,18 +683,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.mediaItems(
     if (items.isEmpty()) {
         item { ProviderContentMessage(emptyMessage) }
     } else {
-        itemsIndexed(items, key = { _, item -> item.id }) { _, item ->
-            ProviderSearchRow(
-                title = item.title,
-                subtitle = listOf(item.type.name, item.providerName).joinToString(" · "),
-                coverUrl = item.coverUrl,
-                placeholder = when (item.type) {
-                    ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
-                    ProviderMediaItemType.Album -> CoverPlaceholder.Album
-                },
-                onClick = { actions.onOpenMediaItem(item) },
-            )
-            HorizontalDivider()
+        item(key = "search-media-grid:${items.first().type}") {
+            ProviderMediaItemGrid(items = items, onClick = actions.onOpenMediaItem)
         }
     }
 }
@@ -494,15 +696,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlists(
     if (playlists.isEmpty()) {
         item { ProviderContentMessage("没有歌单结果") }
     } else {
-        itemsIndexed(playlists, key = { _, item -> item.id }) { _, playlist ->
-            ProviderSearchRow(
-                title = playlist.title,
-                subtitle = playlist.providerName,
-                coverUrl = playlist.coverUrl,
-                placeholder = CoverPlaceholder.Playlist,
-                onClick = { actions.onOpenPlaylist(playlist) },
-            )
-            HorizontalDivider()
+        item(key = "search-playlist-grid") {
+            ProviderPlaylistGrid(playlists = playlists, onClick = actions.onOpenPlaylist)
         }
     }
 }
@@ -514,61 +709,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.videos(
     if (videos.isEmpty()) {
         item { ProviderContentMessage("没有视频结果") }
     } else {
-        itemsIndexed(videos, key = { _, item -> item.id }) { _, video ->
-            ProviderSearchRow(
-                title = video.title,
-                subtitle = listOf(video.artists, video.providerName).filter { it.isNotBlank() }.joinToString(" · "),
-                coverUrl = video.coverUrl,
-                onClick = { actions.onOpenVideo(video) },
-            )
-            HorizontalDivider()
+        item(key = "search-video-list") {
+            ProviderVideoList(videos, actions.onOpenVideo)
         }
     }
 }
 
-@Composable
-private fun ProviderSearchRow(
-    title: String,
-    subtitle: String,
-    coverUrl: String?,
-    placeholder: CoverPlaceholder = CoverPlaceholder.Song,
-    onClick: () -> Unit,
-) {
-    FuoListItem(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
-        leadingContent = {
-            CoverBox(
-                track = MusicTrack(
-                    id = title,
-                    title = title,
-                    artists = "",
-                    album = "",
-                    source = "",
-                    sourceType = TrackSourceType.Provider,
-                    coverUrl = coverUrl,
-                ),
-                modifier = Modifier.size(48.dp),
-                placeholder = placeholder,
-            )
-        },
-        headlineContent = {
-            Text(
-                text = title.ifBlank { "未命名" },
-                maxLines = 1,
-            )
-        },
-        supportingContent = {
-            Text(
-                text = subtitle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        },
-    )
-}
-
 private fun ProviderSearchTab.label(uiState: SearchUiState): String = when (this) {
+    ProviderSearchTab.Comprehensive -> "综合"
     ProviderSearchTab.Songs -> "歌曲 ${uiState.searchResults.size}"
     ProviderSearchTab.Artists -> "歌手 ${uiState.providerSearchResults.artists.size}"
     ProviderSearchTab.Albums -> "专辑 ${uiState.providerSearchResults.albums.size}"

@@ -16,6 +16,8 @@ class SearchFeatureTest {
             onPreferencesChanged = { searchScope, providerId -> persistedPreferences += searchScope to providerId },
         )
 
+        assertEquals(ProviderSearchTab.Comprehensive, owner.uiState.value.providerSearchTab)
+
         owner.dispatch(SearchAction.ScopeChanged(SearchScope.Local))
         owner.dispatch(SearchAction.ProviderChanged("netease"))
         owner.dispatch(SearchAction.QueryChanged("hello"))
@@ -88,7 +90,7 @@ class SearchFeatureTest {
         assertEquals("Song Artist A / Artist B", owner.uiState.value.query)
         assertEquals(SearchScope.All, owner.uiState.value.searchScope)
         assertEquals(null, owner.uiState.value.selectedSearchProviderId)
-        assertEquals(ProviderSearchTab.Songs, owner.uiState.value.providerSearchTab)
+        assertEquals(ProviderSearchTab.Comprehensive, owner.uiState.value.providerSearchTab)
         assertEquals(1, opened)
     }
 

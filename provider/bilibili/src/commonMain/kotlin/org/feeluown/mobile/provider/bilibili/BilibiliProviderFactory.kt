@@ -8,11 +8,17 @@ import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 object BilibiliProviderFactory : KotlinProviderFactory {
     override val providerId: String = "bilibili"
 
-    override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider =
-        BilibiliProvider(
+    override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
+        val content = BilibiliContentProvider(
             http = dependencies.http,
             credentials = dependencies.credentials,
         )
+        return BilibiliComprehensiveSearchProvider(
+            delegate = content,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
+        )
+    }
 
     fun createContentProvider(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider =
         BilibiliContentProvider(
