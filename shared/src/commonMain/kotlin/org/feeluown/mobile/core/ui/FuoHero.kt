@@ -44,10 +44,8 @@ internal class ResourceHeroCoordinator {
         activeKey = key
     }
 
-    fun destinationKey(identity: ResourceCoverHeroKey?): ResourceCoverHeroKey? {
-        if (identity == null) return null
-        return activeKey?.takeIf { it.matchesResource(identity) } ?: identity
-    }
+    fun destinationKey(identity: ResourceCoverHeroKey): ResourceCoverHeroKey =
+        activeKey?.takeIf { it.matchesResource(identity) } ?: identity
 }
 
 internal val LocalResourceHeroCoordinator = staticCompositionLocalOf<ResourceHeroCoordinator?> { null }
@@ -98,10 +96,15 @@ internal fun MusicTrack.detailCoverHeroKey(placeholder: CoverPlaceholder): Resou
 internal fun Modifier.fuoNavigationHero(key: Any?): Modifier {
     if (key == null) return this
     val sharedTransitionScope = LocalAppSharedTransitionScope.current ?: return this
+    val resolvedKey = if (key is ResourceCoverHeroKey && key.sourceInstanceId == null) {
+        LocalResourceHeroCoordinator.current?.destinationKey(key) ?: key
+    } else {
+        key
+    }
     val animatedVisibilityScope = LocalNavAnimatedContentScope.current
     return with(sharedTransitionScope) {
         this@fuoNavigationHero.sharedElement(
-            sharedContentState = rememberSharedContentState(key),
+            sharedContentState = rememberSharedContentState(resolvedKey),
             animatedVisibilityScope = animatedVisibilityScope,
         )
     }
