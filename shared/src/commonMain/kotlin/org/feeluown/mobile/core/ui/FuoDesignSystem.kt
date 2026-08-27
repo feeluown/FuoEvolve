@@ -1,22 +1,28 @@
 package org.feeluown.mobile
 
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -27,9 +33,12 @@ import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -47,6 +56,15 @@ internal object FuoSpacing {
     val xxl = 32.dp
 }
 
+/**
+ * App motion entry point.
+ *
+ * New interaction and transition motion should consume the Material motion scheme through these
+ * helpers instead of introducing local tween/spring constants. This keeps custom UI aligned with
+ * Material 3 Expressive and leaves one theme-level seam for a future animation-speed preference.
+ *
+ * Duration tokens are retained temporarily for transitions that have not been migrated yet.
+ */
 internal object FuoMotion {
     const val pageTransitionMillis = 300
     const val pageFadeMillis = 180
@@ -57,6 +75,33 @@ internal object FuoMotion {
     const val overlayEnterMillis = 240
     const val overlayExitMillis = 200
     const val overlayFadeMillis = 160
+
+    const val surfacePressedScale = 0.985f
+    const val prominentPressedScale = 0.975f
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = MaterialTheme.motionScheme.fastSpatialSpec()
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = MaterialTheme.motionScheme.defaultSpatialSpec()
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = MaterialTheme.motionScheme.slowSpatialSpec()
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = MaterialTheme.motionScheme.fastEffectsSpec()
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = MaterialTheme.motionScheme.defaultEffectsSpec()
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = MaterialTheme.motionScheme.slowEffectsSpec()
 }
 
 internal object FuoMediaOverlay {
@@ -72,18 +117,41 @@ internal fun Modifier.fuoInteractive(): Modifier = sizeIn(
 )
 
 @Composable
+internal fun Modifier.fuoPressFeedback(
+    interactionSource: MutableInteractionSource,
+    enabled: Boolean = true,
+    pressedScale: Float = FuoMotion.surfacePressedScale,
+): Modifier {
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (enabled && pressed) pressedScale else 1f,
+        animationSpec = FuoMotion.fastSpatialSpec(),
+        label = "Fuo press feedback",
+    )
+    return graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+@Composable
 internal fun FuoSectionCard(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val indication = LocalIndication.current
     val interactiveModifier = if (onClick == null) {
         modifier
     } else {
         modifier
             .fuoInteractive()
+            .fuoPressFeedback(interactionSource = interactionSource, enabled = enabled)
             .clickable(
+                interactionSource = interactionSource,
+                indication = indication,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
@@ -114,14 +182,20 @@ internal fun FuoListItem(
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val indication = LocalIndication.current
     val itemModifier = if (onClick == null) {
         modifier
     } else {
-        modifier.clickable(
-            enabled = enabled,
-            role = Role.Button,
-            onClick = onClick,
-        )
+        modifier
+            .fuoPressFeedback(interactionSource = interactionSource, enabled = enabled)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = indication,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
     }
     ListItem(
         headlineContent = headlineContent,
