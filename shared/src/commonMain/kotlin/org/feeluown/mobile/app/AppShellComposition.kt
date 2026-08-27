@@ -10,7 +10,10 @@ val LocalShareHandler = staticCompositionLocalOf<(SharePayload) -> Unit> { {} }
 val LocalAppLayoutInfo = staticCompositionLocalOf { AppLayoutInfo() }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
-val LocalPlayerSharedTransitionScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
+val LocalAppSharedTransitionScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+val LocalPlayerSharedTransitionScope = LocalAppSharedTransitionScope
 
 data class AppLayoutInfo(
     val isLandscape: Boolean = false,
