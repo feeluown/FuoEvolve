@@ -32,6 +32,7 @@ import org.feeluown.mobile.provider.core.trackKey
 import org.feeluown.mobile.provider.core.videoKey
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.core.network.ProviderRequestKind
 
 /**
  * NetEase default search uses cloud-search (`type=1018`) for the full result set and the native
@@ -97,14 +98,18 @@ internal class NeteaseComprehensiveSearchProvider(
     }
 
     private suspend fun multimatchBestMatches(keyword: String): List<ProviderSearchHit> {
+        val payload = NeteaseWeApi.encrypt(
+            """{"s":${jsonString(keyword)},"type":1}""",
+        )
         val raw = http.postForm(
             providerId = ID,
-            url = "$BASE/api/search/suggest/multimatch",
+            url = "$BASE/weapi/search/suggest/multimatch",
             form = Parameters.build {
-                append("s", keyword)
-                append("type", "1")
+                append("params", payload.params)
+                append("encSecKey", payload.encSecKey)
             },
             headers = authenticatedHeaders(),
+            kind = ProviderRequestKind.SafeRead,
             cacheKey = "netease:search:multimatch:$keyword",
             cachePolicy = ProviderCachePolicies.search,
         ).value
@@ -308,6 +313,9 @@ internal class NeteaseComprehensiveSearchProvider(
 
     private fun firstNonEmpty(vararg values: JsonArray): JsonArray =
         values.firstOrNull { it.isNotEmpty() } ?: JsonArray(emptyList())
+
+    private fun jsonString(value: String): String =
+        "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
     private fun normalize(value: String): String = value.trim().lowercase().replace(" ", "")
 
