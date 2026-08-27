@@ -13,7 +13,7 @@ fun SearchUiState(
     selectedSearchProviderId: String? = null,
     searchResults: List<MusicTrack> = emptyList(),
     providerSearchResults: ProviderSearchResults = ProviderSearchResults(),
-    providerSearchTab: ProviderSearchTab = ProviderSearchTab.Songs,
+    providerSearchTab: ProviderSearchTab = ProviderSearchTab.Comprehensive,
     isLoading: Boolean = false,
     message: String? = null,
 ): SearchUiState = SearchFeatureState(
@@ -67,11 +67,12 @@ private object AppSearchResultOperations : SearchResultOperations<MusicTrack, Pr
     override fun tracks(results: ProviderSearchResults): List<MusicTrack> = results.tracks
 
     override fun merge(results: List<ProviderSearchResults>): ProviderSearchResults = ProviderSearchResults(
-        tracks = results.flatMap { it.tracks }.distinctBy { it.id },
-        playlists = results.flatMap { it.playlists }.distinctBy { it.id },
-        artists = results.flatMap { it.artists }.distinctBy { it.id },
-        albums = results.flatMap { it.albums }.distinctBy { it.id },
-        videos = results.flatMap { it.videos }.distinctBy { it.id },
+        tracks = roundRobin(results.map { it.tracks }).distinctBy { it.id },
+        playlists = roundRobin(results.map { it.playlists }).distinctBy { it.id },
+        artists = roundRobin(results.map { it.artists }).distinctBy { it.id },
+        albums = roundRobin(results.map { it.albums }).distinctBy { it.id },
+        videos = roundRobin(results.map { it.videos }).distinctBy { it.id },
+        bestMatches = results.flatMap { it.bestMatches }.distinctBy(::searchHitKey),
         errorMessage = results.firstNotNullOfOrNull { it.errorMessage },
     )
 
@@ -85,4 +86,22 @@ private object AppSearchResultOperations : SearchResultOperations<MusicTrack, Pr
     override fun errorMessage(results: ProviderSearchResults): String? = results.errorMessage
 
     override fun trackId(track: MusicTrack): String = track.id
+}
+
+private fun <T> roundRobin(groups: List<List<T>>): List<T> {
+    if (groups.isEmpty()) return emptyList()
+    val maxSize = groups.maxOfOrNull { it.size } ?: 0
+    return buildList {
+        repeat(maxSize) { index ->
+            groups.forEach { group -> group.getOrNull(index)?.let(::add) }
+        }
+    }
+}
+
+private fun searchHitKey(hit: ProviderSearchHit): String = when (hit) {
+    is ProviderSearchHit.Track -> "track:${hit.value.id}"
+    is ProviderSearchHit.Artist -> "artist:${hit.value.id}"
+    is ProviderSearchHit.Album -> "album:${hit.value.id}"
+    is ProviderSearchHit.Playlist -> "playlist:${hit.value.id}"
+    is ProviderSearchHit.Video -> "video:${hit.value.id}"
 }
