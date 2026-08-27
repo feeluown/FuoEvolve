@@ -72,15 +72,21 @@ val retiredSharedPlaybackBusinessFiles = listOf(
     "ReplacementTieBreak.kt",
 ).map { name -> rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/feature/playback/$name") }
 
+val providerKotlinSources = rootProject.fileTree("provider") {
+    include("**/src/**/*.kt")
+}
+
 val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundaries") {
     group = "verification"
     description = "Reject shared/app dependencies, provider aggregation, or restoration of playback business ownership in :shared."
 
+    inputs.file(project.buildFile)
     inputs.files(playbackRequiredFiles.map(rootProject::file))
     inputs.dir(rootProject.file("feature/playback/src/commonMain/kotlin"))
     inputs.files(retiredSharedPlaybackBusinessFiles)
     inputs.dir(rootProject.file("shared/src/commonMain/kotlin"))
-    inputs.dir(rootProject.file("provider"))
+    inputs.dir(rootProject.file("shared/src/iosMain/kotlin"))
+    inputs.files(providerKotlinSources)
     inputs.dir(rootProject.file("androidApp/src/main/kotlin"))
 
     doLast {
@@ -154,10 +160,11 @@ val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundar
             }
         }
 
-        val replacementPolicyLeaks = listOf(
-            rootProject.file("shared/src/commonMain/kotlin"),
-            rootProject.file("provider"),
-        ).flatMap { root -> root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+        val replacementPolicyFiles = rootProject.file("shared/src/commonMain/kotlin")
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .toList() + providerKotlinSources.files
+        val replacementPolicyLeaks = replacementPolicyFiles
             .flatMap { file ->
                 file.readLines().mapIndexedNotNull { index, line ->
                     if (Regex("\\b(?:bilibiliReplacementScore|rankReplacementCandidates|selectRankedReplacementCandidate|replacementTieBreakConfidence|sortReplacementScoreTies)\\b")
