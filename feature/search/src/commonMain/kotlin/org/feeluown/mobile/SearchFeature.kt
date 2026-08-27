@@ -1,6 +1,9 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +20,7 @@ enum class SearchScope {
 
 @Serializable
 enum class ProviderSearchTab {
+    Comprehensive,
     Songs,
     Artists,
     Albums,
@@ -38,7 +42,7 @@ data class SearchFeatureState<Track, ProviderResults>(
     val searchScope: SearchScope = SearchScope.All,
     val selectedSearchProviderId: String? = null,
     val searchResults: List<Track> = emptyList(),
-    val providerSearchTab: ProviderSearchTab = ProviderSearchTab.Songs,
+    val providerSearchTab: ProviderSearchTab = ProviderSearchTab.Comprehensive,
     val isLoading: Boolean = false,
     val message: String? = null,
 )
@@ -218,7 +222,7 @@ private class SearchController<Track, ProviderResults>(
                 }.joinToString(" "),
                 searchScope = SearchScope.All,
                 selectedSearchProviderId = null,
-                providerSearchTab = ProviderSearchTab.Songs,
+                providerSearchTab = ProviderSearchTab.Comprehensive,
             )
         }
         notifyPreferencesChanged()
@@ -280,13 +284,13 @@ private class SearchController<Track, ProviderResults>(
                             resultOperations.tracks(provider)
                         }
 
-                        SearchScope.All -> {
-                            val local = localRepository.search(keyword)
-                            val provider = resultOperations.merge(
-                                providerIdsForSearch().map { providerId ->
-                                    providerRepository.searchAll(keyword, providerId)
-                                }
-                            )
+                        SearchScope.All -> coroutineScope {
+                            val localDeferred = async { localRepository.search(keyword) }
+                            val providerDeferreds = providerIdsForSearch().map { providerId ->
+                                async { providerRepository.searchAll(keyword, providerId) }
+                            }
+                            val local = localDeferred.await()
+                            val provider = resultOperations.merge(providerDeferreds.awaitAll())
                             state.update { it.copy(providerSearchResults = provider) }
                             mergeResults(local, resultOperations.tracks(provider))
                         }
