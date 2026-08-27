@@ -29,6 +29,12 @@ class AppShellPolicyTest {
     }
 
     @Test
+    fun playbackHistoryUsesQueueTrack() {
+        assertTrue(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true, isVideoFullscreen = false))
+        assertFalse(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false, isVideoFullscreen = false))
+    }
+
+    @Test
     fun fullscreenVideoSuppressesMiniPlayer() {
         val route = AppRoute.VideoDetail(
             NavigationVideo(
