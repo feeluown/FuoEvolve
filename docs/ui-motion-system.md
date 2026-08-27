@@ -42,6 +42,18 @@ Common interactive surfaces use `fuoPressFeedback` with the same `MutableInterac
 
 Use the more prominent scale only for compact, visually raised surfaces such as the mini player. Material buttons keep their built-in interaction behavior unless a custom interaction specifically needs extra feedback.
 
+## Hero transitions
+
+Hero transitions are reserved for a stable visual object that exists on both sides of a navigation or presentation change. They complement the existing page transition instead of replacing it.
+
+- Provider playlist, album, and artist cards share only their cover image with the corresponding detail header.
+- Resource Hero keys use resource type + provider ID + resource ID. Never use title or cover URL as identity because either can change while the resource remains the same.
+- Navigation Hero elements use the app-level `SharedTransitionLayout` together with Navigation3's `LocalNavAnimatedContentScope`, so normal pop and predictive-back navigation can drive the same shared element.
+- The mini player and full player also share the current cover, but remain a caller-managed overlay transition because the full player is not a Navigation3 destination.
+- Do not convert the full player to a route solely to gain predictive-back progress. Predictive collapse of the player should be implemented separately if desired.
+
+Feature entries without a real cover and track rows whose primary click action is playback should not be forced into a Hero transition merely for decoration.
+
 ## Animation speed setting
 
 A future setting should change the motion scheme provided at the app theme boundary rather than multiply durations inside individual composables. `FuoMotion` consumers then inherit the selected pacing automatically.
