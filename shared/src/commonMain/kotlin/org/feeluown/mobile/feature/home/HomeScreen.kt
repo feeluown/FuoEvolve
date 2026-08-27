@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
@@ -111,6 +110,11 @@ fun HomeScreen(
             }
         }
     }
+    val selectSection: (Int, HomeSection) -> Unit = { index, section ->
+        if (section != state.homeSection || index != pagerState.currentPage) {
+            scope.launch { pagerState.animateScrollToPage(index) }
+        }
+    }
 
     LaunchedEffect(state.homeSection) {
         val page = HomePrimarySections.indexOfFirst { it.first == state.homeSection }
@@ -119,7 +123,7 @@ fun HomeScreen(
         isNavigationCompact = false
     }
 
-    LaunchedEffect(pagerState) {
+    LaunchedEffect(pagerState, state.homeSection) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .collect { page ->
@@ -127,12 +131,6 @@ fun HomeScreen(
                     if (section != state.homeSection) home.setHomeSection(section)
                 }
             }
-    }
-
-    fun selectSection(index: Int, section: HomeSection) {
-        if (section != state.homeSection || index != pagerState.currentPage) {
-            scope.launch { pagerState.animateScrollToPage(index) }
-        }
     }
 
     Scaffold(
@@ -145,7 +143,7 @@ fun HomeScreen(
                     onSettings = home::openSettings,
                     onRecognition = onOpenRecognition,
                     onSearch = home::openSearch,
-                    onSectionClick = ::selectSection,
+                    onSectionClick = selectSection,
                 )
             }
         },
@@ -170,7 +168,7 @@ fun HomeScreen(
                 hasImagePermission = hasImagePermission,
                 onRequestImagePermission = onRequestImagePermission,
                 onOpenRecognition = onOpenRecognition,
-                onSectionClick = ::selectSection,
+                onSectionClick = selectSection,
                 modifier = Modifier
                     .weight(1f)
                     .then(
