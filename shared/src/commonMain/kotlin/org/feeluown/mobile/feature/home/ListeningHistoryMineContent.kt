@@ -10,12 +10,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,9 +41,9 @@ private const val LISTENING_RECENT_LIMIT = 500
 private const val LISTENING_TOP_LIMIT = 50
 
 private enum class ListeningHistoryTab(val label: String) {
-    Recent("最近"),
+    Recent("最近播放"),
     Frequent("常听"),
-    Statistics("统计"),
+    Statistics("听歌统计"),
 }
 
 private enum class ListeningRangePreset(val label: String) {
@@ -57,8 +65,41 @@ private val listeningRecentTypes = listOf(
     ListeningRecentType(ListeningResourceType.Artist, "歌手"),
     ListeningRecentType(ListeningResourceType.Album, "专辑"),
     ListeningRecentType(ListeningResourceType.Playlist, "歌单"),
-    ListeningRecentType(ListeningResourceType.Feature, "功能"),
+    ListeningRecentType(ListeningResourceType.Feature, "推荐内容"),
 )
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ListeningHistoryScreen(
+    repository: ListeningHistoryRepository,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("播放记录") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
+            )
+        },
+    ) { paddingValues ->
+        ListeningHistoryMineContent(
+            repository = repository,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+        )
+    }
+}
 
 @Composable
 internal fun ListeningHistoryMineContent(
@@ -116,7 +157,7 @@ internal fun ListeningHistoryMineContent(
             topResources = loaded.topResources
             insights = loaded.insights
         }.onFailure { throwable ->
-            errorMessage = throwable.message ?: "读取听歌记录失败"
+            errorMessage = throwable.message ?: "读取播放记录失败"
         }
         isLoading = false
     }
@@ -226,7 +267,7 @@ private fun ListeningRecentContent(
                     HorizontalDivider()
                 }
             }
-            if (events.isEmpty()) item("empty") { ProviderContentMessage("暂无听歌记录") }
+            if (events.isEmpty()) item("empty") { ProviderContentMessage("暂无播放记录") }
         }
     } else {
         LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -234,7 +275,7 @@ private fun ListeningRecentContent(
                 ListeningResourceRow(stat, showRanking = false)
                 HorizontalDivider()
             }
-            if (resources.isEmpty()) item("empty") { ProviderContentMessage("暂无${recentType.label}记录") }
+            if (resources.isEmpty()) item("empty") { ProviderContentMessage("暂无${recentType.label}播放记录") }
         }
     }
 }
@@ -245,9 +286,8 @@ private fun ListeningEventRow(event: ListeningHistoryEvent) {
         Text(event.primaryResource.title.ifBlank { "未知资源" }, style = MaterialTheme.typography.bodyLarge)
         val details = buildList {
             event.primaryResource.subtitle.takeIf { it.isNotBlank() }?.let(::add)
-            add(formatListeningDuration(event.playedMs))
-            add(event.startReason.displayName())
-            if (event.qualified) add("有效播放")
+            add("播放 ${formatListeningDuration(event.playedMs)}")
+            event.startReason.displayName().takeIf { it.isNotBlank() }?.let(::add)
         }
         Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
     }
@@ -261,11 +301,11 @@ private fun ListeningFrequentContent(
 ) {
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item("title") {
-            Text("${rangePreset.label}常听", style = MaterialTheme.typography.titleMedium)
-            Text("按有效播放次数、播放时长、最近播放依次排序", style = MaterialTheme.typography.bodySmall)
+            Text(rangePreset.frequentTitle(), style = MaterialTheme.typography.titleMedium)
+            Text("根据你实际听过的次数和时长排序", style = MaterialTheme.typography.bodySmall)
         }
         listeningStatSections().forEach { section ->
-            val rows = resources[section.first].orEmpty().filter { it.qualifiedPlayCount > 0L }.take(10)
+            val rows = resources[section.first].orEmpty().filter(ListeningResourceStat::hasFrequentSignal).take(10)
             if (rows.isNotEmpty()) {
                 item("header:${section.first.name}") {
                     Text(section.second, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -276,8 +316,8 @@ private fun ListeningFrequentContent(
                 }
             }
         }
-        if (resources.values.all { rows -> rows.none { it.qualifiedPlayCount > 0L } }) {
-            item("empty") { ProviderContentMessage("这个时间范围内还没有有效播放") }
+        if (resources.values.flatten().none(ListeningResourceStat::hasFrequentSignal)) {
+            item("empty") { ProviderContentMessage("这段时间还没有形成常听记录") }
         }
     }
 }
@@ -289,59 +329,56 @@ private fun ListeningStatisticsContent(
     resources: Map<ListeningResourceType, List<ListeningResourceStat>>,
     modifier: Modifier,
 ) {
-    val topTracks = resources[ListeningResourceType.Track].orEmpty().filter { it.qualifiedPlayCount > 0L }
-    val recommendationSeeds = topTracks.take(5)
-    val overplayed = topTracks.filter { it.qualifiedPlayCount >= 10L }.take(5)
+    val topTracks = resources[ListeningResourceType.Track].orEmpty().filter(ListeningResourceStat::hasFrequentSignal)
+    val mostPlayedTracks = topTracks.take(5)
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item("replay") {
-            Text("${rangePreset.replayLabel()} Replay", style = MaterialTheme.typography.titleLarge)
+        item("overview") {
+            Text(rangePreset.statisticsTitle(), style = MaterialTheme.typography.titleLarge)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                ListeningMetric("听歌", "${insights.qualifiedPlayCount} 次")
-                ListeningMetric("时长", formatListeningDuration(insights.totalPlayedMs))
-                ListeningMetric("活跃", "${insights.activeDays} 天")
+                ListeningMetric("播放次数", "${insights.eventCount} 次")
+                ListeningMetric("听歌时长", formatListeningDuration(insights.totalPlayedMs))
+                ListeningMetric("听歌天数", "${insights.activeDays} 天")
             }
         }
         item("selection") {
-            Text("播放方式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text("播放习惯", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "主动 ${insights.userSelectedPlayCount} 次 · 自动续播 ${insights.automaticPlayCount} 次",
+                "你主动选择了 ${insights.userSelectedPlayCount} 次 · 自动续播 ${insights.automaticPlayCount} 次",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
         if (insights.sourceShares.isNotEmpty()) {
-            item("sources-header") { Text("实际播放来源", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+            item("sources-header") {
+                Text("主要播放来源", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
             items(insights.sourceShares.take(10), key = { "source:${it.sourceId}" }) { share ->
-                Text("${share.sourceId} · ${formatListeningDuration(share.playedMs)} · ${share.eventCount} 次")
-            }
-        }
-        if (recommendationSeeds.isNotEmpty()) {
-            item("seed-header") {
-                Text("推荐种子", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text("来自当前时间范围内最稳定的有效播放偏好", style = MaterialTheme.typography.bodySmall)
-            }
-            items(recommendationSeeds, key = { "seed:${it.resource.resourceKey}" }) { stat ->
-                ListeningResourceRow(stat, showRanking = true)
-            }
-        }
-        if (overplayed.isNotEmpty()) {
-            item("overplay-header") {
-                Text("高频播放", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text("可作为推荐去重/降权输入；阈值为当前范围有效播放 ≥ 10 次", style = MaterialTheme.typography.bodySmall)
-            }
-            items(overplayed, key = { "overplay:${it.resource.resourceKey}" }) { stat ->
-                ListeningResourceRow(stat, showRanking = true)
-            }
-        }
-        if (insights.trend.isNotEmpty()) {
-            item("trend-header") { Text("听歌趋势", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
-            items(insights.trend.takeLast(30), key = { "trend:${it.bucketStartMillis}" }) { point ->
                 Text(
-                    "${formatListeningUtcDay(point.bucketStartMillis)} · ${point.qualifiedPlayCount} 次 · ${formatListeningDuration(point.playedMs)}",
+                    "${share.sourceId.displayListeningSourceName()} · 播放 ${share.eventCount} 次 · 共 ${formatListeningDuration(share.playedMs)}",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
-        if (insights.eventCount == 0L) item("empty") { ProviderContentMessage("这个时间范围内还没有听歌数据") }
+        if (mostPlayedTracks.isNotEmpty()) {
+            item("most-played-header") {
+                Text("最常听的歌曲", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("这段时间你听得最多的几首歌", style = MaterialTheme.typography.bodySmall)
+            }
+            items(mostPlayedTracks, key = { "most-played:${it.resource.resourceKey}" }) { stat ->
+                ListeningResourceRow(stat, showRanking = true)
+            }
+        }
+        if (insights.trend.isNotEmpty()) {
+            item("trend-header") {
+                Text("每天听了多少", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
+            items(insights.trend.takeLast(30), key = { "trend:${it.bucketStartMillis}" }) { point ->
+                Text(
+                    "${formatListeningUtcDay(point.bucketStartMillis)} · 播放 ${point.eventCount} 次 · ${formatListeningDuration(point.playedMs)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        if (insights.eventCount == 0L) item("empty") { ProviderContentMessage("这段时间还没有播放记录") }
     }
 }
 
@@ -359,13 +396,28 @@ private fun ListeningResourceRow(stat: ListeningResourceStat, showRanking: Boole
         Text(stat.resource.title.ifBlank { stat.resource.sourceResourceId }, style = MaterialTheme.typography.bodyLarge)
         val detail = buildList {
             stat.resource.subtitle.takeIf { it.isNotBlank() }?.let(::add)
-            if (showRanking) add("有效 ${stat.qualifiedPlayCount} 次")
-            add(formatListeningDuration(stat.playedMs))
-            if (stat.contextSessionCount > 0L) add("${stat.contextSessionCount} 次会话")
-            if (!showRanking) add("最近 ${formatListeningUtcDay(stat.lastPlayedAtMillis)}")
+            if (showRanking) {
+                if ((stat.resource.type == ListeningResourceType.Playlist || stat.resource.type == ListeningResourceType.Feature) &&
+                    stat.contextSessionCount > 0L
+                ) {
+                    add("播放 ${stat.contextSessionCount} 次")
+                } else if (stat.qualifiedPlayCount > 0L) {
+                    add("听过 ${stat.qualifiedPlayCount} 次")
+                }
+                if (stat.playedMs > 0L) add("累计 ${formatListeningDuration(stat.playedMs)}")
+            } else {
+                if (stat.playedMs > 0L) add("累计播放 ${formatListeningDuration(stat.playedMs)}")
+                add("最近播放 ${formatListeningUtcDay(stat.lastPlayedAtMillis)}")
+            }
         }
         Text(detail.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
     }
+}
+
+private fun ListeningResourceStat.hasFrequentSignal(): Boolean = when (resource.type) {
+    ListeningResourceType.Playlist,
+    ListeningResourceType.Feature -> contextSessionCount > 0L || qualifiedPlayCount > 0L
+    else -> qualifiedPlayCount > 0L
 }
 
 private fun listeningStatSections() = listOf(
@@ -373,8 +425,8 @@ private fun listeningStatSections() = listOf(
     ListeningResourceType.Artist to "歌手",
     ListeningResourceType.Album to "专辑",
     ListeningResourceType.Playlist to "歌单",
-    ListeningResourceType.Feature to "功能 / 推荐",
-    ListeningResourceType.LocalDirectory to "本地目录",
+    ListeningResourceType.Feature to "推荐内容",
+    ListeningResourceType.LocalDirectory to "本地音乐目录",
 )
 
 private fun ListeningRangePreset.toTimeRange(nowMillis: Long): ListeningTimeRange {
@@ -389,19 +441,35 @@ private fun ListeningRangePreset.toTimeRange(nowMillis: Long): ListeningTimeRang
     return if (this == ListeningRangePreset.All) ListeningTimeRange.All else ListeningTimeRange(start, end)
 }
 
-private fun ListeningRangePreset.replayLabel(): String = when (this) {
+private fun ListeningRangePreset.displayRangeName(): String = when (this) {
+    ListeningRangePreset.SevenDays -> "近 7 天"
+    ListeningRangePreset.ThirtyDays -> "近 30 天"
+    ListeningRangePreset.NinetyDays -> "近 90 天"
     ListeningRangePreset.ThisYear -> "今年"
-    ListeningRangePreset.All -> "全部"
-    else -> label
+    ListeningRangePreset.All -> "全部时间"
 }
 
+private fun ListeningRangePreset.frequentTitle(): String = "${displayRangeName()}常听"
+
+private fun ListeningRangePreset.statisticsTitle(): String = "${displayRangeName()}听歌概览"
+
 private fun ListeningStartReason.displayName(): String = when (this) {
-    ListeningStartReason.UserSelection -> "主动选择"
-    ListeningStartReason.PlaylistReplace -> "全部播放"
+    ListeningStartReason.UserSelection -> "手动播放"
+    ListeningStartReason.PlaylistReplace -> "歌单播放"
     ListeningStartReason.AutoNext -> "自动续播"
     ListeningStartReason.Resume -> "继续播放"
-    ListeningStartReason.RestoreSession -> "恢复会话"
-    ListeningStartReason.Unknown -> "播放"
+    ListeningStartReason.RestoreSession -> "恢复播放"
+    ListeningStartReason.Unknown -> ""
+}
+
+private fun String.displayListeningSourceName(): String = when (lowercase()) {
+    "netease" -> "网易云音乐"
+    "qqmusic" -> "QQ 音乐"
+    "bilibili" -> "哔哩哔哩"
+    "ytmusic" -> "YouTube Music"
+    "local" -> "本地音乐"
+    "downloaded" -> "已下载音乐"
+    else -> this
 }
 
 private fun formatListeningDuration(durationMs: Long): String {
