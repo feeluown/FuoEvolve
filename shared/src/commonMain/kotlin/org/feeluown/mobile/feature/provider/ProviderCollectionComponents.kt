@@ -149,10 +149,18 @@ fun ProviderPlaylistCard(
     modifier: Modifier = Modifier,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val heroCoordinator = LocalResourceHeroCoordinator.current
+    val heroKey = rememberResourceHeroSourceKey(playlist.coverHeroKey())
     Column(
         modifier = modifier
             .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(
+                role = Role.Button,
+                onClick = {
+                    heroCoordinator?.activate(heroKey)
+                    onClick()
+                },
+            )
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
@@ -160,7 +168,7 @@ fun ProviderPlaylistCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .fuoNavigationHero(playlist.coverHeroKey()),
+                .fuoNavigationHero(heroKey),
             placeholder = CoverPlaceholder.Playlist,
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
@@ -262,10 +270,18 @@ fun ProviderMediaItemCard(
     modifier: Modifier = Modifier,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val heroCoordinator = LocalResourceHeroCoordinator.current
+    val heroKey = rememberResourceHeroSourceKey(item.coverHeroKey())
     Column(
         modifier = modifier
             .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(
+                role = Role.Button,
+                onClick = {
+                    heroCoordinator?.activate(heroKey)
+                    onClick()
+                },
+            )
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
@@ -273,7 +289,7 @@ fun ProviderMediaItemCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .fuoNavigationHero(item.coverHeroKey()),
+                .fuoNavigationHero(heroKey),
             placeholder = when (item.type) {
                 ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
                 ProviderMediaItemType.Album -> CoverPlaceholder.Album
