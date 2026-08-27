@@ -110,11 +110,15 @@ internal fun ProviderDetailHeader(
 ) {
     val descriptionExpanded = remember(description) { mutableStateOf(false) }
     val descriptionOverflows = remember(description) { mutableStateOf(false) }
+    val resolvedHeroKey = heroKey ?: track.detailCoverHeroKey(placeholder)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 4.dp),
+            .padding(
+                top = if (resolvedHeroKey != null) 24.dp else 8.dp,
+                bottom = 4.dp,
+            ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
@@ -126,7 +130,7 @@ internal fun ProviderDetailHeader(
                 track = track,
                 modifier = Modifier
                     .size(112.dp)
-                    .fuoNavigationHero(heroKey ?: track.detailCoverHeroKey(placeholder)),
+                    .fuoNavigationHero(resolvedHeroKey),
                 placeholder = placeholder,
             )
             Column(
