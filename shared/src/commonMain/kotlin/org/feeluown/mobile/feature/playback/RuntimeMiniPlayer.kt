@@ -4,8 +4,8 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -49,6 +49,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.feeluown.mobile.core.model.TrackRef
@@ -76,6 +78,7 @@ internal fun RuntimeMiniPlayer(
     val isLoadingAudio = state.status == PlaybackSessionStatus.Loading
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     val openPlayerInteractionSource = remember { MutableInteractionSource() }
+    val contentSizeSpec = FuoMotion.defaultSpatialSpec<IntSize>()
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -83,8 +86,12 @@ internal fun RuntimeMiniPlayer(
                 horizontal = if (isWideLayout) 0.dp else 8.dp,
                 vertical = if (isWideLayout) 0.dp else 4.dp,
             )
-            .animateContentSize(animationSpec = tween(220))
+            .animateContentSize(animationSpec = contentSizeSpec)
             .fuoInteractive()
+            .fuoPressFeedback(
+                interactionSource = openPlayerInteractionSource,
+                pressedScale = FuoMotion.prominentPressedScale,
+            )
             .clickable(
                 interactionSource = openPlayerInteractionSource,
                 indication = null,
@@ -216,7 +223,7 @@ private fun RuntimeMiniPlayerProgress(
     val targetProgress = state.positionMs.coerceIn(0, duration).toFloat() / duration
     val progress by animateFloatAsState(
         targetValue = targetProgress,
-        animationSpec = tween(FuoMotion.progressAnimationMillis),
+        animationSpec = FuoMotion.fastEffectsSpec(),
         label = "mini player progress",
     )
     LinearWavyProgressIndicator(
@@ -237,6 +244,8 @@ private fun RuntimeMiniPlayerLyricLine(state: PlaybackSessionState) {
     val lines = remember(state.lyrics) { parseLyrics(state.lyrics) }
     val currentIndex = currentLyricIndex(lines, state.lyricsPositionMs)
     val currentLine = lines.getOrNull(currentIndex)?.text?.takeIf { it.isNotBlank() } ?: return
+    val lyricSpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
+    val lyricEffectsSpec = FuoMotion.fastEffectsSpec<Float>()
 
     AnimatedContent(
         targetState = RuntimeMiniPlayerLyricState(currentIndex, currentLine),
@@ -245,13 +254,13 @@ private fun RuntimeMiniPlayerLyricLine(state: PlaybackSessionState) {
             val enterOffset: (Int) -> Int = { height -> if (direction > 0) height else -height }
             val exitOffset: (Int) -> Int = { height -> if (direction > 0) -height else height }
             (slideInVertically(
-                animationSpec = tween(180),
+                animationSpec = lyricSpatialSpec,
                 initialOffsetY = enterOffset,
-            ) + fadeIn(animationSpec = tween(180))) togetherWith
+            ) + fadeIn(animationSpec = lyricEffectsSpec)) togetherWith
                 (slideOutVertically(
-                    animationSpec = tween(180),
+                    animationSpec = lyricSpatialSpec,
                     targetOffsetY = exitOffset,
-                ) + fadeOut(animationSpec = tween(180)))
+                ) + fadeOut(animationSpec = lyricEffectsSpec))
         },
         modifier = Modifier.fillMaxWidth(),
         label = "mini player lyric line",
@@ -300,10 +309,18 @@ private fun RuntimeMiniPlayerCover(
             )
         }
     }
+    val coverSpatialSpec = FuoMotion.slowSpatialSpec<IntOffset>()
+    val coverEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
     Box(modifier = sharedModifier) {
         AnimatedContent(
             targetState = displayedTrack,
-            transitionSpec = { runtimeMiniPlayerCoverTransition(transitionDirection) },
+            transitionSpec = {
+                runtimeMiniPlayerCoverTransition(
+                    direction = transitionDirection,
+                    spatialSpec = coverSpatialSpec,
+                    effectsSpec = coverEffectsSpec,
+                )
+            },
             modifier = Modifier.fillMaxSize(),
             contentKey = { it.coverUrl },
             label = "player cover transition",
@@ -320,18 +337,22 @@ private fun RuntimeMiniPlayerCover(
     }
 }
 
-private fun runtimeMiniPlayerCoverTransition(direction: TrackChangeDirection): ContentTransform {
+private fun runtimeMiniPlayerCoverTransition(
+    direction: TrackChangeDirection,
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform {
     val directionMultiplier = if (direction == TrackChangeDirection.Next) 1 else -1
     return (
         slideInHorizontally(
             initialOffsetX = { width -> width * directionMultiplier },
-            animationSpec = tween(FuoMotion.coverTransitionMillis),
-        ) + fadeIn(animationSpec = tween(FuoMotion.coverFadeMillis))
+            animationSpec = spatialSpec,
+        ) + fadeIn(animationSpec = effectsSpec)
         ) togetherWith (
         slideOutHorizontally(
             targetOffsetX = { width -> -width * directionMultiplier },
-            animationSpec = tween(FuoMotion.coverTransitionMillis),
-        ) + fadeOut(animationSpec = tween(FuoMotion.coverFadeMillis))
+            animationSpec = spatialSpec,
+        ) + fadeOut(animationSpec = effectsSpec)
         )
 }
 
