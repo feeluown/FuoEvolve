@@ -69,6 +69,10 @@ fun createAppUiGraph(
         lyrics = playbackLyricsPort,
         replacement = replacementActionPort,
     )
+    val listeningHistory = ListeningHistoryPlaylistMetadataRepository(
+        delegate = playbackQueueUiPort.listeningHistoryRepository ?: NoOpListeningHistoryRepository,
+        home = homeFeatureController,
+    )
     return AppUiGraph(
         playbackSession = playbackSession,
         playback = playback,
@@ -83,7 +87,7 @@ fun createAppUiGraph(
             home = homeFeatureController,
             providerCatalog = providerCatalogFeatureController,
             playbackQueue = playbackQueueUiPort,
-            listeningHistory = playbackQueueUiPort.listeningHistoryRepository ?: NoOpListeningHistoryRepository,
+            listeningHistory = listeningHistory,
             downloads = downloadActionPort,
             playlists = playlistActionPort,
             providerTrackActions = providerTrackActionPort,
