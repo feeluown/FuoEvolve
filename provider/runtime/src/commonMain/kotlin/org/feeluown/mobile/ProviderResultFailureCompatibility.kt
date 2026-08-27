@@ -13,6 +13,7 @@ fun ProviderSearchResults(
     artists: List<MediaRef> = emptyList(),
     albums: List<MediaRef> = emptyList(),
     videos: List<ProviderVideo> = emptyList(),
+    bestMatches: List<ProviderSearchHit> = emptyList(),
     errorMessage: String?,
     compatibility: Unit = Unit,
 ): ProviderSearchResults = ProviderSearchResults(
@@ -21,6 +22,7 @@ fun ProviderSearchResults(
     artists = artists,
     albums = albums,
     videos = videos,
+    bestMatches = bestMatches,
     failure = errorMessage.toProviderResultFailure(),
 )
 
