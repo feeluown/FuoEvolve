@@ -1,5 +1,36 @@
 package org.feeluown.mobile
 
+/** Provider-native best match preserved across the provider-neutral search boundary. */
+sealed interface ProviderSearchHit {
+    val providerId: String
+    val providerName: String
+
+    data class Track(val value: MusicTrack) : ProviderSearchHit {
+        override val providerId: String get() = value.source
+        override val providerName: String get() = value.providerName.orEmpty()
+    }
+
+    data class Artist(val value: MediaRef) : ProviderSearchHit {
+        override val providerId: String get() = value.providerId
+        override val providerName: String get() = value.providerName
+    }
+
+    data class Album(val value: MediaRef) : ProviderSearchHit {
+        override val providerId: String get() = value.providerId
+        override val providerName: String get() = value.providerName
+    }
+
+    data class Playlist(val value: ProviderPlaylist) : ProviderSearchHit {
+        override val providerId: String get() = value.providerId
+        override val providerName: String get() = value.providerName
+    }
+
+    data class Video(val value: ProviderVideo) : ProviderSearchHit {
+        override val providerId: String get() = value.providerId
+        override val providerName: String get() = value.providerName
+    }
+}
+
 /** Provider-neutral aggregate search result shared by catalog consumers. */
 data class ProviderSearchResults(
     val tracks: List<MusicTrack> = emptyList(),
@@ -7,6 +38,7 @@ data class ProviderSearchResults(
     val artists: List<MediaRef> = emptyList(),
     val albums: List<MediaRef> = emptyList(),
     val videos: List<ProviderVideo> = emptyList(),
+    val bestMatches: List<ProviderSearchHit> = emptyList(),
     val failure: ProviderFailure? = null,
 )
 
