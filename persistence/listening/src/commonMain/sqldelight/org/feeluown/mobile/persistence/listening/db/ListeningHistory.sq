@@ -1,0 +1,312 @@
+CREATE TABLE listening_resource (
+    resource_key TEXT NOT NULL PRIMARY KEY,
+    resource_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    source_resource_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    subtitle TEXT NOT NULL,
+    cover_url TEXT,
+    metadata_json TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX listening_resource_type_idx ON listening_resource(resource_type);
+CREATE INDEX listening_resource_source_idx ON listening_resource(source_id, source_resource_id);
+
+CREATE TABLE listening_event (
+    session_key TEXT NOT NULL PRIMARY KEY,
+    primary_resource_key TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    played_ms INTEGER NOT NULL,
+    duration_ms INTEGER,
+    qualified INTEGER NOT NULL,
+    start_reason TEXT NOT NULL,
+    completion_reason TEXT,
+    context_session_key TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX listening_event_started_at_idx ON listening_event(started_at DESC);
+CREATE INDEX listening_event_qualified_started_idx ON listening_event(qualified, started_at DESC);
+CREATE INDEX listening_event_primary_started_idx ON listening_event(primary_resource_key, started_at DESC);
+CREATE INDEX listening_event_context_started_idx ON listening_event(context_session_key, started_at DESC);
+
+CREATE TABLE listening_event_resource (
+    session_key TEXT NOT NULL,
+    resource_key TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    PRIMARY KEY (session_key, resource_key, relation_type)
+);
+
+CREATE INDEX listening_event_resource_resource_idx ON listening_event_resource(resource_key, relation_type);
+
+CREATE TABLE listening_legacy_playlist_stat (
+    source_id TEXT NOT NULL,
+    source_resource_id TEXT NOT NULL,
+    play_count INTEGER NOT NULL,
+    last_played_at INTEGER NOT NULL,
+    PRIMARY KEY (source_id, source_resource_id)
+);
+
+CREATE TABLE listening_metadata (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+upsertResource:
+INSERT OR REPLACE INTO listening_resource(
+    resource_key,
+    resource_type,
+    source_id,
+    source_resource_id,
+    title,
+    subtitle,
+    cover_url,
+    metadata_json,
+    updated_at
+) VALUES (
+    :resourceKey,
+    :resourceType,
+    :sourceId,
+    :sourceResourceId,
+    :title,
+    :subtitle,
+    :coverUrl,
+    :metadataJson,
+    :updatedAt
+);
+
+upsertEvent:
+INSERT OR REPLACE INTO listening_event(
+    session_key,
+    primary_resource_key,
+    started_at,
+    ended_at,
+    played_ms,
+    duration_ms,
+    qualified,
+    start_reason,
+    completion_reason,
+    context_session_key,
+    updated_at
+) VALUES (
+    :sessionKey,
+    :primaryResourceKey,
+    :startedAt,
+    :endedAt,
+    :playedMs,
+    :durationMs,
+    :qualified,
+    :startReason,
+    :completionReason,
+    :contextSessionKey,
+    :updatedAt
+);
+
+deleteEventRelations:
+DELETE FROM listening_event_resource
+WHERE session_key = :sessionKey;
+
+insertEventRelation:
+INSERT OR REPLACE INTO listening_event_resource(
+    session_key,
+    resource_key,
+    relation_type
+) VALUES (
+    :sessionKey,
+    :resourceKey,
+    :relationType
+);
+
+selectMetadataValue:
+SELECT value FROM listening_metadata WHERE key = :key LIMIT 1;
+
+upsertMetadata:
+INSERT OR REPLACE INTO listening_metadata(key, value) VALUES (:key, :value);
+
+selectExistingPlaylistContextSessionCount:
+SELECT COUNT(DISTINCT e.context_session_key)
+FROM listening_event e
+JOIN listening_event_resource er ON er.session_key = e.session_key
+JOIN listening_resource r ON r.resource_key = er.resource_key
+WHERE er.relation_type = 'PlaylistContext'
+  AND r.resource_type = 'Playlist'
+  AND r.source_resource_id = :sourceResourceId
+  AND (r.source_id = :sourceId OR r.source_id = 'context')
+  AND e.context_session_key IS NOT NULL;
+
+upsertLegacyPlaylistStat:
+INSERT OR REPLACE INTO listening_legacy_playlist_stat(
+    source_id,
+    source_resource_id,
+    play_count,
+    last_played_at
+) VALUES (
+    :sourceId,
+    :sourceResourceId,
+    :playCount,
+    :lastPlayedAt
+);
+
+selectLegacyPlaylistStats:
+SELECT source_id, source_resource_id, play_count, last_played_at
+FROM listening_legacy_playlist_stat;
+
+clearLegacyPlaylistStats:
+DELETE FROM listening_legacy_playlist_stat;
+
+selectRecentEvents:
+SELECT
+    e.session_key,
+    e.started_at,
+    e.ended_at,
+    e.played_ms,
+    e.duration_ms,
+    e.qualified,
+    e.start_reason,
+    e.completion_reason,
+    e.context_session_key,
+    r.resource_key,
+    r.resource_type,
+    r.source_id,
+    r.source_resource_id,
+    r.title,
+    r.subtitle,
+    r.cover_url,
+    r.metadata_json
+FROM listening_event e
+JOIN listening_resource r ON r.resource_key = e.primary_resource_key
+WHERE e.started_at >= :startAt
+  AND e.started_at < :endAt
+  AND (:resourceType = '' OR r.resource_type = :resourceType)
+ORDER BY e.started_at DESC
+LIMIT :limit;
+
+selectRecentResources:
+SELECT
+    r.resource_key,
+    r.resource_type,
+    r.source_id,
+    r.source_resource_id,
+    r.title,
+    r.subtitle,
+    r.cover_url,
+    r.metadata_json,
+    COUNT(e.session_key) AS event_count,
+    COALESCE(SUM(e.qualified), 0) AS qualified_play_count,
+    COALESCE(SUM(e.played_ms), 0) AS total_played_ms,
+    MAX(e.started_at) AS last_played_at,
+    COUNT(DISTINCT e.context_session_key) AS context_session_count
+FROM listening_event e
+JOIN listening_resource r ON r.resource_key = e.primary_resource_key
+WHERE e.started_at >= :startAt
+  AND e.started_at < :endAt
+  AND (:resourceType = '' OR r.resource_type = :resourceType)
+GROUP BY r.resource_key, r.resource_type, r.source_id, r.source_resource_id, r.title, r.subtitle, r.cover_url, r.metadata_json
+ORDER BY last_played_at DESC
+LIMIT :limit;
+
+selectRecentRelatedResources:
+SELECT
+    r.resource_key,
+    r.resource_type,
+    r.source_id,
+    r.source_resource_id,
+    r.title,
+    r.subtitle,
+    r.cover_url,
+    r.metadata_json,
+    COUNT(DISTINCT e.session_key) AS event_count,
+    COALESCE(SUM(e.qualified), 0) AS qualified_play_count,
+    COALESCE(SUM(e.played_ms), 0) AS total_played_ms,
+    MAX(e.started_at) AS last_played_at,
+    COUNT(DISTINCT e.context_session_key) AS context_session_count
+FROM listening_event e
+JOIN listening_event_resource er ON er.session_key = e.session_key
+JOIN listening_resource r ON r.resource_key = er.resource_key
+WHERE e.started_at >= :startAt
+  AND e.started_at < :endAt
+  AND r.resource_type = :resourceType
+  AND er.relation_type = :relationType
+GROUP BY r.resource_key, r.resource_type, r.source_id, r.source_resource_id, r.title, r.subtitle, r.cover_url, r.metadata_json
+ORDER BY last_played_at DESC
+LIMIT :limit;
+
+selectResourceStats:
+SELECT
+    r.resource_key,
+    r.resource_type,
+    r.source_id,
+    r.source_resource_id,
+    r.title,
+    r.subtitle,
+    r.cover_url,
+    r.metadata_json,
+    COUNT(DISTINCT e.session_key) AS event_count,
+    COALESCE(SUM(e.qualified), 0) AS qualified_play_count,
+    COALESCE(SUM(e.played_ms), 0) AS total_played_ms,
+    MAX(e.started_at) AS last_played_at,
+    COUNT(DISTINCT e.context_session_key) AS context_session_count
+FROM listening_event e
+JOIN listening_event_resource er ON er.session_key = e.session_key
+JOIN listening_resource r ON r.resource_key = er.resource_key
+WHERE e.started_at >= :startAt
+  AND e.started_at < :endAt
+  AND r.resource_type = :resourceType
+  AND er.relation_type = :relationType
+GROUP BY r.resource_key, r.resource_type, r.source_id, r.source_resource_id, r.title, r.subtitle, r.cover_url, r.metadata_json
+ORDER BY qualified_play_count DESC, total_played_ms DESC, last_played_at DESC
+LIMIT :limit;
+
+selectSummary:
+SELECT
+    COUNT(*) AS event_count,
+    COALESCE(SUM(qualified), 0) AS qualified_play_count,
+    COALESCE(SUM(played_ms), 0) AS total_played_ms,
+    COUNT(DISTINCT date(started_at / 1000, 'unixepoch')) AS active_days,
+    COALESCE(SUM(CASE WHEN start_reason IN ('UserSelection', 'PlaylistReplace') THEN 1 ELSE 0 END), 0) AS user_selected_play_count,
+    COALESCE(SUM(CASE WHEN start_reason = 'AutoNext' THEN 1 ELSE 0 END), 0) AS automatic_play_count
+FROM listening_event
+WHERE started_at >= :startAt
+  AND started_at < :endAt;
+
+selectSourceShares:
+SELECT
+    COALESCE(resolved.source_id, primary_resource.source_id) AS source_id,
+    COUNT(DISTINCT e.session_key) AS event_count,
+    COALESCE(SUM(e.played_ms), 0) AS total_played_ms
+FROM listening_event e
+JOIN listening_resource primary_resource ON primary_resource.resource_key = e.primary_resource_key
+LEFT JOIN listening_event_resource resolved_relation
+    ON resolved_relation.session_key = e.session_key
+   AND resolved_relation.relation_type = 'ResolvedSource'
+LEFT JOIN listening_resource resolved ON resolved.resource_key = resolved_relation.resource_key
+WHERE e.started_at >= :startAt
+  AND e.started_at < :endAt
+GROUP BY COALESCE(resolved.source_id, primary_resource.source_id)
+ORDER BY total_played_ms DESC;
+
+selectTrend:
+SELECT
+    (started_at / :bucketMs) * :bucketMs AS bucket_start,
+    COUNT(*) AS event_count,
+    COALESCE(SUM(qualified), 0) AS qualified_play_count,
+    COALESCE(SUM(played_ms), 0) AS total_played_ms
+FROM listening_event
+WHERE started_at >= :startAt
+  AND started_at < :endAt
+GROUP BY bucket_start
+ORDER BY bucket_start ASC;
+
+countEvents:
+SELECT COUNT(*) FROM listening_event;
+
+clearEventRelations:
+DELETE FROM listening_event_resource;
+
+clearEvents:
+DELETE FROM listening_event;
+
+clearResources:
+DELETE FROM listening_resource;

@@ -31,9 +31,21 @@ class DefaultSearchAppPort(
     }
 
     override fun playResult(index: Int) {
-        val tracks = searchController.uiState.value.searchResults
+        val state = searchController.uiState.value
+        val tracks = state.searchResults
         if (index !in tracks.indices) return
-        playbackQueue.playTracks(tracks, index)
+        val query = state.query.trim()
+        playbackQueue.playTracks(
+            tracks = tracks,
+            index = index,
+            context = PlaybackContextSnapshot(
+                type = PlaybackContextType.Search,
+                sourceId = "search",
+                resourceId = query.ifBlank { "results" },
+                title = query.ifBlank { "搜索" },
+                subtitle = "搜索结果",
+            ),
+        )
         closeSearch()
     }
 

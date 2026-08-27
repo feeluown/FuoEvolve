@@ -76,6 +76,18 @@ internal class PlaybackQueueCoordinator(
             index = index,
             sourceFeature = null,
             sourcePlaylistId = null,
+            sourceContext = null,
+            keepSelectedTrack = true,
+        )
+    }
+
+    override fun playTracks(tracks: List<MusicTrack>, index: Int, context: PlaybackContextSnapshot) {
+        replaceSourceQueue(
+            tracks = tracks,
+            index = index,
+            sourceFeature = null,
+            sourcePlaylistId = null,
+            sourceContext = context,
             keepSelectedTrack = true,
         )
     }
@@ -86,6 +98,23 @@ internal class PlaybackQueueCoordinator(
             index = index,
             sourceFeature = null,
             sourcePlaylistId = sourcePlaylistId,
+            sourceContext = fallbackPlaylistContext(sourcePlaylistId),
+            keepSelectedTrack = true,
+        )
+    }
+
+    override fun playPlaylistTracks(
+        tracks: List<MusicTrack>,
+        index: Int,
+        sourcePlaylistId: String,
+        context: PlaybackContextSnapshot,
+    ) {
+        replaceSourceQueue(
+            tracks = tracks,
+            index = index,
+            sourceFeature = null,
+            sourcePlaylistId = sourcePlaylistId,
+            sourceContext = context,
             keepSelectedTrack = true,
         )
     }
@@ -96,6 +125,22 @@ internal class PlaybackQueueCoordinator(
             index = 0,
             sourceFeature = null,
             sourcePlaylistId = sourcePlaylistId,
+            sourceContext = fallbackPlaylistContext(sourcePlaylistId),
+            keepSelectedTrack = false,
+        )
+    }
+
+    override fun playAllPlaylistTracks(
+        tracks: List<MusicTrack>,
+        sourcePlaylistId: String,
+        context: PlaybackContextSnapshot,
+    ) {
+        replaceSourceQueue(
+            tracks = tracks,
+            index = 0,
+            sourceFeature = null,
+            sourcePlaylistId = sourcePlaylistId,
+            sourceContext = context,
             keepSelectedTrack = false,
         )
     }
@@ -120,6 +165,7 @@ internal class PlaybackQueueCoordinator(
             index = index,
             sourceFeature = sourceFeature,
             sourcePlaylistId = null,
+            sourceContext = sourceFeature.toPlaybackContextSnapshot(),
             keepSelectedTrack = true,
         )
     }
@@ -154,9 +200,6 @@ internal class PlaybackQueueCoordinator(
                         playMainIndexInternal(nextIndex, 0, TrackChangeDirection.Next)
                     appendedCount == 0 && queueState.queueFeature == feature ->
                         publishMessage("${feature.title} 暂无后续歌曲")
-                    // Negative values represent a load failure. The playback owner has already
-                    // published the retryable provider/network error and it must not be replaced
-                    // with an indistinguishable "no more songs" message here.
                     else -> Unit
                 }
             }
@@ -280,6 +323,7 @@ internal class PlaybackQueueCoordinator(
         queueState.mainQueueIndex = -1
         queueState.queueFeature = null
         queueState.queuePlaylistId = null
+        queueState.beginListeningContext(null)
         queueState.isFmQueue = false
         queueState.shuffleBeforeFm = null
         if (currentTrack != null) {
@@ -351,6 +395,7 @@ internal class PlaybackQueueCoordinator(
         index: Int,
         sourceFeature: ProviderFeature?,
         sourcePlaylistId: String?,
+        sourceContext: PlaybackContextSnapshot?,
         keepSelectedTrack: Boolean,
     ) {
         if (tracks.isEmpty() || index !in tracks.indices) return
@@ -367,6 +412,7 @@ internal class PlaybackQueueCoordinator(
         queueState.isFmQueue = enteringFm
         queueState.queueFeature = sourceFeature?.takeIf { enteringFm }
         queueState.queuePlaylistId = sourcePlaylistId
+        queueState.beginListeningContext(sourceContext)
         queueState.currentUpNextTrack = null
         queueState.currentIsUpNext = false
         queueState.originalMainQueue = emptyList()
@@ -496,6 +542,21 @@ internal class PlaybackQueueCoordinator(
         queueState.originalMainQueue = emptyList()
         queueState.shuffleEnabled = false
     }
+
+    private fun fallbackPlaylistContext(sourcePlaylistId: String) = PlaybackContextSnapshot(
+        type = PlaybackContextType.Playlist,
+        sourceId = "context",
+        resourceId = sourcePlaylistId,
+        title = sourcePlaylistId,
+    )
+
+    private fun ProviderFeature.toPlaybackContextSnapshot() = PlaybackContextSnapshot(
+        type = PlaybackContextType.Feature,
+        sourceId = providerId,
+        resourceId = id,
+        title = title,
+        subtitle = providerName,
+    )
 
     private fun Int.floorMod(divisor: Int): Int = ((this % divisor) + divisor) % divisor
 }

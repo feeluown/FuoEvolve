@@ -63,6 +63,15 @@ fun LocalPlaylistScreen(
     val downloads = LocalDownloadActionPort.current
     val playlistActions = LocalPlaylistActionPort.current
     val providerTrackActions = LocalProviderTrackActionPort.current
+    val listeningContext = remember(displayPlaylist.id, displayPlaylist.title) {
+        PlaybackContextSnapshot(
+            type = PlaybackContextType.Playlist,
+            sourceId = "local",
+            resourceId = displayPlaylist.id,
+            title = displayPlaylist.title.ifBlank { "未命名歌单" },
+            subtitle = "本地歌单",
+        )
+    }
     var showDeleteDialog by remember(displayPlaylist.id) { mutableStateOf(false) }
 
     Scaffold(
@@ -125,7 +134,11 @@ fun LocalPlaylistScreen(
                     PlayAllButton(
                         onClick = {
                             if (uiState.selectedTracks.isNotEmpty()) {
-                                playbackQueue.playAllPlaylistTracks(uiState.selectedTracks, displayPlaylist.id)
+                                playbackQueue.playAllPlaylistTracks(
+                                    uiState.selectedTracks,
+                                    displayPlaylist.id,
+                                    listeningContext,
+                                )
                             }
                         },
                         enabled = uiState.selectedTracks.isNotEmpty(),
@@ -150,7 +163,12 @@ fun LocalPlaylistScreen(
                             track = track,
                             downloadState = downloads.downloadStates[track.id],
                             onClick = {
-                                playbackQueue.playPlaylistTracks(uiState.selectedTracks, index, displayPlaylist.id)
+                                playbackQueue.playPlaylistTracks(
+                                    uiState.selectedTracks,
+                                    index,
+                                    displayPlaylist.id,
+                                    listeningContext,
+                                )
                             },
                             onAddToUpNext = { playbackQueue.addToUpNext(track) },
                             onDownload = { downloads.download(track) },

@@ -149,6 +149,7 @@ private class IosAppContainer(
     private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
     private val oauthDeviceCodeAssistant: OAuthDeviceCodeAssistant = IosOAuthDeviceCodeAssistant(oauthDeviceCodeOutput)
     private val playbackQueueStore = IosPlaybackQueueStore()
+    private val listeningHistorySink: ListeningHistorySink = NoOpListeningHistorySink
     private val resourceCacheRepository = IosResourceCacheRepository()
     private val debugLogFeatureController by lazy { createDebugLogFeatureController(NoOpDebugLogRepository, scope) }
     private val audioRecognitionRepository = IosAudioRecognitionRepository(audioRecognitionOutput)
@@ -246,6 +247,7 @@ private class IosAppContainer(
             downloadActions = downloadActionPort,
             scope = scope,
             openTrackDetail = trackNavigationPort::open,
+            listeningHistorySink = listeningHistorySink,
         )
     }
 

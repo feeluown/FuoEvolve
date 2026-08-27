@@ -38,6 +38,7 @@ internal fun AppRoute.showsMiniPlayer(
     isVideoFullscreen: Boolean,
 ): Boolean = when (this) {
     AppRoute.Home -> hasCurrentTrack
+    AppRoute.PlaybackHistory,
     AppRoute.LocalPlaylist,
     AppRoute.LocalMusicCollection,
     is AppRoute.FeatureDetail,

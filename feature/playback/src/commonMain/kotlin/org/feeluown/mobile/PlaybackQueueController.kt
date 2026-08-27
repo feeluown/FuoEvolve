@@ -14,10 +14,14 @@ data class PlaybackQueueState(
     val currentIsUpNext: Boolean = false,
     val queueFeature: ProviderFeature? = null,
     val queuePlaylistId: String? = null,
+    val listeningContext: PlaybackContextSnapshot? = null,
+    val listeningContextSequence: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
+    val lastPlaybackStartReason: PlaybackStartReason? = null,
+    val playbackStartSequence: Long = 0L,
 )
 
 /**
@@ -79,6 +83,22 @@ internal class PlaybackQueueController {
 
     fun markNextPlaybackStart(reason: PlaybackStartReason) {
         pendingPlaybackStartReason = reason
+        updateEphemeral { current ->
+            current.copy(
+                lastPlaybackStartReason = reason,
+                playbackStartSequence = current.playbackStartSequence + 1L,
+            )
+        }
+    }
+
+    /** Starts a new logical playback-context session without making it part of durable queue state. */
+    fun beginListeningContext(context: PlaybackContextSnapshot?) {
+        updateEphemeral { current ->
+            current.copy(
+                listeningContext = context,
+                listeningContextSequence = current.listeningContextSequence + 1L,
+            )
+        }
     }
 
     fun consumePlaybackStartReason(): PlaybackStartReason =
@@ -150,6 +170,13 @@ internal class PlaybackQueueController {
         crossinline transform: (PlaybackQueueState) -> PlaybackQueueState,
     ) {
         if (!applyingStartupSnapshot) startupDirty = true
+        mutableState.update { current -> transform(current) }
+    }
+
+    /** Playback transaction/context metadata is observable but not part of durable queue mutation history. */
+    private inline fun updateEphemeral(
+        crossinline transform: (PlaybackQueueState) -> PlaybackQueueState,
+    ) {
         mutableState.update { current -> transform(current) }
     }
 }

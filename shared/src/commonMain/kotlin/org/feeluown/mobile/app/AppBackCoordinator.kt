@@ -98,6 +98,7 @@ fun createAppBackCoordinator(
         closeRoute = { route ->
             when (route) {
                 AppRoute.Home -> false
+                AppRoute.PlaybackHistory -> navigator.pop(AppRoute.PlaybackHistory)
                 AppRoute.Search -> {
                     searchAppPort.closeSearch()
                     true

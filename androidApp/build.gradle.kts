@@ -120,6 +120,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":playback:api"))
     implementation(project(":playback:runtime"))
+    implementation(project(":persistence:listening"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.compose.material3.expressive)
