@@ -14,8 +14,10 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,10 +29,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -49,6 +55,8 @@ import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
+
+private val MiniPlayerPreviousControlBreakpoint = 420.dp
 
 /**
  * Controller-free MiniPlayer implementation backed by the app-scoped playback session.
@@ -67,110 +75,161 @@ internal fun RuntimeMiniPlayer(
     val state by playbackSession.state.collectAsStateWithLifecycle()
     val isLoadingAudio = state.status == PlaybackSessionStatus.Loading
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val openPlayerInteractionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(
+                horizontal = if (isWideLayout) 0.dp else 8.dp,
+                vertical = if (isWideLayout) 0.dp else 4.dp,
+            )
             .animateContentSize(animationSpec = tween(220))
             .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onOpenFullPlayer),
-        shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 3.dp,
+            .clickable(
+                interactionSource = openPlayerInteractionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onOpenFullPlayer,
+            ),
+        shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.extraLarge,
+        color = if (isWideLayout) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = if (isWideLayout) 3.dp else 5.dp,
     ) {
         Column {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = if (isWideLayout) 8.dp else 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                state.currentTrack?.let { track ->
-                    RuntimeMiniPlayerCover(
-                        track = track,
-                        heroEnabled = !isFullPlayerOpen,
-                        transitionDirection = transitionDirection,
-                        isLoading = isLoadingAudio,
-                        cornerRadius = if (isWideLayout) 10.dp else 12.dp,
-                        modifier = Modifier.size(if (isWideLayout) 44.dp else 56.dp),
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = state.currentTrack?.title ?: "未播放",
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = if (isLoadingAudio) {
-                            "正在加载音频"
-                        } else {
-                            state.currentTrack?.let(::runtimeArtistAlbumLabel) ?: "选择一首音乐开始播放"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isLoadingAudio) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    RuntimeMiniPlayerLyricLine(state)
-                }
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val showPrevious = shouldShowMiniPlayerPreviousControl(maxWidth, isWideLayout)
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(
+                        horizontal = if (isWideLayout) 12.dp else 14.dp,
+                        vertical = if (isWideLayout) 8.dp else 8.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(if (isWideLayout) 12.dp else 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RoundControlButton(
-                        imageVector = Icons.Filled.SkipPrevious,
-                        contentDescription = "上一首",
-                        onClick = playbackSession::previous,
-                        size = 48.dp,
-                        iconSize = 24.dp,
-                    )
-                    PlayPauseButton(
-                        isPlaying = state.status == PlaybackSessionStatus.Playing,
-                        isLoading = state.status == PlaybackSessionStatus.Loading,
-                        onClick = playbackSession::toggle,
-                        size = 48.dp,
-                        iconSize = 26.dp,
-                    )
-                    RoundControlButton(
-                        imageVector = Icons.Filled.SkipNext,
-                        contentDescription = "下一首",
-                        onClick = playbackSession::next,
-                        size = 48.dp,
-                        iconSize = 24.dp,
-                    )
+                    state.currentTrack?.let { track ->
+                        RuntimeMiniPlayerCover(
+                            track = track,
+                            heroEnabled = !isFullPlayerOpen,
+                            transitionDirection = transitionDirection,
+                            isLoading = isLoadingAudio,
+                            cornerRadius = if (isWideLayout) 10.dp else 18.dp,
+                            modifier = Modifier.size(if (isWideLayout) 48.dp else 64.dp),
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = state.currentTrack?.title ?: "未播放",
+                            style = if (isWideLayout) {
+                                MaterialTheme.typography.titleSmall
+                            } else {
+                                MaterialTheme.typography.titleMedium
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = if (isLoadingAudio) {
+                                "正在加载音频"
+                            } else {
+                                state.currentTrack?.let(::runtimeArtistAlbumLabel) ?: "选择一首音乐开始播放"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isLoadingAudio) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        RuntimeMiniPlayerLyricLine(state)
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (showPrevious) {
+                            RoundControlButton(
+                                imageVector = Icons.Filled.SkipPrevious,
+                                contentDescription = "上一首",
+                                onClick = playbackSession::previous,
+                                size = 48.dp,
+                                iconSize = 24.dp,
+                            )
+                        }
+                        PlayPauseButton(
+                            isPlaying = state.status == PlaybackSessionStatus.Playing,
+                            isLoading = state.status == PlaybackSessionStatus.Loading,
+                            onClick = playbackSession::toggle,
+                            size = if (isWideLayout) 48.dp else 56.dp,
+                            iconSize = if (isWideLayout) 26.dp else 30.dp,
+                            prominent = !isWideLayout,
+                        )
+                        RoundControlButton(
+                            imageVector = Icons.Filled.SkipNext,
+                            contentDescription = "下一首",
+                            onClick = playbackSession::next,
+                            size = 48.dp,
+                            iconSize = 24.dp,
+                        )
+                    }
                 }
             }
-            RuntimeMiniPlayerProgress(state, isLoadingAudio)
+            RuntimeMiniPlayerProgress(
+                state = state,
+                isLoadingAudio = isLoadingAudio,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = if (isWideLayout) 12.dp else 16.dp)
+                    .padding(bottom = if (isWideLayout) 6.dp else 8.dp),
+            )
         }
     }
 }
 
+internal fun shouldShowMiniPlayerPreviousControl(maxWidth: Dp, isWideLayout: Boolean): Boolean =
+    isWideLayout || maxWidth >= MiniPlayerPreviousControlBreakpoint
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RuntimeMiniPlayerProgress(
     state: PlaybackSessionState,
     isLoadingAudio: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    val duration = state.durationMs.takeIf { it > 0 }
-    if (isLoadingAudio || duration != null) {
-        val targetProgress = duration?.let {
-            state.positionMs.coerceIn(0, it).toFloat() / it
-        } ?: 0f
-        val progress by animateFloatAsState(
-            targetValue = targetProgress,
-            animationSpec = tween(FuoMotion.progressAnimationMillis),
-            label = "mini player progress",
-        )
+    if (isLoadingAudio) {
         LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp),
+            modifier = modifier.height(4.dp),
         )
+        return
     }
+    val duration = state.durationMs.takeIf { it > 0 } ?: return
+    val targetProgress = state.positionMs.coerceIn(0, duration).toFloat() / duration
+    val progress by animateFloatAsState(
+        targetValue = targetProgress,
+        animationSpec = tween(FuoMotion.progressAnimationMillis),
+        label = "mini player progress",
+    )
+    LinearWavyProgressIndicator(
+        progress = { progress },
+        modifier = modifier.height(5.dp),
+        amplitude = { value ->
+            if (state.status == PlaybackSessionStatus.Playing) {
+                WavyProgressIndicatorDefaults.indicatorAmplitude(value)
+            } else {
+                0f
+            }
+        },
+    )
 }
 
 @Composable
