@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 
@@ -23,7 +24,9 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
         exit = slideOutVertically(animationSpec = overlaySpatialSpec) { it / 2 } +
             fadeOut(animationSpec = overlayEffectsSpec),
     ) {
-        RuntimeFullPlayer()
+        CompositionLocalProvider(LocalAppSharedTransitionScope provides null) {
+            RuntimeFullPlayer()
+        }
     }
     LocalMetadataDialog()
     PlaylistTargetFeatureDialog(
