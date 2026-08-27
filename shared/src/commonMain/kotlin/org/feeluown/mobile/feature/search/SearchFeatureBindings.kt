@@ -64,7 +64,13 @@ fun SearchFeatureController.searchRecognizedSong(song: RecognizedSong) {
 private object AppSearchResultOperations : SearchResultOperations<MusicTrack, ProviderSearchResults> {
     override fun empty(errorMessage: String?): ProviderSearchResults = ProviderSearchResults(errorMessage = errorMessage)
 
-    override fun tracks(results: ProviderSearchResults): List<MusicTrack> = results.tracks
+    override fun tracks(results: ProviderSearchResults): List<MusicTrack> =
+        buildList {
+            results.bestMatches.forEach { hit ->
+                if (hit is ProviderSearchHit.Track) add(hit.value)
+            }
+            addAll(results.tracks)
+        }.distinctBy { it.id }
 
     override fun merge(results: List<ProviderSearchResults>): ProviderSearchResults = ProviderSearchResults(
         tracks = roundRobin(results.map { it.tracks }).distinctBy { it.id },
@@ -77,7 +83,7 @@ private object AppSearchResultOperations : SearchResultOperations<MusicTrack, Pr
     )
 
     override fun totalCount(results: ProviderSearchResults): Int =
-        results.tracks.size +
+        tracks(results).size +
             results.playlists.size +
             results.artists.size +
             results.albums.size +
