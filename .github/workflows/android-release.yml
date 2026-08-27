@@ -8,28 +8,10 @@ name: Android Release
 
 jobs:
   test:
-    name: Run shared tests
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    uses: ./.github/workflows/android-tests.yml
     permissions:
       contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Run shared tests
-        run: ./gradlew :shared:allTests
 
   build-release-apks:
     name: Build signed multi-ABI release APK
