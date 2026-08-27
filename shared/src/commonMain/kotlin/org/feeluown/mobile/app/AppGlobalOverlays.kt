@@ -24,6 +24,7 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
         exit = slideOutVertically(animationSpec = overlaySpatialSpec) { it / 2 } +
             fadeOut(animationSpec = overlayEffectsSpec),
     ) {
+        // Full player keeps its normal overlay motion; shared-cover Hero is intentionally disabled.
         CompositionLocalProvider(LocalAppSharedTransitionScope provides null) {
             RuntimeFullPlayer()
         }
