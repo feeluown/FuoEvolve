@@ -140,7 +140,7 @@ jobs:
         uses: actions/ai-inference@v3
         with:
           prompt-file: ./.github/prompts/release-summary.prompt.yml
-          model: ""
+          model: auto
           file_input: |
             release_context: ./build/release-context.md
         env:
