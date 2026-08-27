@@ -305,7 +305,7 @@ private fun ListeningFrequentContent(
             Text("根据你实际听过的次数和时长排序", style = MaterialTheme.typography.bodySmall)
         }
         listeningStatSections().forEach { section ->
-            val rows = resources[section.first].orEmpty().filter(ListeningResourceStat::hasFrequentSignal).take(10)
+            val rows = resources[section.first].orEmpty().filter { it.hasFrequentSignal() }.take(10)
             if (rows.isNotEmpty()) {
                 item("header:${section.first.name}") {
                     Text(section.second, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -316,7 +316,7 @@ private fun ListeningFrequentContent(
                 }
             }
         }
-        if (resources.values.flatten().none(ListeningResourceStat::hasFrequentSignal)) {
+        if (resources.values.flatten().none { it.hasFrequentSignal() }) {
             item("empty") { ProviderContentMessage("这段时间还没有形成常听记录") }
         }
     }
@@ -329,7 +329,7 @@ private fun ListeningStatisticsContent(
     resources: Map<ListeningResourceType, List<ListeningResourceStat>>,
     modifier: Modifier,
 ) {
-    val topTracks = resources[ListeningResourceType.Track].orEmpty().filter(ListeningResourceStat::hasFrequentSignal)
+    val topTracks = resources[ListeningResourceType.Track].orEmpty().filter { it.hasFrequentSignal() }
     val mostPlayedTracks = topTracks.take(5)
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item("overview") {
