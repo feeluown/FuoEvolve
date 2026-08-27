@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -89,6 +90,7 @@ fun HomeScreen(
     val layoutInfo = LocalAppLayoutInfo.current
     val playbackUiPort = LocalPlaybackUiPort.current
     val state = home.uiState.collectAsStateWithLifecycle().value
+    val currentHomeSection by rememberUpdatedState(state.homeSection)
     val selectedIndex = HomePrimarySections.indexOfFirst { it.first == state.homeSection }.coerceAtLeast(0)
     val pagerState = rememberPagerState(
         initialPage = selectedIndex,
@@ -123,12 +125,12 @@ fun HomeScreen(
         isNavigationCompact = false
     }
 
-    LaunchedEffect(pagerState, state.homeSection) {
+    LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .collect { page ->
                 HomePrimarySections.getOrNull(page)?.first?.let { section ->
-                    if (section != state.homeSection) home.setHomeSection(section)
+                    if (section != currentHomeSection) home.setHomeSection(section)
                 }
             }
     }
