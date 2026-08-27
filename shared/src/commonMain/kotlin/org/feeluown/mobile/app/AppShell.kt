@@ -62,7 +62,7 @@ internal fun AppShell(
         ) {
             ProvideNarrowPlaybackUi(playback) {
                 SharedTransitionLayout(Modifier.fillMaxSize()) {
-                    CompositionLocalProvider(LocalPlayerSharedTransitionScope provides this) {
+                    CompositionLocalProvider(LocalAppSharedTransitionScope provides this) {
                         Box(Modifier.fillMaxSize()) {
                             AppNavHost(
                                 backStack = appUiState.backStack,
