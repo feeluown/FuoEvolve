@@ -292,53 +292,60 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
         },
         bottomBar = { if (graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer() },
     ) { paddingValues ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            LoadingIndicator(state.isLoading)
-            ProviderDetailHeader(
-                track = displayPlaylist.toDisplayTrack(),
-                title = displayPlaylist.title.ifBlank { "未命名歌单" },
-                subtitle = buildList {
-                    add(displayPlaylist.providerName)
-                    displayPlaylist.playCount?.let { add(formatPlayCount(it)) }
-                    displayPlaylist.trackCount?.let { add("$it 首") }
-                }.joinToString(" · "),
-                description = displayPlaylist.description,
-                placeholder = CoverPlaceholder.Playlist,
-                action = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (
-                            state.favoriteState.isFavorite ||
-                            state.favoriteState.canFavorite ||
-                            state.favoriteState.canUnfavorite
-                        ) {
-                            ProviderFavoriteButton(
-                                isFavorite = state.favoriteState.isFavorite,
-                                isLoading = state.isFavoriteLoading,
-                                enabled = owner.canToggleFavorite(),
-                                favoriteLabel = "收藏",
-                                unfavoriteLabel = "已收藏",
-                                onClick = owner::toggleFavorite,
-                            )
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ProviderDetailHeader(
+                    track = displayPlaylist.toDisplayTrack(),
+                    title = displayPlaylist.title.ifBlank { "未命名歌单" },
+                    subtitle = buildList {
+                        add(displayPlaylist.providerName)
+                        displayPlaylist.playCount?.let { add(formatPlayCount(it)) }
+                        displayPlaylist.trackCount?.let { add("$it 首") }
+                    }.joinToString(" · "),
+                    description = displayPlaylist.description,
+                    placeholder = CoverPlaceholder.Playlist,
+                    heroKey = playlist.coverHeroKey(),
+                    action = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (
+                                state.favoriteState.isFavorite ||
+                                state.favoriteState.canFavorite ||
+                                state.favoriteState.canUnfavorite
+                            ) {
+                                ProviderFavoriteButton(
+                                    isFavorite = state.favoriteState.isFavorite,
+                                    isLoading = state.isFavoriteLoading,
+                                    enabled = owner.canToggleFavorite(),
+                                    favoriteLabel = "收藏",
+                                    unfavoriteLabel = "已收藏",
+                                    onClick = owner::toggleFavorite,
+                                )
+                            }
+                            if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
+                            ShareTextButton(sharePayload)
                         }
-                        if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
-                        ShareTextButton(sharePayload)
-                    }
-                },
-            )
-            state.errorMessage?.let { ProviderContentMessage(it) }
-            ProviderDetailTrackList(
-                tracks = state.tracks,
-                emptyMessage = "歌单暂无歌曲",
-                showEmpty = !state.isLoading && state.errorMessage == null,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                onClick = owner::play,
-                onItemVisible = owner::prefetchIfNeeded,
-                canRemove = owner::canRemove,
-                onRemove = owner::remove,
-            )
+                    },
+                )
+                state.errorMessage?.let { ProviderContentMessage(it) }
+                ProviderDetailTrackList(
+                    tracks = state.tracks,
+                    emptyMessage = "歌单暂无歌曲",
+                    showEmpty = !state.isLoading && state.errorMessage == null,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onClick = owner::play,
+                    onItemVisible = owner::prefetchIfNeeded,
+                    canRemove = owner::canRemove,
+                    onRemove = owner::remove,
+                )
+            }
+            if (state.isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
+                )
+            }
         }
     }
     if (showDeleteDialog) {
@@ -480,77 +487,84 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
         },
         bottomBar = { if (graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer() },
     ) { paddingValues ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            LoadingIndicator(state.isLoading)
-            ProviderDetailHeader(
-                track = displayItem.toDisplayTrack(),
-                title = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
-                subtitle = buildList {
-                    add(displayItem.providerName)
-                    add(if (isArtist) "歌手" else "专辑")
-                    displayItem.trackCount?.let { add("$it 首") }
-                    if (isArtist) displayItem.albumCount?.let { add("$it 张专辑") }
-                }.joinToString(" · "),
-                description = displayItem.description,
-                placeholder = if (isArtist) CoverPlaceholder.Artist else CoverPlaceholder.Album,
-                action = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (
-                            state.favoriteState.isFavorite ||
-                            state.favoriteState.canFavorite ||
-                            state.favoriteState.canUnfavorite
-                        ) {
-                            ProviderFavoriteButton(
-                                isFavorite = state.favoriteState.isFavorite,
-                                isLoading = state.isFavoriteLoading,
-                                enabled = owner.canToggleFavorite(),
-                                favoriteLabel = if (isArtist) "关注" else "收藏",
-                                unfavoriteLabel = if (isArtist) "已关注" else "已收藏",
-                                onClick = owner::toggleFavorite,
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ProviderDetailHeader(
+                    track = displayItem.toDisplayTrack(),
+                    title = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
+                    subtitle = buildList {
+                        add(displayItem.providerName)
+                        add(if (isArtist) "歌手" else "专辑")
+                        displayItem.trackCount?.let { add("$it 首") }
+                        if (isArtist) displayItem.albumCount?.let { add("$it 张专辑") }
+                    }.joinToString(" · "),
+                    description = displayItem.description,
+                    placeholder = if (isArtist) CoverPlaceholder.Artist else CoverPlaceholder.Album,
+                    heroKey = item.coverHeroKey(),
+                    action = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (
+                                state.favoriteState.isFavorite ||
+                                state.favoriteState.canFavorite ||
+                                state.favoriteState.canUnfavorite
+                            ) {
+                                ProviderFavoriteButton(
+                                    isFavorite = state.favoriteState.isFavorite,
+                                    isLoading = state.isFavoriteLoading,
+                                    enabled = owner.canToggleFavorite(),
+                                    favoriteLabel = if (isArtist) "关注" else "收藏",
+                                    unfavoriteLabel = if (isArtist) "已关注" else "已收藏",
+                                    onClick = owner::toggleFavorite,
+                                )
+                            }
+                            if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
+                            ShareTextButton(sharePayload)
+                        }
+                    },
+                )
+                state.errorMessage?.let { ProviderContentMessage(it) }
+                if (isArtist) {
+                    PrimaryTabRow(selectedTabIndex = selectedTabIndex) {
+                        listOf("歌曲", "专辑").forEachIndexed { index, title ->
+                            Tab(
+                                selected = selectedTabIndex == index,
+                                onClick = { selectedTabIndex = index },
+                                text = { Text(title) },
                             )
                         }
-                        if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
-                        ShareTextButton(sharePayload)
                     }
-                },
-            )
-            state.errorMessage?.let { ProviderContentMessage(it) }
-            if (isArtist) {
-                PrimaryTabRow(selectedTabIndex = selectedTabIndex) {
-                    listOf("歌曲", "专辑").forEachIndexed { index, title ->
-                        Tab(
-                            selected = selectedTabIndex == index,
-                            onClick = { selectedTabIndex = index },
-                            text = { Text(title) },
-                        )
+                }
+                if (isArtist && selectedTabIndex == 1) {
+                    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        if (state.albums.isEmpty() && !state.isLoading && state.errorMessage == null) {
+                            item { ProviderContentMessage("暂无专辑") }
+                        } else {
+                            item {
+                                ProviderMediaItemGrid(
+                                    items = state.albums,
+                                    onClick = owner::open,
+                                    onItemVisible = owner::prefetchAlbumsIfNeeded,
+                                )
+                            }
+                        }
                     }
+                } else {
+                    ProviderDetailTrackList(
+                        tracks = state.tracks,
+                        emptyMessage = "暂无歌曲",
+                        showEmpty = !state.isLoading && state.errorMessage == null,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        onClick = owner::play,
+                        onItemVisible = owner::prefetchTracksIfNeeded,
+                    )
                 }
             }
-            if (isArtist && selectedTabIndex == 1) {
-                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (state.albums.isEmpty() && !state.isLoading && state.errorMessage == null) {
-                        item { ProviderContentMessage("暂无专辑") }
-                    } else {
-                        item {
-                            ProviderMediaItemGrid(
-                                items = state.albums,
-                                onClick = owner::open,
-                                onItemVisible = owner::prefetchAlbumsIfNeeded,
-                            )
-                        }
-                    }
-                }
-            } else {
-                ProviderDetailTrackList(
-                    tracks = state.tracks,
-                    emptyMessage = "暂无歌曲",
-                    showEmpty = !state.isLoading && state.errorMessage == null,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    onClick = owner::play,
-                    onItemVisible = owner::prefetchTracksIfNeeded,
+            if (state.isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
                 )
             }
         }
