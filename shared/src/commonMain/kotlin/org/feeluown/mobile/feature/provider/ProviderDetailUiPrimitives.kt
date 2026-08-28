@@ -99,21 +99,26 @@ fun ShareTextButton(payload: SharePayload?) {
 }
 
 @Composable
-fun ProviderDetailHeader(
+internal fun ProviderDetailHeader(
     track: MusicTrack,
     title: String,
     subtitle: String,
     description: String,
     placeholder: CoverPlaceholder = CoverPlaceholder.Song,
+    heroKey: ResourceCoverHeroKey? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     val descriptionExpanded = remember(description) { mutableStateOf(false) }
     val descriptionOverflows = remember(description) { mutableStateOf(false) }
+    val resolvedHeroKey = heroKey ?: track.detailCoverHeroKey(placeholder)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 4.dp),
+            .padding(
+                top = if (resolvedHeroKey != null) 24.dp else 8.dp,
+                bottom = 4.dp,
+            ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
@@ -123,7 +128,9 @@ fun ProviderDetailHeader(
         ) {
             CoverBox(
                 track = track,
-                modifier = Modifier.size(112.dp),
+                modifier = Modifier
+                    .size(112.dp)
+                    .fuoNavigationHero(resolvedHeroKey),
                 placeholder = placeholder,
             )
             Column(

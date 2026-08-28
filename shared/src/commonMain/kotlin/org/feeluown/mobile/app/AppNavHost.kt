@@ -6,12 +6,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
@@ -19,34 +20,67 @@ import androidx.navigation3.ui.NavDisplay
 private fun pageTransition(
     initialOffsetX: (Int) -> Int,
     targetOffsetX: (Int) -> Int,
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
 ): ContentTransform = (
     slideInHorizontally(
         initialOffsetX = initialOffsetX,
-        animationSpec = tween(FuoMotion.pageTransitionMillis),
-    ) + fadeIn(animationSpec = tween(FuoMotion.pageFadeMillis))
+        animationSpec = spatialSpec,
+    ) + fadeIn(animationSpec = effectsSpec)
     ) togetherWith (
     slideOutHorizontally(
         targetOffsetX = targetOffsetX,
-        animationSpec = tween(FuoMotion.pageTransitionMillis),
-    ) + fadeOut(animationSpec = tween(FuoMotion.pageFadeMillis))
+        animationSpec = spatialSpec,
+    ) + fadeOut(animationSpec = effectsSpec)
     )
 
-private fun forwardPageTransition(): ContentTransform =
-    pageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+private fun forwardPageTransition(
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform = pageTransition(
+    initialOffsetX = { it },
+    targetOffsetX = { -it },
+    spatialSpec = spatialSpec,
+    effectsSpec = effectsSpec,
+)
 
-private fun popPageTransition(): ContentTransform =
-    pageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+private fun popPageTransition(
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform = pageTransition(
+    initialOffsetX = { -it },
+    targetOffsetX = { it },
+    spatialSpec = spatialSpec,
+    effectsSpec = effectsSpec,
+)
 
-private fun settingsForwardPageTransition(): ContentTransform =
-    pageTransition(initialOffsetX = { -it }, targetOffsetX = { it })
+private fun settingsForwardPageTransition(
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform = pageTransition(
+    initialOffsetX = { -it },
+    targetOffsetX = { it },
+    spatialSpec = spatialSpec,
+    effectsSpec = effectsSpec,
+)
 
-private fun settingsPopPageTransition(): ContentTransform =
-    pageTransition(initialOffsetX = { it }, targetOffsetX = { -it })
+private fun settingsPopPageTransition(
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform = pageTransition(
+    initialOffsetX = { it },
+    targetOffsetX = { -it },
+    spatialSpec = spatialSpec,
+    effectsSpec = effectsSpec,
+)
 
-private fun settingsNavigationMetadata(): Map<String, Any> =
-    NavDisplay.transitionSpec { settingsForwardPageTransition() } +
-        NavDisplay.popTransitionSpec { settingsPopPageTransition() } +
-        NavDisplay.predictivePopTransitionSpec { settingsPopPageTransition() }
+private fun settingsNavigationMetadata(
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): Map<String, Any> =
+    NavDisplay.transitionSpec { settingsForwardPageTransition(spatialSpec, effectsSpec) } +
+        NavDisplay.popTransitionSpec { settingsPopPageTransition(spatialSpec, effectsSpec) } +
+        NavDisplay.predictivePopTransitionSpec { settingsPopPageTransition(spatialSpec, effectsSpec) }
 
 @Composable
 internal fun AppNavHost(
@@ -58,6 +92,8 @@ internal fun AppNavHost(
 ) {
     val localPlaylistState by uiGraph.localPlaylist.uiState.collectAsStateWithLifecycle()
     val activeRoute = backStack.lastOrNull()
+    val pageSpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
+    val pageEffectsSpec = FuoMotion.fastEffectsSpec<Float>()
 
     LaunchedEffect(activeRoute, uiGraph.playback.queue) {
         uiGraph.playback.queue.setPlaybackContextHint(activeRoute?.toPlaybackContextSnapshot())
@@ -67,13 +103,17 @@ internal fun AppNavHost(
         backStack = backStack,
         modifier = modifier,
         onBack = { appViewModel.onBack() },
-        transitionSpec = { forwardPageTransition() },
-        popTransitionSpec = { popPageTransition() },
-        predictivePopTransitionSpec = { popPageTransition() },
+        transitionSpec = { forwardPageTransition(pageSpatialSpec, pageEffectsSpec) },
+        popTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
+        predictivePopTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
         entryProvider = { route ->
             NavEntry(
                 key = route,
-                metadata = if (route == AppRoute.Settings) settingsNavigationMetadata() else emptyMap(),
+                metadata = if (route == AppRoute.Settings) {
+                    settingsNavigationMetadata(pageSpatialSpec, pageEffectsSpec)
+                } else {
+                    emptyMap()
+                },
             ) {
                 when (route) {
                     AppRoute.Home -> HomeScreen(

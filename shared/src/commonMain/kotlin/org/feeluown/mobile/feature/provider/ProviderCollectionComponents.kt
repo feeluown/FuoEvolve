@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.currentCompositeKeyHashCode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -31,6 +32,7 @@ fun ProviderPlaylistGrid(
     onClick: (ProviderPlaylist) -> Unit,
     onMore: (() -> Unit)? = null,
     maxRows: Int? = null,
+    heroScopeKey: String? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     val columns = layoutInfo.gridColumns.coerceAtLeast(1)
@@ -43,6 +45,8 @@ fun ProviderPlaylistGrid(
         hasMore -> playlists.take(capacity)
         else -> playlists
     }
+    val resolvedHeroScopeKey = heroScopeKey ?: "composition:${currentCompositeKeyHashCode}"
+    val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing),
@@ -63,10 +67,14 @@ fun ProviderPlaylistGrid(
                             )
                         }
                         is PlaylistGridCell.Playlist -> {
+                            val identity = cell.value.coverHeroKey()
+                            val occurrence = heroOccurrences[identity] ?: 0
+                            heroOccurrences[identity] = occurrence + 1
                             ProviderPlaylistCard(
                                 playlist = cell.value,
                                 onClick = { onClick(cell.value) },
                                 modifier = Modifier.weight(1f),
+                                heroSourceId = identity.forSource(resolvedHeroScopeKey, occurrence).sourceInstanceId,
                             )
                         }
                     }
@@ -147,19 +155,29 @@ fun ProviderPlaylistCard(
     playlist: ProviderPlaylist,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    heroSourceId: String? = null,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val heroCoordinator = LocalResourceHeroCoordinator.current
+    val heroKey = playlist.coverHeroKey().copy(sourceInstanceId = heroSourceId)
     Column(
         modifier = modifier
             .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(
+                role = Role.Button,
+                onClick = {
+                    heroCoordinator?.activate(heroKey)
+                    onClick()
+                },
+            )
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
             track = playlist.toDisplayTrack(),
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f),
+                .aspectRatio(1f)
+                .fuoNavigationHero(heroKey),
             placeholder = CoverPlaceholder.Playlist,
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
@@ -189,6 +207,7 @@ fun ProviderMediaItemGrid(
     onItemVisible: ((Int) -> Unit)? = null,
     onMore: (() -> Unit)? = null,
     maxRows: Int? = null,
+    heroScopeKey: String? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     val columns = layoutInfo.gridColumns.coerceAtLeast(1)
@@ -202,6 +221,8 @@ fun ProviderMediaItemGrid(
         else -> items
     }
     val itemType = items.firstOrNull()?.type
+    val resolvedHeroScopeKey = heroScopeKey ?: "composition:${currentCompositeKeyHashCode}"
+    val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing),
@@ -233,10 +254,14 @@ fun ProviderMediaItemGrid(
                                     onItemVisible(index)
                                 }
                             }
+                            val identity = cell.value.coverHeroKey()
+                            val occurrence = heroOccurrences[identity] ?: 0
+                            heroOccurrences[identity] = occurrence + 1
                             ProviderMediaItemCard(
                                 item = cell.value,
                                 onClick = { onClick(cell.value) },
                                 modifier = Modifier.weight(1f),
+                                heroSourceId = identity.forSource(resolvedHeroScopeKey, occurrence).sourceInstanceId,
                             )
                         }
                     }
@@ -259,19 +284,29 @@ fun ProviderMediaItemCard(
     item: ProviderMediaItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    heroSourceId: String? = null,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
+    val heroCoordinator = LocalResourceHeroCoordinator.current
+    val heroKey = item.coverHeroKey().copy(sourceInstanceId = heroSourceId)
     Column(
         modifier = modifier
             .fuoInteractive()
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(
+                role = Role.Button,
+                onClick = {
+                    heroCoordinator?.activate(heroKey)
+                    onClick()
+                },
+            )
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
         CoverBox(
             track = item.toDisplayTrack(),
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f),
+                .aspectRatio(1f)
+                .fuoNavigationHero(heroKey),
             placeholder = when (item.type) {
                 ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
                 ProviderMediaItemType.Album -> CoverPlaceholder.Album

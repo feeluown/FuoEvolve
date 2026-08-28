@@ -145,6 +145,53 @@ tasks.register("checkArchitectureBoundaries") {
     inputs.file(rootProject.file(searchFeatureBuildFile))
 
     doLast {
+        val sharedAppRoot = rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/app")
+        val sharedLowerUiRoots = listOf(
+            rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/feature"),
+            rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/core"),
+        )
+        val compositionLocalDeclarationPattern = Regex(
+            "\\bval\\s+(Local[A-Za-z0-9_]+)\\s*=\\s*(?:staticCompositionLocalOf|compositionLocalOf)\\b",
+        )
+        val appOwnedCompositionLocals = if (sharedAppRoot.isDirectory) {
+            sharedAppRoot.walkTopDown()
+                .filter { it.isFile && it.extension == "kt" }
+                .flatMap { file ->
+                    compositionLocalDeclarationPattern.findAll(file.readText())
+                        .map { match -> match.groupValues[1] }
+                }
+                .toSet()
+        } else {
+            emptySet()
+        }
+        val appOwnedAmbientViolations = sharedLowerUiRoots
+            .filter { it.isDirectory }
+            .flatMap { root -> root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    val trimmed = line.trimStart()
+                    val commentOnly = trimmed.startsWith("//") ||
+                        trimmed.startsWith("/**") ||
+                        trimmed.startsWith("*") ||
+                        trimmed.startsWith("*/")
+                    if (commentOnly) return@mapIndexedNotNull null
+                    appOwnedCompositionLocals.firstOrNull { symbol ->
+                        Regex("\\b${Regex.escape(symbol)}\\b").containsMatchIn(line)
+                    }?.let { symbol ->
+                        "${file.relativeTo(rootProject.projectDir).invariantSeparatorsPath}:${index + 1} ($symbol)"
+                    }
+                }
+            }
+        if (appOwnedAmbientViolations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Feature/core UI depends upward on app-owned CompositionLocal declarations:")
+                    appOwnedAmbientViolations.forEach { appendLine(" - $it") }
+                    append("Move cross-feature UI ambients to shared/core/ui and let the app shell only provide their values.")
+                },
+            )
+        }
+
         val retiredCompatViolations = retiredControllerCompatibilityFiles
             .map(rootProject::file)
             .filter { it.isFile }
