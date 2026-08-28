@@ -1,19 +1,11 @@
 package org.feeluown.mobile
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 val LocalShareHandler = staticCompositionLocalOf<(SharePayload) -> Unit> { {} }
 val LocalAppLayoutInfo = staticCompositionLocalOf { AppLayoutInfo() }
-
-@OptIn(ExperimentalSharedTransitionApi::class)
-val LocalAppSharedTransitionScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
-
-@OptIn(ExperimentalSharedTransitionApi::class)
-val LocalPlayerSharedTransitionScope = LocalAppSharedTransitionScope
 
 data class AppLayoutInfo(
     val isLandscape: Boolean = false,
