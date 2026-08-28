@@ -1,40 +1,6 @@
 name: iOS Debug App
 
 "on":
-  push:
-    branches:
-      - master
-    paths:
-      - "iosApp/**"
-      - "shared/**"
-      - "core/**"
-      - "feature/**"
-      - "playback/**"
-      - "provider/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-      - "gradle/**"
-      - "gradlew"
-      - "gradlew.bat"
-      - ".github/workflows/ios-debug-app.yml"
-  pull_request:
-    branches:
-      - master
-    paths:
-      - "iosApp/**"
-      - "shared/**"
-      - "core/**"
-      - "feature/**"
-      - "playback/**"
-      - "provider/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-      - "gradle/**"
-      - "gradlew"
-      - "gradlew.bat"
-      - ".github/workflows/ios-debug-app.yml"
   workflow_dispatch:
 
 concurrency:
