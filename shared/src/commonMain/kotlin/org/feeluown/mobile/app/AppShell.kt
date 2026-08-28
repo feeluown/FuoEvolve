@@ -92,25 +92,34 @@ internal fun AppShell(
                                     modifier = Modifier.fillMaxSize(),
                                 )
                                 AppGlobalOverlays(uiGraph)
-                                PlaybackDynamicColorTheme(
-                                    emphasis = if (playback.isFullPlayerOpen) {
-                                        PlaybackColorEmphasis.Immersive
-                                    } else {
-                                        PlaybackColorEmphasis.Ambient
-                                    },
-                                ) {
+                                val feedbackModifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .navigationBarsPadding()
+                                    .padding(
+                                        start = 16.dp,
+                                        top = 16.dp,
+                                        end = 16.dp,
+                                        bottom = snackbarBottomPadding,
+                                    )
+                                if (playback.isFullPlayerOpen || miniPlayerVisible) {
+                                    PlaybackDynamicColorTheme(
+                                        emphasis = if (playback.isFullPlayerOpen) {
+                                            PlaybackColorEmphasis.Immersive
+                                        } else {
+                                            PlaybackColorEmphasis.Ambient
+                                        },
+                                    ) {
+                                        AppFeedbackHost(
+                                            appViewModel = appViewModel,
+                                            uiGraph = uiGraph,
+                                            modifier = feedbackModifier,
+                                        )
+                                    }
+                                } else {
                                     AppFeedbackHost(
                                         appViewModel = appViewModel,
                                         uiGraph = uiGraph,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .navigationBarsPadding()
-                                            .padding(
-                                                start = 16.dp,
-                                                top = 16.dp,
-                                                end = 16.dp,
-                                                bottom = snackbarBottomPadding,
-                                            ),
+                                        modifier = feedbackModifier,
                                     )
                                 }
                             }
