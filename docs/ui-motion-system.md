@@ -47,8 +47,9 @@ Use the more prominent scale only for compact, visually raised surfaces such as 
 Hero transitions are reserved for a stable visual object that exists on both sides of a navigation or presentation change. They complement the existing page transition instead of replacing it.
 
 - Provider playlist, album, and artist cards share only their cover image with the corresponding detail header.
-- Resource identity remains resource type + provider ID + resource ID. A transient per-card source instance token disambiguates duplicate renderings of the same resource on one page so forward and pop transitions return to the card that was actually clicked.
-- The source instance token belongs only to the UI Hero layer; it is saveable with the source composition and is not added to provider/domain models or navigation routes.
+- Resource identity remains resource type + provider ID + resource ID. A per-card source instance token disambiguates duplicate renderings of the same resource on one page so forward and pop transitions return to the card that was actually clicked.
+- Source instance tokens are derived deterministically from the resource container's stable Compose composition key plus the resource occurrence within that container. Recreating the source page therefore produces the same shared-element key instead of a new random token.
+- The source instance token belongs only to the UI Hero layer and is not added to provider/domain models or navigation routes.
 - Navigation Hero elements use the app-level `SharedTransitionLayout` together with Navigation3's `LocalNavAnimatedContentScope`, so normal pop and predictive-back navigation can drive the same shared element.
 - Playlist, album, and artist detail loading progress is overlay-only and does not remeasure the Hero header. The destination keeps a stable target position while refreshed metadata arrives.
 - The full player intentionally does not participate in shared-cover Hero transitions; it keeps the normal overlay enter/exit motion.
