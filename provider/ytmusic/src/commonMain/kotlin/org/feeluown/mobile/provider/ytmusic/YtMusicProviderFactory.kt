@@ -5,6 +5,7 @@ import org.feeluown.mobile.ProviderDeviceAuthorizationPollResult
 import org.feeluown.mobile.ProviderOAuthToken
 import org.feeluown.mobile.ProviderSearchHit
 import org.feeluown.mobile.ProviderSearchResults
+import org.feeluown.mobile.provider.core.CapabilityDelegatingProvider
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.KotlinProviderFactory
 import org.feeluown.mobile.provider.core.ProviderDeviceAuthorizationCapability
@@ -17,15 +18,28 @@ object YtMusicProviderFactory : KotlinProviderFactory {
     override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
         val base = YtMusicProvider(dependencies.http, dependencies.credentials)
         val content = YtMusicContentProvider(base, dependencies.http, dependencies.credentials)
-        return YtMusicApplicationProvider(content)
+        val provider = CapabilityDelegatingProvider(
+            base = base,
+            presentation = content,
+            account = content,
+            discovery = content,
+            content = content,
+            library = content,
+            playback = content,
+        )
+        return YtMusicApplicationProvider(
+            provider = provider,
+            oauth = content,
+        )
     }
 }
 
 private class YtMusicApplicationProvider(
-    private val content: YtMusicContentProvider,
-) : KotlinMusicProvider by content, ProviderDeviceAuthorizationCapability {
+    private val provider: KotlinMusicProvider,
+    private val oauth: YtMusicContentProvider,
+) : KotlinMusicProvider by provider, ProviderDeviceAuthorizationCapability {
     override suspend fun search(keyword: String): ProviderSearchResults {
-        val results = content.search(keyword)
+        val results = provider.search(keyword)
         if (results.bestMatches.isNotEmpty()) return results
         return results.copy(bestMatches = listOfNotNull(bestMatch(keyword, results)))
     }
@@ -33,7 +47,7 @@ private class YtMusicApplicationProvider(
     override suspend fun beginDeviceAuthorization(
         clientId: String,
         clientSecret: String,
-    ): ProviderDeviceAuthorization = content.beginOAuth(clientId, clientSecret).let { code ->
+    ): ProviderDeviceAuthorization = oauth.beginOAuth(clientId, clientSecret).let { code ->
         ProviderDeviceAuthorization(
             providerId = YtMusicProvider.ID,
             deviceCode = code.deviceCode,
@@ -49,7 +63,7 @@ private class YtMusicApplicationProvider(
         clientId: String,
         clientSecret: String,
     ): ProviderDeviceAuthorizationPollResult = when (
-        val result = content.pollOAuth(deviceCode, clientId, clientSecret)
+        val result = oauth.pollOAuth(deviceCode, clientId, clientSecret)
     ) {
         is YtMusicOAuthPollResult.Authorized -> ProviderDeviceAuthorizationPollResult.Authorized(
             ProviderOAuthToken(
@@ -68,7 +82,7 @@ private class YtMusicApplicationProvider(
         oauthJson: String,
         clientId: String,
         clientSecret: String,
-    ) = content.loginWithOAuthJson(oauthJson, clientId, clientSecret)
+    ) = oauth.loginWithOAuthJson(oauthJson, clientId, clientSecret)
 
     private fun bestMatch(keyword: String, results: ProviderSearchResults): ProviderSearchHit? {
         val query = normalize(keyword)
