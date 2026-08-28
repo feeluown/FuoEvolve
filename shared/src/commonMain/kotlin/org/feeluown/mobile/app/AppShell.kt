@@ -15,6 +15,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -26,6 +29,13 @@ internal fun AppShell(
 ) {
     val videoDetailState by uiGraph.providerDetail.owners.video.uiState.collectAsStateWithLifecycle()
     val playback = uiGraph.playback
+    val isPlaybackLoading by remember(uiGraph.playbackSession) {
+        uiGraph.playbackSession.state
+            .map { it.status == PlaybackSessionStatus.Loading }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = uiGraph.playbackSession.state.value.status == PlaybackSessionStatus.Loading,
+    )
     val resourceHeroCoordinator = remember { ResourceHeroCoordinator() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -62,33 +72,48 @@ internal fun AppShell(
             LocalAppLayoutInfo provides layoutInfo,
         ) {
             ProvideNarrowPlaybackUi(playback) {
-                SharedTransitionLayout(Modifier.fillMaxSize()) {
-                    CompositionLocalProvider(
-                        LocalAppSharedTransitionScope provides this,
-                        LocalResourceHeroCoordinator provides resourceHeroCoordinator,
-                    ) {
-                        Box(Modifier.fillMaxSize()) {
-                            AppNavHost(
-                                backStack = appUiState.backStack,
-                                appViewModel = appViewModel,
-                                uiGraph = uiGraph,
-                                platform = platform,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                            AppGlobalOverlays(uiGraph)
-                            AppFeedbackHost(
-                                appViewModel = appViewModel,
-                                uiGraph = uiGraph,
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .navigationBarsPadding()
-                                    .padding(
-                                        start = 16.dp,
-                                        top = 16.dp,
-                                        end = 16.dp,
-                                        bottom = snackbarBottomPadding,
-                                    ),
-                            )
+                ProvidePlaybackColorEnvironment(
+                    themeMode = playback.presentation.themeMode,
+                    dynamicCoverColorEnabled = playback.presentation.dynamicCoverColorEnabled,
+                    coverImageUrl = playback.presentation.currentTrack?.coverUrl,
+                    isLoading = isPlaybackLoading,
+                ) {
+                    SharedTransitionLayout(Modifier.fillMaxSize()) {
+                        CompositionLocalProvider(
+                            LocalAppSharedTransitionScope provides this,
+                            LocalResourceHeroCoordinator provides resourceHeroCoordinator,
+                        ) {
+                            Box(Modifier.fillMaxSize()) {
+                                AppNavHost(
+                                    backStack = appUiState.backStack,
+                                    appViewModel = appViewModel,
+                                    uiGraph = uiGraph,
+                                    platform = platform,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                                AppGlobalOverlays(uiGraph)
+                                PlaybackDynamicColorTheme(
+                                    emphasis = if (playback.isFullPlayerOpen) {
+                                        PlaybackColorEmphasis.Immersive
+                                    } else {
+                                        PlaybackColorEmphasis.Ambient
+                                    },
+                                ) {
+                                    AppFeedbackHost(
+                                        appViewModel = appViewModel,
+                                        uiGraph = uiGraph,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .navigationBarsPadding()
+                                            .padding(
+                                                start = 16.dp,
+                                                top = 16.dp,
+                                                end = 16.dp,
+                                                bottom = snackbarBottomPadding,
+                                            ),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
