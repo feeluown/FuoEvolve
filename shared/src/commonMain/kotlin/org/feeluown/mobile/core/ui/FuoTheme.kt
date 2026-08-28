@@ -8,11 +8,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -32,6 +29,7 @@ private const val REQUIRED_CONTRAST_RATIO = 4.5
 
 private val LocalThemePaletteStyle = staticCompositionLocalOf { ThemePaletteStyle.Expressive }
 private val LocalThemeColorSpec = staticCompositionLocalOf { ThemeColorSpec.Expressive_2025 }
+private val LocalBaseTargetColorScheme = staticCompositionLocalOf<ColorScheme?> { null }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -43,18 +41,23 @@ fun FuoTheme(
     content: @Composable () -> Unit,
 ) {
     val darkTheme = resolvedDarkTheme(themeMode, isSystemInDarkTheme())
-    val colorScheme = fuoColorScheme(
+    val targetColorScheme = fuoColorScheme(
         themeColorScheme = themeColorScheme,
         darkTheme = darkTheme,
         paletteStyle = themePaletteStyle,
         colorSpec = themeColorSpec,
     )
+    val animatedColorScheme = rememberAnimatedColorScheme(
+        target = targetColorScheme,
+        labelPrefix = "app theme",
+    )
     CompositionLocalProvider(
         LocalThemePaletteStyle provides themePaletteStyle,
         LocalThemeColorSpec provides themeColorSpec,
+        LocalBaseTargetColorScheme provides targetColorScheme,
     ) {
-        FuoExpressiveTheme(colorScheme = colorScheme) {
-            platformWindowSurfaceEffect(colorScheme.surface)
+        FuoExpressiveTheme(colorScheme = animatedColorScheme) {
+            platformWindowSurfaceEffect(animatedColorScheme.surface)
             content()
         }
     }
@@ -70,7 +73,7 @@ internal fun PlayerDynamicColorTheme(
     content: @Composable () -> Unit,
 ) {
     val darkTheme = resolvedDarkTheme(themeMode, isSystemInDarkTheme())
-    val baseColorScheme = MaterialTheme.colorScheme
+    val baseTargetColorScheme = LocalBaseTargetColorScheme.current ?: MaterialTheme.colorScheme
     val paletteStyle = LocalThemePaletteStyle.current
     val colorSpec = LocalThemeColorSpec.current
     val coverColorSeed = rememberCoverColorSeed(
@@ -84,21 +87,16 @@ internal fun PlayerDynamicColorTheme(
     val hasCoverColor = dynamicCoverColorEnabled &&
         (isLoading || !coverImageUrl.isNullOrBlank()) &&
         coverColorSeed != null
-    val animatedCoverColorSeed by animateColorAsState(
-        targetValue = coverColorSeed ?: baseColorScheme.primary,
-        animationSpec = tween(FuoMotion.coverColorTransitionMillis),
-        label = "player cover color",
-    )
     val coverColorScheme = remember(
-        animatedCoverColorSeed,
+        coverColorSeed,
         darkTheme,
         hasCoverColor,
         paletteStyle,
         colorSpec,
     ) {
-        if (hasCoverColor) {
+        if (hasCoverColor && coverColorSeed != null) {
             generatedColorScheme(
-                seedColor = animatedCoverColorSeed,
+                seedColor = coverColorSeed,
                 darkTheme = darkTheme,
                 paletteStyle = paletteStyle,
                 colorSpec = colorSpec,
@@ -107,8 +105,12 @@ internal fun PlayerDynamicColorTheme(
             null
         }
     }
+    val animatedColorScheme = rememberAnimatedColorScheme(
+        target = coverColorScheme ?: baseTargetColorScheme,
+        labelPrefix = "player theme",
+    )
     FuoExpressiveTheme(
-        colorScheme = coverColorScheme ?: baseColorScheme,
+        colorScheme = animatedColorScheme,
         content = content,
     )
 }
@@ -209,29 +211,40 @@ private fun fuoColorScheme(
     paletteStyle: ThemePaletteStyle,
     colorSpec: ThemeColorSpec,
 ): ColorScheme {
-    if (themeColorScheme == ThemeColorScheme.Dynamic) {
-        platformDynamicColorScheme(darkTheme)?.let { platformScheme ->
+    val platformPrimary = if (themeColorScheme == ThemeColorScheme.Dynamic) {
+        platformDynamicColorScheme(darkTheme)?.primary
+    } else {
+        null
+    }
+    return remember(
+        themeColorScheme,
+        darkTheme,
+        paletteStyle,
+        colorSpec,
+        platformPrimary,
+    ) {
+        if (platformPrimary != null) {
             val generated = generatedColorScheme(
-                seedColor = platformScheme.primary,
+                seedColor = platformPrimary,
                 darkTheme = darkTheme,
                 paletteStyle = paletteStyle,
                 colorSpec = colorSpec,
             )
             if (hasAccessibleContrast(generated)) {
-                return generated
+                return@remember generated
             }
         }
+        presetColorScheme(
+            preset = if (themeColorScheme == ThemeColorScheme.Dynamic) {
+                ThemeColorScheme.ExpressiveDefault
+            } else {
+                themeColorScheme
+            },
+            darkTheme = darkTheme,
+            paletteStyle = paletteStyle,
+            colorSpec = colorSpec,
+        )
     }
-    return presetColorScheme(
-        preset = if (themeColorScheme == ThemeColorScheme.Dynamic) {
-            ThemeColorScheme.ExpressiveDefault
-        } else {
-            themeColorScheme
-        },
-        darkTheme = darkTheme,
-        paletteStyle = paletteStyle,
-        colorSpec = colorSpec,
-    )
 }
 
 @Composable
