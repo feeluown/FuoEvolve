@@ -70,7 +70,7 @@ internal object FuoMotion {
     const val pageFadeMillis = 180
     const val coverTransitionMillis = 360
     const val coverFadeMillis = 220
-    const val coverColorTransitionMillis = 420
+    const val themeColorTransitionMillis = 420
     const val progressAnimationMillis = 180
     const val overlayEnterMillis = 240
     const val overlayExitMillis = 200
