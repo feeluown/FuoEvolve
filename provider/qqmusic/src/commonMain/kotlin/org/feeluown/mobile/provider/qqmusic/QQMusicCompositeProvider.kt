@@ -16,17 +16,30 @@ import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 
 /**
- * QQ Music module-local composite. Provider-specific discovery, account library and artist
- * enrichment stay inside the concrete provider module instead of leaking helper types to :shared.
+ * QQ Music module-local content/library composition.
+ *
+ * The delegates are injectable so the factory can share one core provider instance across
+ * playback, content, account and library capabilities instead of constructing nested providers.
  */
 internal class QQMusicCompositeProvider(
     dependencies: ProviderRuntimeDependencies,
+    private val content: QQMusicContentProvider = QQMusicContentProvider(
+        dependencies.http,
+        dependencies.credentials,
+    ),
+    private val userLibrary: QQMusicUserLibrary = QQMusicUserLibrary(
+        dependencies.http,
+        dependencies.credentials,
+    ),
+    private val followedArtists: QQMusicFollowedArtistsLoader = QQMusicFollowedArtistsLoader(
+        dependencies.http,
+        dependencies.credentials,
+    ),
+    private val artistDetails: QQMusicArtistDetailProvider = QQMusicArtistDetailProvider(
+        dependencies.http,
+        dependencies.credentials,
+    ),
 ) : KotlinMusicProvider {
-    private val content = QQMusicContentProvider(dependencies.http, dependencies.credentials)
-    private val userLibrary = QQMusicUserLibrary(dependencies.http, dependencies.credentials)
-    private val followedArtists = QQMusicFollowedArtistsLoader(dependencies.http, dependencies.credentials)
-    private val artistDetails = QQMusicArtistDetailProvider(dependencies.http, dependencies.credentials)
-
     override val id: String get() = content.id
     override val name: String get() = content.name
     override val info get() = content.info
@@ -48,6 +61,7 @@ internal class QQMusicCompositeProvider(
     override suspend fun trackDetail(identifier: String) = content.trackDetail(identifier)
     override suspend fun resolve(track: MusicTrack, qualityPolicy: String) = content.resolve(track, qualityPolicy)
     override suspend fun lyrics(track: MusicTrack) = content.lyrics(track)
+    override suspend fun lyricsSearchKeyword(track: MusicTrack) = content.lyricsSearchKeyword(track)
 
     override suspend fun authState(): ProviderAuthState = enrichAuth(content.authState())
 
