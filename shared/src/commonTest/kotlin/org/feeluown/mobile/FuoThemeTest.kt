@@ -50,4 +50,26 @@ class FuoThemeTest {
         assertEquals(21.0, colorContrastRatio(Color.White, Color.Black), absoluteTolerance = 0.01)
         assertTrue(colorContrastRatio(Color.Black, Color.White) >= 21.0 - 0.01)
     }
+
+    @Test
+    fun transitionContrastCorrectionProtectsLowContrastMidpoint() {
+        val midpoint = Color(0xFF777777)
+        val corrected = ensureThemeContrast(
+            foreground = midpoint,
+            backgrounds = listOf(midpoint),
+        )
+
+        assertTrue(colorContrastRatio(corrected, midpoint) >= 4.5)
+    }
+
+    @Test
+    fun transitionContrastCorrectionKeepsAccessibleColorUnchanged() {
+        val foreground = Color.Black
+        val background = Color.White
+
+        assertEquals(
+            foreground,
+            ensureThemeContrast(foreground, listOf(background)),
+        )
+    }
 }
