@@ -132,10 +132,12 @@ fun ProvideNarrowPlaybackUi(
 @Composable
 fun PlaybackMiniPlayer() {
     val graph = LocalPlaybackUiPort.current
-    RuntimeMiniPlayer(
-        playbackSession = LocalPlaybackSession.current,
-        isFullPlayerOpen = graph.navigation.isFullPlayerOpen,
-        transitionDirection = graph.queue.trackChangeDirection,
-        onOpenFullPlayer = graph.navigation::openFullPlayer,
-    )
+    PlaybackDynamicColorTheme(emphasis = PlaybackColorEmphasis.Ambient) {
+        RuntimeMiniPlayer(
+            playbackSession = LocalPlaybackSession.current,
+            isFullPlayerOpen = graph.navigation.isFullPlayerOpen,
+            transitionDirection = graph.queue.trackChangeDirection,
+            onOpenFullPlayer = graph.navigation::openFullPlayer,
+        )
+    }
 }
