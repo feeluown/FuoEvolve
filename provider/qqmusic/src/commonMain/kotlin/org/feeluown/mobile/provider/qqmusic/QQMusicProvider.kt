@@ -7,12 +7,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPayload
-import org.feeluown.mobile.ProviderCapabilities
 import org.feeluown.mobile.ProviderComment
-import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderFeature
-import org.feeluown.mobile.ProviderFeatureCategory
-import org.feeluown.mobile.ProviderInfo
 import org.feeluown.mobile.ProviderMediaItem
 import org.feeluown.mobile.ProviderMediaItemDetail
 import org.feeluown.mobile.ProviderMediaItemType
@@ -33,7 +29,6 @@ import org.feeluown.mobile.provider.core.base64DecodeToString
 import org.feeluown.mobile.provider.core.boolean
 import org.feeluown.mobile.provider.core.int
 import org.feeluown.mobile.provider.core.long
-import org.feeluown.mobile.provider.core.md5Hex
 import org.feeluown.mobile.provider.core.obj
 import org.feeluown.mobile.provider.core.parseCookies
 import org.feeluown.mobile.provider.core.providerJson
@@ -44,7 +39,6 @@ import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderRequestKind
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
-import kotlin.random.Random
 
 class QQMusicProvider(
     http: ProviderHttpClient,
@@ -972,58 +966,16 @@ class QQMusicProvider(
     }
 
     private companion object {
-        const val ID = "qqmusic"
-        const val NAME = "QQ 音乐"
-        const val SEARCH_BASE = "https://c.y.qq.com"
-        const val VKEY_BASE = "https://u.y.qq.com"
-        const val QQ_AUDIO_BASE = "http://isure.stream.qqmusic.qq.com"
-        const val PLAYLIST_MUTATION_SYNC_ATTEMPTS = 6
-        const val PLAYLIST_MUTATION_SYNC_DELAY_MS = 200L
-        val defaultGuid = Random.nextLong(100_000_000, 1_000_000_000).toString()
-        val INFO = ProviderInfo(
-            providerId = ID,
-            providerName = NAME,
-            loginConfig = org.feeluown.mobile.ProviderLoginConfig(
-                "https://y.qq.com",
-                listOf(listOf("qqmusic_key", "wxuin", "qm_keyst"), listOf("qqmusic_key", "uin", "qm_keyst")),
-            ),
-            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
-        )
-        val CAPABILITIES = ProviderCapabilities(
-            providerId = ID,
-            providerName = NAME,
-            canAddSongToPlaylist = true,
-            canRemoveSongFromPlaylist = true,
-            canCreatePlaylist = true,
-            canDeletePlaylist = true,
-        )
-        val FEATURES = listOf(
-            ProviderFeature("qqmusic_daily_songs", ID, NAME, "每日推荐歌曲", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
-            ProviderFeature("qqmusic_radio", ID, NAME, "私人 FM", ProviderFeatureCategory.Recommend, ProviderContentType.Songs, true),
-            ProviderFeature("qqmusic_daily_playlists", ID, NAME, "推荐歌单", ProviderFeatureCategory.Recommend, ProviderContentType.Playlists, true),
-            ProviderFeature("qqmusic_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
-        )
+        const val ID = QQMusicProviderDefinition.ID
+        const val NAME = QQMusicProviderDefinition.NAME
+        const val SEARCH_BASE = QQMusicProviderDefinition.SEARCH_BASE
+        const val VKEY_BASE = QQMusicProviderDefinition.VKEY_BASE
+        const val QQ_AUDIO_BASE = QQMusicProviderDefinition.QQ_AUDIO_BASE
+        const val PLAYLIST_MUTATION_SYNC_ATTEMPTS = QQMusicProviderDefinition.PLAYLIST_MUTATION_SYNC_ATTEMPTS
+        const val PLAYLIST_MUTATION_SYNC_DELAY_MS = QQMusicProviderDefinition.PLAYLIST_MUTATION_SYNC_DELAY_MS
+        val defaultGuid get() = QQMusicProviderDefinition.defaultGuid
+        val INFO get() = QQMusicProviderDefinition.info
+        val CAPABILITIES get() = QQMusicProviderDefinition.capabilities
+        val FEATURES get() = QQMusicProviderDefinition.features
     }
 }
-
-private data class QqAudioQuality(
-    val code: String,
-    val prefix: String,
-    val extension: String,
-    val label: String,
-) {
-    fun filename(mediaId: String): String = "$prefix$mediaId.$extension"
-}
-
-private fun JsonObject.hasPositive(key: String): Boolean = string(key).toLongOrNull()?.let { it > 0 } == true
-
-private fun qqSign(data: String): String {
-    val randomPart = buildString {
-        repeat(Random.nextInt(10, 17)) {
-            append(QQ_SIGN_ALPHABET[Random.nextInt(QQ_SIGN_ALPHABET.length)])
-        }
-    }
-    return "zza$randomPart${md5Hex("CJBPACrRuNy7$data")}"
-}
-
-private const val QQ_SIGN_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
