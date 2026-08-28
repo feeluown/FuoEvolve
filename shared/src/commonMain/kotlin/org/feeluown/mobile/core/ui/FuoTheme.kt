@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
 import com.materialkolor.dynamiccolor.ColorSpec
@@ -27,10 +28,18 @@ import kotlin.math.pow
 
 private const val COVER_THEME_MAX_COLORS = 128
 private const val REQUIRED_CONTRAST_RATIO = 4.5
+private const val PLAYBACK_AMBIENT_SURFACE_BLEND = 0.32f
+private const val PLAYBACK_AMBIENT_ACCENT_BLEND = 0.62f
 
 private val LocalThemePaletteStyle = staticCompositionLocalOf { ThemePaletteStyle.Expressive }
 private val LocalThemeColorSpec = staticCompositionLocalOf { ThemeColorSpec.Expressive_2025 }
 private val LocalBaseTargetColorScheme = staticCompositionLocalOf<ColorScheme?> { null }
+private val LocalPlaybackCoverTargetColorScheme = staticCompositionLocalOf<ColorScheme?> { null }
+
+internal enum class PlaybackColorEmphasis {
+    Ambient,
+    Immersive,
+}
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -64,9 +73,8 @@ fun FuoTheme(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun PlayerDynamicColorTheme(
+internal fun ProvidePlaybackColorEnvironment(
     themeMode: ThemeMode,
     dynamicCoverColorEnabled: Boolean,
     coverImageUrl: String?,
@@ -74,7 +82,6 @@ internal fun PlayerDynamicColorTheme(
     content: @Composable () -> Unit,
 ) {
     val darkTheme = resolvedDarkTheme(themeMode, isSystemInDarkTheme())
-    val baseTargetColorScheme = LocalBaseTargetColorScheme.current ?: MaterialTheme.colorScheme
     val paletteStyle = LocalThemePaletteStyle.current
     val colorSpec = LocalThemeColorSpec.current
     val coverColorSeed = rememberCoverColorSeed(
@@ -106,13 +113,156 @@ internal fun PlayerDynamicColorTheme(
             null
         }
     }
+    CompositionLocalProvider(
+        LocalPlaybackCoverTargetColorScheme provides coverColorScheme,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun PlaybackDynamicColorTheme(
+    emphasis: PlaybackColorEmphasis,
+    content: @Composable () -> Unit,
+) {
+    val baseTargetColorScheme = LocalBaseTargetColorScheme.current ?: MaterialTheme.colorScheme
+    val coverTargetColorScheme = LocalPlaybackCoverTargetColorScheme.current
+    val targetColorScheme = remember(baseTargetColorScheme, coverTargetColorScheme, emphasis) {
+        when {
+            coverTargetColorScheme == null -> baseTargetColorScheme
+            emphasis == PlaybackColorEmphasis.Immersive -> coverTargetColorScheme
+            else -> ambientPlaybackColorScheme(baseTargetColorScheme, coverTargetColorScheme)
+        }
+    }
     val animatedColorScheme = rememberAnimatedColorScheme(
-        target = coverColorScheme ?: baseTargetColorScheme,
-        labelPrefix = "player theme",
+        target = targetColorScheme,
+        labelPrefix = "playback ${emphasis.name.lowercase()} theme",
     )
     FuoExpressiveTheme(
         colorScheme = animatedColorScheme,
         content = content,
+    )
+}
+
+internal fun ambientPlaybackColorScheme(
+    base: ColorScheme,
+    cover: ColorScheme,
+): ColorScheme {
+    val primary = lerp(base.primary, cover.primary, PLAYBACK_AMBIENT_ACCENT_BLEND)
+    val primaryContainer = lerp(
+        base.primaryContainer,
+        cover.primaryContainer,
+        PLAYBACK_AMBIENT_ACCENT_BLEND,
+    )
+    val secondary = lerp(base.secondary, cover.secondary, PLAYBACK_AMBIENT_ACCENT_BLEND)
+    val secondaryContainer = lerp(
+        base.secondaryContainer,
+        cover.secondaryContainer,
+        PLAYBACK_AMBIENT_ACCENT_BLEND,
+    )
+    val surfaceVariant = lerp(
+        base.surfaceVariant,
+        cover.surfaceVariant,
+        PLAYBACK_AMBIENT_SURFACE_BLEND,
+    )
+    val surfaceContainer = lerp(
+        base.surfaceContainer,
+        cover.surfaceContainer,
+        PLAYBACK_AMBIENT_SURFACE_BLEND,
+    )
+    val surfaceContainerHigh = lerp(
+        base.surfaceContainerHigh,
+        cover.surfaceContainerHigh,
+        PLAYBACK_AMBIENT_SURFACE_BLEND,
+    )
+    val surfaceContainerHighest = lerp(
+        base.surfaceContainerHighest,
+        cover.surfaceContainerHighest,
+        PLAYBACK_AMBIENT_SURFACE_BLEND,
+    )
+    val surfaceContainerLow = lerp(
+        base.surfaceContainerLow,
+        cover.surfaceContainerLow,
+        PLAYBACK_AMBIENT_SURFACE_BLEND,
+    )
+    val surfaceContainerLowest = lerp(
+        base.surfaceContainerLowest,
+        cover.surfaceContainerLowest,
+        PLAYBACK_AMBIENT_SURFACE_BLEND,
+    )
+
+    return base.copy(
+        primary = primary,
+        onPrimary = ensureThemeContrast(
+            lerp(base.onPrimary, cover.onPrimary, PLAYBACK_AMBIENT_ACCENT_BLEND),
+            listOf(primary),
+        ),
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = ensureThemeContrast(
+            lerp(
+                base.onPrimaryContainer,
+                cover.onPrimaryContainer,
+                PLAYBACK_AMBIENT_ACCENT_BLEND,
+            ),
+            listOf(primaryContainer),
+        ),
+        inversePrimary = lerp(
+            base.inversePrimary,
+            cover.inversePrimary,
+            PLAYBACK_AMBIENT_ACCENT_BLEND,
+        ),
+        secondary = secondary,
+        onSecondary = ensureThemeContrast(
+            lerp(base.onSecondary, cover.onSecondary, PLAYBACK_AMBIENT_ACCENT_BLEND),
+            listOf(secondary),
+        ),
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = ensureThemeContrast(
+            lerp(
+                base.onSecondaryContainer,
+                cover.onSecondaryContainer,
+                PLAYBACK_AMBIENT_ACCENT_BLEND,
+            ),
+            listOf(secondaryContainer),
+        ),
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = ensureThemeContrast(
+            lerp(
+                base.onSurfaceVariant,
+                cover.onSurfaceVariant,
+                PLAYBACK_AMBIENT_SURFACE_BLEND,
+            ),
+            listOf(surfaceVariant),
+        ),
+        surfaceTint = lerp(
+            base.surfaceTint,
+            cover.surfaceTint,
+            PLAYBACK_AMBIENT_ACCENT_BLEND,
+        ),
+        onSurface = ensureThemeContrast(
+            base.onSurface,
+            listOf(
+                base.surface,
+                base.surfaceBright,
+                base.surfaceDim,
+                surfaceContainer,
+                surfaceContainerHigh,
+                surfaceContainerHighest,
+                surfaceContainerLow,
+                surfaceContainerLowest,
+            ),
+        ),
+        outline = lerp(base.outline, cover.outline, PLAYBACK_AMBIENT_SURFACE_BLEND),
+        outlineVariant = lerp(
+            base.outlineVariant,
+            cover.outlineVariant,
+            PLAYBACK_AMBIENT_SURFACE_BLEND,
+        ),
+        surfaceContainer = surfaceContainer,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceContainerHighest,
+        surfaceContainerLow = surfaceContainerLow,
+        surfaceContainerLowest = surfaceContainerLowest,
     )
 }
 

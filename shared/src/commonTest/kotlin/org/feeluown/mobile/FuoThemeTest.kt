@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.ui.graphics.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class FuoThemeTest {
@@ -32,6 +33,38 @@ class FuoThemeTest {
         ).forEach { seed ->
             assertTrue(hasAccessibleContrast(expressiveColorScheme(seed, darkTheme = false)))
             assertTrue(hasAccessibleContrast(expressiveColorScheme(seed, darkTheme = true)))
+        }
+    }
+
+    @Test
+    fun ambientPlaybackColorsKeepBaseSurfaceAndBlendPlaybackContainers() {
+        val base = expressiveColorScheme(Color(0xFF6750A4), darkTheme = false)
+        val cover = expressiveColorScheme(Color(0xFFCC3A45), darkTheme = false)
+        val ambient = ambientPlaybackColorScheme(base, cover)
+
+        assertEquals(base.surface, ambient.surface)
+        assertNotEquals(base.surfaceContainerHigh, ambient.surfaceContainerHigh)
+        assertNotEquals(cover.surfaceContainerHigh, ambient.surfaceContainerHigh)
+        assertNotEquals(base.primary, ambient.primary)
+        assertTrue(hasAccessibleContrast(ambient))
+    }
+
+    @Test
+    fun ambientPlaybackColorsRemainAccessibleInLightAndDarkModes() {
+        listOf(false, true).forEach { darkTheme ->
+            val base = expressiveColorScheme(Color(0xFF6750A4), darkTheme)
+            listOf(
+                Color(0xFFFF2020),
+                Color(0xFF102040),
+                Color(0xFF22AA77),
+                Color(0xFF8060D0),
+            ).forEach { seed ->
+                val cover = expressiveColorScheme(seed, darkTheme)
+                assertTrue(
+                    hasAccessibleContrast(ambientPlaybackColorScheme(base, cover)),
+                    "ambient scheme for $seed dark=$darkTheme",
+                )
+            }
         }
     }
 
