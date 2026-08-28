@@ -1,5 +1,6 @@
 package org.feeluown.mobile.provider.netease
 
+import org.feeluown.mobile.provider.core.CapabilityDelegatingProvider
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.KotlinProviderFactory
 import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
@@ -13,10 +14,19 @@ object NeteaseProviderFactory : KotlinProviderFactory {
             http = dependencies.http,
             credentials = dependencies.credentials,
         )
-        return NeteaseComprehensiveSearchProvider(
+        val discovery = NeteaseComprehensiveSearchProvider(
             delegate = base,
             http = dependencies.http,
             credentials = dependencies.credentials,
+        )
+        return CapabilityDelegatingProvider(
+            base = base,
+            presentation = base,
+            account = base,
+            discovery = discovery,
+            content = base,
+            library = base,
+            playback = base,
         )
     }
 }
