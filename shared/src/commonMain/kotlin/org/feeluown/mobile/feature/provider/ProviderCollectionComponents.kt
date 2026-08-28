@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.currentCompositeKeyHashCode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -44,6 +45,7 @@ fun ProviderPlaylistGrid(
         hasMore -> playlists.take(capacity)
         else -> playlists
     }
+    val resolvedHeroScopeKey = heroScopeKey ?: "composition:${currentCompositeKeyHashCode}"
     val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -72,7 +74,7 @@ fun ProviderPlaylistGrid(
                                 playlist = cell.value,
                                 onClick = { onClick(cell.value) },
                                 modifier = Modifier.weight(1f),
-                                heroSourceId = heroScopeKey?.let { identity.forSource(it, occurrence).sourceInstanceId },
+                                heroSourceId = identity.forSource(resolvedHeroScopeKey, occurrence).sourceInstanceId,
                             )
                         }
                     }
@@ -219,6 +221,7 @@ fun ProviderMediaItemGrid(
         else -> items
     }
     val itemType = items.firstOrNull()?.type
+    val resolvedHeroScopeKey = heroScopeKey ?: "composition:${currentCompositeKeyHashCode}"
     val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -258,7 +261,7 @@ fun ProviderMediaItemGrid(
                                 item = cell.value,
                                 onClick = { onClick(cell.value) },
                                 modifier = Modifier.weight(1f),
-                                heroSourceId = heroScopeKey?.let { identity.forSource(it, occurrence).sourceInstanceId },
+                                heroSourceId = identity.forSource(resolvedHeroScopeKey, occurrence).sourceInstanceId,
                             )
                         }
                     }
