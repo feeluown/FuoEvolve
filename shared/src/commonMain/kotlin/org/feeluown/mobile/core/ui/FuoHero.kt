@@ -4,13 +4,10 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
-import kotlin.random.Random
 
 internal enum class ResourceCoverHeroType {
     Playlist,
@@ -26,15 +23,19 @@ internal data class ResourceCoverHeroKey(
 ) {
     fun matchesResource(other: ResourceCoverHeroKey): Boolean =
         type == other.type && providerId == other.providerId && resourceId == other.resourceId
+
+    fun forSource(scopeKey: String, occurrence: Int): ResourceCoverHeroKey =
+        copy(sourceInstanceId = "$scopeKey#$occurrence")
 }
 
 /**
  * Coordinates the transient source instance for resource-cover Hero transitions.
  *
  * Resource identity alone is insufficient because the same playlist/album/artist can be rendered
- * more than once on one screen. The clicked card activates its own saveable instance token; the
- * detail destination then uses that exact key for both the forward and pop transition without
- * leaking presentation-only identity into navigation/domain models.
+ * more than once on one screen. Source cards therefore add a deterministic render-scope token to
+ * their resource identity. The clicked card activates that complete key; the detail destination
+ * reuses it for both forward and pop transitions without leaking presentation-only identity into
+ * navigation/domain models.
  */
 internal class ResourceHeroCoordinator {
     var activeKey by mutableStateOf<ResourceCoverHeroKey?>(null)
@@ -49,16 +50,6 @@ internal class ResourceHeroCoordinator {
 }
 
 internal val LocalResourceHeroCoordinator = staticCompositionLocalOf<ResourceHeroCoordinator?> { null }
-
-@Composable
-internal fun rememberResourceHeroSourceKey(identity: ResourceCoverHeroKey): ResourceCoverHeroKey {
-    val sourceInstanceId = rememberSaveable(identity.type.name, identity.providerId, identity.resourceId) {
-        Random.nextLong().toString()
-    }
-    return remember(identity, sourceInstanceId) {
-        identity.copy(sourceInstanceId = sourceInstanceId)
-    }
-}
 
 internal fun ProviderPlaylist.coverHeroKey(): ResourceCoverHeroKey = ResourceCoverHeroKey(
     type = ResourceCoverHeroType.Playlist,
