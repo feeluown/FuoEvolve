@@ -176,14 +176,16 @@ internal fun rememberAnimatedColorScheme(
             target.onSurface,
             animationSpec,
             "$labelPrefix onSurface",
-            surface,
-            surfaceBright,
-            surfaceDim,
-            surfaceContainer,
-            surfaceContainerHigh,
-            surfaceContainerHighest,
-            surfaceContainerLow,
-            surfaceContainerLowest,
+            listOf(
+                surface,
+                surfaceBright,
+                surfaceDim,
+                surfaceContainer,
+                surfaceContainerHigh,
+                surfaceContainerHighest,
+                surfaceContainerLow,
+                surfaceContainerLowest,
+            ),
         ),
         surfaceVariant = surfaceVariant,
         onSurfaceVariant = animatedContrastThemeColor(
@@ -230,8 +232,7 @@ internal fun rememberAnimatedColorScheme(
             target.onPrimaryFixed,
             animationSpec,
             "$labelPrefix onPrimaryFixed",
-            primaryFixed,
-            primaryFixedDim,
+            listOf(primaryFixed, primaryFixedDim),
         ),
         onPrimaryFixedVariant = animatedThemeColor(
             target.onPrimaryFixedVariant,
@@ -244,8 +245,7 @@ internal fun rememberAnimatedColorScheme(
             target.onSecondaryFixed,
             animationSpec,
             "$labelPrefix onSecondaryFixed",
-            secondaryFixed,
-            secondaryFixedDim,
+            listOf(secondaryFixed, secondaryFixedDim),
         ),
         onSecondaryFixedVariant = animatedThemeColor(
             target.onSecondaryFixedVariant,
@@ -258,8 +258,7 @@ internal fun rememberAnimatedColorScheme(
             target.onTertiaryFixed,
             animationSpec,
             "$labelPrefix onTertiaryFixed",
-            tertiaryFixed,
-            tertiaryFixedDim,
+            listOf(tertiaryFixed, tertiaryFixedDim),
         ),
         onTertiaryFixedVariant = animatedThemeColor(
             target.onTertiaryFixedVariant,
@@ -274,10 +273,23 @@ private fun animatedContrastThemeColor(
     target: Color,
     animationSpec: FiniteAnimationSpec<Color>,
     label: String,
-    vararg backgrounds: Color,
+    background: Color,
+): Color = animatedContrastThemeColor(
+    target = target,
+    animationSpec = animationSpec,
+    label = label,
+    backgrounds = listOf(background),
+)
+
+@Composable
+private fun animatedContrastThemeColor(
+    target: Color,
+    animationSpec: FiniteAnimationSpec<Color>,
+    label: String,
+    backgrounds: List<Color>,
 ): Color {
     val animated = animatedThemeColor(target, animationSpec, label)
-    return ensureThemeContrast(animated, backgrounds.asList())
+    return ensureThemeContrast(animated, backgrounds)
 }
 
 @Composable
