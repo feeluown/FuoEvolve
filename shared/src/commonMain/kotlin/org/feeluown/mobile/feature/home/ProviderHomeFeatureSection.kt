@@ -24,6 +24,7 @@ fun ProviderContentHomeFeatureSection(
 ) {
     val state = home.uiState.collectAsStateWithLifecycle().value
     val graph = LocalHomeFeatureUiGraph.current
+    val gridPreviewCapacity = LocalAppLayoutInfo.current.gridColumns.coerceAtLeast(1) * 2
     val title = if (section == HomeSection.Recommend) "推荐" else "探索"
     val sections = if (section == HomeSection.Recommend) state.recommendSections else state.exploreSections
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
@@ -69,8 +70,19 @@ fun ProviderContentHomeFeatureSection(
                         }
                     }
                     previewSections.forEach { contentSection ->
+                        val hasMore = contentSection.errorMessage == null && when {
+                            contentSection.playlists.isNotEmpty() -> contentSection.playlists.size > gridPreviewCapacity
+                            contentSection.mediaItems.isNotEmpty() -> contentSection.mediaItems.size > gridPreviewCapacity
+                            else -> false
+                        }
                         item(key = "header:${contentSection.feature.id}") {
-                            ProviderFeatureHeader(feature = contentSection.feature)
+                            ProviderFeatureHeader(
+                                feature = contentSection.feature,
+                                action = if (hasMore) {
+                                    { home.openFeature(contentSection.feature) }
+                                } else null,
+                                actionLabel = "查看更多",
+                            )
                         }
                         val errorMessage = contentSection.errorMessage
                         when {
@@ -81,7 +93,6 @@ fun ProviderContentHomeFeatureSection(
                                 ProviderPlaylistGrid(
                                     playlists = contentSection.playlists,
                                     onClick = { home.openPlaylist(it, contentSection.feature.category) },
-                                    onMore = { home.openFeature(contentSection.feature) },
                                     maxRows = 2,
                                 )
                             }
@@ -89,7 +100,6 @@ fun ProviderContentHomeFeatureSection(
                                 ProviderMediaItemGrid(
                                     items = contentSection.mediaItems,
                                     onClick = home::openMediaItem,
-                                    onMore = { home.openFeature(contentSection.feature) },
                                     maxRows = 2,
                                 )
                             }
@@ -125,12 +135,19 @@ fun ProviderContentHomeFeatureSection(
                         }
                     }
                     otherSections.forEach { contentSection ->
+                        val hasMore = contentSection.errorMessage == null &&
+                            contentSection.tracks.isEmpty() &&
+                            contentSection.playlists.size > gridPreviewCapacity
                         item(key = "header:${contentSection.feature.id}") {
                             ProviderFeatureHeader(
                                 feature = contentSection.feature,
                                 onPlayAll = contentSection.tracks.takeIf { it.isNotEmpty() }?.let {
                                     { home.playAllFeature(contentSection) }
                                 },
+                                action = if (hasMore) {
+                                    { home.openFeature(contentSection.feature) }
+                                } else null,
+                                actionLabel = "查看更多",
                             )
                         }
                         val errorMessage = contentSection.errorMessage
@@ -162,7 +179,7 @@ fun ProviderContentHomeFeatureSection(
                                 ProviderPlaylistGrid(
                                     playlists = contentSection.playlists,
                                     onClick = { home.openPlaylist(it, contentSection.feature.category) },
-                                    onMore = { home.openFeature(contentSection.feature) },
+                                    maxRows = 2,
                                 )
                             }
                             contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
