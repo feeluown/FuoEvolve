@@ -8,6 +8,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+
+private const val MIN_THEME_TRANSITION_CONTRAST_RATIO = 4.5
+private const val CONTRAST_SEARCH_ITERATIONS = 14
 
 @Composable
 internal fun rememberAnimatedColorScheme(
@@ -18,56 +22,262 @@ internal fun rememberAnimatedColorScheme(
         tween<Color>(durationMillis = FuoMotion.themeColorTransitionMillis)
     }
 
+    val primary = animatedThemeColor(target.primary, animationSpec, "$labelPrefix primary")
+    val primaryContainer = animatedThemeColor(
+        target.primaryContainer,
+        animationSpec,
+        "$labelPrefix primaryContainer",
+    )
+    val secondary = animatedThemeColor(target.secondary, animationSpec, "$labelPrefix secondary")
+    val secondaryContainer = animatedThemeColor(
+        target.secondaryContainer,
+        animationSpec,
+        "$labelPrefix secondaryContainer",
+    )
+    val tertiary = animatedThemeColor(target.tertiary, animationSpec, "$labelPrefix tertiary")
+    val tertiaryContainer = animatedThemeColor(
+        target.tertiaryContainer,
+        animationSpec,
+        "$labelPrefix tertiaryContainer",
+    )
+    val background = animatedThemeColor(target.background, animationSpec, "$labelPrefix background")
+    val surface = animatedThemeColor(target.surface, animationSpec, "$labelPrefix surface")
+    val surfaceVariant = animatedThemeColor(
+        target.surfaceVariant,
+        animationSpec,
+        "$labelPrefix surfaceVariant",
+    )
+    val inverseSurface = animatedThemeColor(
+        target.inverseSurface,
+        animationSpec,
+        "$labelPrefix inverseSurface",
+    )
+    val error = animatedThemeColor(target.error, animationSpec, "$labelPrefix error")
+    val errorContainer = animatedThemeColor(
+        target.errorContainer,
+        animationSpec,
+        "$labelPrefix errorContainer",
+    )
+    val surfaceBright = animatedThemeColor(
+        target.surfaceBright,
+        animationSpec,
+        "$labelPrefix surfaceBright",
+    )
+    val surfaceDim = animatedThemeColor(target.surfaceDim, animationSpec, "$labelPrefix surfaceDim")
+    val surfaceContainer = animatedThemeColor(
+        target.surfaceContainer,
+        animationSpec,
+        "$labelPrefix surfaceContainer",
+    )
+    val surfaceContainerHigh = animatedThemeColor(
+        target.surfaceContainerHigh,
+        animationSpec,
+        "$labelPrefix surfaceContainerHigh",
+    )
+    val surfaceContainerHighest = animatedThemeColor(
+        target.surfaceContainerHighest,
+        animationSpec,
+        "$labelPrefix surfaceContainerHighest",
+    )
+    val surfaceContainerLow = animatedThemeColor(
+        target.surfaceContainerLow,
+        animationSpec,
+        "$labelPrefix surfaceContainerLow",
+    )
+    val surfaceContainerLowest = animatedThemeColor(
+        target.surfaceContainerLowest,
+        animationSpec,
+        "$labelPrefix surfaceContainerLowest",
+    )
+    val primaryFixed = animatedThemeColor(
+        target.primaryFixed,
+        animationSpec,
+        "$labelPrefix primaryFixed",
+    )
+    val primaryFixedDim = animatedThemeColor(
+        target.primaryFixedDim,
+        animationSpec,
+        "$labelPrefix primaryFixedDim",
+    )
+    val secondaryFixed = animatedThemeColor(
+        target.secondaryFixed,
+        animationSpec,
+        "$labelPrefix secondaryFixed",
+    )
+    val secondaryFixedDim = animatedThemeColor(
+        target.secondaryFixedDim,
+        animationSpec,
+        "$labelPrefix secondaryFixedDim",
+    )
+    val tertiaryFixed = animatedThemeColor(
+        target.tertiaryFixed,
+        animationSpec,
+        "$labelPrefix tertiaryFixed",
+    )
+    val tertiaryFixedDim = animatedThemeColor(
+        target.tertiaryFixedDim,
+        animationSpec,
+        "$labelPrefix tertiaryFixedDim",
+    )
+
     return target.copy(
-        primary = animatedThemeColor(target.primary, animationSpec, "$labelPrefix primary"),
-        onPrimary = animatedThemeColor(target.onPrimary, animationSpec, "$labelPrefix onPrimary"),
-        primaryContainer = animatedThemeColor(target.primaryContainer, animationSpec, "$labelPrefix primaryContainer"),
-        onPrimaryContainer = animatedThemeColor(target.onPrimaryContainer, animationSpec, "$labelPrefix onPrimaryContainer"),
+        primary = primary,
+        onPrimary = animatedContrastThemeColor(
+            target.onPrimary,
+            animationSpec,
+            "$labelPrefix onPrimary",
+            primary,
+        ),
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = animatedContrastThemeColor(
+            target.onPrimaryContainer,
+            animationSpec,
+            "$labelPrefix onPrimaryContainer",
+            primaryContainer,
+        ),
         inversePrimary = animatedThemeColor(target.inversePrimary, animationSpec, "$labelPrefix inversePrimary"),
-        secondary = animatedThemeColor(target.secondary, animationSpec, "$labelPrefix secondary"),
-        onSecondary = animatedThemeColor(target.onSecondary, animationSpec, "$labelPrefix onSecondary"),
-        secondaryContainer = animatedThemeColor(target.secondaryContainer, animationSpec, "$labelPrefix secondaryContainer"),
-        onSecondaryContainer = animatedThemeColor(target.onSecondaryContainer, animationSpec, "$labelPrefix onSecondaryContainer"),
-        tertiary = animatedThemeColor(target.tertiary, animationSpec, "$labelPrefix tertiary"),
-        onTertiary = animatedThemeColor(target.onTertiary, animationSpec, "$labelPrefix onTertiary"),
-        tertiaryContainer = animatedThemeColor(target.tertiaryContainer, animationSpec, "$labelPrefix tertiaryContainer"),
-        onTertiaryContainer = animatedThemeColor(target.onTertiaryContainer, animationSpec, "$labelPrefix onTertiaryContainer"),
-        background = animatedThemeColor(target.background, animationSpec, "$labelPrefix background"),
-        onBackground = animatedThemeColor(target.onBackground, animationSpec, "$labelPrefix onBackground"),
-        surface = animatedThemeColor(target.surface, animationSpec, "$labelPrefix surface"),
-        onSurface = animatedThemeColor(target.onSurface, animationSpec, "$labelPrefix onSurface"),
-        surfaceVariant = animatedThemeColor(target.surfaceVariant, animationSpec, "$labelPrefix surfaceVariant"),
-        onSurfaceVariant = animatedThemeColor(target.onSurfaceVariant, animationSpec, "$labelPrefix onSurfaceVariant"),
+        secondary = secondary,
+        onSecondary = animatedContrastThemeColor(
+            target.onSecondary,
+            animationSpec,
+            "$labelPrefix onSecondary",
+            secondary,
+        ),
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = animatedContrastThemeColor(
+            target.onSecondaryContainer,
+            animationSpec,
+            "$labelPrefix onSecondaryContainer",
+            secondaryContainer,
+        ),
+        tertiary = tertiary,
+        onTertiary = animatedContrastThemeColor(
+            target.onTertiary,
+            animationSpec,
+            "$labelPrefix onTertiary",
+            tertiary,
+        ),
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = animatedContrastThemeColor(
+            target.onTertiaryContainer,
+            animationSpec,
+            "$labelPrefix onTertiaryContainer",
+            tertiaryContainer,
+        ),
+        background = background,
+        onBackground = animatedContrastThemeColor(
+            target.onBackground,
+            animationSpec,
+            "$labelPrefix onBackground",
+            background,
+        ),
+        surface = surface,
+        onSurface = animatedContrastThemeColor(
+            target.onSurface,
+            animationSpec,
+            "$labelPrefix onSurface",
+            surface,
+            surfaceBright,
+            surfaceDim,
+            surfaceContainer,
+            surfaceContainerHigh,
+            surfaceContainerHighest,
+            surfaceContainerLow,
+            surfaceContainerLowest,
+        ),
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = animatedContrastThemeColor(
+            target.onSurfaceVariant,
+            animationSpec,
+            "$labelPrefix onSurfaceVariant",
+            surfaceVariant,
+        ),
         surfaceTint = animatedThemeColor(target.surfaceTint, animationSpec, "$labelPrefix surfaceTint"),
-        inverseSurface = animatedThemeColor(target.inverseSurface, animationSpec, "$labelPrefix inverseSurface"),
-        inverseOnSurface = animatedThemeColor(target.inverseOnSurface, animationSpec, "$labelPrefix inverseOnSurface"),
-        error = animatedThemeColor(target.error, animationSpec, "$labelPrefix error"),
-        onError = animatedThemeColor(target.onError, animationSpec, "$labelPrefix onError"),
-        errorContainer = animatedThemeColor(target.errorContainer, animationSpec, "$labelPrefix errorContainer"),
-        onErrorContainer = animatedThemeColor(target.onErrorContainer, animationSpec, "$labelPrefix onErrorContainer"),
+        inverseSurface = inverseSurface,
+        inverseOnSurface = animatedContrastThemeColor(
+            target.inverseOnSurface,
+            animationSpec,
+            "$labelPrefix inverseOnSurface",
+            inverseSurface,
+        ),
+        error = error,
+        onError = animatedContrastThemeColor(
+            target.onError,
+            animationSpec,
+            "$labelPrefix onError",
+            error,
+        ),
+        errorContainer = errorContainer,
+        onErrorContainer = animatedContrastThemeColor(
+            target.onErrorContainer,
+            animationSpec,
+            "$labelPrefix onErrorContainer",
+            errorContainer,
+        ),
         outline = animatedThemeColor(target.outline, animationSpec, "$labelPrefix outline"),
         outlineVariant = animatedThemeColor(target.outlineVariant, animationSpec, "$labelPrefix outlineVariant"),
         scrim = animatedThemeColor(target.scrim, animationSpec, "$labelPrefix scrim"),
-        surfaceBright = animatedThemeColor(target.surfaceBright, animationSpec, "$labelPrefix surfaceBright"),
-        surfaceDim = animatedThemeColor(target.surfaceDim, animationSpec, "$labelPrefix surfaceDim"),
-        surfaceContainer = animatedThemeColor(target.surfaceContainer, animationSpec, "$labelPrefix surfaceContainer"),
-        surfaceContainerHigh = animatedThemeColor(target.surfaceContainerHigh, animationSpec, "$labelPrefix surfaceContainerHigh"),
-        surfaceContainerHighest = animatedThemeColor(target.surfaceContainerHighest, animationSpec, "$labelPrefix surfaceContainerHighest"),
-        surfaceContainerLow = animatedThemeColor(target.surfaceContainerLow, animationSpec, "$labelPrefix surfaceContainerLow"),
-        surfaceContainerLowest = animatedThemeColor(target.surfaceContainerLowest, animationSpec, "$labelPrefix surfaceContainerLowest"),
-        primaryFixed = animatedThemeColor(target.primaryFixed, animationSpec, "$labelPrefix primaryFixed"),
-        primaryFixedDim = animatedThemeColor(target.primaryFixedDim, animationSpec, "$labelPrefix primaryFixedDim"),
-        onPrimaryFixed = animatedThemeColor(target.onPrimaryFixed, animationSpec, "$labelPrefix onPrimaryFixed"),
-        onPrimaryFixedVariant = animatedThemeColor(target.onPrimaryFixedVariant, animationSpec, "$labelPrefix onPrimaryFixedVariant"),
-        secondaryFixed = animatedThemeColor(target.secondaryFixed, animationSpec, "$labelPrefix secondaryFixed"),
-        secondaryFixedDim = animatedThemeColor(target.secondaryFixedDim, animationSpec, "$labelPrefix secondaryFixedDim"),
-        onSecondaryFixed = animatedThemeColor(target.onSecondaryFixed, animationSpec, "$labelPrefix onSecondaryFixed"),
-        onSecondaryFixedVariant = animatedThemeColor(target.onSecondaryFixedVariant, animationSpec, "$labelPrefix onSecondaryFixedVariant"),
-        tertiaryFixed = animatedThemeColor(target.tertiaryFixed, animationSpec, "$labelPrefix tertiaryFixed"),
-        tertiaryFixedDim = animatedThemeColor(target.tertiaryFixedDim, animationSpec, "$labelPrefix tertiaryFixedDim"),
-        onTertiaryFixed = animatedThemeColor(target.onTertiaryFixed, animationSpec, "$labelPrefix onTertiaryFixed"),
-        onTertiaryFixedVariant = animatedThemeColor(target.onTertiaryFixedVariant, animationSpec, "$labelPrefix onTertiaryFixedVariant"),
+        surfaceBright = surfaceBright,
+        surfaceDim = surfaceDim,
+        surfaceContainer = surfaceContainer,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceContainerHighest,
+        surfaceContainerLow = surfaceContainerLow,
+        surfaceContainerLowest = surfaceContainerLowest,
+        primaryFixed = primaryFixed,
+        primaryFixedDim = primaryFixedDim,
+        onPrimaryFixed = animatedContrastThemeColor(
+            target.onPrimaryFixed,
+            animationSpec,
+            "$labelPrefix onPrimaryFixed",
+            primaryFixed,
+            primaryFixedDim,
+        ),
+        onPrimaryFixedVariant = animatedThemeColor(
+            target.onPrimaryFixedVariant,
+            animationSpec,
+            "$labelPrefix onPrimaryFixedVariant",
+        ),
+        secondaryFixed = secondaryFixed,
+        secondaryFixedDim = secondaryFixedDim,
+        onSecondaryFixed = animatedContrastThemeColor(
+            target.onSecondaryFixed,
+            animationSpec,
+            "$labelPrefix onSecondaryFixed",
+            secondaryFixed,
+            secondaryFixedDim,
+        ),
+        onSecondaryFixedVariant = animatedThemeColor(
+            target.onSecondaryFixedVariant,
+            animationSpec,
+            "$labelPrefix onSecondaryFixedVariant",
+        ),
+        tertiaryFixed = tertiaryFixed,
+        tertiaryFixedDim = tertiaryFixedDim,
+        onTertiaryFixed = animatedContrastThemeColor(
+            target.onTertiaryFixed,
+            animationSpec,
+            "$labelPrefix onTertiaryFixed",
+            tertiaryFixed,
+            tertiaryFixedDim,
+        ),
+        onTertiaryFixedVariant = animatedThemeColor(
+            target.onTertiaryFixedVariant,
+            animationSpec,
+            "$labelPrefix onTertiaryFixedVariant",
+        ),
     )
+}
+
+@Composable
+private fun animatedContrastThemeColor(
+    target: Color,
+    animationSpec: FiniteAnimationSpec<Color>,
+    label: String,
+    vararg backgrounds: Color,
+): Color {
+    val animated = animatedThemeColor(target, animationSpec, label)
+    return ensureThemeContrast(animated, backgrounds.asList())
 }
 
 @Composable
@@ -82,4 +292,38 @@ private fun animatedThemeColor(
         label = label,
     )
     return animated
+}
+
+internal fun ensureThemeContrast(
+    foreground: Color,
+    backgrounds: List<Color>,
+    minimumRatio: Double = MIN_THEME_TRANSITION_CONTRAST_RATIO,
+): Color {
+    if (backgrounds.isEmpty() || backgrounds.all { colorContrastRatio(foreground, it) >= minimumRatio }) {
+        return foreground
+    }
+
+    fun minimumContrast(candidate: Color): Double = backgrounds.minOf {
+        colorContrastRatio(candidate, it)
+    }
+
+    val blackContrast = minimumContrast(Color.Black)
+    val whiteContrast = minimumContrast(Color.White)
+    val anchor = if (blackContrast >= whiteContrast) Color.Black else Color.White
+    val anchorContrast = maxOf(blackContrast, whiteContrast)
+    if (anchorContrast < minimumRatio) {
+        return anchor
+    }
+
+    var low = 0f
+    var high = 1f
+    repeat(CONTRAST_SEARCH_ITERATIONS) {
+        val fraction = (low + high) / 2f
+        if (minimumContrast(lerp(foreground, anchor, fraction)) >= minimumRatio) {
+            high = fraction
+        } else {
+            low = fraction
+        }
+    }
+    return lerp(foreground, anchor, high)
 }
