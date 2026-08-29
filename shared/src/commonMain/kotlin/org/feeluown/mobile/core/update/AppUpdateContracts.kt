@@ -80,7 +80,7 @@ object NoopAppUpdateController : AppUpdateController {
     override fun downloadAndInstall() = Unit
 }
 
-internal fun evaluateAppUpdate(
+fun evaluateAppUpdate(
     installedVersionCode: Long,
     channel: AppUpdateChannel,
     remoteVersionCode: Long,
@@ -90,4 +90,4 @@ internal fun evaluateAppUpdate(
     else -> AppUpdateDecision.UpToDate
 }
 
-internal fun AppUpdateChannel.manifestValue(): String = name.lowercase()
+fun AppUpdateChannel.manifestValue(): String = name.lowercase()
