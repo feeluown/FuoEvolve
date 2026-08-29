@@ -141,10 +141,10 @@ internal class AndroidAppUpdateController(
             )
         }
 
-        markCheckAttempt(channel)
         runCatching {
             withContext(Dispatchers.IO) { fetchManifest(channel) }
         }.onSuccess { manifest ->
+            markSuccessfulCheck(channel)
             latestManifest = manifest
             val decision = evaluateAppUpdate(installedVersionCode, channel, manifest.versionCode)
             mutableUiState.update { current ->
@@ -174,7 +174,7 @@ internal class AndroidAppUpdateController(
         return System.currentTimeMillis() - lastCheck >= AUTO_CHECK_INTERVAL_MS
     }
 
-    private fun markCheckAttempt(channel: AppUpdateChannel) {
+    private fun markSuccessfulCheck(channel: AppUpdateChannel) {
         preferences.edit().putLong(lastCheckKey(channel), System.currentTimeMillis()).apply()
     }
 
@@ -387,13 +387,13 @@ internal class AndroidAppUpdateController(
     }
 
     private fun PackageInfo.signerSha256Digests(): Set<String> {
-        val signatures = if (Build.VERSION.SDK_INT >= 28) {
+        val signerSignatures = if (Build.VERSION.SDK_INT >= 28) {
             signingInfo?.apkContentsSigners?.toList().orEmpty()
         } else {
             @Suppress("DEPRECATION")
-            signatures?.toList().orEmpty()
+            this.signatures?.toList().orEmpty()
         }
-        return signatures.mapTo(linkedSetOf()) { signature ->
+        return signerSignatures.mapTo(linkedSetOf()) { signature ->
             MessageDigest.getInstance("SHA-256").digest(signature.toByteArray()).toHexString()
         }
     }
@@ -411,7 +411,9 @@ internal class AndroidAppUpdateController(
         return digest.digest().toHexString()
     }
 
-    private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte -> "%02x".format(byte) }
+    private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
+        (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+    }
 
     private fun <T> HttpURLConnection.useConnection(block: (HttpURLConnection) -> T): T = try {
         block(this)
