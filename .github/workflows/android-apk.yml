@@ -17,8 +17,6 @@ name: Android APK
       - "gradle/**"
       - "gradlew"
       - "gradlew.bat"
-      - "fdroid/**"
-      - "scripts/build-fdroid-pages.sh"
       - "scripts/write-update-manifest.sh"
       - ".github/workflows/android-apk.yml"
       - ".github/workflows/android-tests.yml"
@@ -36,8 +34,6 @@ name: Android APK
       - "gradle/**"
       - "gradlew"
       - "gradlew.bat"
-      - "fdroid/**"
-      - "scripts/build-fdroid-pages.sh"
       - "scripts/write-update-manifest.sh"
       - ".github/workflows/android-apk.yml"
       - ".github/workflows/android-tests.yml"
@@ -71,8 +67,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate update scripts
-        run: bash -n scripts/build-fdroid-pages.sh scripts/write-update-manifest.sh
+      - name: Validate update manifest script
+        run: bash -n scripts/write-update-manifest.sh
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -125,29 +121,14 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  publish-canary-pages:
+  publish-canary:
     name: Publish master Canary update
     needs: build-release-apks
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    concurrency:
-      group: fuoevolve-github-pages
-      cancel-in-progress: false
+    timeout-minutes: 10
     permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    env:
-      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
-      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
-      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
-      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
-      GH_TOKEN: ${{ github.token }}
-      FDROID_DOCKER_IMAGE: registry.gitlab.com/fdroid/docker-executable-fdroidserver:master
+      contents: write
 
     steps:
       - name: Checkout
@@ -167,36 +148,35 @@ jobs:
           name: fuo-evolve-release-multi-abi-signed-${{ github.sha }}.apk
           path: build/canary
 
-      - name: Build F-Droid repository and Pages base
-        run: |
-          docker pull "$FDROID_DOCKER_IMAGE"
-          bash scripts/build-fdroid-pages.sh
-
-      - name: Publish current build as Canary
+      - name: Prepare Canary distribution
         env:
           CANARY_APK: build/canary/fuo-evolve-release-multi-abi-signed-${{ github.sha }}.apk
-          CANARY_URL: https://feeluown.github.io/FuoEvolve/update/fuo-evolve-canary.apk
+          CANARY_URL: https://raw.githubusercontent.com/feeluown/FuoEvolve/canary-dist/fuo-evolve-canary.apk
         run: |
           test -f "$CANARY_APK"
-          mkdir -p build/pages/update
-          cp "$CANARY_APK" build/pages/update/fuo-evolve-canary.apk
+          dist_dir="$RUNNER_TEMP/canary-dist"
+          rm -rf "$dist_dir"
+          mkdir -p "$dist_dir"
+          cp "$CANARY_APK" "$dist_dir/fuo-evolve-canary.apk"
           COMMIT_SHA="$GITHUB_SHA" \
           WORKFLOW_RUN_ID="$GITHUB_RUN_ID" \
           RELEASE_NOTES_URL="https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" \
             bash scripts/write-update-manifest.sh \
               canary \
-              build/pages/update/fuo-evolve-canary.apk \
-              build/pages/update/canary.json \
+              "$dist_dir/fuo-evolve-canary.apk" \
+              "$dist_dir/canary.json" \
               "$CANARY_URL"
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v6
-
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: build/pages
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Publish Canary distribution branch
+        run: |
+          dist_dir="$RUNNER_TEMP/canary-dist"
+          git checkout --orphan canary-dist
+          git rm -rf .
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp "$dist_dir/fuo-evolve-canary.apk" ./fuo-evolve-canary.apk
+          cp "$dist_dir/canary.json" ./canary.json
+          git add fuo-evolve-canary.apk canary.json
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "canary: ${GITHUB_SHA}"
+          git push --force origin HEAD:refs/heads/canary-dist
