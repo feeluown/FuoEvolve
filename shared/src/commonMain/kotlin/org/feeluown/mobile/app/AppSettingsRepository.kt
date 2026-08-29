@@ -145,6 +145,8 @@ internal fun AppSettings.toPersistedSettings(): PersistedSettingsV1 = PersistedS
     themePaletteStyle = themePaletteStyle.name,
     themeColorSpec = themeColorSpec.name,
     dynamicCoverColorEnabled = dynamicCoverColorEnabled,
+    appUpdateChannel = appUpdateChannel.name,
+    autoCheckAppUpdates = autoCheckAppUpdates,
     playlistPlaybackStatsVersion = playlistPlaybackStatsVersion,
     playlistPlaybackStats = playlistPlaybackStats.mapValues { (_, stat) ->
         PersistedPlaylistPlaybackStat(stat.playCount, stat.lastPlayedAtMillis)
@@ -195,6 +197,8 @@ internal fun PersistedSettingsV1.toAppSettings(): AppSettings {
         themePaletteStyle = themePaletteStyle.enumOr(defaults.themePaletteStyle),
         themeColorSpec = themeColorSpec.enumOr(defaults.themeColorSpec),
         dynamicCoverColorEnabled = dynamicCoverColorEnabled ?: defaults.dynamicCoverColorEnabled,
+        appUpdateChannel = appUpdateChannel.enumOr(defaults.appUpdateChannel),
+        autoCheckAppUpdates = autoCheckAppUpdates ?: defaults.autoCheckAppUpdates,
         playlistPlaybackStatsVersion = playlistPlaybackStatsVersion ?: defaults.playlistPlaybackStatsVersion,
         playlistPlaybackStats = playlistPlaybackStats
             ?.mapValues { (_, stat) -> PlaylistPlaybackStat(stat.playCount, stat.lastPlayedAtMillis) }

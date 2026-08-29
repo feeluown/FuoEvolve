@@ -5,9 +5,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class AppUpdateChannel(val label: String) {
-    Stable("Stable"),
-    Canary("Canary"),
+enum class AppUpdateChannel {
+    Stable,
+    Canary,
 }
 
 @Serializable
