@@ -25,6 +25,7 @@ data class SettingsFeatureUiState(
     val cacheUsage: CacheUsage = CacheUsage(),
     val downloadTasks: List<DownloadTask> = emptyList(),
     val localMusic: LocalMusicUiState = LocalMusicUiState(viewMode = LocalMusicViewMode.All),
+    val appUpdate: AppUpdateUiState = AppUpdateUiState(),
     val statusBarLyricsAvailable: Boolean = false,
     val bydInstrumentLyricsAvailable: Boolean = false,
     val debugLogViewerAvailable: Boolean = false,
@@ -60,6 +61,10 @@ interface SettingsFeatureController {
     fun setStatusBarLyricsAvailability(available: Boolean)
     fun setStatusBarLyricsEnabled(enabled: Boolean)
     fun setBydInstrumentLyricsEnabled(enabled: Boolean)
+    fun setAppUpdateChannel(channel: AppUpdateChannel) = Unit
+    fun setAutoCheckAppUpdates(enabled: Boolean) = Unit
+    fun checkAppUpdates() = Unit
+    fun downloadAndInstallAppUpdate() = Unit
     fun dismissFeedback(feedback: String)
 }
 
@@ -77,6 +82,7 @@ fun createSettingsFeatureController(
     navigator: AppNavigator,
     scope: CoroutineScope,
     bydInstrumentLyricsAvailable: Boolean = false,
+    appUpdateController: AppUpdateController = NoopAppUpdateController,
 ): SettingsFeatureController {
     val owner = createSettingsFeatureOwner(
         preferences = BoundSettingsPreferencesPort(settingsRepository),
@@ -88,18 +94,33 @@ fun createSettingsFeatureController(
         debugLogViewerAvailable = debugLogViewerAvailable,
         scope = scope,
     )
-    return BoundSettingsFeatureController(owner, settingsRepository, scope, bydInstrumentLyricsAvailable)
+    return BoundSettingsFeatureController(
+        owner = owner,
+        settingsRepository = settingsRepository,
+        appUpdateController = appUpdateController,
+        scope = scope,
+        bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
+    )
 }
 
 private class BoundSettingsFeatureController(
     private val owner: BoundCoreOwner,
     private val settingsRepository: AppSettingsRepository,
+    private val appUpdateController: AppUpdateController,
     private val scope: CoroutineScope,
     private val bydInstrumentLyricsAvailable: Boolean,
 ) : SettingsFeatureController {
-    override val uiState: StateFlow<SettingsFeatureUiState> = combine(owner.state, settingsRepository.state) { state, settingsState ->
-        toUiState(state, settingsState.settings)
-    }.stateIn(scope, SharingStarted.Eagerly, toUiState(owner.state.value, settingsRepository.state.value.settings))
+    override val uiState: StateFlow<SettingsFeatureUiState> = combine(
+        owner.state,
+        settingsRepository.state,
+        appUpdateController.uiState,
+    ) { state, settingsState, appUpdateState ->
+        toUiState(state, settingsState.settings, appUpdateState)
+    }.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        toUiState(owner.state.value, settingsRepository.state.value.settings, appUpdateController.uiState.value),
+    )
 
     override fun close() = owner.close()
     override fun update(transform: (SettingsFeaturePreferencesUiState) -> SettingsFeaturePreferencesUiState) {
@@ -147,13 +168,22 @@ private class BoundSettingsFeatureController(
     override fun setBydInstrumentLyricsEnabled(enabled: Boolean) {
         scope.launch { settingsRepository.update { settings -> settings.copy(bydInstrumentLyricsEnabled = enabled) } }
     }
+    override fun setAppUpdateChannel(channel: AppUpdateChannel) = appUpdateController.setChannel(channel)
+    override fun setAutoCheckAppUpdates(enabled: Boolean) = appUpdateController.setAutoCheckEnabled(enabled)
+    override fun checkAppUpdates() = appUpdateController.checkNow()
+    override fun downloadAndInstallAppUpdate() = appUpdateController.downloadAndInstall()
     override fun dismissFeedback(feedback: String) = owner.dismissFeedback(feedback)
 
-    private fun toUiState(state: BoundCoreState, appSettings: AppSettings) = SettingsFeatureUiState(
+    private fun toUiState(
+        state: BoundCoreState,
+        appSettings: AppSettings,
+        appUpdateState: AppUpdateUiState,
+    ) = SettingsFeatureUiState(
         settings = appSettings,
         cacheUsage = state.cacheUsage,
         downloadTasks = state.downloadTasks,
         localMusic = state.localMusic,
+        appUpdate = appUpdateState,
         statusBarLyricsAvailable = state.statusBarLyricsAvailable,
         bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
         debugLogViewerAvailable = state.debugLogViewerAvailable,

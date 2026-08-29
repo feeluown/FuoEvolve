@@ -102,6 +102,7 @@ private enum class FeatureSettingsCategory(
     Appearance("外观与显示", "主题、歌词字号与歌词同步"),
     LocalMusic("本地音乐", "媒体目录扫描与短音频过滤"),
     Storage("下载与存储", "下载行为、缓存上限与清理"),
+    Updates("应用更新", "Stable / Canary、自动检查与安装"),
     About("关于", "版本、项目链接与诊断信息"),
 }
 
@@ -540,6 +541,7 @@ private fun SettingsCategoryDetail(
             )
             FeatureSettingsCategory.LocalMusic -> LocalMusicFeatureSettings(settings, settingsController)
             FeatureSettingsCategory.Storage -> StorageFeatureSettings(settings, settingsController)
+            FeatureSettingsCategory.Updates -> AppUpdateFeatureSettings(settings, settingsController)
             FeatureSettingsCategory.About -> AboutFeatureSettings(settings, settingsController, appVersionInfo)
         }
     }
@@ -1645,6 +1647,13 @@ private fun categorySummary(
     FeatureSettingsCategory.Appearance -> "${settings.settings.themeMode.label} · ${settings.settings.themeColorScheme.label}"
     FeatureSettingsCategory.LocalMusic -> "${settings.localMusic.directories.size} 个媒体目录"
     FeatureSettingsCategory.Storage -> "并行下载 ${settings.settings.downloadParallelism} · 缓存与清理"
+    FeatureSettingsCategory.Updates -> when {
+        !settings.appUpdate.supported -> "当前平台暂不支持"
+        settings.appUpdate.phase == AppUpdatePhase.UpdateAvailable ->
+            "发现 ${settings.appUpdate.remoteVersionName ?: "新版本"}"
+        settings.appUpdate.phase == AppUpdatePhase.WaitingForStable -> "Stable · 等待正式版追上"
+        else -> "${settings.appUpdate.channel.label} · ${if (settings.appUpdate.autoCheckEnabled) "自动检查" else "手动检查"}"
+    }
     FeatureSettingsCategory.About -> appVersionInfo ?: "FuoEvolve"
 }
 
@@ -1654,6 +1663,7 @@ private fun categoryIcon(category: FeatureSettingsCategory): ImageVector = when 
     FeatureSettingsCategory.Appearance -> Icons.Filled.Palette
     FeatureSettingsCategory.LocalMusic -> Icons.Filled.Settings
     FeatureSettingsCategory.Storage -> Icons.Filled.Download
+    FeatureSettingsCategory.Updates -> Icons.Filled.Download
     FeatureSettingsCategory.About -> Icons.Filled.Code
 }
 

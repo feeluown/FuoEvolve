@@ -124,6 +124,33 @@ class AppSettingsRepositoryTest {
     }
 
     @Test
+    fun appUpdatePreferencesRoundTripAcrossSettingsStorage() = runTest {
+        val store = FakeSettingsSnapshotStore()
+        val first = PersistentAppSettingsRepository(
+            store = store,
+            legacyLoader = null,
+            scope = backgroundScope,
+        )
+        first.awaitSettings()
+
+        first.update {
+            it.copy(
+                appUpdateChannel = AppUpdateChannel.Canary,
+                autoCheckAppUpdates = false,
+            )
+        }
+
+        val restored = PersistentAppSettingsRepository(
+            store = store,
+            legacyLoader = null,
+            scope = backgroundScope,
+        ).awaitSettings()
+
+        assertEquals(AppUpdateChannel.Canary, restored.appUpdateChannel)
+        assertFalse(restored.autoCheckAppUpdates)
+    }
+
+    @Test
     fun playlistPlaybackStatsRoundTripWithProviderPlaylistKey() = runTest {
         val store = FakeSettingsSnapshotStore()
         val first = PersistentAppSettingsRepository(
