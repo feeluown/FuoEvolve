@@ -80,6 +80,13 @@ internal class AndroidAppContainer(
     }
     private val playbackEngine: AndroidNativeAudioEngine by lazy { AndroidNativeAudioEngine(context, appScope) }
     val settingsRepository: AppSettingsRepository by lazy { createAndroidAppSettingsRepository(context, appScope) }
+    private val appUpdateController: AppUpdateController by lazy {
+        AndroidAppUpdateController(
+            context = context,
+            settingsRepository = settingsRepository,
+            scope = appScope,
+        )
+    }
     private val providerSessionRepository: ProviderSessionRepository by lazy { DefaultProviderSessionRepository(providerGraph.auth) }
     private val navigator by lazy { AppNavigator() }
     private val trackNavigationPort: TrackNavigationPort by lazy { createTrackNavigationPort(navigator) }
@@ -275,6 +282,7 @@ internal class AndroidAppContainer(
             navigator = navigator,
             scope = appScope,
             bydInstrumentLyricsAvailable = isBydInstrumentLyricsAvailable(),
+            appUpdateController = appUpdateController,
         )
     }
 
