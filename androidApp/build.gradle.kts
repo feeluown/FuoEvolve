@@ -24,7 +24,7 @@ fun gitOutput(vararg args: String): String? = runCatching {
     }.standardOutput.asText.get().trim()
     output.takeIf { it.isNotBlank() }
 }.getOrNull()
-val gitVersionName = gitOutput("describe", "--tags", "--always", "--dirty")
+val gitVersionName = gitOutput("describe", "--tags", "--match", "[0-9]*", "--always", "--dirty")
     ?: "0.1.0"
 // versionCode tracks master commit count at the branch point so feature-branch
 // commits do not bump it (avoids install conflicts across branches).

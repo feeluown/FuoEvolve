@@ -3,7 +3,7 @@ name: Android Release
 "on":
   push:
     tags:
-      - "*"
+      - "[0-9]*"
   workflow_dispatch:
 
 jobs:
@@ -185,6 +185,9 @@ jobs:
       needs.publish-release.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: fuoevolve-github-pages
+      cancel-in-progress: false
     permissions:
       contents: read
       pages: write

@@ -9,6 +9,8 @@ readonly RELEASE_LIMIT="${FDROID_RELEASE_LIMIT:-5}"
 readonly REPOSITORY="${GITHUB_REPOSITORY:-feeluown/FuoEvolve}"
 readonly PACKAGE_NAME="org.feeluown.mobile"
 readonly EXPECTED_SIGNER_SHA256="${FUO_APK_SIGNER_SHA256:-8d8be45a04cf3242c13b43361c9ffa1ca8fb2f39d1a43ce35beadfa8dbfefb74}"
+readonly UPDATE_BASE_URL="${FUO_UPDATE_BASE_URL:-https://feeluown.github.io/FuoEvolve/update}"
+readonly CANARY_BACKUP_DIR="$PROJECT_ROOT/build/canary-pages-backup"
 ANDROID_SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 if [[ -z "$ANDROID_SDK_ROOT" && -f "$PROJECT_ROOT/local.properties" ]]; then
     ANDROID_SDK_ROOT="$(sed -n 's/^sdk\.dir=//p' "$PROJECT_ROOT/local.properties" | tail -n 1)"
@@ -81,6 +83,23 @@ run_fdroid() {
     fi
 }
 
+preserve_existing_canary() {
+    rm -rf "$CANARY_BACKUP_DIR"
+    mkdir -p "$CANARY_BACKUP_DIR"
+
+    local manifest="$CANARY_BACKUP_DIR/canary.json"
+    local apk="$CANARY_BACKUP_DIR/fuo-evolve-canary.apk"
+    local curl_args=(--fail --location --silent --show-error --connect-timeout 5 --max-time 30)
+    if curl "${curl_args[@]}" "$UPDATE_BASE_URL/canary.json" -o "$manifest" && \
+       curl "${curl_args[@]}" "$UPDATE_BASE_URL/fuo-evolve-canary.apk" -o "$apk"; then
+        echo "Preserved existing Canary update files from GitHub Pages"
+    else
+        rm -f "$manifest" "$apk"
+        echo "No existing Canary update files to preserve"
+    fi
+}
+
+preserve_existing_canary
 rm -rf "$WORK_DIR" "$PAGES_DIR"
 mkdir -p "$WORK_DIR/repo" "$WORK_DIR/metadata" "$PAGES_DIR"
 
@@ -102,6 +121,10 @@ mapfile -t release_tags < <(
 )
 
 downloaded=0
+latest_release_tag=""
+latest_release_asset_name=""
+latest_release_apk=""
+latest_release_published_at=""
 for tag in "${release_tags[@]}"; do
     asset_name="$(
         gh release view "$tag" \
@@ -118,6 +141,16 @@ for tag in "${release_tags[@]}"; do
         --repo "$REPOSITORY" \
         --pattern "$asset_name" \
         --dir "$WORK_DIR/repo"
+
+    if (( downloaded == 0 )); then
+        latest_release_tag="$tag"
+        latest_release_asset_name="$asset_name"
+        latest_release_apk="$WORK_DIR/repo/$asset_name"
+        latest_release_published_at="$(
+            gh release view "$tag" --repo "$REPOSITORY" --json publishedAt --jq '.publishedAt // ""'
+        )"
+    fi
+
     downloaded=$((downloaded + 1))
     if (( downloaded >= RELEASE_LIMIT )); then
         break
@@ -158,10 +191,26 @@ done
 )
 
 cp -a "$PROJECT_ROOT/docs/." "$PAGES_DIR/"
-mkdir -p "$PAGES_DIR/fdroid"
+mkdir -p "$PAGES_DIR/fdroid" "$PAGES_DIR/update"
 cp -a "$WORK_DIR/repo" "$PAGES_DIR/fdroid/repo"
+
+stable_apk_url="https://github.com/$REPOSITORY/releases/download/$latest_release_tag/$latest_release_asset_name"
+PUBLISHED_AT="$latest_release_published_at" \
+RELEASE_NOTES_URL="https://github.com/$REPOSITORY/releases/tag/$latest_release_tag" \
+    bash "$PROJECT_ROOT/scripts/write-update-manifest.sh" \
+        stable \
+        "$latest_release_apk" \
+        "$PAGES_DIR/update/stable.json" \
+        "$stable_apk_url"
+
+if [[ -f "$CANARY_BACKUP_DIR/canary.json" && -f "$CANARY_BACKUP_DIR/fuo-evolve-canary.apk" ]]; then
+    cp "$CANARY_BACKUP_DIR/canary.json" "$PAGES_DIR/update/canary.json"
+    cp "$CANARY_BACKUP_DIR/fuo-evolve-canary.apk" "$PAGES_DIR/update/fuo-evolve-canary.apk"
+fi
+
 touch "$PAGES_DIR/.nojekyll"
 
 test -f "$PAGES_DIR/404.html"
 test -f "$PAGES_DIR/fdroid/repo/index-v2.json"
 test -f "$PAGES_DIR/fdroid/repo/entry.json"
+test -f "$PAGES_DIR/update/stable.json"
