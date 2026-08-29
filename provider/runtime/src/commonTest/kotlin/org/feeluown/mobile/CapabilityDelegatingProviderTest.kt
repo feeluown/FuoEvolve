@@ -137,7 +137,7 @@ private class RecordingProvider(
         track: MusicTrack,
     ): ProviderMutationResult {
         calls += "addTrackToPlaylist"
-        return ProviderMutationResult(true)
+        return ProviderMutationResult(success = true, message = "ok")
     }
 
     override suspend fun removeTrackFromPlaylist(
@@ -145,22 +145,22 @@ private class RecordingProvider(
         track: MusicTrack,
     ): ProviderMutationResult {
         calls += "removeTrackFromPlaylist"
-        return ProviderMutationResult(true)
+        return ProviderMutationResult(success = true, message = "ok")
     }
 
     override suspend fun createPlaylist(name: String): ProviderMutationResult {
         calls += "createPlaylist"
-        return ProviderMutationResult(true)
+        return ProviderMutationResult(success = true, message = "ok")
     }
 
     override suspend fun deletePlaylist(playlist: ProviderPlaylist): ProviderMutationResult {
         calls += "deletePlaylist"
-        return ProviderMutationResult(true)
+        return ProviderMutationResult(success = true, message = "ok")
     }
 
     override suspend fun setSongDisliked(track: MusicTrack, disliked: Boolean): ProviderMutationResult {
         calls += "setSongDisliked"
-        return ProviderMutationResult(true)
+        return ProviderMutationResult(success = true, message = "ok")
     }
 
     override suspend fun mediaItemTracks(item: MediaRef): List<MusicTrack> {
@@ -209,7 +209,7 @@ private class RecordingProvider(
         favorite: Boolean,
     ): ProviderMutationResult {
         calls += "setResourceFavorite"
-        return ProviderMutationResult(true)
+        return ProviderMutationResult(success = true, message = "ok")
     }
 }
 
@@ -219,6 +219,7 @@ private fun testTrack() = MusicTrack(
     artists = "Artist",
     album = "Album",
     source = "test",
+    sourceType = TrackSourceType.Provider,
 )
 
 private fun testPlaylist() = ProviderPlaylist(
