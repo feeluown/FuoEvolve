@@ -72,16 +72,16 @@ size="$(stat -c '%s' "$APK_PATH")"
 published_at="${PUBLISHED_AT:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
-CHANNEL="$CHANNEL" \
-VERSION_CODE="$version_code" \
-VERSION_NAME="$version_name" \
-APK_URL="$APK_URL" \
-APK_SHA256="$sha256" \
-APK_SIZE="$size" \
-PUBLISHED_AT="$published_at" \
-COMMIT_SHA="${COMMIT_SHA:-}" \
-WORKFLOW_RUN_ID="${WORKFLOW_RUN_ID:-}" \
-RELEASE_NOTES_URL="${RELEASE_NOTES_URL:-}" \
+MANIFEST_CHANNEL="$CHANNEL" \
+MANIFEST_VERSION_CODE="$version_code" \
+MANIFEST_VERSION_NAME="$version_name" \
+MANIFEST_APK_URL="$APK_URL" \
+MANIFEST_APK_SHA256="$sha256" \
+MANIFEST_APK_SIZE="$size" \
+MANIFEST_PUBLISHED_AT="$published_at" \
+MANIFEST_COMMIT_SHA="${COMMIT_SHA:-}" \
+MANIFEST_WORKFLOW_RUN_ID="${WORKFLOW_RUN_ID:-}" \
+MANIFEST_RELEASE_NOTES_URL="${RELEASE_NOTES_URL:-}" \
 python3 - "$OUTPUT_PATH" <<'PY'
 import json
 import os
@@ -90,23 +90,23 @@ import sys
 output = sys.argv[1]
 payload = {
     "schemaVersion": 1,
-    "channel": os.environ["CHANNEL"],
-    "versionCode": int(os.environ["VERSION_CODE"]),
-    "versionName": os.environ["VERSION_NAME"],
-    "publishedAt": os.environ["PUBLISHED_AT"],
+    "channel": os.environ["MANIFEST_CHANNEL"],
+    "versionCode": int(os.environ["MANIFEST_VERSION_CODE"]),
+    "versionName": os.environ["MANIFEST_VERSION_NAME"],
+    "publishedAt": os.environ["MANIFEST_PUBLISHED_AT"],
     "apk": {
-        "url": os.environ["APK_URL"],
-        "sha256": os.environ["APK_SHA256"],
-        "size": int(os.environ["APK_SIZE"]),
+        "url": os.environ["MANIFEST_APK_URL"],
+        "sha256": os.environ["MANIFEST_APK_SHA256"],
+        "size": int(os.environ["MANIFEST_APK_SIZE"]),
     },
 }
-commit_sha = os.environ.get("COMMIT_SHA")
+commit_sha = os.environ.get("MANIFEST_COMMIT_SHA")
 if commit_sha:
     payload["commitSha"] = commit_sha
-workflow_run_id = os.environ.get("WORKFLOW_RUN_ID")
+workflow_run_id = os.environ.get("MANIFEST_WORKFLOW_RUN_ID")
 if workflow_run_id:
     payload["workflowRunId"] = int(workflow_run_id)
-release_notes_url = os.environ.get("RELEASE_NOTES_URL")
+release_notes_url = os.environ.get("MANIFEST_RELEASE_NOTES_URL")
 if release_notes_url:
     payload["releaseNotesUrl"] = release_notes_url
 
