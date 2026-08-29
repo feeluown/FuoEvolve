@@ -1,19 +1,15 @@
 package org.feeluown.mobile.provider.bilibili
 
 import io.ktor.http.Parameters
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.PlaybackPart
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.ProviderAuthState
-import org.feeluown.mobile.ProviderCapabilities
 import org.feeluown.mobile.ProviderComment
 import org.feeluown.mobile.ProviderContentSection
-import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderFeature
-import org.feeluown.mobile.ProviderFeatureCategory
-import org.feeluown.mobile.ProviderInfo
-import org.feeluown.mobile.ProviderMediaItem
-import org.feeluown.mobile.ProviderMediaItemDetail
 import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
 import org.feeluown.mobile.ProviderPlaylistDetail
@@ -30,7 +26,6 @@ import org.feeluown.mobile.provider.core.int
 import org.feeluown.mobile.provider.core.long
 import org.feeluown.mobile.provider.core.md5Hex
 import org.feeluown.mobile.provider.core.obj
-import org.feeluown.mobile.provider.core.parseCookies
 import org.feeluown.mobile.provider.core.providerJson
 import org.feeluown.mobile.provider.core.splitResourceId
 import org.feeluown.mobile.provider.core.string
@@ -39,8 +34,6 @@ import org.feeluown.mobile.provider.core.network.ProviderCachePolicies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderRequestKind
 import org.feeluown.mobile.provider.core.network.currentTimeMillis
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class BilibiliProvider(
     http: ProviderHttpClient,
@@ -515,11 +508,7 @@ class BilibiliProvider(
 
     private suspend fun currentUserMid(): String? = nav()?.obj("data")?.stringOrNull("mid")
 
-    private suspend fun csrfToken(): String? {
-        val stored = currentCredentials() ?: return null
-        return stored.cookies["bili_jct"]?.takeIf { it.isNotBlank() }
-            ?: parseCookies(stored.cookieHeader.orEmpty())["bili_jct"]?.takeIf { it.isNotBlank() }
-    }
+    private suspend fun csrfToken(): String? = csrfCookie(currentCredentials())
 
     private suspend fun nav(): kotlinx.serialization.json.JsonObject? = runCatching {
         http.getText(
@@ -591,11 +580,6 @@ class BilibiliProvider(
         )
     }
 
-    private fun credentialsArePresent(credentials: org.feeluown.mobile.provider.core.ProviderCredentials): Boolean =
-        credentials.cookies.isNotEmpty() ||
-            !credentials.cookieHeader.isNullOrBlank() ||
-            !credentials.authorization.isNullOrBlank()
-
     private suspend fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
         putAll(authenticatedHeaders(mapOf("Referer" to "https://www.bilibili.com/", "Accept" to "application/json, text/plain, */*")))
         putAll(extra)
@@ -608,150 +592,15 @@ class BilibiliProvider(
         ),
     )
 
-    private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
-
-    private fun parsePaged(value: String): Pair<String, Int?> {
-        if (!value.startsWith("paged_")) return value to null
-        val parts = value.removePrefix("paged_").split("__", limit = 2)
-        return parts.first() to parts.getOrNull(1)?.toIntOrNull()
-    }
-
-    private fun selectAudio(
-        qualityPolicy: String,
-        audio: List<AudioStream>,
-        flac: AudioStream?,
-    ): SelectedAudio? {
-        if (qualityPolicy == AudioQualityPolicy.Highest.policy && flac != null) {
-            return SelectedAudio(flac, "SHQ")
-        }
-        val sorted = audio.sortedByDescending { it.bandwidth }
-        val preferred = when (qualityPolicy) {
-            AudioQualityPolicy.Low.policy -> sorted.filter { it.bandwidth <= AUDIO_LOW_MAX_BANDWIDTH }
-            AudioQualityPolicy.Standard.policy -> sorted.filter { it.bandwidth <= AUDIO_STANDARD_MAX_BANDWIDTH }
-            else -> sorted
-        }
-        val fallback = if (qualityPolicy == AudioQualityPolicy.Low.policy) sorted.lastOrNull() else sorted.firstOrNull()
-        val selected = preferred.firstOrNull() ?: fallback ?: flac ?: return null
-        return SelectedAudio(selected, selected.qualityLabel())
-    }
-
-    private fun kotlinx.serialization.json.JsonObject.toAudioStream(isFlac: Boolean = false): AudioStream? {
-        val url = stringOrNull("baseUrl") ?: stringOrNull("base_url") ?: return null
-        return AudioStream(
-            url = url,
-            bandwidth = long("bandwidth") ?: 0L,
-            durationMs = long("length"),
-            isFlac = isFlac,
-        )
-    }
-
-    private fun kotlinx.serialization.json.JsonObject.toVideoStream(): VideoStream? {
-        val url = stringOrNull("baseUrl") ?: stringOrNull("base_url") ?: return null
-        return VideoStream(
-            url = url,
-            bandwidth = long("bandwidth") ?: 0L,
-        )
-    }
-
-    private fun AudioStream.qualityLabel(): String = when {
-        isFlac -> "SHQ"
-        bandwidth <= AUDIO_LOW_MAX_BANDWIDTH -> "LQ"
-        bandwidth <= AUDIO_STANDARD_MAX_BANDWIDTH -> "SQ"
-        else -> "HQ"
-    }
-
-    private fun stripHtml(value: String): String = value
-        .replace(Regex("<[^>]+>"), "")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-
-    private fun normalizeCover(value: String?): String? = value?.let { if (it.startsWith("//")) "https:$it" else it }
-
-    private fun parseDurationMs(value: String): Long? {
-        val parts = value.split(':').mapNotNull { it.toLongOrNull() }
-        if (parts.isEmpty()) return null
-        return parts.fold(0L) { total, part -> total * 60 + part } * 1_000
-    }
-
-    private fun parseSearchTags(value: String?): List<String> = value
-        ?.split(',', '，')
-        ?.map { tag -> tag.trim() }
-        ?.filter { tag -> tag.isNotBlank() }
-        ?.distinct()
-        .orEmpty()
-
-    private fun String.keyFromUrl(): String = substringAfterLast('/').substringBeforeLast('.')
-
-    private fun encodeQueryComponent(value: String): String = buildString {
-        for (byte in value.encodeToByteArray()) {
-            val number = byte.toInt() and 0xff
-            when {
-                number == 0x20 -> append('+')
-                number in 0x30..0x39 || number in 0x41..0x5a || number in 0x61..0x7a || number in setOf(45, 46, 95, 126) -> append(number.toChar())
-                else -> {
-                    append('%')
-                    append("0123456789ABCDEF"[number ushr 4])
-                    append("0123456789ABCDEF"[number and 0x0f])
-                }
-            }
-        }
-    }
-
-    private fun mixinKey(value: String): String = MIXIN_KEY_TABLE.indices
-        .mapNotNull { index -> value.getOrNull(MIXIN_KEY_TABLE[index]) }
-        .joinToString("")
-        .take(32)
-
-    private data class WbiKeys(val mixinKey: String)
-
-    private data class AudioStream(
-        val url: String,
-        val bandwidth: Long,
-        val durationMs: Long?,
-        val isFlac: Boolean = false,
-    )
-
-    private data class SelectedAudio(
-        val stream: AudioStream,
-        val quality: String,
-    )
-
-    private data class VideoStream(
-        val url: String,
-        val bandwidth: Long,
-    )
-
     private companion object {
-        const val ID = "bilibili"
-        const val NAME = "哔哩哔哩"
-        const val BASE = "https://api.bilibili.com"
-        const val COLLECTION_PREFIX = "collection_"
-        const val MAX_FAVORITE_PAGE_SIZE = 20
-        const val AUDIO_LOW_MAX_BANDWIDTH = 120_000L
-        const val AUDIO_STANDARD_MAX_BANDWIDTH = 256_000L
-        const val BILIBILI_MEDIA_USER_AGENT =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-        val MIXIN_KEY_TABLE = intArrayOf(
-            46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-            27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
-            37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-            22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
-        )
-        val INFO = ProviderInfo(
-            providerId = ID,
-            providerName = NAME,
-            loginConfig = org.feeluown.mobile.ProviderLoginConfig(
-                "https://passport.bilibili.com/h5-app/passport/login?gourl=https%3A%2F%2Fm.bilibili.com%2F",
-                listOf(listOf("SESSDATA", "bili_jct")),
-            ),
-            supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
-        )
-        val CAPABILITIES = ProviderCapabilities(providerId = ID, providerName = NAME, canAddSongToPlaylist = true, canRemoveSongFromPlaylist = true)
-        val FEATURES = listOf(
-            ProviderFeature("bilibili_popular_videos", ID, NAME, "热门视频", ProviderFeatureCategory.Music, ProviderContentType.Songs, false),
-            ProviderFeature("bilibili_user_playlists", ID, NAME, "我的歌单", ProviderFeatureCategory.MinePlaylists, ProviderContentType.Playlists, true),
-            ProviderFeature("bilibili_favorite_playlists", ID, NAME, "收藏歌单", ProviderFeatureCategory.MineFavoritePlaylists, ProviderContentType.Playlists, true),
-        )
+        const val ID = BilibiliProviderDefinition.ID
+        const val NAME = BilibiliProviderDefinition.NAME
+        const val BASE = BilibiliProviderDefinition.BASE
+        const val COLLECTION_PREFIX = BilibiliProviderDefinition.COLLECTION_PREFIX
+        const val MAX_FAVORITE_PAGE_SIZE = BilibiliProviderDefinition.MAX_FAVORITE_PAGE_SIZE
+        const val BILIBILI_MEDIA_USER_AGENT = BilibiliProviderDefinition.MEDIA_USER_AGENT
+        val INFO get() = BilibiliProviderDefinition.info
+        val CAPABILITIES get() = BilibiliProviderDefinition.capabilities
+        val FEATURES get() = BilibiliProviderDefinition.features
     }
 }
