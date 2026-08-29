@@ -30,7 +30,7 @@ object BilibiliProviderFactory : KotlinProviderFactory {
             account = base,
             discovery = discovery,
             content = content,
-            library = base,
+            library = content,
             playback = base,
         )
     }
