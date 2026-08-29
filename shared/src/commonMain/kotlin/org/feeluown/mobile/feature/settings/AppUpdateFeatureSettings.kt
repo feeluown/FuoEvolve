@@ -46,8 +46,8 @@ internal fun AppUpdateFeatureSettings(
     if (!update.supported) {
         AppUpdateGroup(title = "应用更新") {
             AppUpdateRow(
-                title = "当前平台暂不支持应用内更新",
-                supportingText = "可以继续通过系统或 FuoEvolve 发布页面更新应用。",
+                title = "当前设备暂不支持应用内更新",
+                supportingText = "请通过应用发布页面获取新版本。",
             )
         }
         return
@@ -56,7 +56,7 @@ internal fun AppUpdateFeatureSettings(
     val operationBusy = update.phase == AppUpdatePhase.Checking ||
         update.phase == AppUpdatePhase.Downloading
 
-    AppUpdateGroup(title = "更新渠道") {
+    AppUpdateGroup(title = "更新版本") {
         Column(
             modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
@@ -81,8 +81,8 @@ internal fun AppUpdateFeatureSettings(
             }
             Text(
                 when (update.channel) {
-                    AppUpdateChannel.Stable -> "仅接收正式发布版本，适合日常使用。"
-                    AppUpdateChannel.Canary -> "跟随 master 最新成功构建，可能包含尚未稳定的改动。"
+                    AppUpdateChannel.Stable -> "推荐日常使用，更新更稳定。"
+                    AppUpdateChannel.Canary -> "更早体验新功能，但可能不够稳定。"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -91,7 +91,7 @@ internal fun AppUpdateFeatureSettings(
         AppUpdateDivider()
         AppUpdateRow(
             title = "自动检查更新",
-            supportingText = "应用启动后最多每 12 小时检查一次当前渠道；手动检查不受限制。",
+            supportingText = "开启后会定期检查新版本。",
             enabled = update.phase != AppUpdatePhase.Downloading,
             trailingContent = {
                 Switch(
@@ -103,10 +103,9 @@ internal fun AppUpdateFeatureSettings(
         )
     }
 
-    AppUpdateGroup(title = "版本") {
+    AppUpdateGroup(title = "版本信息") {
         AppUpdateRow(
             title = "当前版本",
-            supportingText = "versionCode ${update.installedVersionCode}",
             trailingContent = {
                 Text(
                     update.installedVersionName.ifBlank { "—" },
@@ -115,11 +114,10 @@ internal fun AppUpdateFeatureSettings(
                 )
             },
         )
-        update.remoteVersionCode?.let { remoteVersionCode ->
+        if (update.remoteVersionCode != null) {
             AppUpdateDivider()
             AppUpdateRow(
-                title = "${update.channel.label} 最新版本",
-                supportingText = "versionCode $remoteVersionCode",
+                title = "最新版本",
                 trailingContent = {
                     Text(
                         update.remoteVersionName.orEmpty().ifBlank { "—" },
@@ -131,11 +129,8 @@ internal fun AppUpdateFeatureSettings(
         }
     }
 
-    AppUpdateGroup(title = "更新状态") {
-        AppUpdateRow(
-            title = update.message ?: updatePhaseLabel(update.phase),
-            supportingText = update.publishedAt?.takeIf { it.isNotBlank() }?.let { "发布时间 $it" },
-        )
+    AppUpdateGroup(title = "检查更新") {
+        AppUpdateRow(title = appUpdateStatusText(update))
         if (update.phase == AppUpdatePhase.Downloading) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = FuoSpacing.lg, vertical = FuoSpacing.sm),
@@ -157,19 +152,19 @@ internal fun AppUpdateFeatureSettings(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Filled.Download, contentDescription = null)
-                    Text("下载并安装 ${update.remoteVersionName.orEmpty()}".trim())
+                    Text("立即更新")
                 }
                 AppUpdatePhase.InstallPermissionRequired -> Button(
                     onClick = controller::downloadAndInstallAppUpdate,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("继续安装")
+                    Text("允许安装更新")
                 }
                 AppUpdatePhase.Installing -> OutlinedButton(
                     onClick = controller::downloadAndInstallAppUpdate,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("再次打开安装器")
+                    Text("重新打开安装界面")
                 }
                 AppUpdatePhase.Checking -> Button(
                     onClick = {},
@@ -189,17 +184,16 @@ internal fun AppUpdateFeatureSettings(
                     onClick = controller::checkAppUpdates,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (update.phase == AppUpdatePhase.Error) "重新检查" else "检查更新")
+                    Text(if (update.phase == AppUpdatePhase.Error) "重试" else "检查更新")
                 }
             }
         }
     }
 
     update.releaseNotesUrl?.takeIf { it.isNotBlank() }?.let { releaseNotesUrl ->
-        AppUpdateGroup(title = "版本详情") {
+        AppUpdateGroup(title = "更新内容") {
             AppUpdateRow(
-                title = if (update.channel == AppUpdateChannel.Stable) "查看发布说明" else "查看对应提交",
-                supportingText = update.remoteVersionName,
+                title = "查看更新说明",
                 trailingContent = {
                     Icon(
                         Icons.AutoMirrored.Filled.OpenInNew,
@@ -212,22 +206,12 @@ internal fun AppUpdateFeatureSettings(
         }
     }
 
-    if (update.channel == AppUpdateChannel.Canary) {
-        AppUpdateGroup(title = "Canary") {
-            AppUpdateRow(
-                title = "测试渠道",
-                supportingText = "每次 master 成功构建都可能成为新版本。切回 Stable 时不会自动降级；若当前 Canary 比最新 Stable 新，会等待后续正式版追上。",
-                titleColor = MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
-
     if (confirmCanary) {
         AlertDialog(
             onDismissRequest = { confirmCanary = false },
-            title = { Text("切换到 Canary？") },
+            title = { Text("切换到抢先体验版？") },
             text = {
-                Text("Canary 跟随 master 最新成功构建，可能包含未完成或不稳定的改动。切换后会立即检查 Canary 更新。")
+                Text("可以更早体验新功能，但可能不够稳定。")
             },
             confirmButton = {
                 TextButton(
@@ -305,14 +289,17 @@ private fun AppUpdateDivider() {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
-private fun updatePhaseLabel(phase: AppUpdatePhase): String = when (phase) {
-    AppUpdatePhase.Idle -> "尚未检查"
+private fun appUpdateStatusText(update: AppUpdateUiState): String = when (update.phase) {
+    AppUpdatePhase.Idle -> "尚未检查更新"
     AppUpdatePhase.Checking -> "正在检查更新"
     AppUpdatePhase.UpToDate -> "当前已是最新版本"
-    AppUpdatePhase.UpdateAvailable -> "发现新版本"
+    AppUpdatePhase.UpdateAvailable -> update.remoteVersionName
+        ?.takeIf { it.isNotBlank() }
+        ?.let { "发现新版本 $it" }
+        ?: "发现新版本"
     AppUpdatePhase.Downloading -> "正在下载更新"
-    AppUpdatePhase.InstallPermissionRequired -> "需要安装未知来源应用权限"
-    AppUpdatePhase.Installing -> "已打开系统安装器"
-    AppUpdatePhase.WaitingForStable -> "等待后续 Stable 版本"
-    AppUpdatePhase.Error -> "检查更新失败"
+    AppUpdatePhase.InstallPermissionRequired -> "需要允许安装更新"
+    AppUpdatePhase.Installing -> "请在系统界面完成安装"
+    AppUpdatePhase.WaitingForStable -> "当前版本已经较新"
+    AppUpdatePhase.Error -> "更新失败，请稍后重试"
 }
