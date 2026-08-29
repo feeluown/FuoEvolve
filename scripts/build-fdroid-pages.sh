@@ -89,8 +89,9 @@ preserve_existing_canary() {
 
     local manifest="$CANARY_BACKUP_DIR/canary.json"
     local apk="$CANARY_BACKUP_DIR/fuo-evolve-canary.apk"
-    if curl --fail --location --silent --show-error "$UPDATE_BASE_URL/canary.json" -o "$manifest" && \
-       curl --fail --location --silent --show-error "$UPDATE_BASE_URL/fuo-evolve-canary.apk" -o "$apk"; then
+    local curl_args=(--fail --location --silent --show-error --connect-timeout 5 --max-time 30)
+    if curl "${curl_args[@]}" "$UPDATE_BASE_URL/canary.json" -o "$manifest" && \
+       curl "${curl_args[@]}" "$UPDATE_BASE_URL/fuo-evolve-canary.apk" -o "$apk"; then
         echo "Preserved existing Canary update files from GitHub Pages"
     else
         rm -f "$manifest" "$apk"
@@ -196,7 +197,7 @@ cp -a "$WORK_DIR/repo" "$PAGES_DIR/fdroid/repo"
 stable_apk_url="https://github.com/$REPOSITORY/releases/download/$latest_release_tag/$latest_release_asset_name"
 PUBLISHED_AT="$latest_release_published_at" \
 RELEASE_NOTES_URL="https://github.com/$REPOSITORY/releases/tag/$latest_release_tag" \
-    "$PROJECT_ROOT/scripts/write-update-manifest.sh" \
+    bash "$PROJECT_ROOT/scripts/write-update-manifest.sh" \
         stable \
         "$latest_release_apk" \
         "$PAGES_DIR/update/stable.json" \
