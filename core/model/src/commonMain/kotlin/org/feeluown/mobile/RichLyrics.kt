@@ -95,6 +95,24 @@ private fun composeRichLyricsTransport(
 
 private data class TimedRichText(val timeMs: Long, val text: String)
 
+private data class RichAlignmentScore(
+    val matches: Int = 0,
+    val semanticMismatches: Int = 0,
+    val totalDistanceMs: Long = 0L,
+) {
+    fun withMatch(semanticMismatch: Boolean, distanceMs: Long): RichAlignmentScore = copy(
+        matches = matches + 1,
+        semanticMismatches = semanticMismatches + if (semanticMismatch) 1 else 0,
+        totalDistanceMs = totalDistanceMs + distanceMs,
+    )
+
+    fun isBetterThan(other: RichAlignmentScore): Boolean = when {
+        matches != other.matches -> matches > other.matches
+        semanticMismatches != other.semanticMismatches -> semanticMismatches < other.semanticMismatches
+        else -> totalDistanceMs < other.totalDistanceMs
+    }
+}
+
 /**
  * NetEase YRC may prepend JSON metadata lines such as composer/arranger credits.
  * They are not lyric text and the YRC parser intentionally does not render them.
@@ -146,38 +164,70 @@ private fun alignSecondaryRichTrack(
     secondary: List<TimedRichText>,
 ): Map<Int, String> {
     if (primary.isEmpty() || secondary.isEmpty()) return emptyMap()
-    val aligned = mutableMapOf<Int, String>()
-    var minimumPrimaryIndex = 0
 
-    secondary.forEachIndexed { secondaryIndex, secondaryLine ->
-        val secondaryIsCredit = isLikelyLyricCreditText(secondaryLine.text)
-        val nearestIndex = (minimumPrimaryIndex until primary.size)
-            .asSequence()
-            .filter { primaryIndex ->
-                abs(primary[primaryIndex].timeMs - secondaryLine.timeMs) <= RICH_LYRIC_ALIGNMENT_TOLERANCE_MS
-            }
-            .minWithOrNull(
-                compareBy<Int> { primaryIndex ->
-                    if (isLikelyLyricCreditText(primary[primaryIndex].text) == secondaryIsCredit) 0 else 1
-                }.thenBy { primaryIndex ->
-                    abs(primary[primaryIndex].timeMs - secondaryLine.timeMs)
-                }.thenBy { it },
-            )
-        val fallbackIndex = if (
-            nearestIndex == null &&
-            primary.size == secondary.size &&
-            secondaryIndex >= minimumPrimaryIndex &&
-            abs(primary[secondaryIndex].timeMs - secondaryLine.timeMs) <= RICH_LYRIC_INDEX_TOLERANCE_MS
-        ) {
-            secondaryIndex
-        } else {
-            null
+    val primarySize = primary.size
+    val secondarySize = secondary.size
+    val hasNormalCandidate = BooleanArray(secondarySize) { secondaryIndex ->
+        primary.any { primaryLine ->
+            abs(primaryLine.timeMs - secondary[secondaryIndex].timeMs) <= RICH_LYRIC_ALIGNMENT_TOLERANCE_MS
         }
-        val primaryIndex = nearestIndex ?: fallbackIndex ?: return@forEachIndexed
-        aligned[primaryIndex] = secondaryLine.text
-        minimumPrimaryIndex = primaryIndex + 1
+    }
+    val scores = Array(primarySize + 1) {
+        Array(secondarySize + 1) { RichAlignmentScore() }
+    }
+    val actions = Array(primarySize) { IntArray(secondarySize) }
+
+    for (primaryIndex in primarySize - 1 downTo 0) {
+        for (secondaryIndex in secondarySize - 1 downTo 0) {
+            var bestScore = scores[primaryIndex + 1][secondaryIndex]
+            var bestAction = RICH_ALIGNMENT_SKIP_PRIMARY
+
+            val skipSecondaryScore = scores[primaryIndex][secondaryIndex + 1]
+            if (skipSecondaryScore.isBetterThan(bestScore)) {
+                bestScore = skipSecondaryScore
+                bestAction = RICH_ALIGNMENT_SKIP_SECONDARY
+            }
+
+            val primaryLine = primary[primaryIndex]
+            val secondaryLine = secondary[secondaryIndex]
+            val distanceMs = abs(primaryLine.timeMs - secondaryLine.timeMs)
+            val normalMatch = distanceMs <= RICH_LYRIC_ALIGNMENT_TOLERANCE_MS
+            val indexFallbackMatch =
+                !hasNormalCandidate[secondaryIndex] &&
+                    primarySize == secondarySize &&
+                    primaryIndex == secondaryIndex &&
+                    distanceMs <= RICH_LYRIC_INDEX_TOLERANCE_MS
+            if (normalMatch || indexFallbackMatch) {
+                val matchScore = scores[primaryIndex + 1][secondaryIndex + 1].withMatch(
+                    semanticMismatch = isLikelyLyricCreditText(primaryLine.text) !=
+                        isLikelyLyricCreditText(secondaryLine.text),
+                    distanceMs = distanceMs,
+                )
+                if (!bestScore.isBetterThan(matchScore)) {
+                    bestScore = matchScore
+                    bestAction = RICH_ALIGNMENT_MATCH
+                }
+            }
+
+            scores[primaryIndex][secondaryIndex] = bestScore
+            actions[primaryIndex][secondaryIndex] = bestAction
+        }
     }
 
+    val aligned = mutableMapOf<Int, String>()
+    var primaryIndex = 0
+    var secondaryIndex = 0
+    while (primaryIndex < primarySize && secondaryIndex < secondarySize) {
+        when (actions[primaryIndex][secondaryIndex]) {
+            RICH_ALIGNMENT_MATCH -> {
+                aligned[primaryIndex] = secondary[secondaryIndex].text
+                primaryIndex += 1
+                secondaryIndex += 1
+            }
+            RICH_ALIGNMENT_SKIP_SECONDARY -> secondaryIndex += 1
+            else -> primaryIndex += 1
+        }
+    }
     return aligned
 }
 
@@ -211,5 +261,8 @@ private val lyricCreditPrefixRegex = Regex(
     """^\s*(?:(?:作词|作詞|作曲|编曲|編曲|填词|填詞|混音|制作人|製作人|监制|監製|原唱|演唱|歌手|和声|和聲|录音|錄音|母带|母帶|吉他|贝斯|貝斯|鼓|弦乐|弦樂|词|詞|曲)|(?:lyrics?|lyricist|composer|arranger|producer|vocals?|singer|mix(?:ing)?|master(?:ing)?|written\s+by|music\s+by))\s*(?:[:：/]|-\s+)""",
     RegexOption.IGNORE_CASE,
 )
+private const val RICH_ALIGNMENT_SKIP_PRIMARY = 1
+private const val RICH_ALIGNMENT_SKIP_SECONDARY = 2
+private const val RICH_ALIGNMENT_MATCH = 3
 private const val RICH_LYRIC_ALIGNMENT_TOLERANCE_MS = 350L
 private const val RICH_LYRIC_INDEX_TOLERANCE_MS = 1_500L
