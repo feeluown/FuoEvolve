@@ -51,7 +51,6 @@ jobs:
 
   build-release-apks:
     name: Build signed multi-ABI release APK
-    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -123,7 +122,9 @@ jobs:
 
   publish-canary:
     name: Publish master Canary update
-    needs: build-release-apks
+    needs:
+      - test
+      - build-release-apks
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 10
