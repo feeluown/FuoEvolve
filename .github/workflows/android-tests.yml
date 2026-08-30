@@ -2,6 +2,9 @@ name: Android Tests
 
 "on":
   workflow_call:
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -26,12 +29,19 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-      - name: Run architecture checks, Android unit tests and coverage
+      - name: Run architecture checks
         run: >-
           ./gradlew
+          --no-configuration-cache
           checkArchitectureBoundaries
           :feature:playback:checkPlaybackFeatureBoundaries
+
+      - name: Run Android unit tests and coverage
+        run: >-
+          ./gradlew
           :feature:recognition:testDebugUnitTest
           :feature:search:testDebugUnitTest
           :feature:localplaylist:testDebugUnitTest
