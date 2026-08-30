@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,9 +53,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -241,12 +240,16 @@ private fun RuntimeFullPlayerContent(
                 verticalArrangement = Arrangement.spacedBy(portraitSpacing),
             ) {
                 RuntimePlayerHeader(currentTrack)
-                PrimaryTabRow(selectedTabIndex = pagerState.currentPage.coerceIn(0, PlayerVisualTab.entries.lastIndex)) {
+                Row(
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     PlayerVisualTab.entries.forEach { tab ->
-                        Tab(
+                        FilterChip(
                             selected = pagerState.currentPage == tab.ordinal,
                             onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
-                            text = { Text(tab.title) },
+                            label = { Text(tab.title) },
                         )
                     }
                 }
