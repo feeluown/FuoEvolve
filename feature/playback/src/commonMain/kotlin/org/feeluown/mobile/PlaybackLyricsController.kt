@@ -182,7 +182,7 @@ internal class PlaybackLyricsController(
         val alignmentOffsetMs = (associationAlignmentKey ?: defaultAlignmentKey)?.let { alignmentKey ->
             alignmentOffsetForTrackId(alignmentKey).coerceIn(-3_000L, 3_000L)
         } ?: 0L
-        currentAlignmentPersistenceKey = associationAlignmentKey ?: defaultAlignmentKey
+        currentAlignmentPersistenceKey = defaultAlignmentKey
 
         if (
             loadedForTrackId == track.id &&
@@ -301,6 +301,9 @@ internal class PlaybackLyricsController(
         val alignmentKey = when {
             previous?.isManualAssociation == true && previous.associatedTrackId != null ->
                 lyricsAlignmentPersistenceKey(playbackSourceTrackId, previous.associatedTrackId)
+            previous != null && track.isSmartReplacement ->
+                lyricsAlignmentPersistenceKey(playbackSourceTrackId, sourceTrack.id)
+            previous != null -> null
             persistedAssociationTrackId != null ->
                 lyricsAlignmentPersistenceKey(playbackSourceTrackId, persistedAssociationTrackId)
             track.isSmartReplacement ->
@@ -373,7 +376,6 @@ internal class PlaybackLyricsController(
         val sourceTrack = lyricSourceTrackForPlayback(playbackTrack)
         val playbackSourceTrackId = alignmentSourceTrackIdForPlayback(playbackTrack)
         val alignmentKey = lyricsAlignmentPersistenceKey(playbackSourceTrackId, track.id)
-        currentAlignmentPersistenceKey = alignmentKey
         val requestSerial = currentRequestSerial()
         selectionJob?.cancel()
         mutableAssociationState.value = mutableAssociationState.value.copy(
@@ -401,6 +403,7 @@ internal class PlaybackLyricsController(
             loadedForTrackId = playbackTrack.id
             loadedForPlaybackSourceTrackId = playbackSourceTrackId
             loadedAssociationTrackId = track.id
+            currentAlignmentPersistenceKey = alignmentKey
             updateLyrics(lyrics)
             mutableAssociationState.value = LyricsAssociationUiState(
                 trackId = playbackTrack.id,
