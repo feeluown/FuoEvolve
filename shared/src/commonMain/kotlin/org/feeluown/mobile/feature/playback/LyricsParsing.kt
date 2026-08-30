@@ -21,6 +21,24 @@ private data class RawLyricLine(
     val order: Int,
 )
 
+private data class SecondaryAlignmentScore(
+    val matches: Int = 0,
+    val semanticMismatches: Int = 0,
+    val totalDistanceMs: Long = 0L,
+) {
+    fun withMatch(semanticMismatch: Boolean, distanceMs: Long): SecondaryAlignmentScore = copy(
+        matches = matches + 1,
+        semanticMismatches = semanticMismatches + if (semanticMismatch) 1 else 0,
+        totalDistanceMs = totalDistanceMs + distanceMs,
+    )
+
+    fun isBetterThan(other: SecondaryAlignmentScore): Boolean = when {
+        matches != other.matches -> matches > other.matches
+        semanticMismatches != other.semanticMismatches -> semanticMismatches < other.semanticMismatches
+        else -> totalDistanceMs < other.totalDistanceMs
+    }
+}
+
 const val LYRIC_TRANSLATION_MARKER = "\n__FUO_LYRIC_TRANSLATION__\n"
 const val LYRIC_ROMANIZATION_MARKER = "\n__FUO_LYRIC_ROMANIZATION__\n"
 
@@ -77,24 +95,32 @@ fun attachLyricTranslations(lines: List<LyricLine>, translationRaw: String?): Li
     if (translationRaw.isNullOrBlank() || lines.isEmpty()) return lines
     val translationLines = parseLrc(translationRaw).filter { it.timeMs != Long.MAX_VALUE }
     if (translationLines.isEmpty()) return lines
-    val byTime = translationLines
+    val groupedTranslationLines = translationLines
         .groupBy { it.timeMs }
-        .mapValues { (_, value) ->
-            value.flatMap { secondary ->
-                listOfNotNull(secondary.text, secondary.translation)
-            }
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .distinct()
-                .joinToString("\n")
+        .map { (timeMs, sameTimeLines) ->
+            LyricLine(
+                timeMs = timeMs,
+                text = sameTimeLines.flatMap { secondary ->
+                    listOfNotNull(secondary.text, secondary.translation)
+                }
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                    .joinToString("\n"),
+            )
         }
-    return lines.map { line ->
-        if (line.timeMs == Long.MAX_VALUE || !line.translation.isNullOrBlank()) return@map line
-        val exact = byTime[line.timeMs]
-        val nearestTime = byTime.keys
-            .minByOrNull { kotlin.math.abs(it - line.timeMs) }
-            ?.takeIf { kotlin.math.abs(it - line.timeMs) <= 50 }
-        line.copy(translation = exact ?: nearestTime?.let(byTime::get))
+        .filter { it.text.isNotBlank() }
+        .sortedBy(LyricLine::timeMs)
+    val aligned = alignSecondaryLyricLines(
+        primary = lines,
+        secondary = groupedTranslationLines,
+        toleranceMs = LYRIC_TRANSLATION_ALIGNMENT_TOLERANCE_MS,
+        eligiblePrimary = { it.translation.isNullOrBlank() },
+    )
+    return lines.mapIndexed { index, line ->
+        if (line.timeMs == Long.MAX_VALUE || !line.translation.isNullOrBlank()) return@mapIndexed line
+        val translation = aligned[index]?.text?.takeIf(String::isNotBlank) ?: return@mapIndexed line
+        line.copy(translation = translation)
     }
 }
 
@@ -103,15 +129,16 @@ fun attachLyricRomanization(lines: List<LyricLine>, romanizationRaw: String?): L
     val romanizationLines = parseLyricTrack(romanizationRaw)
         .filter { it.timeMs != Long.MAX_VALUE }
     if (romanizationLines.isEmpty()) return lines
-    val primaryTimedSize = lines.count { it.timeMs != Long.MAX_VALUE }
+    val aligned = alignSecondaryLyricLines(
+        primary = lines,
+        secondary = romanizationLines,
+        toleranceMs = LYRIC_ROMANIZATION_ALIGNMENT_TOLERANCE_MS,
+        indexToleranceMs = LYRIC_ROMANIZATION_INDEX_TOLERANCE_MS,
+        eligiblePrimary = { it.romanization.isNullOrBlank() },
+    )
     return lines.mapIndexed { index, line ->
         if (line.timeMs == Long.MAX_VALUE || !line.romanization.isNullOrBlank()) return@mapIndexed line
-        val secondary = alignedRomanizationLine(
-            track = romanizationLines,
-            primaryTimeMs = line.timeMs,
-            primaryIndex = index,
-            primarySize = primaryTimedSize,
-        ) ?: return@mapIndexed line
+        val secondary = aligned[index] ?: return@mapIndexed line
         val romanization = listOfNotNull(secondary.text, secondary.translation)
             .map(String::trim)
             .filter(String::isNotBlank)
@@ -128,26 +155,92 @@ fun attachLyricRomanization(lines: List<LyricLine>, romanizationRaw: String?): L
     }
 }
 
-private fun alignedRomanizationLine(
-    track: List<LyricLine>,
-    primaryTimeMs: Long,
-    primaryIndex: Int,
-    primarySize: Int,
-): LyricLine? {
-    val nearest = track.minByOrNull { kotlin.math.abs(it.timeMs - primaryTimeMs) }
-    if (
-        nearest != null &&
-        kotlin.math.abs(nearest.timeMs - primaryTimeMs) <= LYRIC_ROMANIZATION_ALIGNMENT_TOLERANCE_MS
-    ) {
-        return nearest
+private fun alignSecondaryLyricLines(
+    primary: List<LyricLine>,
+    secondary: List<LyricLine>,
+    toleranceMs: Long,
+    indexToleranceMs: Long? = null,
+    eligiblePrimary: (LyricLine) -> Boolean = { true },
+): Map<Int, LyricLine> {
+    val timedPrimary = primary.mapIndexedNotNull { index, line ->
+        if (line.timeMs == Long.MAX_VALUE || !eligiblePrimary(line)) null else index to line
     }
-    return track.getOrNull(primaryIndex)
-        ?.takeIf {
-            track.size == primarySize &&
-                kotlin.math.abs(it.timeMs - primaryTimeMs) <= LYRIC_ROMANIZATION_INDEX_TOLERANCE_MS
+    if (timedPrimary.isEmpty() || secondary.isEmpty()) return emptyMap()
+
+    val primarySize = timedPrimary.size
+    val secondarySize = secondary.size
+    val hasNormalCandidate = BooleanArray(secondarySize) { secondaryIndex ->
+        timedPrimary.any { (_, primaryLine) ->
+            kotlin.math.abs(primaryLine.timeMs - secondary[secondaryIndex].timeMs) <= toleranceMs
         }
+    }
+    val scores = Array(primarySize + 1) {
+        Array(secondarySize + 1) { SecondaryAlignmentScore() }
+    }
+    val actions = Array(primarySize) { IntArray(secondarySize) }
+
+    for (primaryPosition in primarySize - 1 downTo 0) {
+        for (secondaryIndex in secondarySize - 1 downTo 0) {
+            var bestScore = scores[primaryPosition + 1][secondaryIndex]
+            var bestAction = ALIGNMENT_SKIP_PRIMARY
+
+            val skipSecondaryScore = scores[primaryPosition][secondaryIndex + 1]
+            if (skipSecondaryScore.isBetterThan(bestScore)) {
+                bestScore = skipSecondaryScore
+                bestAction = ALIGNMENT_SKIP_SECONDARY
+            }
+
+            val primaryLine = timedPrimary[primaryPosition].second
+            val secondaryLine = secondary[secondaryIndex]
+            val distanceMs = kotlin.math.abs(primaryLine.timeMs - secondaryLine.timeMs)
+            val normalMatch = distanceMs <= toleranceMs
+            val indexFallbackMatch =
+                !hasNormalCandidate[secondaryIndex] &&
+                    indexToleranceMs != null &&
+                    primarySize == secondarySize &&
+                    primaryPosition == secondaryIndex &&
+                    distanceMs <= indexToleranceMs
+            if (normalMatch || indexFallbackMatch) {
+                val matchScore = scores[primaryPosition + 1][secondaryIndex + 1].withMatch(
+                    semanticMismatch = isLikelyLyricCreditText(primaryLine.text) !=
+                        isLikelyLyricCreditText(secondaryLine.text),
+                    distanceMs = distanceMs,
+                )
+                if (!bestScore.isBetterThan(matchScore)) {
+                    bestScore = matchScore
+                    bestAction = ALIGNMENT_MATCH
+                }
+            }
+
+            scores[primaryPosition][secondaryIndex] = bestScore
+            actions[primaryPosition][secondaryIndex] = bestAction
+        }
+    }
+
+    val aligned = mutableMapOf<Int, LyricLine>()
+    var primaryPosition = 0
+    var secondaryIndex = 0
+    while (primaryPosition < primarySize && secondaryIndex < secondarySize) {
+        when (actions[primaryPosition][secondaryIndex]) {
+            ALIGNMENT_MATCH -> {
+                aligned[timedPrimary[primaryPosition].first] = secondary[secondaryIndex]
+                primaryPosition += 1
+                secondaryIndex += 1
+            }
+            ALIGNMENT_SKIP_SECONDARY -> secondaryIndex += 1
+            else -> primaryPosition += 1
+        }
+    }
+    return aligned
 }
 
+private fun isLikelyLyricCreditText(text: String): Boolean =
+    lyricCreditPrefixRegex.containsMatchIn(text.trim())
+
+private const val ALIGNMENT_SKIP_PRIMARY = 1
+private const val ALIGNMENT_SKIP_SECONDARY = 2
+private const val ALIGNMENT_MATCH = 3
+private const val LYRIC_TRANSLATION_ALIGNMENT_TOLERANCE_MS = 50L
 private const val LYRIC_ROMANIZATION_ALIGNMENT_TOLERANCE_MS = 350L
 private const val LYRIC_ROMANIZATION_INDEX_TOLERANCE_MS = 1_500L
 
@@ -204,7 +297,10 @@ fun parseLrc(raw: String?): List<LyricLine> {
         .groupBy { it.timeMs }
         .values
         .flatMap { sameTimeLines ->
-            if (sameTimeLines.size == 2) {
+            if (
+                sameTimeLines.size == 2 &&
+                sameTimeLines.none { isLikelyLyricCreditText(it.text) }
+            ) {
                 val original = sameTimeLines[0]
                 val translation = sameTimeLines[1].text.takeIf { it != original.text }
                 listOf(LyricLine(original.timeMs, original.text, translation))
@@ -272,3 +368,7 @@ val lrcTimeRegex = Regex("""\[(\d{1,3}:\d{1,2}(?:\.\d{1,3})?)]""")
 val lrcMetadataRegex = Regex("""^\[[A-Za-z]+:.*]$""")
 val yrcLineHeaderRegex = Regex("""^\[(\d+),(\d+)]""")
 val yrcWordRegex = Regex("""\((\d+),(\d+),\d+\)([^(]*)""")
+private val lyricCreditPrefixRegex = Regex(
+    """^\s*(?:(?:作词|作詞|作曲|编曲|編曲|填词|填詞|混音|制作人|製作人|监制|監製|原唱|演唱|歌手|和声|和聲|录音|錄音|母带|母帶|吉他|贝斯|貝斯|鼓|弦乐|弦樂|词|詞|曲)|(?:lyrics?|lyricist|composer|arranger|producer|vocals?|singer|mix(?:ing)?|master(?:ing)?|written\s+by|music\s+by))\s*(?:[:：/]|-\s+)""",
+    RegexOption.IGNORE_CASE,
+)

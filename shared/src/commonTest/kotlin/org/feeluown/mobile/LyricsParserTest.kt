@@ -26,6 +26,22 @@ class LyricsParserTest {
     }
 
     @Test
+    fun parseLrcKeepsSameTimestampCreditsAsIndependentLines() {
+        val lines = parseLrc(
+            """
+            [00:01.000]作曲：でんの子P
+            [00:01.000]作詞：でんの子P
+            """.trimIndent(),
+        )
+
+        assertEquals(2, lines.size)
+        assertEquals("作曲：でんの子P", lines[0].text)
+        assertNull(lines[0].translation)
+        assertEquals("作詞：でんの子P", lines[1].text)
+        assertNull(lines[1].translation)
+    }
+
+    @Test
     fun parseLrcKeepsLinesWithoutTranslationAndSkipsMetadata() {
         val lines = parseLrc(
             """
@@ -112,6 +128,46 @@ class LyricsParserTest {
         assertEquals("The club isn't the best place", lines.single().text)
         assertEquals("这俱乐部不是个能找到安慰的地方", lines.single().translation)
         assertNull(lines.single().words)
+    }
+
+    @Test
+    fun parseLyricsUsesEachRomanizationLineAtMostOnce() {
+        val raw = composeLyricsWithRichTracks(
+            main = """
+                [00:01.000]作詞：でんの子P
+                [00:01.200]ふわっとしたあなたゆるさせつなさ
+            """.trimIndent(),
+            romanization = "[00:01.200]fu wa tto shi ta a na ta yu ru sa se tsu na sa",
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals(2, lines.size)
+        assertNull(lines[0].romanization)
+        assertEquals(
+            "fu wa tto shi ta a na ta yu ru sa se tsu na sa",
+            lines[1].romanization,
+        )
+    }
+
+    @Test
+    fun parseLyricsReservesFollowingExactRomanizationMatch() {
+        val raw = composeLyricsWithRichTracks(
+            main = """
+                [00:01.000]かな
+                [00:01.300]さかな
+            """.trimIndent(),
+            romanization = """
+                [00:01.200]ka na
+                [00:01.300]sa ka na
+            """.trimIndent(),
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals(2, lines.size)
+        assertEquals("ka na", lines[0].romanization)
+        assertEquals("sa ka na", lines[1].romanization)
     }
 
     @Test
