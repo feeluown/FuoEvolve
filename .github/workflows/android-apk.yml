@@ -67,7 +67,10 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare Git refs for Gradle versioning
-        run: git branch --force master origin/master
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
 
       - name: Validate update manifest script
         run: bash -n scripts/write-update-manifest.sh
