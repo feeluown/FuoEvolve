@@ -21,6 +21,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -32,10 +38,10 @@ jobs:
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-      - name: Run architecture checks, Android unit tests and coverage
+      - name: Run architecture checks
         run: >-
           ./gradlew
-          --configuration-cache
+          --no-configuration-cache
           checkArchitectureBoundaries
           :feature:download:checkOfflineFeatureBoundaries
           :feature:providerauth:checkProviderFeatureBoundaries
@@ -45,6 +51,11 @@ jobs:
           :feature:home:checkHomeFeatureBoundaries
           :feature:playback:checkPlaybackFeatureBoundaries
           :shared:checkP4ContractBoundaries
+
+      - name: Run Android unit tests and coverage
+        run: >-
+          ./gradlew
+          --configuration-cache
           :feature:recognition:testDebugUnitTest
           :feature:search:testDebugUnitTest
           :feature:localplaylist:testDebugUnitTest
