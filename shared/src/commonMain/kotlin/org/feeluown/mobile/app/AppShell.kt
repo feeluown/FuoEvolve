@@ -79,8 +79,12 @@ internal fun AppShell(
                     isLoading = isPlaybackLoading,
                 ) {
                     SharedTransitionLayout(Modifier.fillMaxSize()) {
+                        // NavDisplay may start predictive-pop visuals before onBack is dispatched.
+                        // While the full player owns Back, keep underlying routes out of the shared
+                        // transition scope so their resource-cover Hero cannot render above it.
+                        val appSharedTransitionScope = if (playback.isFullPlayerOpen) null else this
                         CompositionLocalProvider(
-                            LocalAppSharedTransitionScope provides this,
+                            LocalAppSharedTransitionScope provides appSharedTransitionScope,
                             LocalResourceHeroCoordinator provides resourceHeroCoordinator,
                         ) {
                             Box(Modifier.fillMaxSize()) {
