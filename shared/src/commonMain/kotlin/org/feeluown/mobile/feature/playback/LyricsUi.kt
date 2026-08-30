@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,9 +19,11 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -51,6 +52,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 
+private const val LYRIC_ALIGNMENT_STEP_MS = 250L
+private const val LYRIC_ALIGNMENT_LIMIT_MS = 3_000L
+private const val LYRIC_ALIGNMENT_SLIDER_STEPS = 23
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifier) {
     val lyricsPort = LocalPlaybackLyricsPort.current
@@ -60,7 +66,12 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
     val currentTrack = state.currentTrack
     val associationMatchesTrack = associationState.trackId == currentTrack?.id
     val lyricOffsetMs = if (associationMatchesTrack) associationState.alignmentOffsetMs else 0L
-    var alignmentPanelOpen by remember(currentTrack?.id) { mutableStateOf(false) }
+    val canAdjustLyricsAlignment = currentTrack != null &&
+        associationMatchesTrack &&
+        (associationState.isManualAssociation || currentTrack.isSmartReplacement)
+    var alignmentSheetOpen by remember(currentTrack?.id, currentTrack?.replacementId) {
+        mutableStateOf(false)
+    }
     val renderPositionMs = rememberKaraokePositionMs(
         positionMs = state.positionMs,
         isPlaying = state.status == PlayerStatus.Playing,
@@ -230,11 +241,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         Spacer(modifier = Modifier.height(edgeSpacerHeight))
                     }
                 }
-                if (
-                    currentTrack != null &&
-                    associationMatchesTrack &&
-                    associationState.isManualAssociation
-                ) {
+                if (canAdjustLyricsAlignment) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -242,70 +249,35 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = { lyricsPort.openAssociationSearch(currentTrack) }) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "更换歌词",
-                            )
+                        if (associationState.isManualAssociation) {
+                            IconButton(onClick = { lyricsPort.openAssociationSearch(currentTrack) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "更换歌词",
+                                )
+                            }
                         }
-                        IconButton(onClick = { alignmentPanelOpen = !alignmentPanelOpen }) {
+                        IconButton(onClick = { alignmentSheetOpen = true }) {
                             Icon(
                                 imageVector = Icons.Default.Tune,
                                 contentDescription = "微调歌词对齐",
                             )
                         }
                     }
-                    if (alignmentPanelOpen) {
-                        Surface(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 60.dp, end = FuoSpacing.sm)
-                                .width(280.dp),
-                            shape = MaterialTheme.shapes.medium,
-                            tonalElevation = 3.dp,
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(FuoSpacing.md),
-                                verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
-                            ) {
-                                Text(
-                                    text = "歌词对齐：${lyricOffsetLabel(lyricOffsetMs)}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                                Slider(
-                                    value = lyricOffsetMs.toFloat(),
-                                    onValueChange = { value ->
-                                        lyricsPort.updateAlignmentOffset(
-                                            ((value / 250f).roundToInt() * 250L).coerceIn(-3_000L, 3_000L),
-                                        )
-                                    },
-                                    valueRange = -3_000f..3_000f,
-                                    steps = 23,
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = "提前 3 秒",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    TextButton(onClick = { lyricsPort.updateAlignmentOffset(0L) }) {
-                                        Text("归零")
-                                    }
-                                    Text(
-                                        text = "延后 3 秒",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
+        }
+    }
+
+    if (alignmentSheetOpen && canAdjustLyricsAlignment) {
+        ModalBottomSheet(
+            onDismissRequest = { alignmentSheetOpen = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            LyricsAlignmentSheetContent(
+                offsetMs = lyricOffsetMs,
+                onOffsetChange = lyricsPort::updateAlignmentOffset,
+            )
         }
     }
 
@@ -317,6 +289,100 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
             onSelect = lyricsPort::selectAssociation,
             onDismiss = lyricsPort::closeAssociationSearch,
         )
+    }
+}
+
+@Composable
+private fun LyricsAlignmentSheetContent(
+    offsetMs: Long,
+    onOffsetChange: (Long) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = FuoSpacing.lg)
+            .padding(bottom = FuoSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+    ) {
+        Text(
+            text = "歌词微调",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "同步偏移",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = lyricOffsetLabel(offsetMs),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = offsetMs.toFloat(),
+            onValueChange = { value ->
+                onOffsetChange(
+                    ((value / LYRIC_ALIGNMENT_STEP_MS).roundToInt() * LYRIC_ALIGNMENT_STEP_MS)
+                        .coerceIn(-LYRIC_ALIGNMENT_LIMIT_MS, LYRIC_ALIGNMENT_LIMIT_MS),
+                )
+            },
+            valueRange = -LYRIC_ALIGNMENT_LIMIT_MS.toFloat()..LYRIC_ALIGNMENT_LIMIT_MS.toFloat(),
+            steps = LYRIC_ALIGNMENT_SLIDER_STEPS,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "提前 3 秒",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "延后 3 秒",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = {
+                    onOffsetChange(
+                        (offsetMs - LYRIC_ALIGNMENT_STEP_MS).coerceAtLeast(-LYRIC_ALIGNMENT_LIMIT_MS),
+                    )
+                },
+                enabled = offsetMs > -LYRIC_ALIGNMENT_LIMIT_MS,
+            ) {
+                Text("-250 ms")
+            }
+            TextButton(
+                onClick = { onOffsetChange(0L) },
+                enabled = offsetMs != 0L,
+            ) {
+                Text("归零")
+            }
+            TextButton(
+                onClick = {
+                    onOffsetChange(
+                        (offsetMs + LYRIC_ALIGNMENT_STEP_MS).coerceAtMost(LYRIC_ALIGNMENT_LIMIT_MS),
+                    )
+                },
+                enabled = offsetMs < LYRIC_ALIGNMENT_LIMIT_MS,
+            ) {
+                Text("+250 ms")
+            }
+        }
     }
 }
 
