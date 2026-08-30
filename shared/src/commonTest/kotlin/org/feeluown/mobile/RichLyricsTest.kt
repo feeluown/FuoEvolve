@@ -51,6 +51,30 @@ class RichLyricsTest {
     }
 
     @Test
+    fun composeRichLyricsReservesFollowingExactSecondaryMatch() {
+        val raw = composeRichLyrics(
+            main = """
+                [00:01.000]First
+                [00:01.300]Second
+            """.trimIndent(),
+            translation = """
+                [00:01.200]第一
+                [00:01.300]第二
+            """.trimIndent(),
+            romanization = """
+                [00:01.000]first
+                [00:01.300]second
+            """.trimIndent(),
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals(2, lines.size)
+        assertEquals("第一", lines[0].translation)
+        assertEquals("第二", lines[1].translation)
+    }
+
+    @Test
     fun preservesWordTimedPrimaryAndRomanizationTracks() {
         val raw = composeRichLyrics(
             main = "[1000,2000](1000,500,0)Hel(1500,1500,0)lo",
