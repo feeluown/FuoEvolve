@@ -2,6 +2,14 @@ name: Android Tests
 
 "on":
   workflow_call:
+    inputs:
+      validate_android_app:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -18,6 +26,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -26,10 +40,13 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-      - name: Run architecture checks, Android unit tests and coverage
+      - name: Run architecture checks
         run: >-
           ./gradlew
+          --no-configuration-cache
           checkArchitectureBoundaries
           :feature:download:checkOfflineFeatureBoundaries
           :feature:providerauth:checkProviderFeatureBoundaries
@@ -39,24 +56,41 @@ jobs:
           :feature:home:checkHomeFeatureBoundaries
           :feature:playback:checkPlaybackFeatureBoundaries
           :shared:checkP4ContractBoundaries
-          :feature:recognition:testDebugUnitTest
-          :feature:search:testDebugUnitTest
-          :feature:localplaylist:testDebugUnitTest
-          :feature:localmusic:testDebugUnitTest
-          :feature:download:testDebugUnitTest
-          :feature:providercatalog:testDebugUnitTest
-          :feature:providerauth:testDebugUnitTest
-          :feature:providerdetail:testDebugUnitTest
-          :feature:settings:testDebugUnitTest
-          :feature:onboarding:testDebugUnitTest
-          :feature:home:testDebugUnitTest
-          :feature:playback:testDebugUnitTest
-          :playback:runtime:testDebugUnitTest
-          :provider:runtime:testDebugUnitTest
-          :persistence:settings:testDebugUnitTest
-          :provider:bilibili:testDebugUnitTest
-          :provider:netease:testDebugUnitTest
-          :provider:qqmusic:testDebugUnitTest
-          :provider:ytmusic:testDebugUnitTest
-          :shared:testDebugUnitTest
-          :shared:koverXmlReportDebug
+
+      - name: Run Android unit tests, coverage and PR compile validation
+        env:
+          VALIDATE_ANDROID_APP: ${{ inputs.validate_android_app }}
+        run: |
+          tasks=(
+            :feature:recognition:testDebugUnitTest
+            :feature:search:testDebugUnitTest
+            :feature:localplaylist:testDebugUnitTest
+            :feature:localmusic:testDebugUnitTest
+            :feature:download:testDebugUnitTest
+            :feature:providercatalog:testDebugUnitTest
+            :feature:providerauth:testDebugUnitTest
+            :feature:providerdetail:testDebugUnitTest
+            :feature:settings:testDebugUnitTest
+            :feature:onboarding:testDebugUnitTest
+            :feature:home:testDebugUnitTest
+            :feature:playback:testDebugUnitTest
+            :playback:runtime:testDebugUnitTest
+            :provider:runtime:testDebugUnitTest
+            :persistence:settings:testDebugUnitTest
+            :provider:bilibili:testDebugUnitTest
+            :provider:netease:testDebugUnitTest
+            :provider:qqmusic:testDebugUnitTest
+            :provider:ytmusic:testDebugUnitTest
+            :shared:testDebugUnitTest
+            :shared:koverXmlReportDebug
+          )
+
+          if [ "$VALIDATE_ANDROID_APP" = "true" ]; then
+            tasks+=(
+              :androidApp:compileDebugKotlin
+              :androidApp:compileDebugJavaWithJavac
+              :androidApp:processDebugResources
+            )
+          fi
+
+          ./gradlew --configuration-cache "${tasks[@]}"
