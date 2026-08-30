@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   test:
-    name: Run shared tests and coverage
+    name: Run Android tests and coverage
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -27,5 +27,36 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Run architecture checks, feature/playback/provider runtime tests, shared tests and coverage
-        run: ./gradlew checkArchitectureBoundaries :feature:recognition:allTests :feature:search:allTests :feature:localplaylist:allTests :feature:localmusic:allTests :feature:download:allTests :feature:providercatalog:allTests :feature:providerauth:allTests :feature:providerdetail:allTests :feature:settings:allTests :feature:onboarding:allTests :feature:home:allTests :feature:playback:allTests :playback:runtime:allTests :provider:runtime:allTests :shared:allTests :shared:koverXmlReportDebug
+      - name: Run architecture checks, Android unit tests and coverage
+        run: >-
+          ./gradlew
+          checkArchitectureBoundaries
+          :feature:download:checkOfflineFeatureBoundaries
+          :feature:providerauth:checkProviderFeatureBoundaries
+          :feature:providerdetail:checkProviderDetailFeatureBoundaries
+          :feature:settings:checkSettingsFeatureBoundaries
+          :feature:onboarding:checkOnboardingFeatureBoundaries
+          :feature:home:checkHomeFeatureBoundaries
+          :feature:playback:checkPlaybackFeatureBoundaries
+          :shared:checkP4ContractBoundaries
+          :feature:recognition:testDebugUnitTest
+          :feature:search:testDebugUnitTest
+          :feature:localplaylist:testDebugUnitTest
+          :feature:localmusic:testDebugUnitTest
+          :feature:download:testDebugUnitTest
+          :feature:providercatalog:testDebugUnitTest
+          :feature:providerauth:testDebugUnitTest
+          :feature:providerdetail:testDebugUnitTest
+          :feature:settings:testDebugUnitTest
+          :feature:onboarding:testDebugUnitTest
+          :feature:home:testDebugUnitTest
+          :feature:playback:testDebugUnitTest
+          :playback:runtime:testDebugUnitTest
+          :provider:runtime:testDebugUnitTest
+          :persistence:settings:testDebugUnitTest
+          :provider:bilibili:testDebugUnitTest
+          :provider:netease:testDebugUnitTest
+          :provider:qqmusic:testDebugUnitTest
+          :provider:ytmusic:testDebugUnitTest
+          :shared:testDebugUnitTest
+          :shared:koverXmlReportDebug
