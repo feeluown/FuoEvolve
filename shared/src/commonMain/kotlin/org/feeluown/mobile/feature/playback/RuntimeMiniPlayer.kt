@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,13 +100,9 @@ internal fun RuntimeMiniPlayer(
                 onClick = onOpenFullPlayer,
             ),
         shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.extraLarge,
-        color = if (isWideLayout) {
-            MaterialTheme.colorScheme.surfaceContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
+        color = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = if (isWideLayout) 3.dp else 5.dp,
+        tonalElevation = 0.dp,
     ) {
         Column {
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
