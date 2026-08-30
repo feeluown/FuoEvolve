@@ -45,7 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,122 +79,132 @@ internal fun RuntimeMiniPlayer(
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     val openPlayerInteractionSource = remember { MutableInteractionSource() }
     val contentSizeSpec = FuoMotion.defaultSpatialSpec<IntSize>()
-    Surface(
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
                 horizontal = if (isWideLayout) 0.dp else 8.dp,
                 vertical = if (isWideLayout) 0.dp else 4.dp,
-            )
-            .animateContentSize(animationSpec = contentSizeSpec)
-            .fuoInteractive()
-            .fuoPressFeedback(
-                interactionSource = openPlayerInteractionSource,
-                pressedScale = FuoMotion.prominentPressedScale,
-            )
-            .clickable(
-                interactionSource = openPlayerInteractionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onOpenFullPlayer,
             ),
-        shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.extraLarge,
-        color = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 0.dp,
     ) {
-        Column {
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                val showPrevious = shouldShowMiniPlayerPreviousControl(maxWidth, isWideLayout)
-                Row(
-                    modifier = Modifier.padding(
-                        horizontal = if (isWideLayout) 12.dp else 14.dp,
-                        vertical = if (isWideLayout) 8.dp else 8.dp,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(if (isWideLayout) 12.dp else 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    state.currentTrack?.let { track ->
-                        RuntimeMiniPlayerCover(
-                            track = track,
-                            heroVisible = !isFullPlayerOpen,
-                            transitionDirection = transitionDirection,
-                            isLoading = isLoadingAudio,
-                            cornerRadius = if (isWideLayout) 10.dp else 18.dp,
-                            modifier = Modifier.size(if (isWideLayout) 48.dp else 64.dp),
-                        )
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = state.currentTrack?.title ?: "未播放",
-                            style = if (isWideLayout) {
-                                MaterialTheme.typography.titleSmall
-                            } else {
-                                MaterialTheme.typography.titleMedium
-                            },
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = if (isLoadingAudio) {
-                                "正在加载音频"
-                            } else {
-                                state.currentTrack?.let(::runtimeArtistAlbumLabel) ?: "选择一首音乐开始播放"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isLoadingAudio) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        RuntimeMiniPlayerLyricLine(state)
-                    }
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(animationSpec = contentSizeSpec)
+                .fuoInteractive()
+                .fuoPressFeedback(
+                    interactionSource = openPlayerInteractionSource,
+                    pressedScale = FuoMotion.prominentPressedScale,
+                )
+                .clickable(
+                    interactionSource = openPlayerInteractionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onOpenFullPlayer,
+                ),
+            shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.extraLarge,
+            color = if (isWideLayout) {
+                MaterialTheme.colorScheme.surfaceContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = if (isWideLayout) 3.dp else 5.dp,
+        ) {
+            Column {
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val showPrevious = shouldShowMiniPlayerPreviousControl(maxWidth, isWideLayout)
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(
+                            horizontal = if (isWideLayout) 12.dp else 14.dp,
+                            vertical = if (isWideLayout) 8.dp else 8.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(if (isWideLayout) 12.dp else 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (showPrevious) {
+                        state.currentTrack?.let { track ->
+                            RuntimeMiniPlayerCover(
+                                track = track,
+                                heroVisible = !isFullPlayerOpen,
+                                transitionDirection = transitionDirection,
+                                isLoading = isLoadingAudio,
+                                cornerRadius = if (isWideLayout) 10.dp else 18.dp,
+                                modifier = Modifier.size(if (isWideLayout) 48.dp else 64.dp),
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = state.currentTrack?.title ?: "未播放",
+                                style = if (isWideLayout) {
+                                    MaterialTheme.typography.titleSmall
+                                } else {
+                                    MaterialTheme.typography.titleMedium
+                                },
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (isLoadingAudio) {
+                                    "正在加载音频"
+                                } else {
+                                    state.currentTrack?.let(::runtimeArtistAlbumLabel) ?: "选择一首音乐开始播放"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isLoadingAudio) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            RuntimeMiniPlayerLyricLine(state)
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (showPrevious) {
+                                RoundControlButton(
+                                    imageVector = Icons.Filled.SkipPrevious,
+                                    contentDescription = "上一首",
+                                    onClick = playbackSession::previous,
+                                    size = 48.dp,
+                                    iconSize = 24.dp,
+                                )
+                            }
+                            PlayPauseButton(
+                                isPlaying = state.status == PlaybackSessionStatus.Playing,
+                                isLoading = state.status == PlaybackSessionStatus.Loading,
+                                onClick = playbackSession::toggle,
+                                size = if (isWideLayout) 48.dp else 56.dp,
+                                iconSize = if (isWideLayout) 26.dp else 30.dp,
+                                prominent = !isWideLayout,
+                            )
                             RoundControlButton(
-                                imageVector = Icons.Filled.SkipPrevious,
-                                contentDescription = "上一首",
-                                onClick = playbackSession::previous,
+                                imageVector = Icons.Filled.SkipNext,
+                                contentDescription = "下一首",
+                                onClick = playbackSession::next,
                                 size = 48.dp,
                                 iconSize = 24.dp,
                             )
                         }
-                        PlayPauseButton(
-                            isPlaying = state.status == PlaybackSessionStatus.Playing,
-                            isLoading = state.status == PlaybackSessionStatus.Loading,
-                            onClick = playbackSession::toggle,
-                            size = if (isWideLayout) 48.dp else 56.dp,
-                            iconSize = if (isWideLayout) 26.dp else 30.dp,
-                            prominent = !isWideLayout,
-                        )
-                        RoundControlButton(
-                            imageVector = Icons.Filled.SkipNext,
-                            contentDescription = "下一首",
-                            onClick = playbackSession::next,
-                            size = 48.dp,
-                            iconSize = 24.dp,
-                        )
                     }
                 }
+                RuntimeMiniPlayerProgress(
+                    state = state,
+                    isLoadingAudio = isLoadingAudio,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = if (isWideLayout) 12.dp else 16.dp)
+                        .padding(bottom = if (isWideLayout) 6.dp else 8.dp),
+                )
             }
-            RuntimeMiniPlayerProgress(
-                state = state,
-                isLoadingAudio = isLoadingAudio,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = if (isWideLayout) 12.dp else 16.dp)
-                    .padding(bottom = if (isWideLayout) 6.dp else 8.dp),
-            )
         }
     }
 }
