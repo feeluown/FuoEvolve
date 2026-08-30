@@ -241,7 +241,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         Spacer(modifier = Modifier.height(edgeSpacerHeight))
                     }
                 }
-                if (canAdjustLyricsAlignment) {
+                if (canAdjustLyricsAlignment && currentTrack != null) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -329,7 +329,7 @@ private fun LyricsAlignmentSheetContent(
             value = offsetMs.toFloat(),
             onValueChange = { value ->
                 onOffsetChange(
-                    ((value / LYRIC_ALIGNMENT_STEP_MS).roundToInt() * LYRIC_ALIGNMENT_STEP_MS)
+                    ((value / LYRIC_ALIGNMENT_STEP_MS.toFloat()).roundToInt() * LYRIC_ALIGNMENT_STEP_MS)
                         .coerceIn(-LYRIC_ALIGNMENT_LIMIT_MS, LYRIC_ALIGNMENT_LIMIT_MS),
                 )
             },
