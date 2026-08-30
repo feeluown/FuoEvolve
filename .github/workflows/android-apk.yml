@@ -54,7 +54,7 @@ jobs:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   build-pr:
-    name: Build debug APK for PR
+    name: Validate debug app for PR
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -64,6 +64,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -76,16 +82,22 @@ jobs:
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-      - name: Build debug APK
+      - name: Compile debug app
         env:
           GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
         run: |
           if [ -n "$GRADLE_ENCRYPTION_KEY" ]; then
             echo "Using Gradle configuration cache."
-            ./gradlew --configuration-cache :androidApp:assembleDebug
+            ./gradlew --configuration-cache \
+              :androidApp:compileDebugKotlin \
+              :androidApp:compileDebugJavaWithJavac \
+              :androidApp:processDebugResources
           else
             echo "::notice::GRADLE_ENCRYPTION_KEY is unavailable; running without persistent configuration cache."
-            ./gradlew --no-configuration-cache :androidApp:assembleDebug
+            ./gradlew --no-configuration-cache \
+              :androidApp:compileDebugKotlin \
+              :androidApp:compileDebugJavaWithJavac \
+              :androidApp:processDebugResources
           fi
 
   build-release-apks:
