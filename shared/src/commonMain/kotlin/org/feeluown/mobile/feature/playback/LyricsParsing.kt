@@ -21,6 +21,24 @@ private data class RawLyricLine(
     val order: Int,
 )
 
+private data class SecondaryAlignmentScore(
+    val matches: Int = 0,
+    val semanticMismatches: Int = 0,
+    val totalDistanceMs: Long = 0L,
+) {
+    fun withMatch(semanticMismatch: Boolean, distanceMs: Long): SecondaryAlignmentScore = copy(
+        matches = matches + 1,
+        semanticMismatches = semanticMismatches + if (semanticMismatch) 1 else 0,
+        totalDistanceMs = totalDistanceMs + distanceMs,
+    )
+
+    fun isBetterThan(other: SecondaryAlignmentScore): Boolean = when {
+        matches != other.matches -> matches > other.matches
+        semanticMismatches != other.semanticMismatches -> semanticMismatches < other.semanticMismatches
+        else -> totalDistanceMs < other.totalDistanceMs
+    }
+}
+
 const val LYRIC_TRANSLATION_MARKER = "\n__FUO_LYRIC_TRANSLATION__\n"
 const val LYRIC_ROMANIZATION_MARKER = "\n__FUO_LYRIC_ROMANIZATION__\n"
 
@@ -149,42 +167,69 @@ private fun alignSecondaryLyricLines(
     }
     if (timedPrimary.isEmpty() || secondary.isEmpty()) return emptyMap()
 
-    val aligned = mutableMapOf<Int, LyricLine>()
-    var minimumPrimaryPosition = 0
-    secondary.forEachIndexed { secondaryIndex, secondaryLine ->
-        val secondaryIsCredit = isLikelyLyricCreditText(secondaryLine.text)
-        val nearestPosition = (minimumPrimaryPosition until timedPrimary.size)
-            .asSequence()
-            .filter { primaryPosition ->
-                kotlin.math.abs(timedPrimary[primaryPosition].second.timeMs - secondaryLine.timeMs) <= toleranceMs
-            }
-            .minWithOrNull(
-                compareBy<Int> { primaryPosition ->
-                    if (
-                        isLikelyLyricCreditText(timedPrimary[primaryPosition].second.text) == secondaryIsCredit
-                    ) {
-                        0
-                    } else {
-                        1
-                    }
-                }.thenBy { primaryPosition ->
-                    kotlin.math.abs(timedPrimary[primaryPosition].second.timeMs - secondaryLine.timeMs)
-                }.thenBy { it },
-            )
-        val fallbackPosition = if (
-            nearestPosition == null &&
-            indexToleranceMs != null &&
-            timedPrimary.size == secondary.size &&
-            secondaryIndex >= minimumPrimaryPosition &&
-            kotlin.math.abs(timedPrimary[secondaryIndex].second.timeMs - secondaryLine.timeMs) <= indexToleranceMs
-        ) {
-            secondaryIndex
-        } else {
-            null
+    val primarySize = timedPrimary.size
+    val secondarySize = secondary.size
+    val hasNormalCandidate = BooleanArray(secondarySize) { secondaryIndex ->
+        timedPrimary.any { (_, primaryLine) ->
+            kotlin.math.abs(primaryLine.timeMs - secondary[secondaryIndex].timeMs) <= toleranceMs
         }
-        val primaryPosition = nearestPosition ?: fallbackPosition ?: return@forEachIndexed
-        aligned[timedPrimary[primaryPosition].first] = secondaryLine
-        minimumPrimaryPosition = primaryPosition + 1
+    }
+    val scores = Array(primarySize + 1) {
+        Array(secondarySize + 1) { SecondaryAlignmentScore() }
+    }
+    val actions = Array(primarySize) { IntArray(secondarySize) }
+
+    for (primaryPosition in primarySize - 1 downTo 0) {
+        for (secondaryIndex in secondarySize - 1 downTo 0) {
+            var bestScore = scores[primaryPosition + 1][secondaryIndex]
+            var bestAction = ALIGNMENT_SKIP_PRIMARY
+
+            val skipSecondaryScore = scores[primaryPosition][secondaryIndex + 1]
+            if (skipSecondaryScore.isBetterThan(bestScore)) {
+                bestScore = skipSecondaryScore
+                bestAction = ALIGNMENT_SKIP_SECONDARY
+            }
+
+            val primaryLine = timedPrimary[primaryPosition].second
+            val secondaryLine = secondary[secondaryIndex]
+            val distanceMs = kotlin.math.abs(primaryLine.timeMs - secondaryLine.timeMs)
+            val normalMatch = distanceMs <= toleranceMs
+            val indexFallbackMatch =
+                !hasNormalCandidate[secondaryIndex] &&
+                    indexToleranceMs != null &&
+                    primarySize == secondarySize &&
+                    primaryPosition == secondaryIndex &&
+                    distanceMs <= indexToleranceMs
+            if (normalMatch || indexFallbackMatch) {
+                val matchScore = scores[primaryPosition + 1][secondaryIndex + 1].withMatch(
+                    semanticMismatch = isLikelyLyricCreditText(primaryLine.text) !=
+                        isLikelyLyricCreditText(secondaryLine.text),
+                    distanceMs = distanceMs,
+                )
+                if (!bestScore.isBetterThan(matchScore)) {
+                    bestScore = matchScore
+                    bestAction = ALIGNMENT_MATCH
+                }
+            }
+
+            scores[primaryPosition][secondaryIndex] = bestScore
+            actions[primaryPosition][secondaryIndex] = bestAction
+        }
+    }
+
+    val aligned = mutableMapOf<Int, LyricLine>()
+    var primaryPosition = 0
+    var secondaryIndex = 0
+    while (primaryPosition < primarySize && secondaryIndex < secondarySize) {
+        when (actions[primaryPosition][secondaryIndex]) {
+            ALIGNMENT_MATCH -> {
+                aligned[timedPrimary[primaryPosition].first] = secondary[secondaryIndex]
+                primaryPosition += 1
+                secondaryIndex += 1
+            }
+            ALIGNMENT_SKIP_SECONDARY -> secondaryIndex += 1
+            else -> primaryPosition += 1
+        }
     }
     return aligned
 }
@@ -192,6 +237,9 @@ private fun alignSecondaryLyricLines(
 private fun isLikelyLyricCreditText(text: String): Boolean =
     lyricCreditPrefixRegex.containsMatchIn(text.trim())
 
+private const val ALIGNMENT_SKIP_PRIMARY = 1
+private const val ALIGNMENT_SKIP_SECONDARY = 2
+private const val ALIGNMENT_MATCH = 3
 private const val LYRIC_TRANSLATION_ALIGNMENT_TOLERANCE_MS = 50L
 private const val LYRIC_ROMANIZATION_ALIGNMENT_TOLERANCE_MS = 350L
 private const val LYRIC_ROMANIZATION_INDEX_TOLERANCE_MS = 1_500L
