@@ -151,6 +151,26 @@ class LyricsParserTest {
     }
 
     @Test
+    fun parseLyricsReservesFollowingExactRomanizationMatch() {
+        val raw = composeLyricsWithRichTracks(
+            main = """
+                [00:01.000]かな
+                [00:01.300]さかな
+            """.trimIndent(),
+            romanization = """
+                [00:01.200]ka na
+                [00:01.300]sa ka na
+            """.trimIndent(),
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals(2, lines.size)
+        assertEquals("ka na", lines[0].romanization)
+        assertEquals("sa ka na", lines[1].romanization)
+    }
+
+    @Test
     fun karaokeFillProgressUsesWordWidthsAndTimeline() {
         val words = listOf(
             LyricWord(1_000, 1_000, "逐"),
