@@ -189,13 +189,26 @@ jobs:
       - name: Publish Canary distribution branch
         run: |
           dist_dir="$RUNNER_TEMP/canary-dist"
-          git checkout --orphan canary-dist
-          git rm -rf .
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp "$dist_dir/fuo-evolve-canary.apk" ./fuo-evolve-canary.apk
-          cp "$dist_dir/canary.json" ./canary.json
-          git add fuo-evolve-canary.apk canary.json
-          git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "canary: ${GITHUB_SHA}"
-          git push --force origin HEAD:refs/heads/canary-dist
+          index_file="$RUNNER_TEMP/canary-dist.index"
+          rm -f "$index_file"
+          trap 'rm -f "$index_file"' EXIT
+
+          GIT_INDEX_FILE="$index_file" git read-tree --empty
+
+          apk_blob=$(git hash-object -w "$dist_dir/fuo-evolve-canary.apk")
+          manifest_blob=$(git hash-object -w "$dist_dir/canary.json")
+
+          GIT_INDEX_FILE="$index_file" \
+            git update-index --add --cacheinfo "100644,$apk_blob,fuo-evolve-canary.apk"
+          GIT_INDEX_FILE="$index_file" \
+            git update-index --add --cacheinfo "100644,$manifest_blob,canary.json"
+
+          tree=$(GIT_INDEX_FILE="$index_file" git write-tree)
+          commit=$(
+            printf 'canary: %s\n' "$GITHUB_SHA" |
+              git -c user.name="github-actions[bot]" \
+                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                  commit-tree "$tree"
+          )
+
+          git push --force origin "$commit:refs/heads/canary-dist"
