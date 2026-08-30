@@ -12,6 +12,8 @@ jobs:
     uses: ./.github/workflows/android-tests.yml
     permissions:
       contents: read
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   build-release-apks:
     name: Build signed multi-ABI release APK
