@@ -31,7 +31,14 @@ jobs:
         run: >-
           ./gradlew
           checkArchitectureBoundaries
+          :feature:download:checkOfflineFeatureBoundaries
+          :feature:providerauth:checkProviderFeatureBoundaries
+          :feature:providerdetail:checkProviderDetailFeatureBoundaries
+          :feature:settings:checkSettingsFeatureBoundaries
+          :feature:onboarding:checkOnboardingFeatureBoundaries
+          :feature:home:checkHomeFeatureBoundaries
           :feature:playback:checkPlaybackFeatureBoundaries
+          :shared:checkP4ContractBoundaries
           :feature:recognition:testDebugUnitTest
           :feature:search:testDebugUnitTest
           :feature:localplaylist:testDebugUnitTest
@@ -46,5 +53,10 @@ jobs:
           :feature:playback:testDebugUnitTest
           :playback:runtime:testDebugUnitTest
           :provider:runtime:testDebugUnitTest
+          :persistence:settings:testDebugUnitTest
+          :provider:bilibili:testDebugUnitTest
+          :provider:netease:testDebugUnitTest
+          :provider:qqmusic:testDebugUnitTest
+          :provider:ytmusic:testDebugUnitTest
           :shared:testDebugUnitTest
           :shared:koverXmlReportDebug
