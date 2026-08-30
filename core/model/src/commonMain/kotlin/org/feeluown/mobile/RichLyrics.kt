@@ -43,22 +43,25 @@ fun composeRichLyrics(
     val secondary = when {
         secondaryTracks.isEmpty() -> null
         primaryLines.isEmpty() || parsedTracks.isEmpty() -> secondaryTracks.first()
-        else -> buildString {
-            primaryLines.forEachIndexed { index, line ->
-                val values = parsedTracks.mapNotNull { track ->
-                    alignedSecondaryText(track, line.timeMs, index, primaryLines.size)
-                }
-                    .map(String::trim)
-                    .filter(String::isNotBlank)
-                    .filter { it != line.text.trim() }
-                    .distinct()
-                values.forEach { value ->
-                    append(formatRichLrcTimestamp(line.timeMs))
-                    append(value)
-                    append('\n')
-                }
+        else -> {
+            val alignedTracks = parsedTracks.map { track ->
+                alignSecondaryRichTrack(primaryLines, track)
             }
-        }.trimEnd().takeIf(String::isNotBlank)
+            buildString {
+                primaryLines.forEachIndexed { index, line ->
+                    val values = alignedTracks.mapNotNull { track -> track[index] }
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .filter { it != line.text.trim() }
+                        .distinct()
+                    values.forEach { value ->
+                        append(formatRichLrcTimestamp(line.timeMs))
+                        append(value)
+                        append('\n')
+                    }
+                }
+            }.trimEnd().takeIf(String::isNotBlank)
+        }
     }
 
     return composeRichLyricsTransport(
@@ -138,20 +141,48 @@ private fun parseTimedRichTrack(raw: String): List<TimedRichText> = buildList {
     }
 }.sortedBy(TimedRichText::timeMs)
 
-private fun alignedSecondaryText(
-    track: List<TimedRichText>,
-    primaryTimeMs: Long,
-    primaryIndex: Int,
-    primarySize: Int,
-): String? {
-    val nearest = track.minByOrNull { abs(it.timeMs - primaryTimeMs) }
-    if (nearest != null && abs(nearest.timeMs - primaryTimeMs) <= RICH_LYRIC_ALIGNMENT_TOLERANCE_MS) {
-        return nearest.text
+private fun alignSecondaryRichTrack(
+    primary: List<TimedRichText>,
+    secondary: List<TimedRichText>,
+): Map<Int, String> {
+    if (primary.isEmpty() || secondary.isEmpty()) return emptyMap()
+    val aligned = mutableMapOf<Int, String>()
+    var minimumPrimaryIndex = 0
+
+    secondary.forEachIndexed { secondaryIndex, secondaryLine ->
+        val secondaryIsCredit = isLikelyLyricCreditText(secondaryLine.text)
+        val nearestIndex = (minimumPrimaryIndex until primary.size)
+            .asSequence()
+            .filter { primaryIndex ->
+                abs(primary[primaryIndex].timeMs - secondaryLine.timeMs) <= RICH_LYRIC_ALIGNMENT_TOLERANCE_MS
+            }
+            .minWithOrNull(
+                compareBy<Int> { primaryIndex ->
+                    if (isLikelyLyricCreditText(primary[primaryIndex].text) == secondaryIsCredit) 0 else 1
+                }.thenBy { primaryIndex ->
+                    abs(primary[primaryIndex].timeMs - secondaryLine.timeMs)
+                }.thenBy { it },
+            )
+        val fallbackIndex = if (
+            nearestIndex == null &&
+            primary.size == secondary.size &&
+            secondaryIndex >= minimumPrimaryIndex &&
+            abs(primary[secondaryIndex].timeMs - secondaryLine.timeMs) <= RICH_LYRIC_INDEX_TOLERANCE_MS
+        ) {
+            secondaryIndex
+        } else {
+            null
+        }
+        val primaryIndex = nearestIndex ?: fallbackIndex ?: return@forEachIndexed
+        aligned[primaryIndex] = secondaryLine.text
+        minimumPrimaryIndex = primaryIndex + 1
     }
-    return track.getOrNull(primaryIndex)
-        ?.takeIf { track.size == primarySize && abs(it.timeMs - primaryTimeMs) <= RICH_LYRIC_INDEX_TOLERANCE_MS }
-        ?.text
+
+    return aligned
 }
+
+private fun isLikelyLyricCreditText(text: String): Boolean =
+    lyricCreditPrefixRegex.containsMatchIn(text.trim())
 
 private fun parseRichLrcTime(match: MatchResult): Long? {
     val minutes = match.groupValues[1].toLongOrNull() ?: return null
@@ -176,5 +207,9 @@ private fun formatRichLrcTimestamp(timeMs: Long): String {
 private val richLrcTimestampRegex = Regex("""\[(\d{1,3}):(\d{1,2})(?:\.(\d{1,3}))?]""")
 private val richWordLineRegex = Regex("""^\[(\d+),(\d+)](.*)$""")
 private val richWordTimestampRegex = Regex("""\(\d+,\d+(?:,\d+)?\)""")
+private val lyricCreditPrefixRegex = Regex(
+    """^\s*(?:(?:作词|作詞|作曲|编曲|編曲|填词|填詞|混音|制作人|製作人|监制|監製|原唱|演唱|歌手|和声|和聲|录音|錄音|母带|母帶|吉他|贝斯|貝斯|鼓|弦乐|弦樂|词|詞|曲)|(?:lyrics?|lyricist|composer|arranger|producer|vocals?|singer|mix(?:ing)?|master(?:ing)?|written\s+by|music\s+by))\s*(?:[:：/]|-\s+)""",
+    RegexOption.IGNORE_CASE,
+)
 private const val RICH_LYRIC_ALIGNMENT_TOLERANCE_MS = 350L
 private const val RICH_LYRIC_INDEX_TOLERANCE_MS = 1_500L
