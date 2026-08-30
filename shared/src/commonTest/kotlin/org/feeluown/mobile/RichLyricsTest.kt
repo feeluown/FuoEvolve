@@ -26,6 +26,31 @@ class RichLyricsTest {
     }
 
     @Test
+    fun alignsSecondaryTracksToLyricInsteadOfNearbyCredit() {
+        val raw = composeRichLyrics(
+            main = """
+                [00:01.000]作詞：でんの子P
+                [00:01.200]ふわっとしたあなたゆるさせつなさ
+            """.trimIndent(),
+            translation = "[00:01.100]轻飘飘的你 摇摇晃晃 略显悲伤",
+            romanization = "[00:01.200]fu wa tto shi ta a na ta yu ru sa se tsu na sa",
+        )
+
+        val lines = parseLyrics(raw)
+
+        assertEquals(2, lines.size)
+        assertEquals("作詞：でんの子P", lines[0].text)
+        assertNull(lines[0].translation)
+        assertNull(lines[0].romanization)
+        assertEquals("ふわっとしたあなたゆるさせつなさ", lines[1].text)
+        assertEquals("轻飘飘的你 摇摇晃晃 略显悲伤", lines[1].translation)
+        assertEquals(
+            "fu wa tto shi ta a na ta yu ru sa se tsu na sa",
+            lines[1].romanization,
+        )
+    }
+
+    @Test
     fun preservesWordTimedPrimaryAndRomanizationTracks() {
         val raw = composeRichLyrics(
             main = "[1000,2000](1000,500,0)Hel(1500,1500,0)lo",
