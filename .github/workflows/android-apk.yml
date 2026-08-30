@@ -19,6 +19,7 @@ name: Android APK
       - "gradlew.bat"
       - "scripts/write-update-manifest.sh"
       - ".github/workflows/android-apk.yml"
+      - ".github/workflows/android-release.yml"
       - ".github/workflows/android-tests.yml"
   pull_request:
     paths:
@@ -36,6 +37,7 @@ name: Android APK
       - "gradlew.bat"
       - "scripts/write-update-manifest.sh"
       - ".github/workflows/android-apk.yml"
+      - ".github/workflows/android-release.yml"
       - ".github/workflows/android-tests.yml"
 
 concurrency:
