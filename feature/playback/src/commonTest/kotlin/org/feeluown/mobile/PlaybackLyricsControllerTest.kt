@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CompletableDeferred
