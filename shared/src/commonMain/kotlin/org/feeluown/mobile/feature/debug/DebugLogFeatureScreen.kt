@@ -60,6 +60,8 @@ fun DebugLogFeatureScreen(
     onBack: () -> Unit,
 ) {
     val uiState by controller.uiState.collectAsStateWithLifecycle()
+    // Compose Multiplatform does not yet expose a common plain-text ClipEntry factory for Android and iOS.
+    @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectionMode by remember { mutableStateOf(false) }
