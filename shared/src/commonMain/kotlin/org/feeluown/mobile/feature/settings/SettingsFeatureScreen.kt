@@ -51,7 +51,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -311,7 +310,7 @@ private fun SettingsMainPage(
         },
     ) { paddingValues ->
         Column(Modifier.fillMaxSize().padding(paddingValues)) {
-            if (settings.isBusy || catalog.isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            LoadingIndicator(settings.isBusy || catalog.isLoading)
             if (useWideLayout) {
                 Row(
                     modifier = Modifier.fillMaxSize().padding(horizontal = FuoSpacing.lg, vertical = FuoSpacing.md),
@@ -411,7 +410,7 @@ private fun SettingsScaffold(
         },
     ) { paddingValues ->
         Column(Modifier.fillMaxSize().padding(paddingValues)) {
-            if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            LoadingIndicator(isLoading)
             content(Modifier.weight(1f).fillMaxWidth())
         }
     }
