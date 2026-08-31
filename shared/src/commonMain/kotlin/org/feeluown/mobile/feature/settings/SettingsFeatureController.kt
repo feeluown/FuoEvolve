@@ -65,6 +65,7 @@ interface SettingsFeatureController {
     fun setAutoCheckAppUpdates(enabled: Boolean) = Unit
     fun checkAppUpdates() = Unit
     fun downloadAndInstallAppUpdate() = Unit
+    fun saveAppUpdateToDownloads() = Unit
     fun dismissFeedback(feedback: String)
 }
 
@@ -172,6 +173,7 @@ private class BoundSettingsFeatureController(
     override fun setAutoCheckAppUpdates(enabled: Boolean) = appUpdateController.setAutoCheckEnabled(enabled)
     override fun checkAppUpdates() = appUpdateController.checkNow()
     override fun downloadAndInstallAppUpdate() = appUpdateController.downloadAndInstall()
+    override fun saveAppUpdateToDownloads() = appUpdateController.saveToDownloads()
     override fun dismissFeedback(feedback: String) = owner.dismissFeedback(feedback)
 
     private fun toUiState(
