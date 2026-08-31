@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -31,7 +30,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,21 +78,6 @@ private val HomeRailCompactHeightThreshold = 400.dp
 private val HomeRailRecognitionHeightThreshold = 320.dp
 private val HomeRailExpandedItemHeight = 64.dp
 private val HomeRailCompactItemHeight = 48.dp
-
-@Composable
-fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
-    AnimatedVisibility(visible = visible, modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(32.dp),
-                strokeWidth = 3.dp,
-            )
-        }
-    }
-}
 
 @Composable
 fun HomeScreen(
