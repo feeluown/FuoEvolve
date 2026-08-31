@@ -60,6 +60,8 @@ data class AppUpdateUiState(
     val publishedAt: String? = null,
     val releaseNotesUrl: String? = null,
     val downloadProgress: Float? = null,
+    val isUpdateSavedToDownloads: Boolean = false,
+    val isSavingUpdateToDownloads: Boolean = false,
     val message: String? = null,
 )
 
@@ -69,6 +71,7 @@ interface AppUpdateController {
     fun setAutoCheckEnabled(enabled: Boolean)
     fun checkNow()
     fun downloadAndInstall()
+    fun saveToDownloads()
 }
 
 object NoopAppUpdateController : AppUpdateController {
@@ -78,6 +81,7 @@ object NoopAppUpdateController : AppUpdateController {
     override fun setAutoCheckEnabled(enabled: Boolean) = Unit
     override fun checkNow() = Unit
     override fun downloadAndInstall() = Unit
+    override fun saveToDownloads() = Unit
 }
 
 fun evaluateAppUpdate(
