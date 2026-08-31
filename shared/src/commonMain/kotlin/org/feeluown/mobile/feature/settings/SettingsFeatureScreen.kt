@@ -1595,35 +1595,35 @@ private fun <T> SettingsChoiceRow(
     onSelect: (T) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth()) {
-        SettingsRow(
-            title = title,
-            supportingText = supportingText,
-            leadingContent = leadingContent,
-            enabled = enabled,
-            trailingContent = {
+    SettingsRow(
+        title = title,
+        supportingText = supportingText,
+        leadingContent = leadingContent,
+        enabled = enabled,
+        trailingContent = {
+            Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null)
                 }
-            },
-            onClick = { if (enabled) expanded = true },
-        )
-        DropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(optionLabel(option)) },
-                    trailingIcon = if (option == selected) {
-                        { Text("✓", color = MaterialTheme.colorScheme.primary) }
-                    } else null,
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    },
-                )
+                DropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(optionLabel(option)) },
+                            trailingIcon = if (option == selected) {
+                                { Text("✓", color = MaterialTheme.colorScheme.primary) }
+                            } else null,
+                            onClick = {
+                                expanded = false
+                                onSelect(option)
+                            },
+                        )
+                    }
+                }
             }
-        }
-    }
+        },
+        onClick = { if (enabled) expanded = true },
+    )
 }
 
 @Composable
