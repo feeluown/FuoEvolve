@@ -47,6 +47,14 @@ fun MineHomeSection(
     val state by home.uiState.collectAsStateWithLifecycle()
     val localMusicState by graph.localMusic.uiState.collectAsStateWithLifecycle()
     val wide = LocalAppLayoutInfo.current.useWideLayout
+    var refreshRequested by remember(state.mineSection) { mutableStateOf(false) }
+    val isLoading = state.isLoading || (state.mineSection == MineSection.LocalMusic && localMusicState.isLoading)
+    val isPullRefreshing = refreshRequested && isLoading
+    val showPageLoading = isLoading && !refreshRequested
+
+    LaunchedEffect(isLoading) {
+        if (!isLoading) refreshRequested = false
+    }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp)) {
         MineOwnerChips(
@@ -54,8 +62,11 @@ fun MineHomeSection(
             includeSecondary = wide,
         )
         PullToRefreshBox(
-            isRefreshing = state.isLoading || (state.mineSection == MineSection.LocalMusic && localMusicState.isLoading),
-            onRefresh = home::refreshMine,
+            isRefreshing = isPullRefreshing,
+            onRefresh = {
+                refreshRequested = true
+                home.refreshMine()
+            },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
             when (state.mineSection) {
@@ -71,6 +82,10 @@ fun MineHomeSection(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+            LoadingIndicator(
+                visible = showPageLoading,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
     }
 }
