@@ -282,8 +282,7 @@ private fun HomeNavigationTabs(
     pagerState: PagerState,
     compact: Boolean,
     height: Dp,
-    onClick: (Int, HomeSection) -> Unit = { _, _ -> },
-    onSectionClick: (Int, HomeSection) -> Unit = onClick,
+    onSectionClick: (Int, HomeSection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val pagerPosition = (
