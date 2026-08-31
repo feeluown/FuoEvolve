@@ -4,15 +4,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -30,9 +36,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun AppUpdateFeatureSettings(
@@ -54,7 +62,8 @@ internal fun AppUpdateFeatureSettings(
     }
 
     val operationBusy = update.phase == AppUpdatePhase.Checking ||
-        update.phase == AppUpdatePhase.Downloading
+        update.phase == AppUpdatePhase.Downloading ||
+        update.isSavingUpdateToDownloads
 
     AppUpdateGroup(title = "更新版本") {
         Column(
@@ -92,11 +101,11 @@ internal fun AppUpdateFeatureSettings(
         AppUpdateRow(
             title = "自动检查更新",
             supportingText = "开启后会定期检查新版本。",
-            enabled = update.phase != AppUpdatePhase.Downloading,
+            enabled = !operationBusy,
             trailingContent = {
                 Switch(
                     checked = update.autoCheckEnabled,
-                    enabled = update.phase != AppUpdatePhase.Downloading,
+                    enabled = !operationBusy,
                     onCheckedChange = controller::setAutoCheckAppUpdates,
                 )
             },
@@ -147,12 +156,33 @@ internal fun AppUpdateFeatureSettings(
         }
         Box(modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg)) {
             when (update.phase) {
-                AppUpdatePhase.UpdateAvailable -> Button(
-                    onClick = controller::downloadAndInstallAppUpdate,
+                AppUpdatePhase.UpdateAvailable -> Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Filled.Download, contentDescription = null)
-                    Text("立即更新")
+                    Button(
+                        onClick = controller::downloadAndInstallAppUpdate,
+                        enabled = !update.isSavingUpdateToDownloads,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null)
+                        Text("立即更新")
+                    }
+                    IconButton(
+                        onClick = controller::saveAppUpdateToDownloads,
+                        enabled = !update.isUpdateSavedToDownloads && !update.isSavingUpdateToDownloads,
+                    ) {
+                        Icon(
+                            imageVector = if (update.isUpdateSavedToDownloads) Icons.Filled.Check else Icons.Filled.SaveAlt,
+                            contentDescription = if (update.isUpdateSavedToDownloads) {
+                                "安装包已保存到下载文件夹"
+                            } else {
+                                "保存安装包到下载文件夹"
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
                 AppUpdatePhase.InstallPermissionRequired -> Button(
                     onClick = controller::downloadAndInstallAppUpdate,
