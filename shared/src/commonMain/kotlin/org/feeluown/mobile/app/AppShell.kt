@@ -55,6 +55,7 @@ internal fun AppShell(
         CompositionLocalProvider(
             LocalPlaybackSession provides uiGraph.playbackSession,
             LocalPlaybackUiPort provides playback,
+            LocalPlaybackMiniPlayerHostedByShell provides true,
             LocalLocalMusicUiGraph provides LocalMusicUiGraph(
                 feature = uiGraph.localMusic,
                 playbackQueue = playback.queue,
@@ -95,6 +96,15 @@ internal fun AppShell(
                                     platform = platform,
                                     modifier = Modifier.fillMaxSize(),
                                 )
+                                if (miniPlayerVisible) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .navigationBarsPadding(),
+                                    ) {
+                                        PlaybackMiniPlayerOverlay()
+                                    }
+                                }
                                 AppGlobalOverlays(uiGraph)
                                 val feedbackModifier = Modifier
                                     .align(Alignment.BottomCenter)
