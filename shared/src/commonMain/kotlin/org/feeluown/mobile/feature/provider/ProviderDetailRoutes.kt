@@ -33,7 +33,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -297,6 +296,7 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                LoadingIndicator(state.isLoading)
                 ProviderDetailHeader(
                     track = displayPlaylist.toDisplayTrack(),
                     title = displayPlaylist.title.ifBlank { "未命名歌单" },
@@ -339,11 +339,6 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                     onItemVisible = owner::prefetchIfNeeded,
                     canRemove = owner::canRemove,
                     onRemove = owner::remove,
-                )
-            }
-            if (state.isLoading) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
                 )
             }
         }
@@ -492,6 +487,7 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                LoadingIndicator(state.isLoading)
                 ProviderDetailHeader(
                     track = displayItem.toDisplayTrack(),
                     title = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
@@ -561,11 +557,6 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                         onItemVisible = owner::prefetchTracksIfNeeded,
                     )
                 }
-            }
-            if (state.isLoading) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                )
             }
         }
     }
