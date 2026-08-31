@@ -102,9 +102,9 @@ internal fun ProvidePlaybackColorEnvironment(
         paletteStyle,
         colorSpec,
     ) {
-        if (hasCoverColor && coverColorSeed != null) {
+        if (hasCoverColor) {
             generatedColorScheme(
-                seedColor = coverColorSeed,
+                seedColor = checkNotNull(coverColorSeed),
                 darkTheme = darkTheme,
                 paletteStyle = paletteStyle,
                 colorSpec = colorSpec,
