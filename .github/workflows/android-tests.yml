@@ -87,6 +87,7 @@ jobs:
 
           if [ "$VALIDATE_ANDROID_APP" = "true" ]; then
             tasks+=(
+              :shared:checkReleaseAarMetadata
               :androidApp:compileDebugKotlin
               :androidApp:compileDebugJavaWithJavac
               :androidApp:processDebugResources
