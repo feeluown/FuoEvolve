@@ -25,7 +25,7 @@ kotlin {
             api(project(":core:model"))
             api(project(":playback:api"))
             api(project(":provider:api"))
-            implementation(compose.runtime)
+            implementation(libs.compose.runtime)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
@@ -66,12 +66,13 @@ val retiredSharedPlaybackBusinessFiles = listOf(
 val providerKotlinSources = rootProject.fileTree("provider") {
     include("**/src/**/*.kt")
 }
+val playbackBuildFile = project.buildFile
 
 val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundaries") {
     group = "verification"
     description = "Reject shared/app dependencies, provider aggregation, or restoration of playback business ownership in :shared."
 
-    inputs.file(project.buildFile)
+    inputs.file(playbackBuildFile)
     inputs.files(playbackRequiredFiles.map(rootProject::file))
     inputs.dir(rootProject.file("feature/playback/src/commonMain/kotlin"))
     inputs.files(retiredSharedPlaybackBusinessFiles)
@@ -89,7 +90,7 @@ val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundar
             }
         }
 
-        val buildText = project.buildFile.readText()
+        val buildText = playbackBuildFile.readText()
         listOf(
             "project(\":shared\")",
             "project(\":androidApp\")",
