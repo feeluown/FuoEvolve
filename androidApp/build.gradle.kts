@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
 }
 
@@ -48,11 +47,11 @@ val hasFuoSigningConfig = listOf(
 ).all { !it.isNullOrBlank() }
 android {
     namespace = "org.feeluown.mobile"
-    compileSdk = 37
+    compileSdk = libs.versions.androidCompileSdk.get().toInt()
 
     defaultConfig {
         applicationId = "org.feeluown.mobile"
-        minSdk = 24
+        minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = 35
         versionCode = gitVersionCode
         versionName = gitVersionName
@@ -61,9 +60,8 @@ android {
     }
 
     sourceSets {
-        getByName("main").assets.srcDir(
-            rootProject.file("shared/src/commonMain/resources"),
-        )
+        getByName("main").assets.directories +=
+            rootProject.file("shared/src/commonMain/resources").path
     }
 
     buildFeatures {

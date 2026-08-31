@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi::class)
+
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope

@@ -1,16 +1,29 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlinx.kover)
 }
 
 kotlin {
-    androidTarget {
+    compilerOptions {
+        optIn.add("kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi")
+    }
+
+    android {
+        namespace = "org.feeluown.mobile.shared"
+        compileSdk = libs.versions.androidCompileSdk.get().toInt()
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+        withHostTest {}
+
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+
+        lint {
+            disable.add("NullSafeMutableLiveData")
         }
     }
 
@@ -51,12 +64,12 @@ kotlin {
             api(project(":feature:onboarding"))
             api(project(":feature:home"))
             api(project(":feature:playback"))
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.animation)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.animation)
             implementation(libs.compose.material3.expressive)
             implementation(libs.material.kolor)
-            implementation(compose.materialIconsExtended)
+            implementation(libs.compose.material.icons.extended)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.androidx.lifecycle.runtime.compose)
@@ -76,6 +89,7 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.media3.datasource)
+            implementation(libs.androidx.media3.database)
             implementation(libs.androidx.media3.exoplayer)
             implementation(libs.androidx.media3.ui)
             implementation(libs.ktor.client.okhttp)
@@ -86,24 +100,6 @@ kotlin {
             implementation(libs.androidx.datastore.preferences)
             implementation(libs.ktor.client.darwin)
         }
-    }
-}
-
-android {
-    namespace = "org.feeluown.mobile.shared"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = 24
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    lint {
-        disable.add("NullSafeMutableLiveData")
     }
 }
 

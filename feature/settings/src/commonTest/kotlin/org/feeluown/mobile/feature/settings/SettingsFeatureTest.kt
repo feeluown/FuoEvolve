@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package org.feeluown.mobile.feature.settings
 
 import kotlinx.coroutines.flow.MutableStateFlow
