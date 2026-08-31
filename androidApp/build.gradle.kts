@@ -60,9 +60,8 @@ android {
     }
 
     sourceSets {
-        getByName("main").assets.srcDir(
-            rootProject.file("shared/src/commonMain/resources"),
-        )
+        getByName("main").assets.directories +=
+            rootProject.file("shared/src/commonMain/resources").path
     }
 
     buildFeatures {
