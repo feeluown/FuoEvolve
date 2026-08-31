@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
@@ -30,10 +31,10 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -82,8 +83,16 @@ private val HomeRailCompactItemHeight = 48.dp
 
 @Composable
 fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
-    AnimatedVisibility(visible = visible) {
-        LinearProgressIndicator(modifier = modifier.fillMaxWidth())
+    AnimatedVisibility(visible = visible, modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(32.dp),
+                strokeWidth = 3.dp,
+            )
+        }
     }
 }
 
@@ -166,10 +175,6 @@ fun HomeScreen(
             modifier = Modifier.fillMaxSize().padding(paddingValues),
             verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) 6.dp else 8.dp),
         ) {
-            LoadingIndicator(
-                visible = state.isLoading,
-                modifier = Modifier.padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
-            )
             HomeSectionPager(
                 home = home,
                 sections = HomePrimarySections,
@@ -277,7 +282,8 @@ private fun HomeNavigationTabs(
     pagerState: PagerState,
     compact: Boolean,
     height: Dp,
-    onSectionClick: (Int, HomeSection) -> Unit,
+    onClick: (Int, HomeSection) -> Unit = { _, _ -> },
+    onSectionClick: (Int, HomeSection) -> Unit = onClick,
     modifier: Modifier = Modifier,
 ) {
     val pagerPosition = (
