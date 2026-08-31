@@ -277,7 +277,7 @@ class AndroidDownloadRepository(
             val canResume = existing > 0L && storedResume?.resourceKey == resourceKey
             if (canResume) {
                 connection.setRequestProperty("Range", "bytes=$existing-")
-                (storedResume?.etag ?: storedResume?.lastModified)?.let { validator ->
+                (storedResume.etag ?: storedResume.lastModified)?.let { validator ->
                     connection.setRequestProperty("If-Range", validator)
                 }
             }
