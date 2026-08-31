@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -70,25 +69,23 @@ fun MineHomeSection(
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-            Box(Modifier.fillMaxSize()) {
-                when (state.mineSection) {
-                    MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
-                    MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
-                    MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
-                    MineSection.LocalMusic -> LocalMusicSection(
-                        hasAudioPermission = hasAudioPermission,
-                        onRequestAudioPermission = onRequestAudioPermission,
-                        hasImagePermission = hasImagePermission,
-                        onRequestImagePermission = onRequestImagePermission,
-                        showModeFilter = !wide,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                LoadingIndicator(
-                    visible = showPageLoading,
-                    modifier = Modifier.align(Alignment.Center),
+            when (state.mineSection) {
+                MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
+                MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
+                MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
+                MineSection.LocalMusic -> LocalMusicSection(
+                    hasAudioPermission = hasAudioPermission,
+                    onRequestAudioPermission = onRequestAudioPermission,
+                    hasImagePermission = hasImagePermission,
+                    onRequestImagePermission = onRequestImagePermission,
+                    showModeFilter = !wide,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
+            LoadingIndicator(
+                visible = showPageLoading,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
     }
 }
