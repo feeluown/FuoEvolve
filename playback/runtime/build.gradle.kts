@@ -1,10 +1,15 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
 kotlin {
-    androidTarget {
+    android {
+        namespace = "org.feeluown.mobile.playback.runtime"
+        compileSdk = libs.versions.androidCompileSdk.get().toInt()
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+        withHostTest {}
+
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
@@ -21,19 +26,5 @@ kotlin {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
-    }
-}
-
-android {
-    namespace = "org.feeluown.mobile.playback.runtime"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = 24
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
     }
 }
