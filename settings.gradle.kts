@@ -14,6 +14,24 @@ dependencyResolutionManagement {
     }
 }
 
+// Compose 1.12 requires Android API 37. Enforce the compile SDK at the build level
+// so a stale per-module value cannot make release-only AAR metadata checks fail.
+val androidCompileSdk = 37
+gradle.beforeProject {
+    afterEvaluate {
+        val androidExtension = extensions.findByName("android")
+        if (androidExtension != null) {
+            androidExtension.javaClass.methods
+                .firstOrNull { method ->
+                    method.name == "setCompileSdk" &&
+                        method.parameterCount == 1 &&
+                        method.parameterTypes[0].isAssignableFrom(Int::class.javaObjectType)
+                }
+                ?.invoke(androidExtension, androidCompileSdk)
+        }
+    }
+}
+
 rootProject.name = "FuoEvolve"
 
 include(":core:model")
