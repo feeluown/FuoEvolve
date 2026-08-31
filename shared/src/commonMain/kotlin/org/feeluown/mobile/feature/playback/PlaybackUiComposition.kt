@@ -65,6 +65,13 @@ val LocalReplacementActionPort = staticCompositionLocalOf<ReplacementActionPort>
     error("ReplacementActionPort is not provided")
 }
 
+/**
+ * Route scaffolds still declare the mini player as a bottom bar. When the app shell owns the
+ * floating player, those legacy slots intentionally emit no layout so route content can continue
+ * underneath the rounded player card.
+ */
+internal val LocalPlaybackMiniPlayerHostedByShell = staticCompositionLocalOf { false }
+
 @Composable
 fun ProvideNarrowPlaybackUi(
     graph: PlaybackUiGraph = LocalPlaybackUiPort.current,
@@ -131,6 +138,18 @@ fun ProvideNarrowPlaybackUi(
 /** Controller-free MiniPlayer entry point used by app/feature screens. */
 @Composable
 fun PlaybackMiniPlayer() {
+    if (LocalPlaybackMiniPlayerHostedByShell.current) return
+    PlaybackMiniPlayerContent()
+}
+
+/** Floating MiniPlayer hosted by the app shell above route content. */
+@Composable
+internal fun PlaybackMiniPlayerOverlay() {
+    PlaybackMiniPlayerContent()
+}
+
+@Composable
+private fun PlaybackMiniPlayerContent() {
     val graph = LocalPlaybackUiPort.current
     PlaybackDynamicColorTheme(emphasis = PlaybackColorEmphasis.Ambient) {
         RuntimeMiniPlayer(
