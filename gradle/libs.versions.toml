@@ -1,5 +1,7 @@
 [versions]
-agp = "9.1.0"
+agp = "9.1.1"
+androidCompileSdk = "37"
+androidMinSdk = "24"
 compose = "1.12.0"
 kotlin = "2.4.10"
 media3 = "1.6.1"
@@ -52,6 +54,7 @@ sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", versi
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
