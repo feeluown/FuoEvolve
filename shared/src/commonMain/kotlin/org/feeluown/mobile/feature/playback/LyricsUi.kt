@@ -66,9 +66,10 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
     val currentTrack = state.currentTrack
     val associationMatchesTrack = associationState.trackId == currentTrack?.id
     val lyricOffsetMs = if (associationMatchesTrack) associationState.alignmentOffsetMs else 0L
-    val canAdjustLyricsAlignment = currentTrack != null &&
+    val alignmentTrack = currentTrack?.takeIf { track ->
         associationMatchesTrack &&
-        (associationState.isManualAssociation || currentTrack.isSmartReplacement)
+            (associationState.isManualAssociation || track.isSmartReplacement)
+    }
     var alignmentSheetOpen by remember(currentTrack?.id, currentTrack?.replacementId) {
         mutableStateOf(false)
     }
@@ -241,7 +242,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         Spacer(modifier = Modifier.height(edgeSpacerHeight))
                     }
                 }
-                if (canAdjustLyricsAlignment && currentTrack != null) {
+                if (alignmentTrack != null) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -250,7 +251,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (associationState.isManualAssociation) {
-                            IconButton(onClick = { lyricsPort.openAssociationSearch(currentTrack) }) {
+                            IconButton(onClick = { lyricsPort.openAssociationSearch(alignmentTrack) }) {
                                 Icon(
                                     imageVector = Icons.Default.Edit,
                                     contentDescription = "更换歌词",
@@ -269,7 +270,7 @@ fun LyricsPanel(state: PlaybackState, fontSize: LyricFontSize, modifier: Modifie
         }
     }
 
-    if (alignmentSheetOpen && canAdjustLyricsAlignment) {
+    if (alignmentSheetOpen && alignmentTrack != null) {
         ModalBottomSheet(
             onDismissRequest = { alignmentSheetOpen = false },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
