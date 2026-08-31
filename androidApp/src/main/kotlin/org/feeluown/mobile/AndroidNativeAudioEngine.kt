@@ -152,10 +152,11 @@ class AndroidNativeAudioEngine(
         val shouldResumeRestoredSession = mutableState.value.status == PlayerStatus.Paused &&
             session?.currentTrack?.id == track.id &&
             session.resumePlan() != null
-        if (shouldResumeRestoredSession && session != null) {
-            preparedRestoredSession = session
-            restoredSession = session
-            activePlan = session.plan
+        if (shouldResumeRestoredSession) {
+            val resumedSession = requireNotNull(session)
+            preparedRestoredSession = resumedSession
+            restoredSession = resumedSession
+            activePlan = resumedSession.plan
             explicitStopRequested = false
             startingPlayback = false
             freshStartPending = false
