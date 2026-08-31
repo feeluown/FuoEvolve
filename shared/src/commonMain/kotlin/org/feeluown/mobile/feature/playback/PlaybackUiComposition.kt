@@ -56,7 +56,7 @@ val LocalProviderTrackActionPort = staticCompositionLocalOf<ProviderTrackActionP
     error("ProviderTrackActionPort is not provided")
 }
 val LocalLocalMusicActionPort = staticCompositionLocalOf<LocalMusicActionPort> {
-    error("LocalLocalMusicActionPort is not provided")
+    error("LocalMusicActionPort is not provided")
 }
 val LocalPlaybackLyricsPort = staticCompositionLocalOf<PlaybackLyricsPort> {
     error("PlaybackLyricsPort is not provided")
