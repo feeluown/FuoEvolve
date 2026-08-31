@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -17,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -79,13 +78,6 @@ private val HomeRailCompactHeightThreshold = 400.dp
 private val HomeRailRecognitionHeightThreshold = 320.dp
 private val HomeRailExpandedItemHeight = 64.dp
 private val HomeRailCompactItemHeight = 48.dp
-
-@Composable
-fun LoadingIndicator(visible: Boolean, modifier: Modifier = Modifier) {
-    AnimatedVisibility(visible = visible) {
-        LinearProgressIndicator(modifier = modifier.fillMaxWidth())
-    }
-}
 
 @Composable
 fun HomeScreen(
@@ -166,10 +158,6 @@ fun HomeScreen(
             modifier = Modifier.fillMaxSize().padding(paddingValues),
             verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) 6.dp else 8.dp),
         ) {
-            LoadingIndicator(
-                visible = state.isLoading,
-                modifier = Modifier.padding(horizontal = if (layoutInfo.useWideLayout) 8.dp else 16.dp),
-            )
             HomeSectionPager(
                 home = home,
                 sections = HomePrimarySections,

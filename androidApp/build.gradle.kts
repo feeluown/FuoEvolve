@@ -48,7 +48,7 @@ val hasFuoSigningConfig = listOf(
 ).all { !it.isNullOrBlank() }
 android {
     namespace = "org.feeluown.mobile"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "org.feeluown.mobile"
