@@ -28,12 +28,9 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.kotlinx.coroutines.core)
         }
-        commonTest {
-            languageSettings.optIn("kotlinx.coroutines.ExperimentalCoroutinesApi")
-            dependencies {
-                implementation(kotlin("test"))
-                implementation(libs.kotlinx.coroutines.test)
-            }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
