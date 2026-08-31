@@ -137,6 +137,10 @@ internal class AndroidAppUpdateController(
                     return@withLock
                 }
                 if (mutableUiState.value.isUpdateSavedToDownloads) return@withLock
+                if (requiresLegacyDownloadsPermission()) {
+                    requestLegacyDownloadsPermission()
+                    return@withLock
+                }
                 mutableUiState.update {
                     it.copy(
                         isSavingUpdateToDownloads = true,
@@ -414,6 +418,25 @@ internal class AndroidAppUpdateController(
             resolver.delete(uri, null, null)
             throw error
         }
+    }
+
+    private fun requiresLegacyDownloadsPermission(): Boolean =
+        Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            ContextCompat.checkSelfPermission(appContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+
+    private fun requestLegacyDownloadsPermission() {
+        mutableUiState.update {
+            it.copy(
+                phase = AppUpdatePhase.UpdateAvailable,
+                isSavingUpdateToDownloads = false,
+                message = "需要存储权限以保存安装包到下载文件夹",
+            )
+        }
+        appContext.startActivity(
+            Intent(appContext, AppUpdateSavePermissionActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     @Suppress("DEPRECATION")
