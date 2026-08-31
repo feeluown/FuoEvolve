@@ -47,6 +47,7 @@ jobs:
         run: >-
           ./gradlew
           --no-configuration-cache
+          --warning-mode all
           checkArchitectureBoundaries
           :feature:download:checkOfflineFeatureBoundaries
           :feature:providerauth:checkProviderFeatureBoundaries
@@ -62,36 +63,36 @@ jobs:
           VALIDATE_ANDROID_APP: ${{ inputs.validate_android_app }}
         run: |
           tasks=(
-            :feature:recognition:testDebugUnitTest
-            :feature:search:testDebugUnitTest
-            :feature:localplaylist:testDebugUnitTest
-            :feature:localmusic:testDebugUnitTest
-            :feature:download:testDebugUnitTest
-            :feature:providercatalog:testDebugUnitTest
-            :feature:providerauth:testDebugUnitTest
-            :feature:providerdetail:testDebugUnitTest
-            :feature:settings:testDebugUnitTest
-            :feature:onboarding:testDebugUnitTest
-            :feature:home:testDebugUnitTest
-            :feature:playback:testDebugUnitTest
-            :playback:runtime:testDebugUnitTest
-            :provider:runtime:testDebugUnitTest
-            :persistence:settings:testDebugUnitTest
-            :provider:bilibili:testDebugUnitTest
-            :provider:netease:testDebugUnitTest
-            :provider:qqmusic:testDebugUnitTest
-            :provider:ytmusic:testDebugUnitTest
-            :shared:testDebugUnitTest
-            :shared:koverXmlReportDebug
+            :feature:recognition:testAndroidHostTest
+            :feature:search:testAndroidHostTest
+            :feature:localplaylist:testAndroidHostTest
+            :feature:localmusic:testAndroidHostTest
+            :feature:download:testAndroidHostTest
+            :feature:providercatalog:testAndroidHostTest
+            :feature:providerauth:testAndroidHostTest
+            :feature:providerdetail:testAndroidHostTest
+            :feature:settings:testAndroidHostTest
+            :feature:onboarding:testAndroidHostTest
+            :feature:home:testAndroidHostTest
+            :feature:playback:testAndroidHostTest
+            :playback:runtime:testAndroidHostTest
+            :provider:runtime:testAndroidHostTest
+            :persistence:settings:testAndroidHostTest
+            :provider:bilibili:testAndroidHostTest
+            :provider:netease:testAndroidHostTest
+            :provider:qqmusic:testAndroidHostTest
+            :provider:ytmusic:testAndroidHostTest
+            :shared:testAndroidHostTest
+            :shared:koverXmlReport
           )
 
           if [ "$VALIDATE_ANDROID_APP" = "true" ]; then
             tasks+=(
-              :shared:checkReleaseAarMetadata
+              :androidApp:checkReleaseAarMetadata
               :androidApp:compileDebugKotlin
               :androidApp:compileDebugJavaWithJavac
               :androidApp:processDebugResources
             )
           fi
 
-          ./gradlew --configuration-cache "${tasks[@]}"
+          ./gradlew --configuration-cache --warning-mode all "${tasks[@]}"
