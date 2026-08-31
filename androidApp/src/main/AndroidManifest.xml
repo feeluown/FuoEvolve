@@ -73,6 +73,11 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".AppUpdateSavePermissionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".ShareReceiverActivity"
             android:excludeFromRecents="true"
             android:exported="true"

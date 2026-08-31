@@ -1,13 +1,18 @@
 package org.feeluown.mobile
 
+import android.Manifest
 import android.content.ClipData
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
@@ -78,6 +83,8 @@ internal class AndroidAppUpdateController(
                             remoteVersionName = if (channelChanged) null else current.remoteVersionName,
                             publishedAt = if (channelChanged) null else current.publishedAt,
                             releaseNotesUrl = if (channelChanged) null else current.releaseNotesUrl,
+                            isUpdateSavedToDownloads = if (channelChanged) false else current.isUpdateSavedToDownloads,
+                            isSavingUpdateToDownloads = if (channelChanged) false else current.isSavingUpdateToDownloads,
                             message = if (channelChanged) null else current.message,
                         )
                     }
@@ -121,6 +128,42 @@ internal class AndroidAppUpdateController(
         }
     }
 
+    override fun saveToDownloads() {
+        scope.launch {
+            operationMutex.withLock {
+                val manifest = latestManifest
+                if (manifest == null || manifest.versionCode <= installedVersionCode) {
+                    checkForUpdatesLocked(force = true)
+                    return@withLock
+                }
+                if (mutableUiState.value.isUpdateSavedToDownloads) return@withLock
+                if (requiresLegacyDownloadsPermission()) {
+                    requestLegacyDownloadsPermission()
+                    return@withLock
+                }
+                mutableUiState.update {
+                    it.copy(
+                        isSavingUpdateToDownloads = true,
+                        message = "正在保存 ${manifest.versionName} 到下载文件夹",
+                    )
+                }
+                runCatching { saveToDownloadsLocked(manifest) }
+                    .onSuccess {
+                        mutableUiState.update {
+                            it.copy(
+                                phase = AppUpdatePhase.UpdateAvailable,
+                                downloadProgress = null,
+                                isUpdateSavedToDownloads = true,
+                                isSavingUpdateToDownloads = false,
+                                message = "安装包已保存到下载文件夹",
+                            )
+                        }
+                    }
+                    .onFailure(::showError)
+            }
+        }
+    }
+
     private suspend fun checkForUpdates(force: Boolean) {
         operationMutex.withLock { checkForUpdatesLocked(force) }
     }
@@ -137,6 +180,7 @@ internal class AndroidAppUpdateController(
                 autoCheckEnabled = settings.autoCheckAppUpdates,
                 phase = AppUpdatePhase.Checking,
                 downloadProgress = null,
+                isSavingUpdateToDownloads = false,
                 message = null,
             )
         }
@@ -147,6 +191,9 @@ internal class AndroidAppUpdateController(
             markSuccessfulCheck(channel)
             latestManifest = manifest
             val decision = evaluateAppUpdate(installedVersionCode, channel, manifest.versionCode)
+            val savedToDownloads = decision == AppUpdateDecision.UpdateAvailable && runCatching {
+                withContext(Dispatchers.IO) { isSavedToDownloads(manifest) }
+            }.getOrDefault(false)
             mutableUiState.update { current ->
                 current.copy(
                     phase = when (decision) {
@@ -159,6 +206,7 @@ internal class AndroidAppUpdateController(
                     publishedAt = manifest.publishedAt,
                     releaseNotesUrl = manifest.releaseNotesUrl,
                     downloadProgress = null,
+                    isUpdateSavedToDownloads = savedToDownloads,
                     message = when (decision) {
                         AppUpdateDecision.UpToDate -> "当前已是最新版本"
                         AppUpdateDecision.UpdateAvailable -> "发现新版本 ${manifest.versionName}"
@@ -216,6 +264,23 @@ internal class AndroidAppUpdateController(
     }
 
     private suspend fun downloadAndInstallLocked(manifest: AppUpdateManifest) {
+        val apkFile = obtainValidatedApk(manifest)
+        launchInstaller(apkFile)
+    }
+
+    private suspend fun saveToDownloadsLocked(manifest: AppUpdateManifest) {
+        val apkFile = obtainValidatedApk(manifest)
+        mutableUiState.update {
+            it.copy(
+                phase = AppUpdatePhase.UpdateAvailable,
+                downloadProgress = null,
+                message = "正在保存 ${manifest.versionName} 到下载文件夹",
+            )
+        }
+        withContext(Dispatchers.IO) { saveApkToDownloads(apkFile, manifest) }
+    }
+
+    private suspend fun obtainValidatedApk(manifest: AppUpdateManifest): File {
         val updateDir = File(appContext.cacheDir, UPDATE_CACHE_DIR).apply { mkdirs() }
         val apkFile = File(updateDir, "fuo-evolve-${manifest.versionCode}.apk")
         val validCachedApk = withContext(Dispatchers.IO) {
@@ -230,7 +295,7 @@ internal class AndroidAppUpdateController(
         withContext(Dispatchers.IO) {
             check(validateDownloadedApk(apkFile, manifest)) { "下载的安装包校验失败" }
         }
-        launchInstaller(apkFile)
+        return apkFile
     }
 
     private fun downloadApk(manifest: AppUpdateManifest, apkFile: File) {
@@ -296,6 +361,115 @@ internal class AndroidAppUpdateController(
         }
     }
 
+    private fun isSavedToDownloads(manifest: AppUpdateManifest): Boolean {
+        val fileName = downloadsFileName(manifest)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val projection = arrayOf(MediaStore.MediaColumns.SIZE)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+            appContext.contentResolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                arrayOf(fileName),
+                null,
+            )?.use { cursor ->
+                val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                while (cursor.moveToNext()) {
+                    if (cursor.getLong(sizeIndex) == manifest.apk.size) return true
+                }
+                false
+            } ?: false
+        } else {
+            legacyDownloadsFile(fileName).let { file ->
+                file.isFile && file.length() == manifest.apk.size
+            }
+        }
+    }
+
+    private fun saveApkToDownloads(apkFile: File, manifest: AppUpdateManifest) {
+        if (isSavedToDownloads(manifest)) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            saveApkToMediaStore(apkFile, manifest)
+        } else {
+            saveApkToLegacyDownloads(apkFile, manifest)
+        }
+    }
+
+    private fun saveApkToMediaStore(apkFile: File, manifest: AppUpdateManifest) {
+        val resolver = appContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, downloadsFileName(manifest))
+            put(MediaStore.MediaColumns.MIME_TYPE, APK_MIME_TYPE)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("无法创建下载文件")
+        try {
+            resolver.openOutputStream(uri, "w")?.use { output ->
+                apkFile.inputStream().buffered().use { input ->
+                    input.copyTo(output, DOWNLOAD_BUFFER_BYTES)
+                }
+            } ?: throw IOException("无法写入下载文件")
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        } catch (error: Throwable) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    }
+
+    private fun requiresLegacyDownloadsPermission(): Boolean =
+        Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            ContextCompat.checkSelfPermission(appContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+
+    private fun requestLegacyDownloadsPermission() {
+        mutableUiState.update {
+            it.copy(
+                phase = AppUpdatePhase.UpdateAvailable,
+                isSavingUpdateToDownloads = false,
+                message = "需要存储权限以保存安装包到下载文件夹",
+            )
+        }
+        appContext.startActivity(
+            Intent(appContext, AppUpdateSavePermissionActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun saveApkToLegacyDownloads(apkFile: File, manifest: AppUpdateManifest) {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            throw IOException("保存到下载文件夹需要存储权限")
+        }
+        val target = legacyDownloadsFile(downloadsFileName(manifest))
+        target.parentFile?.let { downloadsDir ->
+            if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
+                throw IOException("无法创建下载文件夹")
+            }
+        }
+        apkFile.copyTo(target, overwrite = true)
+        if (target.length() != manifest.apk.size) {
+            target.delete()
+            throw IOException("保存的安装包大小不匹配")
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun legacyDownloadsFile(fileName: String): File = File(
+        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+        fileName,
+    )
+
+    private fun downloadsFileName(manifest: AppUpdateManifest): String {
+        val safeVersionName = manifest.versionName.replace(INVALID_FILE_NAME_CHARS, "_")
+        return "FuoEvolve-$safeVersionName-${manifest.versionCode}.apk"
+    }
+
     private fun validateDownloadedApk(apkFile: File, manifest: AppUpdateManifest): Boolean {
         val archive = readArchivePackageInfo(apkFile) ?: return false
         if (archive.packageName != appContext.packageName) return false
@@ -348,6 +522,7 @@ internal class AndroidAppUpdateController(
             it.copy(
                 phase = AppUpdatePhase.Error,
                 downloadProgress = null,
+                isSavingUpdateToDownloads = false,
                 message = error.message?.takeIf(String::isNotBlank) ?: "更新失败，请稍后重试",
             )
         }
@@ -439,6 +614,7 @@ internal class AndroidAppUpdateController(
         private const val WAITING_FOR_STABLE_MESSAGE =
             "已切换至稳定版。当前版本比最新稳定版更新，将在后续稳定版发布后恢复接收稳定版更新。"
         private val SHA256_REGEX = Regex("^[0-9a-fA-F]{64}$")
+        private val INVALID_FILE_NAME_CHARS = Regex("[^A-Za-z0-9._-]")
 
         private fun lastCheckKey(channel: AppUpdateChannel): String = "last_check_${channel.name.lowercase()}"
     }
