@@ -333,7 +333,6 @@ private class AndroidFingerprintRuntime(
                         "${JSONObject.quote(requestId)},${JSONObject.quote(encoded)})",
                     null,
                 )
-                Unit
             }
             if (ready) action() else waiting.add(action)
         }
