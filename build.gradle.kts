@@ -105,7 +105,9 @@ val productionSourceRoots = listOf(
     "shared/src/commonMain/kotlin",
     "shared/src/androidMain/kotlin",
     "shared/src/iosMain/kotlin",
+    "shared/src/desktopMain/kotlin",
     "androidApp/src/main/kotlin",
+    "desktopApp/src/main/kotlin",
 )
 val playbackRuntimeAdapterFiles = listOf(
     "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidPlaybackRuntime.kt",
@@ -114,6 +116,7 @@ val playbackRuntimeAdapterFiles = listOf(
 val platformCompositionRootFiles = listOf(
     "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidAppContainer.kt",
     "shared/src/iosMain/kotlin/org/feeluown/mobile/IosAppHost.kt",
+    "shared/src/desktopMain/kotlin/org/feeluown/mobile/DesktopAppHost.kt",
 )
 val appRootFile = "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppRoot.kt"
 val searchFeatureBuildFile = "feature/search/build.gradle.kts"
