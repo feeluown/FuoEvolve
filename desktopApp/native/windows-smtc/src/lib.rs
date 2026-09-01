@@ -5,10 +5,12 @@ use std::ptr;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use windows::core::{factory, HSTRING, Result as WindowsResult};
-use windows::Foundation::TimeSpan;
+use windows::Foundation::{TimeSpan, TypedEventHandler};
 use windows::Media::{
-    MediaPlaybackStatus, MediaPlaybackType, SystemMediaTransportControls,
-    SystemMediaTransportControlsButton, SystemMediaTransportControlsTimelineProperties,
+    MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs,
+    SystemMediaTransportControls, SystemMediaTransportControlsButton,
+    SystemMediaTransportControlsButtonPressedEventArgs,
+    SystemMediaTransportControlsTimelineProperties,
 };
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::WinRT::{
@@ -79,8 +81,8 @@ impl Drop for RoApartment {
 struct SmtcWorker {
     controls: SystemMediaTransportControls,
     timeline: SystemMediaTransportControlsTimelineProperties,
-    _button_revoker: windows::core::EventRevoker,
-    _position_revoker: windows::core::EventRevoker,
+    button_token: i64,
+    position_token: i64,
 }
 
 impl SmtcWorker {
@@ -100,36 +102,50 @@ impl SmtcWorker {
         controls.SetPlaybackStatus(MediaPlaybackStatus::Stopped)?;
 
         let button_callback = callback;
-        let button_revoker = controls.ButtonPressed(move |_, args| {
-            let Some(args) = args.as_ref() else { return };
-            let Ok(button) = args.Button() else { return };
-            let action = if button == SystemMediaTransportControlsButton::Play {
-                Some(ACTION_PLAY)
-            } else if button == SystemMediaTransportControlsButton::Pause {
-                Some(ACTION_PAUSE)
-            } else if button == SystemMediaTransportControlsButton::Stop {
-                Some(ACTION_STOP)
-            } else if button == SystemMediaTransportControlsButton::Next {
-                Some(ACTION_NEXT)
-            } else if button == SystemMediaTransportControlsButton::Previous {
-                Some(ACTION_PREVIOUS)
-            } else {
-                None
-            };
-            if let Some(action) = action {
-                button_callback(action, 0);
+        let button_handler = TypedEventHandler::<
+            SystemMediaTransportControls,
+            SystemMediaTransportControlsButtonPressedEventArgs,
+        >::new(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                if let Ok(button) = args.Button() {
+                    let action = if button == SystemMediaTransportControlsButton::Play {
+                        Some(ACTION_PLAY)
+                    } else if button == SystemMediaTransportControlsButton::Pause {
+                        Some(ACTION_PAUSE)
+                    } else if button == SystemMediaTransportControlsButton::Stop {
+                        Some(ACTION_STOP)
+                    } else if button == SystemMediaTransportControlsButton::Next {
+                        Some(ACTION_NEXT)
+                    } else if button == SystemMediaTransportControlsButton::Previous {
+                        Some(ACTION_PREVIOUS)
+                    } else {
+                        None
+                    };
+                    if let Some(action) = action {
+                        button_callback(action, 0);
+                    }
+                }
             }
-        })?;
+            Ok(())
+        });
+        let button_token = controls.ButtonPressed(&button_handler)?;
 
         let seek_callback = callback;
-        let position_revoker = controls.PlaybackPositionChangeRequested(move |_, args| {
-            let Some(args) = args.as_ref() else { return };
-            let Ok(position) = args.RequestedPlaybackPosition() else { return };
-            seek_callback(
-                ACTION_SEEK_TO,
-                position.Duration.saturating_div(TICKS_PER_MILLISECOND),
-            );
-        })?;
+        let position_handler = TypedEventHandler::<
+            SystemMediaTransportControls,
+            PlaybackPositionChangeRequestedEventArgs,
+        >::new(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                if let Ok(position) = args.RequestedPlaybackPosition() {
+                    seek_callback(
+                        ACTION_SEEK_TO,
+                        position.Duration.saturating_div(TICKS_PER_MILLISECOND),
+                    );
+                }
+            }
+            Ok(())
+        });
+        let position_token = controls.PlaybackPositionChangeRequested(&position_handler)?;
 
         let timeline = SystemMediaTransportControlsTimelineProperties::new()?;
         timeline.SetStartTime(time_span(0))?;
@@ -141,8 +157,8 @@ impl SmtcWorker {
         Ok(Self {
             controls,
             timeline,
-            _button_revoker: button_revoker,
-            _position_revoker: position_revoker,
+            button_token,
+            position_token,
         })
     }
 
@@ -194,6 +210,8 @@ impl SmtcWorker {
     }
 
     fn shutdown(&self) {
+        let _ = self.controls.RemoveButtonPressed(self.button_token);
+        let _ = self.controls.RemovePlaybackPositionChangeRequested(self.position_token);
         let _ = self.controls.SetPlaybackStatus(MediaPlaybackStatus::Stopped);
         let _ = self.controls.SetIsEnabled(false);
     }
