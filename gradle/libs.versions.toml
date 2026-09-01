@@ -17,6 +17,7 @@ ktor = "3.5.1"
 kover = "0.9.8"
 lyriconProvider = "0.1.70"
 sqldelight = "2.3.2"
+jna = "5.19.1"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -55,6 +56,7 @@ lyricon-provider = { module = "io.github.proify.lyricon:provider", version.ref =
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
