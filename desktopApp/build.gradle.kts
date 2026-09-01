@@ -12,7 +12,10 @@ dependencies {
     implementation(project(":shared"))
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
+    implementation(libs.kotlinx.serialization.json)
     implementation(libs.jna)
+    implementation(libs.jna.platform)
+    implementation(libs.credential.secure.storage)
     testImplementation(kotlin("test"))
 }
 
