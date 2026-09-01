@@ -133,4 +133,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.lyricon.provider)
+    testImplementation(kotlin("test"))
 }
