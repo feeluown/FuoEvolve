@@ -161,7 +161,7 @@ class AndroidNativeAudioEngine(
 
         restoredSession = null
         rawAudioQuality = null
-        if (reason.isActiveSelection) {
+        if (reason.clearsDurablePlaybackResume) {
             activePlan = null
             lastPersistedIdentity = null
             lastPersistedPositionMs = 0L
@@ -238,7 +238,6 @@ class AndroidNativeAudioEngine(
             .onFailure { throwable ->
                 startupState.markIdle()
                 activePlan = null
-                playbackResumeStore.clear()
                 Log.e(TAG, "start playback service failed trackId=${first.track.id}", throwable)
                 mutableState.value = mutableState.value.copy(
                     status = PlayerStatus.Error,
