@@ -31,7 +31,64 @@ internal object DesktopUnsupportedDownloadRepository : DownloadRepository {
     override suspend fun deleteDownloaded(track: MusicTrack) = Unit
 }
 
-internal class DesktopUnsupportedPlaybackEngine : PlaybackEngine {
+@Volatile
+private var desktopPlaybackEngineFactory: (() -> PlaybackEngine)? = null
+
+/**
+ * Installs the concrete desktop playback runtime from the JVM host module.
+ *
+ * Native dependencies such as JNA/libmpv intentionally stay in `desktopApp`; shared desktop code
+ * only sees the existing [PlaybackEngine] contract. Call this before composing [DesktopAppHost].
+ */
+fun installDesktopPlaybackEngineFactory(factory: () -> PlaybackEngine) {
+    desktopPlaybackEngineFactory = factory
+}
+
+/**
+ * Compatibility name kept so the existing desktop composition root does not own a native runtime.
+ * The real implementation is supplied by `desktopApp` before [DesktopAppHost] is created.
+ */
+internal class DesktopUnsupportedPlaybackEngine : PlaybackEngine, ResolvedPlaybackSourceAwareEngine {
+    private val delegate: PlaybackEngine = desktopPlaybackEngineFactory?.invoke()
+        ?: MissingDesktopPlaybackEngine()
+
+    override val state: StateFlow<PlaybackState>
+        get() = delegate.state
+
+    override val resolvesResourcesInternally: Boolean
+        get() = delegate.resolvesResourcesInternally
+
+    override fun prepareLoading(track: MusicTrack) = delegate.prepareLoading(track)
+
+    override fun play(track: MusicTrack, payload: PlaybackPayload) = delegate.play(track, payload)
+
+    override fun play(plan: PlaybackPlan) = delegate.play(plan)
+
+    override fun playResolved(
+        logicalTrack: MusicTrack,
+        resolveTrack: MusicTrack,
+        payload: PlaybackPayload,
+    ) {
+        val sourceAware = delegate as? ResolvedPlaybackSourceAwareEngine
+        if (sourceAware != null) {
+            sourceAware.playResolved(logicalTrack, resolveTrack, payload)
+        } else {
+            delegate.play(logicalTrack, payload)
+        }
+    }
+
+    override fun pause() = delegate.pause()
+
+    override fun resume() = delegate.resume()
+
+    override fun stop() = delegate.stop()
+
+    override fun seekTo(positionMs: Long) = delegate.seekTo(positionMs)
+
+    override fun setStopAfterCurrentTrack(enabled: Boolean) = delegate.setStopAfterCurrentTrack(enabled)
+}
+
+private class MissingDesktopPlaybackEngine : PlaybackEngine {
     private val mutableState = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
 
@@ -51,7 +108,7 @@ internal class DesktopUnsupportedPlaybackEngine : PlaybackEngine {
             currentTrack = track,
             positionMs = 0L,
             durationMs = payload.durationMs ?: track.durationMs ?: 0L,
-            errorMessage = "桌面播放引擎将在后续开发阶段接入",
+            errorMessage = "桌面播放引擎未由 desktopApp 注入",
         )
     }
 
