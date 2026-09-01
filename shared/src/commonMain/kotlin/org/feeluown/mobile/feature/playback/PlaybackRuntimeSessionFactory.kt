@@ -19,8 +19,11 @@ import org.feeluown.mobile.playback.runtime.PlaybackRuntimeQueueActions
 /**
  * Shared composition adapter from the application playback owners to the narrow PlaybackSession API.
  * Platform hosts only choose the resume transaction; state mapping and queue bridging stay identical.
+ *
+ * This factory is public because Android's composition root lives in the separate :androidApp
+ * Gradle module. The implementation details below remain internal to :shared.
  */
-internal fun createSharedPlaybackRuntimeSession(
+fun createSharedPlaybackRuntimeSession(
     playbackState: StateFlow<PlaybackState>,
     playbackEngine: PlaybackEngine,
     transportCoordinator: PlaybackTransportCoordinator,
