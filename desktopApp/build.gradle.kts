@@ -8,6 +8,21 @@ kotlin {
     jvmToolchain(17)
 }
 
+val isWindowsHost = System.getProperty("os.name").orEmpty().lowercase().contains("windows")
+val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the Rust Windows SMTC bridge used by the desktop runtime."
+    onlyIf { isWindowsHost }
+    workingDir(layout.projectDirectory.dir("native/windows-smtc"))
+    commandLine("cargo", "build", "--release")
+}
+
+if (isWindowsHost) {
+    tasks.matching { it.name == "run" }.configureEach {
+        dependsOn(buildWindowsSmtcBridge)
+    }
+}
+
 dependencies {
     implementation(project(":shared"))
     implementation(project(":playback:api"))

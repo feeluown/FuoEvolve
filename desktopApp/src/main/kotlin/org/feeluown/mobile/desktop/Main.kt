@@ -15,7 +15,6 @@ fun main() {
     installDesktopPlaybackEngineFactory { DesktopMpvPlaybackEngine() }
     installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
     installDesktopLocalMusicRepositoryFactory { DesktopLocalMusicRepository() }
-    installDesktopPlaybackSessionIntegrationFactory(::createDesktopSystemMediaSession)
     installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
     application {
         Window(
@@ -23,6 +22,9 @@ fun main() {
             title = "FuoEvolve",
             state = rememberWindowState(width = 1280.dp, height = 800.dp),
         ) {
+            installDesktopPlaybackSessionIntegrationFactory { playbackSession ->
+                createDesktopSystemMediaSessionForWindow(playbackSession, window)
+            }
             DesktopAppHost()
         }
     }

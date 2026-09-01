@@ -4,6 +4,7 @@ client_secret*.json
 .kotlin/
 build/
 **/build/
+**/target/
 local.properties
 *.iml
 .idea/
