@@ -6,9 +6,11 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import org.feeluown.mobile.DesktopAppHost
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
+import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 
 fun main() {
     installDesktopPlaybackEngineFactory { DesktopMpvPlaybackEngine() }
+    installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
     application {
         Window(
             onCloseRequest = ::exitApplication,
