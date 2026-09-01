@@ -14,6 +14,7 @@ enum class PlaybackStartReason {
     AUTO_NEXT,
     RESUME,
     RESTORE_SESSION,
+    RECOVERY,
     ;
 
     val isActiveSelection: Boolean
@@ -22,6 +23,13 @@ enum class PlaybackStartReason {
     val mayResumePausedSession: Boolean
         get() = this == RESUME || this == RESTORE_SESSION
 }
+
+/** Stable identity for one playback start from intent through engine generation. */
+data class PlaybackTransaction(
+    val id: Long,
+    val reason: PlaybackStartReason,
+    val targetTrackId: String,
+)
 
 /** Optional engine capability for distinguishing a fresh selection from session resume. */
 interface PlaybackStartReasonAwareEngine {
@@ -79,12 +87,31 @@ internal class PlaybackStartCoordinator(
         messageAfterStart: String? = null,
         suppressPlaybackRecovery: Boolean = false,
     ) {
-        val startReason = queue.consumePlaybackStartReason()
         prepareSleepTimer(track.id)
+        val playbackTrack = if (manualSelection != null) track else prepareTrack(track)
+        val transaction = when {
+            manualSelection != null -> queue.beginPlaybackTransaction(
+                trackId = playbackTrack.id,
+                reason = PlaybackStartReason.USER_SELECTION,
+                recordPlaybackStart = false,
+            )
+            suppressPlaybackRecovery -> queue.beginPlaybackTransaction(
+                trackId = playbackTrack.id,
+                reason = PlaybackStartReason.RECOVERY,
+                recordPlaybackStart = false,
+            )
+            else -> queue.activePlaybackTransaction()
+                ?.takeIf { it.targetTrackId == playbackTrack.id }
+                ?: queue.beginPlaybackTransaction(
+                    trackId = playbackTrack.id,
+                    reason = PlaybackStartReason.RECOVERY,
+                    recordPlaybackStart = false,
+                )
+        }
+        val startReason = transaction.reason
         val serial = nextRequestSerial()
         _startFailure.value = null
         onRequestStarted(serial, suppressPlaybackRecovery)
-        val playbackTrack = if (manualSelection != null) track else prepareTrack(track)
         manualSelection?.let { selection ->
             onManualSelectionStarted(serial, playbackTrack, selection, rollbackTrack)
         }
@@ -128,6 +155,7 @@ internal class PlaybackStartCoordinator(
                 playbackParts = playbackParts(),
                 currentPartIndex = requestedPartIndex.takeIf { isPlaybackPartRequest } ?: -1,
                 lyrics = preservedLyrics ?: playbackTrack.lyrics,
+                playbackGeneration = transaction.id,
                 errorMessage = null,
             )
         )
@@ -144,6 +172,7 @@ internal class PlaybackStartCoordinator(
         if (!playbackEngine.resolvesResourcesInternally) {
             resolveAndStart(
                 serial = serial,
+                transaction = transaction,
                 playbackTrack = playbackTrack,
                 resolveTrack = resolveTrack,
                 skippedUnavailableCount = skippedUnavailableCount,
@@ -156,7 +185,7 @@ internal class PlaybackStartCoordinator(
 
         playbackEngine.play(
             PlaybackPlan(
-                generation = serial,
+                generation = transaction.id,
                 requests = buildList {
                     add(
                         PlaybackRequest(
@@ -194,6 +223,7 @@ internal class PlaybackStartCoordinator(
 
     private fun resolveAndStart(
         serial: Long,
+        transaction: PlaybackTransaction,
         playbackTrack: MusicTrack,
         resolveTrack: MusicTrack,
         skippedUnavailableCount: Int,
@@ -222,6 +252,7 @@ internal class PlaybackStartCoordinator(
                         )
                     }
                 if (serial != currentRequestSerial()) return@playRequest
+                if (queue.activePlaybackTransaction()?.id != transaction.id) return@playRequest
                 // The legacy direct-resolution path cleared recovery suppression once
                 // media resolution succeeded, before engine playback started.
                 onRequestStarted(serial, false)
@@ -248,6 +279,7 @@ internal class PlaybackStartCoordinator(
                         audioQuality = payload.audioQuality,
                         playbackParts = playbackParts(),
                         currentPartIndex = currentPartIndex(),
+                        playbackGeneration = transaction.id,
                     )
                 )
                 maybeLoadLyrics(playableTrack)
@@ -259,7 +291,7 @@ internal class PlaybackStartCoordinator(
                 )
                 prefetchQueue()
             }.onFailure { throwable ->
-                if (serial == currentRequestSerial()) {
+                if (serial == currentRequestSerial() && queue.activePlaybackTransaction()?.id == transaction.id) {
                     _startFailure.value = PlaybackStartFailure(
                         trackId = playbackTrack.id,
                         message = failureMessage(throwable),
@@ -273,7 +305,9 @@ internal class PlaybackStartCoordinator(
                     )
                 }
             }
-            if (serial == currentRequestSerial()) setLoading(false)
+            if (serial == currentRequestSerial() && queue.activePlaybackTransaction()?.id == transaction.id) {
+                setLoading(false)
+            }
         }
     }
 

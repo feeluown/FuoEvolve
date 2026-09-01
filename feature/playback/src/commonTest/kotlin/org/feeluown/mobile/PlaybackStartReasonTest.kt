@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 class PlaybackStartReasonTest {
     @Test
@@ -17,10 +18,10 @@ class PlaybackStartReasonTest {
             mainQueueIndex = 0
         }
         var startedTrack: MusicTrack? = null
-        var startReason: PlaybackStartReason? = null
+        var transaction: PlaybackTransaction? = null
         val coordinator = coordinator(queue) { track, _, _ ->
             startedTrack = track
-            startReason = queue.consumePlaybackStartReason()
+            transaction = queue.activePlaybackTransaction()
         }
 
         coordinator.playPlaylistTracks(
@@ -30,7 +31,9 @@ class PlaybackStartReasonTest {
         )
 
         assertEquals(selected, startedTrack)
-        assertEquals(PlaybackStartReason.USER_SELECTION, startReason)
+        assertEquals(PlaybackStartReason.USER_SELECTION, transaction?.reason)
+        assertEquals(selected.id, transaction?.targetTrackId)
+        assertEquals(1L, transaction?.id)
         assertEquals(selected, queue.currentTrack())
         assertEquals("playlist:new", queue.queuePlaylistId)
     }
@@ -45,10 +48,10 @@ class PlaybackStartReasonTest {
             mainQueueIndex = 0
         }
         var startedTrack: MusicTrack? = null
-        var startReason: PlaybackStartReason? = null
+        var transaction: PlaybackTransaction? = null
         val coordinator = coordinator(queue) { track, _, _ ->
             startedTrack = track
-            startReason = queue.consumePlaybackStartReason()
+            transaction = queue.activePlaybackTransaction()
         }
 
         coordinator.playAllPlaylistTracks(
@@ -57,7 +60,8 @@ class PlaybackStartReasonTest {
         )
 
         assertEquals(first, startedTrack)
-        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, startReason)
+        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, transaction?.reason)
+        assertEquals(first.id, transaction?.targetTrackId)
         assertEquals(first, queue.currentTrack())
     }
 
@@ -71,7 +75,7 @@ class PlaybackStartReasonTest {
             mainQueueIndex = 0
         }
         var startedTrack: MusicTrack? = null
-        var startReason: PlaybackStartReason? = null
+        var transaction: PlaybackTransaction? = null
         var playbackStarted = false
         val coordinator = coordinator(
             queue = queue,
@@ -84,7 +88,7 @@ class PlaybackStartReasonTest {
             onStart = { track, _, _ ->
                 playbackStarted = true
                 startedTrack = track
-                startReason = queue.consumePlaybackStartReason()
+                transaction = queue.activePlaybackTransaction()
             },
         )
 
@@ -94,7 +98,8 @@ class PlaybackStartReasonTest {
         )
 
         assertEquals(first, startedTrack)
-        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, startReason)
+        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, transaction?.reason)
+        assertEquals(first.id, transaction?.targetTrackId)
     }
 
     @Test
@@ -105,20 +110,20 @@ class PlaybackStartReasonTest {
             mainQueueIndex = 0
         }
         var startedTrack: MusicTrack? = null
-        var startReason: PlaybackStartReason? = null
+        var transaction: PlaybackTransaction? = null
         val coordinator = coordinator(queue) { track, _, _ ->
             startedTrack = track
-            startReason = queue.consumePlaybackStartReason()
+            transaction = queue.activePlaybackTransaction()
         }
 
         coordinator.startCurrent()
 
         assertEquals(pausedTrack, startedTrack)
-        assertEquals(PlaybackStartReason.RESUME, startReason)
+        assertEquals(PlaybackStartReason.RESUME, transaction?.reason)
     }
 
     @Test
-    fun automaticNextUsesAutoNextReason() = runTest {
+    fun automaticNextUsesAutoNextReasonAndNewTransaction() = runTest {
         val first = track("track:a")
         val second = track("track:b")
         val queue = PlaybackQueueController().apply {
@@ -126,17 +131,19 @@ class PlaybackStartReasonTest {
             mainQueueIndex = 0
             repeatMode = RepeatMode.OFF
         }
+        val firstTransaction = queue.beginPlaybackTransaction(first.id, PlaybackStartReason.USER_SELECTION)
         var startedTrack: MusicTrack? = null
-        var startReason: PlaybackStartReason? = null
+        var nextTransaction: PlaybackTransaction? = null
         val coordinator = coordinator(queue) { track, _, _ ->
             startedTrack = track
-            startReason = queue.consumePlaybackStartReason()
+            nextTransaction = queue.activePlaybackTransaction()
         }
 
         coordinator.next()
 
         assertEquals(second, startedTrack)
-        assertEquals(PlaybackStartReason.AUTO_NEXT, startReason)
+        assertEquals(PlaybackStartReason.AUTO_NEXT, nextTransaction?.reason)
+        assertEquals(firstTransaction.id + 1L, assertNotNull(nextTransaction).id)
     }
 
     private fun TestScope.coordinator(

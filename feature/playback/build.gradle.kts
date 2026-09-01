@@ -122,6 +122,16 @@ val checkPlaybackFeatureBoundaries = tasks.register("checkPlaybackFeatureBoundar
             }
         }
 
+        listOf(
+            "pendingPlaybackStartReason",
+            "markNextPlaybackStart",
+            "consumePlaybackStartReason",
+        ).forEach { retiredSymbol ->
+            check(!Regex("\\b${Regex.escape(retiredSymbol)}\\b").containsMatchIn(featureSourceText)) {
+                "Playback starts must use explicit PlaybackTransaction; retired implicit channel restored: $retiredSymbol"
+            }
+        }
+
         val restored = retiredSharedPlaybackBusinessFiles.filter { it.isFile }
         check(restored.isEmpty()) {
             buildString {

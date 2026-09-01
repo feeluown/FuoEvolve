@@ -474,7 +474,7 @@ internal class PlaybackQueueCoordinator(
         requestedPartIndex: Int?,
         reason: PlaybackStartReason,
     ) {
-        queueState.markNextPlaybackStart(reason)
+        queueState.beginPlaybackTransaction(track.id, reason)
         startPlayback(track, skippedUnavailableCount, requestedPartIndex)
     }
 
