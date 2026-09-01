@@ -10,6 +10,7 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":playback:api"))
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.kotlinx.serialization.json)
@@ -17,6 +18,8 @@ dependencies {
     implementation(libs.jna.platform)
     implementation(libs.credential.secure.storage)
     implementation(libs.jaudiotagger)
+    implementation(libs.dbus.java.core)
+    runtimeOnly(libs.dbus.java.transport.native.unixsocket)
     testImplementation(kotlin("test"))
 }
 

@@ -34,6 +34,7 @@ interface PlaybackRuntimeEngine {
 
     fun pause()
     fun resume()
+    fun stop() = pause()
     fun seekTo(positionMs: Long) = Unit
 }
 
@@ -103,6 +104,8 @@ class DefaultPlaybackRuntime(
             engine.pause()
         }
     }
+
+    override fun stop() = engine.stop()
 
     override fun previous() = queueActions.previous()
 

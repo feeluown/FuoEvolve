@@ -39,6 +39,7 @@ interface PlaybackSession {
     fun toggle()
     fun play()
     fun pause()
+    fun stop() = pause()
     fun previous()
     fun next()
     fun seekTo(positionMs: Long) = Unit

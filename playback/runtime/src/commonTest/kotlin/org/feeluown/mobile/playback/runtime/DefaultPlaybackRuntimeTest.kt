@@ -79,6 +79,9 @@ class DefaultPlaybackRuntimeTest {
         runtime.play()
         assertEquals(1, engine.resumeCalls)
 
+        runtime.stop()
+        assertEquals(1, engine.stopCalls)
+
         runtime.seekTo(42_000)
         assertEquals(42_000, engine.lastSeekMs)
         runtime.seekTo(150_000)
@@ -108,6 +111,7 @@ class DefaultPlaybackRuntimeTest {
         override val state = mutableState
         var pauseCalls = 0
         var resumeCalls = 0
+        var stopCalls = 0
         var lastSeekMs: Long? = null
 
         override fun pause() {
@@ -116,6 +120,10 @@ class DefaultPlaybackRuntimeTest {
 
         override fun resume() {
             resumeCalls += 1
+        }
+
+        override fun stop() {
+            stopCalls += 1
         }
 
         override fun seekTo(positionMs: Long) {

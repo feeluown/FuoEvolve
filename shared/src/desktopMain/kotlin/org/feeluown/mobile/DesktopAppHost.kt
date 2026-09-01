@@ -284,6 +284,10 @@ private class DesktopAppContainer {
         )
     }
 
+    private val playbackSessionIntegration = lazy {
+        createDesktopPlaybackSessionIntegration(playbackSession)
+    }
+
     private val searchAppPort by lazy {
         DefaultSearchAppPort(
             searchController = searchController,
@@ -316,6 +320,7 @@ private class DesktopAppContainer {
     }
 
     val appUiGraph: AppUiGraph by lazy {
+        playbackSessionIntegration.value
         createAppUiGraph(
             playbackSession = playbackSession,
             playbackNavigationPort = playbackFeatureOwner.navigation,
@@ -376,6 +381,9 @@ private class DesktopAppContainer {
     }
 
     fun close() {
+        if (playbackSessionIntegration.isInitialized()) {
+            playbackSessionIntegration.value.close()
+        }
         scope.cancel()
         desktopDownloadRepository.close()
         playbackEngine.close()

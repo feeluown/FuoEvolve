@@ -4,6 +4,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.feeluown.mobile.playback.api.PlaybackSession
+
+@Volatile
+private var desktopPlaybackSessionIntegrationFactory: ((PlaybackSession) -> AutoCloseable)? = null
+
+/** Installs desktop system-media integration without leaking platform APIs into shared code. */
+fun installDesktopPlaybackSessionIntegrationFactory(factory: (PlaybackSession) -> AutoCloseable) {
+    desktopPlaybackSessionIntegrationFactory = factory
+}
+
+internal fun createDesktopPlaybackSessionIntegration(playbackSession: PlaybackSession): AutoCloseable =
+    desktopPlaybackSessionIntegrationFactory?.invoke(playbackSession) ?: AutoCloseable { }
 
 @Volatile
 private var desktopLocalMusicRepositoryFactory: (() -> LocalMusicRepository)? = null
