@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
@@ -502,18 +503,53 @@ internal class AndroidAppUpdateController(
             "${appContext.packageName}.fileprovider",
             apkFile,
         )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, APK_MIME_TYPE)
+        var lastLaunchError: Throwable? = null
+        androidInstallerIntentActions(Build.VERSION.SDK_INT).forEach { action ->
+            val intent = buildInstallerIntent(action, uri)
+            grantInstallerUriPermission(intent, uri)
+            try {
+                appContext.startActivity(intent)
+                mutableUiState.update {
+                    it.copy(
+                        phase = AppUpdatePhase.Installing,
+                        downloadProgress = null,
+                        message = "已打开系统安装器",
+                    )
+                }
+                return
+            } catch (error: ActivityNotFoundException) {
+                lastLaunchError = error
+            } catch (error: SecurityException) {
+                lastLaunchError = error
+            }
+        }
+        throw IOException("无法打开系统安装器", lastLaunchError)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun buildInstallerIntent(action: AndroidInstallerIntentAction, uri: Uri): Intent =
+        when (action) {
+            AndroidInstallerIntentAction.InstallPackage -> Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+            }
+            AndroidInstallerIntentAction.ViewPackage -> Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, APK_MIME_TYPE)
+            }
+        }.apply {
             clipData = ClipData.newRawUri("FuoEvolve update", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        appContext.startActivity(intent)
-        mutableUiState.update {
-            it.copy(
-                phase = AppUpdatePhase.Installing,
-                downloadProgress = null,
-                message = "已打开系统安装器",
-            )
+
+    @Suppress("DEPRECATION")
+    private fun grantInstallerUriPermission(intent: Intent, uri: Uri) {
+        packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY).forEach { resolveInfo ->
+            runCatching {
+                appContext.grantUriPermission(
+                    resolveInfo.activityInfo.packageName,
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
         }
     }
 
