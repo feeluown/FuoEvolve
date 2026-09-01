@@ -18,6 +18,7 @@ kover = "0.9.8"
 lyriconProvider = "0.1.70"
 sqldelight = "2.3.2"
 jna = "5.19.1"
+credentialSecureStorage = "1.0.3"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -57,6 +58,8 @@ sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sq
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+credential-secure-storage = { module = "com.microsoft:credential-secure-storage", version.ref = "credentialSecureStorage" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
