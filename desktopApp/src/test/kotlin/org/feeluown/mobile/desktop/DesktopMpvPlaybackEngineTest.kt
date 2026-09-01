@@ -141,6 +141,27 @@ class DesktopMpvPlaybackEngineTest {
         assertTrue(engine.state.value.errorMessage.orEmpty().contains("FUOEVOLVE_LIBMPV_PATH"))
     }
 
+    @Test
+    fun headerFieldsUseMpvListQuotingAndRejectLineInjection() {
+        val validHeaders = listOf(
+            "Referer: https://www.bilibili.com/",
+            "X-Title: 中文",
+        )
+        val encoded = encodeHeaderFields(
+            linkedMapOf(
+                "Referer" to "https://www.bilibili.com/",
+                "X-Title" to "中文",
+                "Injected\nHeader" to "ignored",
+                "Cookie" to "ok\r\nbad",
+            ),
+        )
+        val expected = validHeaders.joinToString(",") { header ->
+            "%${header.toByteArray(Charsets.UTF_8).size}%$header"
+        }
+
+        assertEquals(expected, encoded)
+    }
+
     private fun track(
         id: String,
         source: String,
