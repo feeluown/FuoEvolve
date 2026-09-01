@@ -458,7 +458,7 @@ class AndroidNativeAudioEngine(
         val plan = activePlan ?: return
         val state = mutableState.value
         val track = state.currentTrack ?: return
-        if (state.status !in RESTORABLE_STATUSES) return
+        if (!state.status.isDurablePlaybackResumeStatus()) return
 
         val identity = buildString {
             append(plan.generation)
@@ -644,8 +644,5 @@ class AndroidNativeAudioEngine(
         private const val TAG = "FuoAudioEngine"
         private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
         private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
-        // A session is resumable only after Media3 has established a playable item. Persisting
-        // Loading would turn an asynchronous resolve/start failure into a phantom paused session.
-        private val RESTORABLE_STATUSES = setOf(PlayerStatus.Playing, PlayerStatus.Paused)
     }
 }
