@@ -89,6 +89,12 @@ internal class PlaybackStartCoordinator(
             onManualSelectionStarted(serial, playbackTrack, selection, rollbackTrack)
         }
 
+        val previousPlaybackState = currentPlaybackState()
+        val isManualSourceSwitch = manualSelection != null &&
+            previousPlaybackState.currentTrack?.id == playbackTrack.id
+        val preservedLyrics = previousPlaybackState.lyrics
+            ?.takeIf { isManualSourceSwitch && it.isNotBlank() }
+
         val existingParts = playbackParts()
         val isPlaybackPartRequest = requestedPartIndex != null && existingParts.isNotEmpty()
         if (!isPlaybackPartRequest) {
@@ -96,7 +102,9 @@ internal class PlaybackStartCoordinator(
             setCurrentPartIndex(-1)
         }
         queue.updateCurrentTrack(playbackTrack)
-        resetLyricsForPlaybackRequest()
+        if (!isManualSourceSwitch) {
+            resetLyricsForPlaybackRequest()
+        }
 
         // Establish the platform playback transaction before publishing the new queue/current-track
         // overlay. Android can still hold a restored paused Media3 session at this point; publishing
@@ -119,7 +127,7 @@ internal class PlaybackStartCoordinator(
                 positionMs = 0,
                 playbackParts = playbackParts(),
                 currentPartIndex = requestedPartIndex.takeIf { isPlaybackPartRequest } ?: -1,
-                lyrics = playbackTrack.lyrics,
+                lyrics = preservedLyrics ?: playbackTrack.lyrics,
                 errorMessage = null,
             )
         )
