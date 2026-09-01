@@ -90,7 +90,7 @@ class PlaybackQueueControllerTest {
             mainQueue = listOf(firstNew, secondNew)
             mainQueueIndex = 0
             queuePlaylistId = "playlist:new"
-            markNextPlaybackStart(PlaybackStartReason.PLAYLIST_REPLACE)
+            beginPlaybackTransaction(firstNew.id, PlaybackStartReason.PLAYLIST_REPLACE)
         }
 
         assertFalse(controller.restore(oldSnapshot))
@@ -98,7 +98,8 @@ class PlaybackQueueControllerTest {
         assertEquals(listOf(firstNew, secondNew), controller.mainQueue)
         assertEquals(firstNew, controller.currentTrack())
         assertEquals("playlist:new", controller.queuePlaylistId)
-        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, controller.consumePlaybackStartReason())
+        assertEquals(PlaybackStartReason.PLAYLIST_REPLACE, controller.activePlaybackTransaction()?.reason)
+        assertEquals(firstNew.id, controller.activePlaybackTransaction()?.targetTrackId)
     }
 
     @Test
@@ -154,21 +155,36 @@ class PlaybackQueueControllerTest {
     }
 
     @Test
-    fun resumeIntentStillAllowsStartupQueueRestore() {
+    fun resumeTransactionSurvivesStartupQueueHydration() {
         val restoredTrack = track("netease:old", "Restored")
         val oldSnapshot = PlaybackQueueController().apply {
             mainQueue = listOf(restoredTrack)
             mainQueueIndex = 0
         }.snapshot()
-        val controller = PlaybackQueueController().apply {
-            markNextPlaybackStart(PlaybackStartReason.RESUME)
-        }
+        val controller = PlaybackQueueController()
+        val transaction = controller.beginPlaybackTransaction(restoredTrack.id, PlaybackStartReason.RESUME)
 
         assertTrue(controller.restore(oldSnapshot))
 
         assertEquals(listOf(restoredTrack), controller.mainQueue)
         assertEquals(restoredTrack, controller.currentTrack())
-        assertEquals(PlaybackStartReason.AUTO_NEXT, controller.consumePlaybackStartReason())
+        assertEquals(transaction, controller.activePlaybackTransaction())
+        assertEquals(transaction.id, controller.state.value.playbackStartSequence)
+        assertEquals(transaction.reason, controller.state.value.lastPlaybackStartReason)
+    }
+
+    @Test
+    fun playbackTransactionsAreMonotonicAndObservable() {
+        val controller = PlaybackQueueController()
+
+        val first = controller.beginPlaybackTransaction("track:a", PlaybackStartReason.USER_SELECTION)
+        val second = controller.beginPlaybackTransaction("track:b", PlaybackStartReason.AUTO_NEXT)
+
+        assertEquals(1L, first.id)
+        assertEquals(2L, second.id)
+        assertEquals(second, controller.activePlaybackTransaction())
+        assertEquals(PlaybackStartReason.AUTO_NEXT, controller.state.value.lastPlaybackStartReason)
+        assertEquals(2L, controller.state.value.playbackStartSequence)
     }
 
     @Test

@@ -20,6 +20,8 @@ data class PlaybackQueueState(
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
+    val activePlaybackTransaction: PlaybackTransaction? = null,
+    val playbackTransactionSequence: Long = 0L,
     val lastPlaybackStartReason: PlaybackStartReason? = null,
     val playbackStartSequence: Long = 0L,
 )
@@ -73,22 +75,38 @@ internal class PlaybackQueueController {
         get() = mutableState.value.shuffleBeforeFm
         set(value) = update { it.copy(shuffleBeforeFm = value) }
 
-    private var pendingPlaybackStartReason: PlaybackStartReason? = null
-
     fun currentTrack(): MusicTrack? = mutableState.value.currentTrack()
 
     fun displayQueue(): List<MusicTrack> = mutableState.value.displayQueue()
 
     fun displayQueueIndex(): Int = if (currentTrack() != null) 0 else -1
 
-    fun markNextPlaybackStart(reason: PlaybackStartReason) {
-        pendingPlaybackStartReason = reason
-        updateEphemeral { current ->
-            current.copy(
-                lastPlaybackStartReason = reason,
-                playbackStartSequence = current.playbackStartSequence + 1L,
+    fun activePlaybackTransaction(): PlaybackTransaction? = mutableState.value.activePlaybackTransaction
+
+    fun beginPlaybackTransaction(
+        trackId: String,
+        reason: PlaybackStartReason,
+        recordPlaybackStart: Boolean = true,
+    ): PlaybackTransaction {
+        val current = mutableState.value
+        val transaction = PlaybackTransaction(
+            id = current.playbackTransactionSequence + 1L,
+            reason = reason,
+            targetTrackId = trackId,
+        )
+        updateEphemeral { state ->
+            state.copy(
+                activePlaybackTransaction = transaction,
+                playbackTransactionSequence = transaction.id,
+                lastPlaybackStartReason = if (recordPlaybackStart) reason else state.lastPlaybackStartReason,
+                playbackStartSequence = if (recordPlaybackStart) {
+                    state.playbackStartSequence + 1L
+                } else {
+                    state.playbackStartSequence
+                },
             )
         }
+        return transaction
     }
 
     /** Starts a new logical playback-context session without making it part of durable queue state. */
@@ -100,10 +118,6 @@ internal class PlaybackQueueController {
             )
         }
     }
-
-    fun consumePlaybackStartReason(): PlaybackStartReason =
-        pendingPlaybackStartReason?.also { pendingPlaybackStartReason = null }
-            ?: PlaybackStartReason.AUTO_NEXT
 
     fun updateCurrentTrack(track: MusicTrack) {
         val current = mutableState.value
@@ -123,16 +137,17 @@ internal class PlaybackQueueController {
     }
 
     /**
-     * Applies the persisted startup queue only if no live queue mutation happened first.
+     * Applies the persisted startup queue only if no live durable queue mutation happened first.
      *
-     * Mutation history is tracked monotonically rather than inferred from current values so user
-     * actions that return the queue to its defaults (for example clearing an already-empty queue or
-     * toggling shuffle twice) still invalidate a delayed startup snapshot.
+     * An already-started playback transaction is intentionally preserved across hydration. A resume
+     * may begin from the independently restored engine state before the durable queue snapshot arrives;
+     * resetting its transaction here would make an in-flight provider result look stale.
      *
-     * @return true when the snapshot was applied, false when a newer live mutation won the race.
+     * @return true when the snapshot was applied, false when a newer live queue mutation won the race.
      */
     fun restore(snapshot: PlaybackQueueSnapshot): Boolean {
         if (startupDirty) return false
+        val current = mutableState.value
         applyingStartupSnapshot = true
         try {
             mutableState.value = PlaybackQueueState(
@@ -144,8 +159,11 @@ internal class PlaybackQueueController {
                 repeatMode = snapshot.repeatMode,
                 isFmQueue = snapshot.isFmQueue,
                 shuffleBeforeFm = snapshot.shuffleBeforeFm,
+                activePlaybackTransaction = current.activePlaybackTransaction,
+                playbackTransactionSequence = current.playbackTransactionSequence,
+                lastPlaybackStartReason = current.lastPlaybackStartReason,
+                playbackStartSequence = current.playbackStartSequence,
             )
-            pendingPlaybackStartReason = null
         } finally {
             applyingStartupSnapshot = false
         }

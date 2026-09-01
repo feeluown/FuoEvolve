@@ -36,6 +36,7 @@ class PlaybackStartCoordinatorTest {
         assertEquals("Resolved title", queue.currentTrack()?.title)
         assertEquals(PlayerStatus.Loading, fixture.playbackState.status)
         assertEquals("Resolved title", fixture.playbackState.currentTrack?.title)
+        assertEquals(queue.activePlaybackTransaction()?.id, fixture.playbackState.playbackGeneration)
         assertNull(fixture.coordinator.startFailure.value)
         assertEquals(0, fixture.failureCount)
     }
@@ -63,13 +64,15 @@ class PlaybackStartCoordinatorTest {
     }
 
     @Test
-    fun internalResolutionBuildsPlanWithoutCallingProviderResolver() = runTest {
+    fun internalResolutionUsesPlaybackTransactionAsPlanGeneration() = runTest {
         val current = track("netease:1")
         val next = track("netease:2")
         val queue = PlaybackQueueController().apply {
             mainQueue = listOf(current, next)
             mainQueueIndex = 0
         }
+        queue.beginPlaybackTransaction("unused", PlaybackStartReason.AUTO_NEXT)
+        val transaction = queue.beginPlaybackTransaction(current.id, PlaybackStartReason.USER_SELECTION)
         val engine = FakePlaybackEngine(resolvesInternally = true)
         val repository = FakePlaybackRepository(resolveError = IllegalStateException("resolver should not be called"))
         val fixture = fixture(queue, engine, repository)
@@ -77,7 +80,8 @@ class PlaybackStartCoordinatorTest {
         fixture.coordinator.start(current)
 
         val plan = assertNotNull(engine.playedPlan)
-        assertEquals(1L, plan.generation)
+        assertEquals(transaction.id, plan.generation)
+        assertEquals(transaction.id, fixture.playbackState.playbackGeneration)
         assertEquals(listOf(current.id, next.id), plan.requests.map { it.track.id })
         assertEquals(0, repository.resolveCalls)
         assertNull(fixture.coordinator.startFailure.value)
@@ -90,7 +94,7 @@ class PlaybackStartCoordinatorTest {
         val queue = PlaybackQueueController().apply {
             mainQueue = listOf(selected)
             mainQueueIndex = 0
-            markNextPlaybackStart(PlaybackStartReason.PLAYLIST_REPLACE)
+            beginPlaybackTransaction(selected.id, PlaybackStartReason.PLAYLIST_REPLACE)
         }
         val engine = FakePlaybackEngine(resolvesInternally = true)
         val repository = FakePlaybackRepository(resolveError = IllegalStateException("resolver should not be called"))
@@ -112,6 +116,63 @@ class PlaybackStartCoordinatorTest {
         assertTrue(published)
         assertEquals(selected, fixture.playbackState.currentTrack)
         assertEquals(PlayerStatus.Loading, fixture.playbackState.status)
+        assertEquals(queue.activePlaybackTransaction()?.id, fixture.playbackState.playbackGeneration)
+    }
+
+    @Test
+    fun manualSourceSelectionCreatesFreshTransactionWithoutRestartingListeningHistory() = runTest {
+        val original = track("netease:1")
+        val selection = SmartReplacementSelection(
+            replacementId = "qqmusic:replacement",
+            replacementTitle = "Replacement",
+            replacementArtists = "Artist",
+            replacementSource = "qqmusic",
+        )
+        val queue = PlaybackQueueController().apply {
+            mainQueue = listOf(original)
+            mainQueueIndex = 0
+            beginPlaybackTransaction(original.id, PlaybackStartReason.AUTO_NEXT)
+        }
+        val historySequenceBeforeSwitch = queue.state.value.playbackStartSequence
+        val engine = FakePlaybackEngine(resolvesInternally = true)
+        val repository = FakePlaybackRepository(resolveError = IllegalStateException("resolver should not be called"))
+        val fixture = fixture(queue, engine, repository)
+
+        fixture.coordinator.start(
+            track = original.withReplacementSelection(selection),
+            manualSelection = selection,
+            rollbackTrack = original,
+        )
+
+        val transaction = assertNotNull(queue.activePlaybackTransaction())
+        assertEquals(PlaybackStartReason.USER_SELECTION, transaction.reason)
+        assertEquals(original.id, transaction.targetTrackId)
+        assertEquals(transaction.id, assertNotNull(engine.playedPlan).generation)
+        assertEquals(historySequenceBeforeSwitch, queue.state.value.playbackStartSequence)
+    }
+
+    @Test
+    fun recoveryStartIsFreshAndDoesNotRestartListeningHistory() = runTest {
+        val original = track("netease:1")
+        val queue = PlaybackQueueController().apply {
+            mainQueue = listOf(original)
+            mainQueueIndex = 0
+            beginPlaybackTransaction(original.id, PlaybackStartReason.USER_SELECTION)
+        }
+        val historySequenceBeforeRecovery = queue.state.value.playbackStartSequence
+        val engine = FakePlaybackEngine(resolvesInternally = true)
+        val repository = FakePlaybackRepository(resolveError = IllegalStateException("resolver should not be called"))
+        val fixture = fixture(queue, engine, repository)
+
+        fixture.coordinator.start(
+            track = original,
+            suppressPlaybackRecovery = true,
+        )
+
+        val transaction = assertNotNull(queue.activePlaybackTransaction())
+        assertEquals(PlaybackStartReason.RECOVERY, transaction.reason)
+        assertEquals(historySequenceBeforeRecovery, queue.state.value.playbackStartSequence)
+        assertEquals(PlaybackStartReason.RECOVERY, engine.preparedReason)
     }
 
     private fun TestScope.fixture(
