@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -146,7 +147,10 @@ class PlaybackStartCoordinatorTest {
         )
 
         val transaction = assertNotNull(queue.activePlaybackTransaction())
-        assertEquals(PlaybackStartReason.USER_SELECTION, transaction.reason)
+        assertEquals(PlaybackStartReason.SOURCE_SWITCH, transaction.reason)
+        assertEquals(PlaybackStartReason.SOURCE_SWITCH, engine.preparedReason)
+        assertFalse(transaction.reason.isActiveSelection)
+        assertTrue(transaction.reason.shouldDiscardLiveSession)
         assertEquals(original.id, transaction.targetTrackId)
         assertEquals(transaction.id, assertNotNull(engine.playedPlan).generation)
         assertEquals(historySequenceBeforeSwitch, queue.state.value.playbackStartSequence)
