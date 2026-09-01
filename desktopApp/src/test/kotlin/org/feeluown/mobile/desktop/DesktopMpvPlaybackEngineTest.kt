@@ -35,6 +35,7 @@ class DesktopMpvPlaybackEngineTest {
 
         engine.prepareLoading(logicalTrack)
         engine.playResolved(logicalTrack, resolveTrack, payload)
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 10L))
         backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
 
         assertEquals("https://example.test/audio.m4a", backend.loadedUrl)
@@ -64,6 +65,7 @@ class DesktopMpvPlaybackEngineTest {
             ),
         )
 
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 20L))
         backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
         backend.emit(DesktopMpvBackendEvent.Property("time-pos", "12.5"))
         backend.emit(DesktopMpvBackendEvent.Property("duration", "200"))
@@ -100,6 +102,7 @@ class DesktopMpvPlaybackEngineTest {
                 durationMs = 100_000L,
             ),
         )
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 30L))
         backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
 
         engine.pause()
@@ -114,8 +117,57 @@ class DesktopMpvPlaybackEngineTest {
         assertEquals(false, backend.paused)
         assertEquals(PlayerStatus.Playing, engine.state.value.status)
 
-        backend.emit(DesktopMpvBackendEvent.EndFile(reason = 0))
+        backend.emit(DesktopMpvBackendEvent.EndFile(playlistEntryId = 30L, reason = 0))
         assertEquals(PlayerStatus.Ended, engine.state.value.status)
+    }
+
+    @Test
+    fun staleEventsFromReplacedEntryCannotMutateNewTrack() {
+        lateinit var backend: FakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            FakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val first = track(id = "netease:first", source = "netease")
+        val second = track(id = "qqmusic:second", source = "qqmusic")
+
+        engine.play(first, payload(first, "https://example.test/first.mp3"))
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 41L))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+
+        engine.play(second, payload(second, "https://example.test/second.mp3"))
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+        assertEquals(second.id, engine.state.value.currentTrack?.id)
+
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "99"))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+        backend.emit(DesktopMpvBackendEvent.EndFile(playlistEntryId = 41L, reason = 0))
+
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+        assertEquals(0L, engine.state.value.positionMs)
+        assertEquals(second.id, engine.state.value.currentTrack?.id)
+
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 42L))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+        backend.emit(
+            DesktopMpvBackendEvent.EndFile(
+                playlistEntryId = 41L,
+                reason = 4,
+                errorMessage = "stale failure",
+            ),
+        )
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+        assertEquals(second.id, engine.state.value.currentTrack?.id)
+
+        backend.emit(
+            DesktopMpvBackendEvent.EndFile(
+                playlistEntryId = 42L,
+                reason = 4,
+                errorMessage = "active failure",
+            ),
+        )
+        assertEquals(PlayerStatus.Error, engine.state.value.status)
+        assertTrue(engine.state.value.errorMessage.orEmpty().contains("active failure"))
     }
 
     @Test
@@ -183,6 +235,15 @@ class DesktopMpvPlaybackEngineTest {
 
         assertEquals(expected, encoded)
     }
+
+    private fun payload(track: MusicTrack, url: String) = PlaybackPayload(
+        url = url,
+        title = track.title,
+        artists = track.artists,
+        album = track.album,
+        source = track.source,
+        durationMs = track.durationMs,
+    )
 
     private fun fixedLength(value: String): String =
         "%${value.toByteArray(Charsets.UTF_8).size}%$value"
