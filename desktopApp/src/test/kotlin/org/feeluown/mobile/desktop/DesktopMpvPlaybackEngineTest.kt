@@ -88,7 +88,7 @@ class DesktopMpvPlaybackEngineTest {
         val engine = DesktopMpvPlaybackEngine { listener ->
             FakeDesktopMpvBackend(listener).also { backend = it }
         }
-        val track = track(id = "local:1", source = "local", sourceType = TrackSourceType.Local)
+        val track = track(id = "local:1", source = "local", sourceType = TrackSourceType.LocalMediaStore)
         engine.play(
             track,
             PlaybackPayload(
