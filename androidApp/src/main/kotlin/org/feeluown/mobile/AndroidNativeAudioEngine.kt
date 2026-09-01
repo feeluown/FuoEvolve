@@ -644,6 +644,8 @@ class AndroidNativeAudioEngine(
         private const val TAG = "FuoAudioEngine"
         private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
         private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
-        private val RESTORABLE_STATUSES = setOf(PlayerStatus.Loading, PlayerStatus.Playing, PlayerStatus.Paused)
+        // A session is resumable only after Media3 has established a playable item. Persisting
+        // Loading would turn an asynchronous resolve/start failure into a phantom paused session.
+        private val RESTORABLE_STATUSES = setOf(PlayerStatus.Playing, PlayerStatus.Paused)
     }
 }
