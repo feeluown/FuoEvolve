@@ -307,10 +307,21 @@ private class LibMpvBackend(
 
     override fun load(url: String, headers: Map<String, String>) {
         ensureOpen()
-        // Keep headers file-local so source switches cannot leak Referer/Cookie values into
-        // the following provider item. This mirrors mpv's own ytdl integration behavior.
-        setProperty("file-local-options/http-header-fields", encodeHeaderFields(headers))
-        command("loadfile", url, "replace")
+        val headerFields = encodeHeaderFields(headers)
+        if (headerFields.isEmpty()) {
+            command("loadfile", url, "replace")
+        } else {
+            // Since mpv 0.38 the insertion index is the third loadfile argument; per-file options
+            // therefore require an explicit -1 before the fourth argument. Passing headers here
+            // scopes provider Referer/Cookie values to exactly this playlist entry.
+            command(
+                "loadfile",
+                url,
+                "replace",
+                "-1",
+                "http-header-fields=$headerFields",
+            )
+        }
     }
 
     override fun setPaused(paused: Boolean) {
