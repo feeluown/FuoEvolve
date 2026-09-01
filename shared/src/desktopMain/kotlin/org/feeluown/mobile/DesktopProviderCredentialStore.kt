@@ -1,7 +1,7 @@
 package org.feeluown.mobile
 
-import org.feeluown.mobile.provider.core.InMemoryProviderCredentialStore
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
+import org.feeluown.mobile.provider.core.ProviderCredentials
 
 @Volatile
 private var desktopProviderCredentialStoreFactory: (() -> ProviderCredentialStore)? = null
@@ -17,4 +17,14 @@ fun installDesktopProviderCredentialStoreFactory(factory: () -> ProviderCredenti
 }
 
 internal fun createDesktopProviderCredentialStore(): ProviderCredentialStore =
-    desktopProviderCredentialStoreFactory?.invoke() ?: InMemoryProviderCredentialStore()
+    desktopProviderCredentialStoreFactory?.invoke() ?: MissingDesktopProviderCredentialStore
+
+private object MissingDesktopProviderCredentialStore : ProviderCredentialStore {
+    override suspend fun read(providerId: String): ProviderCredentials? = null
+
+    override suspend fun write(providerId: String, credentials: ProviderCredentials) {
+        throw IllegalStateException("桌面安全凭证存储未由 desktopApp 注入")
+    }
+
+    override suspend fun delete(providerId: String) = Unit
+}
