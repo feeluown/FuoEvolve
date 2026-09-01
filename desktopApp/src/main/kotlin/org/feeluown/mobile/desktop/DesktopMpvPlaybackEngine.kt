@@ -36,8 +36,14 @@ internal class DesktopMpvPlaybackEngine(
     private var backendFailure: Throwable? = null
     @Volatile
     private var paused = false
+    @Volatile
+    private var activePlaylistEntryId: Long? = null
 
     override fun prepareLoading(track: MusicTrack) {
+        // Invalidate the previous entry before asking mpv to stop it. END_FILE and property events are
+        // asynchronous, so anything from the previous item must not be allowed to mutate the new
+        // logical playback transaction while resolution is still in progress.
+        activePlaylistEntryId = null
         backend?.runCatching { stop() }
         val logicalTrack = track.logicalPlaybackTrack()
         mutableState.value = PlaybackState(
@@ -97,6 +103,7 @@ internal class DesktopMpvPlaybackEngine(
     }
 
     override fun stop() {
+        activePlaylistEntryId = null
         backend?.runCatching { stop() }?.onFailure(::publishBackendFailure)
         paused = false
         mutableState.value = PlaybackState()
@@ -104,7 +111,7 @@ internal class DesktopMpvPlaybackEngine(
 
     override fun seekTo(positionMs: Long) {
         val current = mutableState.value
-        if (current.currentTrack == null) return
+        if (current.currentTrack == null || activePlaylistEntryId == null) return
         val upperBound = current.durationMs.takeIf { it > 0L } ?: Long.MAX_VALUE
         val target = positionMs.coerceIn(0L, upperBound)
         backend?.runCatching { seekTo(target) }?.onFailure(::publishBackendFailure)
@@ -112,6 +119,7 @@ internal class DesktopMpvPlaybackEngine(
     }
 
     override fun close() {
+        activePlaylistEntryId = null
         val activeBackend = backend
         backend = null
         runCatching { activeBackend?.close() }
@@ -123,6 +131,7 @@ internal class DesktopMpvPlaybackEngine(
         resolvedSource: org.feeluown.mobile.ResolvedPlaybackSource,
     ) {
         paused = false
+        activePlaylistEntryId = null
         mutableState.value = PlaybackState(
             status = PlayerStatus.Loading,
             currentTrack = logicalTrack,
@@ -153,8 +162,15 @@ internal class DesktopMpvPlaybackEngine(
 
     private fun handleBackendEvent(event: DesktopMpvBackendEvent) {
         when (event) {
+            is DesktopMpvBackendEvent.StartFile -> {
+                val current = mutableState.value
+                if (current.currentTrack != null && current.status == PlayerStatus.Loading) {
+                    activePlaylistEntryId = event.playlistEntryId
+                }
+            }
             DesktopMpvBackendEvent.FileLoaded -> Unit
             DesktopMpvBackendEvent.PlaybackRestart -> {
+                if (activePlaylistEntryId == null) return
                 val current = mutableState.value
                 if (current.currentTrack != null && current.status != PlayerStatus.Error) {
                     mutableState.value = current.copy(
@@ -163,27 +179,33 @@ internal class DesktopMpvPlaybackEngine(
                     )
                 }
             }
-            is DesktopMpvBackendEvent.Property -> handleProperty(event.name, event.value)
-            is DesktopMpvBackendEvent.EndFile -> when (event.reason) {
-                MPV_END_FILE_REASON_EOF -> {
-                    val current = mutableState.value
-                    if (current.currentTrack != null) {
-                        mutableState.value = current.copy(
-                            status = PlayerStatus.Ended,
-                            positionMs = current.durationMs.takeIf { it > 0L } ?: current.positionMs,
+            is DesktopMpvBackendEvent.Property -> {
+                if (activePlaylistEntryId != null) handleProperty(event.name, event.value)
+            }
+            is DesktopMpvBackendEvent.EndFile -> {
+                if (event.playlistEntryId != activePlaylistEntryId) return
+                when (event.reason) {
+                    MPV_END_FILE_REASON_EOF -> {
+                        activePlaylistEntryId = null
+                        val current = mutableState.value
+                        if (current.currentTrack != null) {
+                            mutableState.value = current.copy(
+                                status = PlayerStatus.Ended,
+                                positionMs = current.durationMs.takeIf { it > 0L } ?: current.positionMs,
+                            )
+                        }
+                    }
+                    MPV_END_FILE_REASON_ERROR -> {
+                        activePlaylistEntryId = null
+                        publishBackendFailure(
+                            IllegalStateException(event.errorMessage ?: "libmpv playback failed"),
                         )
                     }
+                    MPV_END_FILE_REASON_STOP,
+                    MPV_END_FILE_REASON_QUIT,
+                    MPV_END_FILE_REASON_REDIRECT,
+                    -> activePlaylistEntryId = null
                 }
-                MPV_END_FILE_REASON_ERROR -> publishBackendFailure(
-                    IllegalStateException(event.errorMessage ?: "libmpv playback failed"),
-                )
-                // STOP is emitted when a file is replaced or explicitly stopped. The application
-                // state is already owned by prepareLoading()/stop(), so do not let this stale event
-                // overwrite the next playback transaction.
-                MPV_END_FILE_REASON_STOP,
-                MPV_END_FILE_REASON_QUIT,
-                MPV_END_FILE_REASON_REDIRECT,
-                -> Unit
             }
             is DesktopMpvBackendEvent.Failure -> publishBackendFailure(event.throwable)
         }
@@ -249,10 +271,12 @@ internal class DesktopMpvPlaybackEngine(
 }
 
 internal sealed interface DesktopMpvBackendEvent {
+    data class StartFile(val playlistEntryId: Long) : DesktopMpvBackendEvent
     data object FileLoaded : DesktopMpvBackendEvent
     data object PlaybackRestart : DesktopMpvBackendEvent
     data class Property(val name: String, val value: String?) : DesktopMpvBackendEvent
     data class EndFile(
+        val playlistEntryId: Long,
         val reason: Int,
         val errorMessage: String? = null,
     ) : DesktopMpvBackendEvent
@@ -349,6 +373,11 @@ private class LibMpvBackend(
                 when (event.eventId) {
                     MPV_EVENT_NONE -> Unit
                     MPV_EVENT_SHUTDOWN -> break
+                    MPV_EVENT_START_FILE -> {
+                        val data = event.data ?: continue
+                        val startFile = MpvNativeStartFile(data)
+                        listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
+                    }
                     MPV_EVENT_FILE_LOADED -> listener(DesktopMpvBackendEvent.FileLoaded)
                     MPV_EVENT_PLAYBACK_RESTART -> listener(DesktopMpvBackendEvent.PlaybackRestart)
                     MPV_EVENT_PROPERTY_CHANGE -> {
@@ -366,6 +395,7 @@ private class LibMpvBackend(
                         val endFile = MpvNativeEndFile(data)
                         listener(
                             DesktopMpvBackendEvent.EndFile(
+                                playlistEntryId = endFile.playlistEntryId,
                                 reason = endFile.reason,
                                 errorMessage = endFile.error
                                     .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
@@ -424,6 +454,16 @@ private class MpvNativeEvent(pointer: Pointer) : Structure(pointer) {
     @JvmField var data: Pointer? = null
 
     override fun getFieldOrder(): List<String> = listOf("eventId", "error", "replyUserdata", "data")
+
+    init {
+        read()
+    }
+}
+
+private class MpvNativeStartFile(pointer: Pointer) : Structure(pointer) {
+    @JvmField var playlistEntryId: Long = 0L
+
+    override fun getFieldOrder(): List<String> = listOf("playlistEntryId")
 
     init {
         read()
@@ -559,6 +599,7 @@ private fun desktopMpvFailureMessage(throwable: Throwable): String {
 private const val MPV_FORMAT_STRING = 1
 private const val MPV_EVENT_NONE = 0
 private const val MPV_EVENT_SHUTDOWN = 1
+private const val MPV_EVENT_START_FILE = 6
 private const val MPV_EVENT_END_FILE = 7
 private const val MPV_EVENT_FILE_LOADED = 8
 private const val MPV_EVENT_PLAYBACK_RESTART = 21
