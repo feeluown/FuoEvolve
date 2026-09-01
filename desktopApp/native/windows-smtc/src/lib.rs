@@ -5,14 +5,15 @@ use std::ptr;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use windows::core::{factory, HSTRING, Result as WindowsResult};
+use windows::Foundation::TimeSpan;
 use windows::Media::{
     MediaPlaybackStatus, MediaPlaybackType, SystemMediaTransportControls,
     SystemMediaTransportControlsButton, SystemMediaTransportControlsTimelineProperties,
 };
-use windows::Win32::ro::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
-use windows::Win32::systemmediatransportcontrolsinterop::ISystemMediaTransportControlsInterop;
-use windows::Win32::HWND;
-use windows::TimeSpan;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::System::WinRT::{
+    ISystemMediaTransportControlsInterop, RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED,
+};
 
 type EventCallback = extern "C" fn(action: i32, value: i64);
 
@@ -64,7 +65,7 @@ struct RoApartment;
 
 impl RoApartment {
     fn initialize() -> WindowsResult<Self> {
-        unsafe { RoInitialize(RO_INIT_MULTITHREADED).ok()? };
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
         Ok(Self)
     }
 }
@@ -126,16 +127,16 @@ impl SmtcWorker {
             let Ok(position) = args.RequestedPlaybackPosition() else { return };
             seek_callback(
                 ACTION_SEEK_TO,
-                position.duration.saturating_div(TICKS_PER_MILLISECOND),
+                position.Duration.saturating_div(TICKS_PER_MILLISECOND),
             );
         })?;
 
         let timeline = SystemMediaTransportControlsTimelineProperties::new()?;
-        timeline.SetStartTime(TimeSpan::from_ticks(0))?;
-        timeline.SetMinSeekTime(TimeSpan::from_ticks(0))?;
-        timeline.SetPosition(TimeSpan::from_ticks(0))?;
-        timeline.SetEndTime(TimeSpan::from_ticks(0))?;
-        timeline.SetMaxSeekTime(TimeSpan::from_ticks(0))?;
+        timeline.SetStartTime(time_span(0))?;
+        timeline.SetMinSeekTime(time_span(0))?;
+        timeline.SetPosition(time_span(0))?;
+        timeline.SetEndTime(time_span(0))?;
+        timeline.SetMaxSeekTime(time_span(0))?;
 
         Ok(Self {
             controls,
@@ -164,11 +165,11 @@ impl SmtcWorker {
         let duration_ticks = duration_ms.saturating_mul(TICKS_PER_MILLISECOND);
         let position_ticks = position_ms.saturating_mul(TICKS_PER_MILLISECOND);
 
-        self.timeline.SetStartTime(TimeSpan::from_ticks(0))?;
-        self.timeline.SetMinSeekTime(TimeSpan::from_ticks(0))?;
-        self.timeline.SetEndTime(TimeSpan::from_ticks(duration_ticks))?;
-        self.timeline.SetMaxSeekTime(TimeSpan::from_ticks(duration_ticks))?;
-        self.timeline.SetPosition(TimeSpan::from_ticks(position_ticks))?;
+        self.timeline.SetStartTime(time_span(0))?;
+        self.timeline.SetMinSeekTime(time_span(0))?;
+        self.timeline.SetEndTime(time_span(duration_ticks))?;
+        self.timeline.SetMaxSeekTime(time_span(duration_ticks))?;
+        self.timeline.SetPosition(time_span(position_ticks))?;
         self.controls.UpdateTimelineProperties(&self.timeline)?;
         Ok(())
     }
@@ -196,6 +197,10 @@ impl SmtcWorker {
         let _ = self.controls.SetPlaybackStatus(MediaPlaybackStatus::Stopped);
         let _ = self.controls.SetIsEnabled(false);
     }
+}
+
+fn time_span(ticks: i64) -> TimeSpan {
+    TimeSpan { Duration: ticks }
 }
 
 fn worker_main(
