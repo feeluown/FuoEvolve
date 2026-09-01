@@ -14,4 +14,15 @@ class AndroidPlaybackResumePolicyTest {
         assertFalse(PlayerStatus.Error.isDurablePlaybackResumeStatus())
         assertFalse(PlayerStatus.Ended.isDurablePlaybackResumeStatus())
     }
+
+    @Test
+    fun onlyNewLogicalSelectionsClearDurableResume() {
+        assertTrue(PlaybackStartReason.USER_SELECTION.clearsDurablePlaybackResume)
+        assertTrue(PlaybackStartReason.PLAYLIST_REPLACE.clearsDurablePlaybackResume)
+        assertFalse(PlaybackStartReason.SOURCE_SWITCH.clearsDurablePlaybackResume)
+        assertFalse(PlaybackStartReason.AUTO_NEXT.clearsDurablePlaybackResume)
+        assertFalse(PlaybackStartReason.RESUME.clearsDurablePlaybackResume)
+        assertFalse(PlaybackStartReason.RESTORE_SESSION.clearsDurablePlaybackResume)
+        assertFalse(PlaybackStartReason.RECOVERY.clearsDurablePlaybackResume)
+    }
 }
