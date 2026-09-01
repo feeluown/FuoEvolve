@@ -10,9 +10,9 @@ name = "fuoevolve_smtc_bridge"
 crate-type = ["cdylib"]
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.100.0", features = [
+windows = { version = "0.62.2", features = [
+    "Foundation",
     "Media",
-    "ro",
-    "systemmediatransportcontrolsinterop",
-    "windef",
+    "Win32_Foundation",
+    "Win32_System_WinRT",
 ] }
