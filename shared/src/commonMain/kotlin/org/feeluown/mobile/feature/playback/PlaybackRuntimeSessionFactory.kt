@@ -76,6 +76,8 @@ private class PlaybackRuntimeEngineAdapter(
     override fun pause() = playbackEngine.pause()
 
     override fun resume() = resumePlayback()
+
+    override fun seekTo(positionMs: Long) = playbackEngine.seekTo(positionMs)
 }
 
 private class PlaybackCoordinatorQueueActions(

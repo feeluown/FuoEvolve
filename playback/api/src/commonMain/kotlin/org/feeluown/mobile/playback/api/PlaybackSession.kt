@@ -41,4 +41,5 @@ interface PlaybackSession {
     fun pause()
     fun previous()
     fun next()
+    fun seekTo(positionMs: Long) = Unit
 }

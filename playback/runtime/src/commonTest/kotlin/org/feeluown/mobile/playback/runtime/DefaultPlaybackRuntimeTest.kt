@@ -61,7 +61,7 @@ class DefaultPlaybackRuntimeTest {
     fun ownsTransportPolicyAndLeavesOnlyQueueTransitionsToBridge() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val engine = FakeEngine(
-            PlaybackRuntimeEngineState(status = PlaybackSessionStatus.Playing),
+            PlaybackRuntimeEngineState(status = PlaybackSessionStatus.Playing, durationMs = 120_000),
         )
         val overlay = MutableStateFlow(
             PlaybackRuntimeOverlay(currentTrack = track("a")),
@@ -72,9 +72,17 @@ class DefaultPlaybackRuntimeTest {
         runtime.toggle()
         assertEquals(1, engine.pauseCalls)
 
-        engine.mutableState.value = PlaybackRuntimeEngineState(status = PlaybackSessionStatus.Paused)
+        engine.mutableState.value = PlaybackRuntimeEngineState(
+            status = PlaybackSessionStatus.Paused,
+            durationMs = 120_000,
+        )
         runtime.play()
         assertEquals(1, engine.resumeCalls)
+
+        runtime.seekTo(42_000)
+        assertEquals(42_000, engine.lastSeekMs)
+        runtime.seekTo(150_000)
+        assertEquals(120_000, engine.lastSeekMs)
 
         engine.mutableState.value = PlaybackRuntimeEngineState(status = PlaybackSessionStatus.Idle)
         runtime.play()
@@ -100,6 +108,7 @@ class DefaultPlaybackRuntimeTest {
         override val state = mutableState
         var pauseCalls = 0
         var resumeCalls = 0
+        var lastSeekMs: Long? = null
 
         override fun pause() {
             pauseCalls += 1
@@ -107,6 +116,10 @@ class DefaultPlaybackRuntimeTest {
 
         override fun resume() {
             resumeCalls += 1
+        }
+
+        override fun seekTo(positionMs: Long) {
+            lastSeekMs = positionMs
         }
     }
 
