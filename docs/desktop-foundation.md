@@ -9,27 +9,31 @@ This document records the architectural baseline for the Windows, macOS and Linu
 - Desktop-only code lives at the platform composition edge (`desktopApp` and `shared/src/desktopMain`) or as platform `actual` implementations in the owning lower module.
 - Feature and common code must not depend on AWT, Windows, macOS, Linux, D-Bus or native desktop APIs.
 - `PlaybackSession` remains the narrow integration surface for future system media controls. Runtime state mapping and queue bridging are shared; platform hosts only select platform-specific engine/resume behavior.
-- Native playback dependencies stay in `desktopApp`. `shared` consumes only the existing `PlaybackEngine` contract and must not depend on JNA or libmpv APIs.
+- Native playback and OS secure-storage dependencies stay in `desktopApp`. `shared` consumes only the existing `PlaybackEngine` and `ProviderCredentialStore` contracts and must not depend on JNA, libmpv or credential-manager APIs.
 
 ## Current capability baseline
 
-The desktop foundation uses the real shared application shell and now includes the first real desktop audio runtime:
+The desktop foundation uses the real shared application shell and now includes working audio playback, downloads and secure provider credential persistence:
 
 - `desktopApp` hosts the common `AppRoot`.
 - Provider networking and provider JVM primitives have desktop actuals.
 - App settings persist in the platform-appropriate config directory.
+- Provider cookies, authorization headers and OAuth credentials persist through the operating-system secure store: Windows Credential Manager, macOS Keychain, and Linux Secret Service/Libsecret when available. No plaintext credential fallback is used.
+- Large provider credentials are split into bounded secure-store entries and committed through a generation manifest so an interrupted update keeps the previous login state readable.
 - Cover loading, theme fallback, search history and desktop-safe UI platform hooks are implemented.
 - Desktop audio playback uses libmpv through a thin direct JNA binding owned by `desktopApp`.
 - The libmpv adapter supports direct/local URLs, provider HTTP headers, pause/resume, seek, EOF/error propagation and observed timeline/buffer/format/codec/bitrate state.
 - Logical queue identity remains in `PlaybackState.currentTrack`; replacement/downloaded/part-specific physical identity continues through `ResolvedPlaybackSource`.
+- Delayed libmpv events from a replaced source are isolated with `playlist_entry_id`, preventing stale EOF/error/progress events from mutating the current playback transaction.
 - Native libmpv loading is lazy, so application startup and JVM tests do not require the library to be installed. Development builds may use `FUOEVOLVE_LIBMPV_PATH` (or `fuoevolve.libmpv.path`) to point at a specific native library.
-- Video playback, local-library indexing, downloads, audio recognition, provider web-cookie login, system media controls and tray lifecycle remain explicit unsupported adapters or follow-up integrations.
+- Desktop downloads reuse the shared download feature and provide persisted tasks, configurable parallelism, pause/resume/retry/delete, provider HTTP headers, Range resume with ETag/Last-Modified validation, progress checkpoints and local `file://` playback reuse.
+- Video playback, local-library indexing, audio recognition, provider web-cookie login UI, system media controls and tray lifecycle remain explicit unsupported adapters or follow-up integrations.
 
 Native packaging must bundle a compatible libmpv build for each supported desktop target. Requiring end users to install a system libmpv is acceptable only for development builds, not for production packages.
 
 ## Follow-up desktop phases
 
-1. Implement desktop local music, downloads, provider credential persistence and provider login/file integrations.
+1. Implement desktop local music and provider login/file integrations, including any platform browser/cookie handoff required by providers.
 2. Add Windows SMTC, macOS Now Playing/Remote Command Center and Linux MPRIS against `PlaybackSession`.
 3. Add tray lifecycle. Closing the application window must hide it; normal process exit is initiated from the tray/status item.
 4. Add native packaging and platform CI for Windows, macOS and Linux, including bundled libmpv binaries.
