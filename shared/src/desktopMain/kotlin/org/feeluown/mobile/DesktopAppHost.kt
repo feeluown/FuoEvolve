@@ -49,13 +49,16 @@ private class DesktopAppContainer {
     )
     private val localRepository: LocalMusicRepository = DesktopUnsupportedLocalMusicRepository
     private val localPlaylistRepository: LocalPlaylistRepository = NoOpLocalPlaylistRepository
-    private val downloadRepository: DownloadRepository = DesktopUnsupportedDownloadRepository
+    private val desktopDownloadRepository = DesktopDownloadRepository(
+        resolvePayload = { track -> playbackProvider.resolve(track) },
+    )
+    private val downloadRepository: DownloadRepository = desktopDownloadRepository
     private val settingsRepository: AppSettingsRepository = PersistentAppSettingsRepository(
         store = createDesktopSettingsSnapshotStore(),
         legacyLoader = null,
         scope = scope,
     )
-    private val playbackEngine: PlaybackEngine = DesktopUnsupportedPlaybackEngine()
+    private val playbackEngine = DesktopUnsupportedPlaybackEngine()
     private val providerSessionRepository = DefaultProviderSessionRepository(providerGraph.auth)
     private val navigator = AppNavigator()
     private val trackNavigationPort: TrackNavigationPort = createTrackNavigationPort(navigator)
@@ -374,5 +377,7 @@ private class DesktopAppContainer {
 
     fun close() {
         scope.cancel()
+        desktopDownloadRepository.close()
+        playbackEngine.close()
     }
 }
