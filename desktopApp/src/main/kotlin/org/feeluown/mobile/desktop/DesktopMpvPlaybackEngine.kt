@@ -307,7 +307,9 @@ private class LibMpvBackend(
 
     override fun load(url: String, headers: Map<String, String>) {
         ensureOpen()
-        setProperty("http-header-fields", encodeHeaderFields(headers))
+        // Keep headers file-local so source switches cannot leak Referer/Cookie values into
+        // the following provider item. This mirrors mpv's own ytdl integration behavior.
+        setProperty("file-local-options/http-header-fields", encodeHeaderFields(headers))
         command("loadfile", url, "replace")
     }
 
@@ -398,7 +400,7 @@ private class LibMpvBackend(
     }
 }
 
-private interface MpvNative : Library {
+internal interface MpvNative : Library {
     fun mpv_create(): Pointer?
     fun mpv_initialize(ctx: Pointer): Int
     fun mpv_terminate_destroy(ctx: Pointer)
@@ -445,8 +447,17 @@ private class MpvNativeEventProperty(pointer: Pointer) : Structure(pointer) {
 private class MpvNativeEndFile(pointer: Pointer) : Structure(pointer) {
     @JvmField var reason: Int = 0
     @JvmField var error: Int = 0
+    @JvmField var playlistEntryId: Long = 0L
+    @JvmField var playlistInsertId: Long = 0L
+    @JvmField var playlistInsertNumEntries: Int = 0
 
-    override fun getFieldOrder(): List<String> = listOf("reason", "error")
+    override fun getFieldOrder(): List<String> = listOf(
+        "reason",
+        "error",
+        "playlistEntryId",
+        "playlistInsertId",
+        "playlistInsertNumEntries",
+    )
 
     init {
         read()
@@ -480,7 +491,7 @@ private fun loadMpvLibrary(): MpvNative {
     )
 }
 
-private fun encodeHeaderFields(headers: Map<String, String>): String = headers
+internal fun encodeHeaderFields(headers: Map<String, String>): String = headers
     .mapNotNull { (name, value) ->
         if (name.isBlank() || name.any { it == '\r' || it == '\n' } || value.any { it == '\r' || it == '\n' }) {
             null
