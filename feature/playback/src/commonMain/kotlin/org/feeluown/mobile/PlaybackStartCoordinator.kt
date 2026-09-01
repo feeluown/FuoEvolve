@@ -11,6 +11,7 @@ private const val PLAYBACK_START_PLAN_LOOKAHEAD = 8
 enum class PlaybackStartReason {
     USER_SELECTION,
     PLAYLIST_REPLACE,
+    SOURCE_SWITCH,
     AUTO_NEXT,
     RESUME,
     RESTORE_SESSION,
@@ -19,6 +20,9 @@ enum class PlaybackStartReason {
 
     val isActiveSelection: Boolean
         get() = this == USER_SELECTION || this == PLAYLIST_REPLACE
+
+    val shouldDiscardLiveSession: Boolean
+        get() = isActiveSelection || this == SOURCE_SWITCH
 
     val mayResumePausedSession: Boolean
         get() = this == RESUME || this == RESTORE_SESSION
@@ -98,7 +102,7 @@ internal class PlaybackStartCoordinator(
         val transaction = when {
             manualSelection != null -> queue.beginPlaybackTransaction(
                 trackId = logicalTrack.id,
-                reason = PlaybackStartReason.USER_SELECTION,
+                reason = PlaybackStartReason.SOURCE_SWITCH,
                 recordPlaybackStart = false,
             )
             suppressPlaybackRecovery -> queue.beginPlaybackTransaction(
@@ -142,8 +146,8 @@ internal class PlaybackStartCoordinator(
         // Establish the platform playback transaction before publishing the new queue/current-track
         // overlay. Android can still hold a restored paused Media3 session at this point; publishing
         // B first lets runtime observers republish stale A before the engine has invalidated it.
-        // prepareLoading() is therefore the transaction boundary: after it returns, active selections
-        // have discarded the old resumable session and stale service state is generation-gated.
+        // prepareLoading() is therefore the transaction boundary: after it returns, fresh starts
+        // have invalidated the old live session and stale service state is generation-gated.
         val reasonAwareEngine = playbackEngine as? PlaybackStartReasonAwareEngine
         if (reasonAwareEngine != null) {
             reasonAwareEngine.prepareLoading(logicalTrack, startReason)

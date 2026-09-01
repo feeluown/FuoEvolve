@@ -254,8 +254,10 @@ private fun PlaybackStartReason?.toListeningStartReason(): ListeningStartReason 
     PlaybackStartReason.AUTO_NEXT -> ListeningStartReason.AutoNext
     PlaybackStartReason.RESUME -> ListeningStartReason.Resume
     PlaybackStartReason.RESTORE_SESSION -> ListeningStartReason.RestoreSession
-    PlaybackStartReason.RECOVERY -> ListeningStartReason.Unknown
-    null -> ListeningStartReason.Unknown
+    PlaybackStartReason.SOURCE_SWITCH,
+    PlaybackStartReason.RECOVERY,
+    null,
+    -> ListeningStartReason.Unknown
 }
 
 private fun isQualifiedListening(playedMs: Long, durationMs: Long?): Boolean {

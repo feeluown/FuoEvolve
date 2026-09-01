@@ -24,6 +24,10 @@ class AndroidNativeAudioEngine(
 ) : PlaybackEngine, PlaybackStartReasonAwareEngine {
     private val playbackResumeStore = AndroidPlaybackResumeStore(context)
     private var restoredSession: AndroidPlaybackResumeSnapshot? = playbackResumeStore.load()
+    private val startupState = PlaybackStartupStateMachine(
+        restoredTrackId = restoredSession?.currentTrack?.id,
+        restoredGeneration = restoredSession?.plan?.generation ?: 0L,
+    )
     private val mutableState = MutableStateFlow(restoredSession?.toPlaybackState() ?: PlaybackState())
     private var rawAudioQuality: String? = null
     private var mediaController: MediaController? = null
@@ -31,10 +35,6 @@ class AndroidNativeAudioEngine(
     private var pendingLockScreenLyrics: PendingLockScreenLyrics? = null
     private var activePlan: PlaybackPlan? = restoredSession?.plan
     private var pendingResumePositionMs: Long? = null
-    private var preparedRestoredSession: AndroidPlaybackResumeSnapshot? = null
-    private var explicitStopRequested = false
-    private var startingPlayback = false
-    private var freshStartPending = false
     private var lastPersistedIdentity: String? = null
     private var lastPersistedPositionMs: Long = restoredSession?.positionMs ?: 0L
     private var restoredRepublishSerial = 0L
@@ -59,46 +59,41 @@ class AndroidNativeAudioEngine(
         }
         scope.launch {
             FuoPlaybackService.playbackState.collect { serviceState ->
-                if (startingPlayback && freshStartPending) {
-                    if (serviceState.isEmptyIdleState()) return@collect
-                    val expectedState = mutableState.value
-                    val expectedTrackId = expectedState.currentTrack?.id
-                    val serviceTrackId = serviceState.currentTrack?.id
-                    val expectedGeneration = expectedState.playbackGeneration
-                    val isFreshGeneration = expectedGeneration > 0L &&
-                        serviceState.playbackGeneration == expectedGeneration
-                    val isExpectedTrack = expectedTrackId == null || serviceTrackId == null ||
-                        expectedTrackId == serviceTrackId
-                    if (!isFreshGeneration || !isExpectedTrack) {
+                val serviceTrackId = serviceState.currentTrack?.logicalPlaybackTrack()?.id
+                when (
+                    startupState.onServiceState(
+                        serviceTrackId = serviceTrackId,
+                        serviceGeneration = serviceState.playbackGeneration,
+                        isEmptyIdleState = serviceState.isEmptyIdleState(),
+                    )
+                ) {
+                    PlaybackServiceStateAction.Ignore -> {
                         Log.d(
                             TAG,
-                            "ignoring stale service state while starting " +
-                                "expectedTrackId=${expectedTrackId.orEmpty()} " +
+                            "ignoring stale service state phase=${startupState.phase} " +
                                 "serviceTrackId=${serviceTrackId.orEmpty()} " +
-                                "expectedGeneration=$expectedGeneration " +
                                 "serviceGeneration=${serviceState.playbackGeneration}",
                         )
                         return@collect
                     }
+
+                    PlaybackServiceStateAction.RepublishRestored -> {
+                        val session = restoredSession ?: playbackResumeStore.load()
+                        if (session != null) {
+                            restoredSession = session
+                            activePlan = session.plan
+                            startupState.markRestored(session.currentTrack.id, session.plan.generation)
+                            publishRestoredState(session)
+                            return@collect
+                        }
+                        startupState.markIdle()
+                    }
+
+                    PlaybackServiceStateAction.Accept -> Unit
                 }
 
-                if (serviceState.isEmptyIdleState() && !explicitStopRequested && !startingPlayback) {
-                    val session = restoredSession ?: playbackResumeStore.load()
-                    if (session != null) {
-                        restoredSession = session
-                        activePlan = session.plan
-                        publishRestoredState(session)
-                        return@collect
-                    }
-                }
-
-                if (!serviceState.isEmptyIdleState()) {
-                    if (serviceState.currentTrack != null) {
-                        startingPlayback = false
-                        freshStartPending = false
-                        restoredSession = null
-                        preparedRestoredSession = null
-                    }
+                if (!serviceState.isEmptyIdleState() && serviceState.currentTrack != null) {
+                    restoredSession = null
                 }
 
                 rawAudioQuality = serviceState.audioQuality
@@ -142,36 +137,31 @@ class AndroidNativeAudioEngine(
         pendingLockScreenLyrics = null
         pendingResumePositionMs = null
 
-        // Only resume-like starts may convert a same-track restart into restoration. Explicit user
-        // selections are new playback transactions even when they happen to select the same track.
         val session = if (reason.mayResumePausedSession) {
             restoredSession ?: playbackResumeStore.load()
         } else {
             null
         }
-        val shouldResumeRestoredSession = mutableState.value.status == PlayerStatus.Paused &&
+        val canResumeRestoredSession = mutableState.value.status == PlayerStatus.Paused &&
             session?.currentTrack?.id == track.id &&
             session.resumePlan() != null
-        if (shouldResumeRestoredSession) {
+        val startupMode = startupState.prepare(
+            trackId = track.id,
+            reason = reason,
+            canResumeRestoredSession = canResumeRestoredSession,
+        )
+        if (startupMode == PlaybackStartupMode.ResumeRestored) {
             val resumedSession = requireNotNull(session)
-            preparedRestoredSession = resumedSession
             restoredSession = resumedSession
             activePlan = resumedSession.plan
-            explicitStopRequested = false
-            startingPlayback = false
-            freshStartPending = false
             connectController()
-            Log.d(TAG, "preserving restored session for prepared trackId=${track.id} reason=$reason")
+            Log.d(TAG, "prepared restored resume trackId=${track.id} reason=$reason")
             return
         }
 
-        preparedRestoredSession = null
         restoredSession = null
-        explicitStopRequested = false
-        startingPlayback = true
-        freshStartPending = true
         rawAudioQuality = null
-        if (reason.isActiveSelection) {
+        if (reason.clearsDurablePlaybackResume) {
             activePlan = null
             lastPersistedIdentity = null
             lastPersistedPositionMs = 0L
@@ -191,7 +181,7 @@ class AndroidNativeAudioEngine(
             playbackGeneration = 0L,
             errorMessage = null,
         )
-        if (reason.isActiveSelection) {
+        if (reason.shouldDiscardLiveSession) {
             discardLivePausedSession(track.id)
         }
         connectController()
@@ -201,23 +191,29 @@ class AndroidNativeAudioEngine(
 
     override fun play(plan: PlaybackPlan) {
         val first = plan.requests.firstOrNull() ?: return
-        val preparedSession = preparedRestoredSession
-        if (preparedSession != null && preparedSession.currentTrack.id == first.track.id) {
-            preparedRestoredSession = null
-            restoredSession = preparedSession
-            activePlan = preparedSession.plan
-            Log.d(
-                TAG,
-                "converting stale restart to restored resume trackId=${first.track.id} positionMs=${preparedSession.positionMs}",
-            )
-            resume()
-            return
+        val startupMode = startupState.beginStart(first.track.id, plan.generation)
+        if (startupMode == PlaybackStartupMode.ResumeRestored) {
+            val session = restoredSession
+            if (session != null && session.currentTrack.id == first.track.id) {
+                val livePosition = mediaController
+                    ?.takeIf { controller ->
+                        controller.currentMediaItem?.matchesTrack(first.track.id) == true &&
+                            controller.playbackState != Player.STATE_IDLE
+                    }
+                    ?.currentPosition
+                    ?.coerceAtLeast(0L)
+                if (startRestoredSession(session, plan.generation, livePosition ?: session.positionMs)) {
+                    return
+                }
+            }
+            startupState.beginFreshStart(first.track.id, plan.generation)
         }
 
-        preparedRestoredSession = null
-        explicitStopRequested = false
-        startingPlayback = true
-        freshStartPending = true
+        startFreshPlan(plan)
+    }
+
+    private fun startFreshPlan(plan: PlaybackPlan) {
+        val first = plan.requests.firstOrNull() ?: return
         restoredSession = null
         pendingResumePositionMs = null
         activePlan = plan
@@ -240,8 +236,8 @@ class AndroidNativeAudioEngine(
         persistPlaybackState(forceSession = true)
         runCatching { FuoPlaybackService.play(context, plan.toJson()) }
             .onFailure { throwable ->
-                startingPlayback = false
-                freshStartPending = false
+                startupState.markIdle()
+                activePlan = null
                 Log.e(TAG, "start playback service failed trackId=${first.track.id}", throwable)
                 mutableState.value = mutableState.value.copy(
                     status = PlayerStatus.Error,
@@ -252,8 +248,42 @@ class AndroidNativeAudioEngine(
         connectController()
     }
 
+    private fun startRestoredSession(
+        session: AndroidPlaybackResumeSnapshot,
+        generation: Long,
+        resumePositionMs: Long,
+    ): Boolean {
+        val resumePlan = session.resumePlan(generation) ?: return false
+        activePlan = resumePlan
+        restoredSession = session
+        pendingResumePositionMs = resumePositionMs.coerceAtLeast(0L)
+        lastPersistedIdentity = null
+        lastPersistedPositionMs = pendingResumePositionMs ?: 0L
+        mutableState.value = session.toPlaybackState().copy(
+            status = PlayerStatus.Loading,
+            positionMs = pendingResumePositionMs ?: session.positionMs,
+            playbackGeneration = generation,
+            errorMessage = null,
+        )
+        persistPlaybackState(forceSession = true)
+        runCatching { FuoPlaybackService.play(context, resumePlan.toJson()) }
+            .onFailure { throwable ->
+                startupState.markRestored(session.currentTrack.id, session.plan.generation)
+                activePlan = session.plan
+                pendingResumePositionMs = null
+                playbackResumeStore.saveSession(session.plan, session.toPlaybackState())
+                Log.e(TAG, "restore playback service failed trackId=${session.currentTrack.id}", throwable)
+                mutableState.value = session.toPlaybackState().copy(
+                    status = PlayerStatus.Error,
+                    errorMessage = throwable.message ?: "无法恢复播放进度",
+                )
+                return false
+            }
+        connectController()
+        return true
+    }
+
     override fun pause() {
-        freshStartPending = false
         mediaController?.pause()
         FuoPlaybackService.pause(context)
         mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
@@ -261,13 +291,13 @@ class AndroidNativeAudioEngine(
     }
 
     override fun resume() {
-        explicitStopRequested = false
-        preparedRestoredSession = null
-        freshStartPending = false
         val controller = mediaController
-        val canResumeLiveSession = controller?.currentMediaItem != null &&
+        val currentTrackId = mutableState.value.currentTrack?.logicalPlaybackTrack()?.id
+        val canResumeLiveSession = currentTrackId != null &&
+            controller?.currentMediaItem?.matchesTrack(currentTrackId) == true &&
             controller.playbackState != Player.STATE_IDLE
         if (canResumeLiveSession) {
+            startupState.markActive(currentTrackId, mutableState.value.playbackGeneration)
             controller.play()
             FuoPlaybackService.resume(context)
             mutableState.value = mutableState.value.copy(status = PlayerStatus.Playing)
@@ -275,31 +305,15 @@ class AndroidNativeAudioEngine(
         }
 
         val session = restoredSession ?: playbackResumeStore.load()
-        val resumePlan = session?.resumePlan()
-        if (session != null && resumePlan != null) {
-            activePlan = resumePlan
+        if (session != null && session.resumePlan() != null) {
             restoredSession = session
-            pendingResumePositionMs = session.positionMs.coerceAtLeast(0L)
-            startingPlayback = true
-            lastPersistedIdentity = null
-            lastPersistedPositionMs = session.positionMs
-            mutableState.value = session.toPlaybackState().copy(
-                status = PlayerStatus.Loading,
-                playbackGeneration = resumePlan.generation,
+            startupState.prepare(
+                trackId = session.currentTrack.id,
+                reason = PlaybackStartReason.RESTORE_SESSION,
+                canResumeRestoredSession = true,
             )
-            persistPlaybackState(forceSession = true)
-            runCatching { FuoPlaybackService.play(context, resumePlan.toJson()) }
-                .onFailure { throwable ->
-                    startingPlayback = false
-                    Log.e(TAG, "restore playback service failed trackId=${session.currentTrack.id}", throwable)
-                    mutableState.value = session.toPlaybackState().copy(
-                        status = PlayerStatus.Error,
-                        errorMessage = throwable.message ?: "无法恢复播放进度",
-                    )
-                    return
-                }
-            connectController()
-            return
+            startupState.beginStart(session.currentTrack.id, session.plan.generation)
+            if (startRestoredSession(session, session.plan.generation, session.positionMs)) return
         }
 
         controller?.play()
@@ -310,12 +324,9 @@ class AndroidNativeAudioEngine(
     override fun stop() {
         pendingLockScreenLyrics = null
         pendingResumePositionMs = null
-        preparedRestoredSession = null
         restoredSession = null
         activePlan = null
-        explicitStopRequested = true
-        startingPlayback = false
-        freshStartPending = false
+        startupState.stop()
         lastPersistedIdentity = null
         lastPersistedPositionMs = 0L
         playbackResumeStore.clear()
@@ -343,7 +354,7 @@ class AndroidNativeAudioEngine(
 
     internal fun republishRestoredState() {
         val session = restoredSession ?: return
-        if (explicitStopRequested || startingPlayback) return
+        if (!startupState.canRepublishRestoredState()) return
         restoredRepublishSerial += 1L
         publishRestoredState(session, forceGeneration = true)
     }
@@ -431,6 +442,8 @@ class AndroidNativeAudioEngine(
         val currentItem = controller.currentMediaItem ?: return
         val trackId = mutableState.value.currentTrack?.id ?: restoredSession?.currentTrack?.id
         if (trackId != null && !currentItem.matchesTrack(trackId)) return
+        val expectedGeneration = activePlan?.generation
+        if (expectedGeneration != null && !currentItem.matchesGeneration(expectedGeneration)) return
         controller.seekTo(position)
         pendingResumePositionMs = null
         mutableState.value = mutableState.value.copy(positionMs = position)
@@ -444,7 +457,7 @@ class AndroidNativeAudioEngine(
         val plan = activePlan ?: return
         val state = mutableState.value
         val track = state.currentTrack ?: return
-        if (state.status !in RESTORABLE_STATUSES) return
+        if (!state.status.isDurablePlaybackResumeStatus()) return
 
         val identity = buildString {
             append(plan.generation)
@@ -547,6 +560,9 @@ class AndroidNativeAudioEngine(
     private fun MediaItem.matchesTrack(trackId: String): Boolean =
         mediaId.endsWith(":$trackId")
 
+    private fun MediaItem.matchesGeneration(generation: Long): Boolean =
+        mediaId.startsWith("$generation:")
+
     private fun buildLockScreenLyricInfo(track: MusicTrack, lineLyrics: String): String =
         JSONObject()
             .put("songName", track.title)
@@ -627,6 +643,5 @@ class AndroidNativeAudioEngine(
         private const val TAG = "FuoAudioEngine"
         private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
         private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
-        private val RESTORABLE_STATUSES = setOf(PlayerStatus.Loading, PlayerStatus.Playing, PlayerStatus.Paused)
     }
 }
