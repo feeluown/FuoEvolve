@@ -60,11 +60,12 @@ private class PlaybackRuntimeEngineAdapter(
         playbackEngine.state,
         startFailureSource.startFailure,
     ) { engineState, startFailure ->
-        engineState.toPlaybackRuntimeEngineState(startFailure)
+        mergePlaybackStartFailure(engineState, startFailure)
     }.stateIn(
         scope = scope,
         started = SharingStarted.Eagerly,
-        initialValue = playbackEngine.state.value.toPlaybackRuntimeEngineState(
+        initialValue = mergePlaybackStartFailure(
+            playbackEngine.state.value,
             startFailureSource.startFailure.value,
         ),
     )
@@ -84,18 +85,20 @@ private class PlaybackCoordinatorQueueActions(
     override fun next() = coordinator.next()
 }
 
-private fun PlaybackState.toPlaybackRuntimeEngineState(
-    startFailure: PlaybackStartFailure? = null,
+/** Pre-engine resource failures are published by PlaybackStartCoordinator. */
+internal fun mergePlaybackStartFailure(
+    engineState: PlaybackState,
+    startFailure: PlaybackStartFailure?,
 ): PlaybackRuntimeEngineState {
     val activeFailure = startFailure?.takeIf { failure ->
-        status == PlayerStatus.Loading && currentTrack?.id == failure.trackId
+        engineState.status == PlayerStatus.Loading && engineState.currentTrack?.id == failure.trackId
     }
     return PlaybackRuntimeEngineState(
-        status = if (activeFailure != null) PlaybackSessionStatus.Error else status.toPlaybackSessionStatus(),
-        positionMs = positionMs,
-        durationMs = durationMs,
-        bufferedMs = bufferedMs,
-        errorMessage = activeFailure?.message ?: errorMessage,
+        status = if (activeFailure != null) PlaybackSessionStatus.Error else engineState.status.toPlaybackSessionStatus(),
+        positionMs = engineState.positionMs,
+        durationMs = engineState.durationMs,
+        bufferedMs = engineState.bufferedMs,
+        errorMessage = activeFailure?.message ?: engineState.errorMessage,
     )
 }
 
