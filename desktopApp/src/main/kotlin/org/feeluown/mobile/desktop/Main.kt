@@ -7,10 +7,12 @@ import androidx.compose.ui.window.rememberWindowState
 import org.feeluown.mobile.DesktopAppHost
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
+import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
 
 fun main() {
     installDesktopPlaybackEngineFactory { DesktopMpvPlaybackEngine() }
     installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
+    installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
     application {
         Window(
             onCloseRequest = ::exitApplication,
