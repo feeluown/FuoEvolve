@@ -96,8 +96,8 @@ internal class DesktopDownloadRepository(
         mutex.withLock {
             val task = taskRecords[taskId] ?: return
             if (task.status != DownloadTaskStatus.Queued && task.status != DownloadTaskStatus.Downloading) return
-            taskConnections.remove(taskId)?.disconnect()
             taskJobs.remove(taskId)?.cancel()
+            taskConnections.remove(taskId)?.disconnect()
             taskRecords[taskId] = task.copy(
                 status = DownloadTaskStatus.Paused,
                 updatedAt = nowMillis(),
@@ -113,8 +113,8 @@ internal class DesktopDownloadRepository(
 
     override suspend fun deleteTask(taskId: String, deleteFile: Boolean) = withContext(Dispatchers.IO) {
         mutex.withLock {
-            taskConnections.remove(taskId)?.disconnect()
             taskJobs.remove(taskId)?.cancel()
+            taskConnections.remove(taskId)?.disconnect()
             val task = taskRecords.remove(taskId) ?: return@withLock
             payloads.remove(taskId)
             resumeMetadata.remove(taskId)
@@ -126,17 +126,19 @@ internal class DesktopDownloadRepository(
     }
 
     override suspend fun deleteDownloaded(track: MusicTrack) = withContext(Dispatchers.IO) {
-        val candidates = listOfNotNull(
-            track.providerId,
-            track.id,
-            taskRecords.values.firstOrNull { task -> task.completedUri == track.localUri }?.id,
-        ).distinct()
-        val taskId = mutex.withLock { candidates.firstOrNull(taskRecords::containsKey) } ?: return@withContext
+        val taskId = mutex.withLock {
+            val candidates = listOfNotNull(
+                track.providerId,
+                track.id,
+                taskRecords.values.firstOrNull { task -> task.completedUri == track.localUri }?.id,
+            ).distinct()
+            candidates.firstOrNull { candidate -> candidate in taskRecords }
+        } ?: return@withContext
         deleteTask(taskId, deleteFile = true)
     }
 
     override fun close() {
-        taskConnections.values.forEach(HttpURLConnection::disconnect)
+        taskConnections.values.forEach { it.disconnect() }
         taskConnections.clear()
         scope.cancel()
     }
@@ -199,14 +201,14 @@ internal class DesktopDownloadRepository(
     private fun schedule() {
         scope.launch {
             val selected = mutex.withLock {
-                val running = taskJobs.values.count(Job::isActive)
+                val running = taskJobs.values.count { it.isActive }
                 val capacity = parallelism - running
                 if (capacity <= 0) return@withLock emptyList()
                 taskRecords.values
                     .filter { it.status == DownloadTaskStatus.Queued && it.id !in taskJobs }
-                    .sortedBy(DownloadTask::createdAt)
+                    .sortedBy { it.createdAt }
                     .take(capacity)
-                    .map(DownloadTask::id)
+                    .map { it.id }
             }
             selected.forEach { taskId ->
                 mutex.withLock {
@@ -290,8 +292,8 @@ internal class DesktopDownloadRepository(
         val http = connection as? HttpURLConnection
         if (http != null) taskConnections[taskId] = http
         try {
-            payload.headers.forEach(connection::setRequestProperty)
-            val existing = Files.takeIf { Files.exists(target) }?.size(target) ?: 0L
+            payload.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+            val existing = if (Files.exists(target)) Files.size(target) else 0L
             val storedResume = mutex.withLock { resumeMetadata[taskId] }
             val resourceKey = payload.url
             val canResume = http != null && existing > 0L && storedResume?.resourceKey == resourceKey
@@ -311,9 +313,9 @@ internal class DesktopDownloadRepository(
             val total = connection.contentLengthLong.takeIf { it > 0L }?.plus(start)
             val metadata = DesktopDownloadResumeMetadata(
                 resourceKey = resourceKey,
-                etag = http?.getHeaderField("ETag")?.takeIf(String::isNotBlank)
+                etag = http?.getHeaderField("ETag")?.takeIf { it.isNotBlank() }
                     ?: storedResume?.etag.takeIf { append },
-                lastModified = http?.getHeaderField("Last-Modified")?.takeIf(String::isNotBlank)
+                lastModified = http?.getHeaderField("Last-Modified")?.takeIf { it.isNotBlank() }
                     ?: storedResume?.lastModified.takeIf { append },
             )
             mutex.withLock {
@@ -373,7 +375,7 @@ internal class DesktopDownloadRepository(
     }
 
     private fun publishLocked() {
-        val ordered = taskRecords.values.sortedByDescending(DownloadTask::createdAt)
+        val ordered = taskRecords.values.sortedByDescending { it.createdAt }
         mutableTasks.value = ordered
         mutableStates.value = ordered.associate { task ->
             task.id to when (task.status) {
@@ -388,7 +390,7 @@ internal class DesktopDownloadRepository(
                 DownloadTaskStatus.Paused -> DownloadState.Paused
                 DownloadTaskStatus.Failed -> DownloadState.Failed(task.failureMessage ?: "下载失败")
                 DownloadTaskStatus.Completed -> task.completedUri
-                    ?.let(DownloadState::Downloaded)
+                    ?.let { DownloadState.Downloaded(it) }
                     ?: DownloadState.Failed("下载文件不存在")
             }
         }
@@ -440,7 +442,7 @@ internal class DesktopDownloadRepository(
     }
 
     private fun writeLyrics(payload: PlaybackPayload, audioFile: Path) {
-        val lyrics = payload.lyrics?.takeIf(String::isNotBlank) ?: return
+        val lyrics = payload.lyrics?.takeIf { it.isNotBlank() } ?: return
         runCatching { Files.writeString(lyricsPath(audioFile), lyrics) }
     }
 }
@@ -525,10 +527,10 @@ private fun desktopDownloadStorageRoot(): Path {
     val home = System.getProperty("user.home").orEmpty()
     val osName = System.getProperty("os.name").orEmpty().lowercase()
     val base = when {
-        osName.contains("win") -> System.getenv("LOCALAPPDATA")?.takeIf(String::isNotBlank)
+        osName.contains("win") -> System.getenv("LOCALAPPDATA")?.takeIf { it.isNotBlank() }
             ?: "$home/AppData/Local"
         osName.contains("mac") -> "$home/Library/Application Support"
-        else -> System.getenv("XDG_DATA_HOME")?.takeIf(String::isNotBlank)
+        else -> System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
             ?: "$home/.local/share"
     }
     return Path.of(base, "FuoEvolve", "downloads")
@@ -540,7 +542,9 @@ private fun mediaExtension(url: String): String {
         ?.substringAfterLast('.', "")
         ?.lowercase()
         .orEmpty()
-    return raw.takeIf { it.length in 1..8 && it.all(Char::isLetterOrDigit) } ?: "audio"
+    return raw.takeIf { extension ->
+        extension.length in 1..8 && extension.all { it.isLetterOrDigit() }
+    } ?: "audio"
 }
 
 private fun sanitizeFileName(value: String): String {
@@ -564,7 +568,8 @@ private fun String.toFilePathOrNull(): Path? = runCatching {
     if (uri.scheme.equals("file", ignoreCase = true)) Path.of(uri) else null
 }.getOrNull()
 
-private fun downloadFileExists(uri: String?): Boolean = uri?.toFilePathOrNull()?.let(Files::isRegularFile) == true
+private fun downloadFileExists(uri: String?): Boolean =
+    uri?.toFilePathOrNull()?.let { path -> Files.isRegularFile(path) } == true
 
 private fun lyricsPath(audioFile: Path): Path = audioFile.resolveSibling("${audioFile.fileName}.lrc")
 
