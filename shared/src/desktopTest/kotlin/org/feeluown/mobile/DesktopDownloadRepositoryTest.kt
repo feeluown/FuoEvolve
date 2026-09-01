@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.io.path.deleteRecursively
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -59,8 +58,7 @@ class DesktopDownloadRepositoryTest {
                 "[00:00.00]Desktop lyrics",
                 Files.readString(completedPath.resolveSibling("${completedPath.fileName}.lrc")),
             )
-            val downloadedState = repository.states.value.getValue(track.id)
-            assertIs<DownloadState.Downloaded>(downloadedState)
+            val downloadedState = assertIs<DownloadState.Downloaded>(repository.states.value.getValue(track.id))
             assertEquals(completedUri, downloadedState.uri)
 
             repository.close()
@@ -86,7 +84,7 @@ class DesktopDownloadRepositoryTest {
         } finally {
             repository.close()
             Files.deleteIfExists(source)
-            root.deleteRecursively()
+            root.toFile().deleteRecursively()
         }
     }
 
