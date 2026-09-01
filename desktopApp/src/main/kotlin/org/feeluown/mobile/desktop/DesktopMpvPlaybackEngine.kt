@@ -307,20 +307,13 @@ private class LibMpvBackend(
 
     override fun load(url: String, headers: Map<String, String>) {
         ensureOpen()
-        val headerFields = encodeHeaderFields(headers)
-        if (headerFields.isEmpty()) {
+        val perFileOptions = encodeMpvLoadfileOptions(headers)
+        if (perFileOptions.isEmpty()) {
             command("loadfile", url, "replace")
         } else {
             // Since mpv 0.38 the insertion index is the third loadfile argument; per-file options
-            // therefore require an explicit -1 before the fourth argument. Passing headers here
-            // scopes provider Referer/Cookie values to exactly this playlist entry.
-            command(
-                "loadfile",
-                url,
-                "replace",
-                "-1",
-                "http-header-fields=$headerFields",
-            )
+            // therefore require an explicit -1 before the fourth argument.
+            command("loadfile", url, "replace", "-1", perFileOptions)
         }
     }
 
@@ -502,18 +495,49 @@ private fun loadMpvLibrary(): MpvNative {
     )
 }
 
+internal fun encodeMpvLoadfileOptions(headers: Map<String, String>): String {
+    val sanitized = headers.mapNotNull { (name, value) ->
+        if (name.isBlank() || name.any(::isHeaderLineBreak) || value.any(::isHeaderLineBreak)) {
+            null
+        } else {
+            name to value
+        }
+    }
+    if (sanitized.isEmpty()) return ""
+
+    val userAgent = sanitized.firstOrNull { (name, _) -> name.equals("User-Agent", ignoreCase = true) }?.second
+    val headerFields = sanitized
+        .filterNot { (name, _) -> name.equals("User-Agent", ignoreCase = true) }
+        .map { (name, value) -> "$name: $value" }
+        .joinToString(",") { header -> mpvFixedLength(header) }
+
+    return buildList {
+        userAgent?.let { add("user-agent=${mpvFixedLength(it)}") }
+        if (headerFields.isNotEmpty()) {
+            // The loadfile options argument is itself a comma-separated key/value list, while
+            // http-header-fields is another comma-separated list. Quote the complete inner list
+            // once more so the outer parser cannot mistake header separators for option separators.
+            add("http-header-fields=${mpvFixedLength(headerFields)}")
+        }
+    }.joinToString(",")
+}
+
 internal fun encodeHeaderFields(headers: Map<String, String>): String = headers
     .mapNotNull { (name, value) ->
-        if (name.isBlank() || name.any { it == '\r' || it == '\n' } || value.any { it == '\r' || it == '\n' }) {
+        if (name.isBlank() || name.any(::isHeaderLineBreak) || value.any(::isHeaderLineBreak)) {
             null
         } else {
             "$name: $value"
         }
     }
-    .joinToString(",") { header ->
-        val byteLength = header.toByteArray(StandardCharsets.UTF_8).size
-        "%$byteLength%$header"
-    }
+    .joinToString(",") { header -> mpvFixedLength(header) }
+
+private fun mpvFixedLength(value: String): String {
+    val byteLength = value.toByteArray(StandardCharsets.UTF_8).size
+    return "%$byteLength%$value"
+}
+
+private fun isHeaderLineBreak(char: Char): Boolean = char == '\r' || char == '\n'
 
 private fun String?.secondsToMsOrNull(): Long? = this
     ?.toDoubleOrNull()
