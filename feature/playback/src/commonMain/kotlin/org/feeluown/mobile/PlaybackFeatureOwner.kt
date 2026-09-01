@@ -98,6 +98,7 @@ private class DefaultPlaybackFeatureOwner(
         scope = scope,
         currentRequestSerial = { playRequestSerial },
         currentTrackId = { queueState.currentTrack()?.id ?: playbackState.value.currentTrack?.id },
+        currentResolvedSource = { playbackState.value.resolvedSource },
         currentLyrics = { playbackState.value.lyrics },
         updateLyrics = { lyrics -> updatePlaybackState { it.copy(lyrics = lyrics) } },
         associationForTrackId = { trackId -> lyricsAssociations[trackId] },
@@ -141,7 +142,7 @@ private class DefaultPlaybackFeatureOwner(
             pendingManualReplacementSwitch = PlaybackOwnerPendingManualReplacement(
                 requestSerial = serial,
                 previousTrack = rollbackTrack,
-                originalTrackId = playbackTrack.originalId ?: playbackTrack.id,
+                originalTrackId = playbackTrack.id,
                 selection = selection,
             )
         },
@@ -180,6 +181,7 @@ private class DefaultPlaybackFeatureOwner(
         smartReplacementProviderIds = ::selectedSmartReplacementProviderIds,
         smartReplacementMinScore = { currentSettings().smartReplacementMinScore.coerceIn(0.0, 1.0) },
         currentTrack = { queueState.currentTrack() ?: playbackState.value.currentTrack },
+        currentResolvedSource = { playbackState.value.resolvedSource },
         startManualReplacement = { track, selection, rollbackTrack ->
             startPlayback(
                 track = track,
@@ -246,7 +248,7 @@ private class DefaultPlaybackFeatureOwner(
         if (playbackState.value.currentTrack?.id == trackId) {
             updatePlaybackState {
                 it.copy(
-                    currentTrack = updatedTrack,
+                    currentTrack = updatedTrack.logicalPlaybackTrack(),
                     lyrics = updatedTrack.lyrics ?: it.lyrics,
                 )
             }
@@ -256,20 +258,29 @@ private class DefaultPlaybackFeatureOwner(
     }
 
     private fun onEngineState(engineState: PlaybackState) {
-        engineState.currentTrack?.let(::synchronizePlaybackTrack)
+        val engineTrack = engineState.currentTrack
+        val logicalEngineTrack = engineTrack?.logicalPlaybackTrack()
+        logicalEngineTrack?.let(::synchronizePlaybackTrack)
         val currentQueueTrackId = queueState.currentTrack()?.id
-        val endAction = lifecycleOwner.evaluate(engineState, currentQueueTrackId)
+        val endAction = lifecycleOwner.evaluate(
+            engineState.copy(currentTrack = logicalEngineTrack),
+            currentQueueTrackId,
+        )
         if (engineState.status == PlayerStatus.Playing) lastRecoveredPlaybackErrorKey = null
 
         val previous = playbackState.value
+        val resolvedSource = engineState.resolvedSource
+            ?: engineTrack?.toLegacyResolvedPlaybackSource()
+            ?: previous.resolvedSource?.takeIf { logicalEngineTrack?.id == previous.currentTrack?.id }
         mutablePlaybackState.value = engineState.copy(
             queue = queueState.displayQueue(),
             queueIndex = queueState.displayQueueIndex(),
-            currentTrack = queueState.currentTrack() ?: engineState.currentTrack,
+            currentTrack = queueState.currentTrack() ?: logicalEngineTrack,
+            resolvedSource = resolvedSource,
             playbackParts = engineState.playbackParts.ifEmpty { playbackParts },
             currentPartIndex = engineState.currentPartIndex.takeIf { it >= 0 } ?: currentPartIndex,
             lyrics = lyricsOwner.mergedLyrics(
-                engineState = engineState,
+                engineState = engineState.copy(currentTrack = logicalEngineTrack),
                 currentQueueTrackId = currentQueueTrackId,
                 previousPlaybackState = previous,
             ),
@@ -288,7 +299,7 @@ private class DefaultPlaybackFeatureOwner(
                 if (suppressPlaybackRecoveryRequestSerial == playRequestSerial) {
                     showManualReplacementRestoreFailure(engineState.errorMessage)
                 } else {
-                    recoverPlaybackEngineError(engineState)
+                    recoverPlaybackEngineError(engineState.copy(currentTrack = logicalEngineTrack))
                 }
             }
         }
@@ -341,10 +352,10 @@ private class DefaultPlaybackFeatureOwner(
     }
 
     private fun MusicTrack.withRememberedReplacement(): MusicTrack {
-        val originalTrack = originalDetailTrackForNavigation()
+        val originalTrack = logicalPlaybackTrack()
         val selection = smartReplacementSelections[originalTrack.id] ?: return this
         if (selection.replacementSource !in selectedSmartReplacementProviderIds()) {
-            return if (isSmartReplacement) originalTrack else this
+            return originalTrack
         }
         return originalTrack.withReplacementSelection(selection)
     }
@@ -373,9 +384,16 @@ private class DefaultPlaybackFeatureOwner(
     private fun commitManualReplacementIfReady(engineState: PlaybackState) {
         val pending = pendingManualReplacementSwitch ?: return
         if (pending.requestSerial != playRequestSerial) return
-        val currentTrack = engineState.currentTrack ?: queueState.currentTrack() ?: return
-        val currentOriginalId = currentTrack.originalId ?: currentTrack.id
-        if (currentOriginalId != pending.originalTrackId || currentTrack.replacementId != pending.selection.replacementId) return
+        val engineTrack = engineState.currentTrack ?: return
+        val logicalTrackId = engineTrack.logicalPlaybackTrack().id
+        val resolvedSource = engineState.resolvedSource ?: engineTrack.toLegacyResolvedPlaybackSource()
+        if (
+            logicalTrackId != pending.originalTrackId ||
+            !resolvedSource.isReplacement ||
+            resolvedSource.trackId != pending.selection.replacementId
+        ) {
+            return
+        }
         smartReplacementSelections = smartReplacementSelections + (pending.originalTrackId to pending.selection)
         pendingManualReplacementSwitch = null
         val nextSelections = smartReplacementSelections
@@ -388,7 +406,7 @@ private class DefaultPlaybackFeatureOwner(
         val previousTrack = pending.previousTrack ?: return true
         startOwner.start(
             track = previousTrack,
-            messageAfterStart = "手动换源失败，已恢复原播放源：${previousTrack.title}",
+            messageAfterStart = "手动换源失败，已恢复原播放源：${previousTrack.logicalPlaybackTrack().title}",
             suppressPlaybackRecovery = true,
         )
         return true
@@ -447,16 +465,17 @@ private class DefaultPlaybackFeatureOwner(
     }
 
     private fun synchronizePlaybackTrack(track: MusicTrack) {
+        val logicalTrack = track.logicalPlaybackTrack()
         val current = queueState.currentTrack()
-        var changed = current != track
-        if (current?.id != track.id) {
-            val upNextIndex = queueState.upNextQueue.indexOfFirst { it.id == track.id }
+        var changed = current != logicalTrack
+        if (current?.id != logicalTrack.id) {
+            val upNextIndex = queueState.upNextQueue.indexOfFirst { it.id == logicalTrack.id }
             if (upNextIndex >= 0) {
                 queueState.currentUpNextTrack = queueState.upNextQueue[upNextIndex]
                 queueState.upNextQueue = queueState.upNextQueue.filterIndexed { index, _ -> index != upNextIndex }
                 queueState.currentIsUpNext = true
             } else {
-                val mainIndex = queueState.mainQueue.indexOfFirst { it.id == track.id }
+                val mainIndex = queueState.mainQueue.indexOfFirst { it.id == logicalTrack.id }
                 if (mainIndex >= 0) {
                     queueState.mainQueueIndex = mainIndex
                     queueState.currentUpNextTrack = null
@@ -465,7 +484,7 @@ private class DefaultPlaybackFeatureOwner(
                 }
             }
         }
-        queueState.updateCurrentTrack(track)
+        queueState.updateCurrentTrack(logicalTrack)
         if (changed) persistPlaybackQueue()
     }
 
@@ -474,7 +493,7 @@ private class DefaultPlaybackFeatureOwner(
             current.copy(
                 queue = queueState.displayQueue(),
                 queueIndex = queueState.displayQueueIndex(),
-                currentTrack = queueState.currentTrack() ?: current.currentTrack,
+                currentTrack = queueState.currentTrack() ?: current.currentTrack?.logicalPlaybackTrack(),
                 playbackParts = playbackParts,
                 currentPartIndex = currentPartIndex,
             )
@@ -488,6 +507,7 @@ private class DefaultPlaybackFeatureOwner(
         updatePlaybackState { current ->
             current.copy(
                 currentTrack = queueState.mainQueue.getOrNull(queueState.mainQueueIndex),
+                resolvedSource = null,
                 queue = queueState.displayQueue(),
                 queueIndex = queueState.displayQueueIndex(),
                 playbackParts = emptyList(),
@@ -502,7 +522,7 @@ private class DefaultPlaybackFeatureOwner(
     }
 
     private fun recoverPlaybackEngineError(engineState: PlaybackState) {
-        val failedTrack = engineState.currentTrack ?: queueState.currentTrack() ?: return
+        val failedTrack = engineState.currentTrack?.logicalPlaybackTrack() ?: queueState.currentTrack() ?: return
         val activeTrackId = queueState.currentTrack()?.id ?: playbackState.value.currentTrack?.id
         if (activeTrackId != null && activeTrackId != failedTrack.id) return
         val errorMessage = engineState.errorMessage.orEmpty()
@@ -546,7 +566,7 @@ private class DefaultPlaybackFeatureOwner(
         throwable: Throwable,
     ): Boolean {
         if (!shouldSkipUnavailable(throwable)) return false
-        queueState.updateCurrentTrack(track.copy(isUnavailable = true))
+        queueState.updateCurrentTrack(track.logicalPlaybackTrack().copy(isUnavailable = true))
         updatePlaybackQueueState()
         persistPlaybackQueue()
         val playableCount = queueState.upNextQueue.size + queueState.mainQueue.size

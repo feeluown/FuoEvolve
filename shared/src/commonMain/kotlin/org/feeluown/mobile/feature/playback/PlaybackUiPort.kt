@@ -28,6 +28,8 @@ data class ArtistTargetPickerUiState(
 /** Rich playback presentation that intentionally stays outside the narrow PlaybackSession API. */
 interface PlaybackPresentationPort {
     val currentTrack: MusicTrack?
+    val resolvedSource: ResolvedPlaybackSource?
+        get() = null
     val playbackParts: List<PlaybackPart>
     val currentPartIndex: Int
     val lyricFontSize: LyricFontSize

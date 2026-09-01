@@ -40,7 +40,7 @@ class ListeningHistoryRecorder(
         state: PlaybackState,
         queueState: PlaybackQueueState?,
     ) {
-        val currentTrack = state.currentTrack
+        val currentTrack = state.currentTrack?.logicalPlaybackTrack()
         val currentPrimary = currentTrack?.logicalListeningResource()
         val currentActive = active
         if (currentActive != null && currentPrimary != null) {
@@ -115,7 +115,7 @@ class ListeningHistoryRecorder(
             currentPartIndex = state.currentPartIndex,
             durationMs = state.durationMs.takeIf { it > 0L } ?: track.durationMs,
             contextSessionKey = listeningContextSessionKey(queueState),
-            resources = track.listeningRelations(queueState),
+            resources = track.listeningRelations(queueState, state.resolvedSource),
             playingSinceMonotonicMs = monotonicMillis(),
         )
         active = session
@@ -138,7 +138,7 @@ class ListeningHistoryRecorder(
         session.durationMs = state.durationMs.takeIf { it > 0L }
             ?: track.durationMs
             ?: session.durationMs
-        session.resources = track.listeningRelations(queueState)
+        session.resources = track.listeningRelations(queueState, state.resolvedSource)
     }
 
     private fun listeningContextSessionKey(queueState: PlaybackQueueState?): String? {
@@ -266,11 +266,15 @@ private fun isQualifiedListening(playedMs: Long, durationMs: Long?): Boolean {
     return playedMs >= threshold
 }
 
-private fun MusicTrack.listeningRelations(queueState: PlaybackQueueState?): List<ListeningResourceRelation> = buildList {
-    val primary = logicalListeningResource()
+private fun MusicTrack.listeningRelations(
+    queueState: PlaybackQueueState?,
+    resolvedSource: ResolvedPlaybackSource?,
+): List<ListeningResourceRelation> = buildList {
+    val logicalTrack = logicalPlaybackTrack()
+    val primary = logicalTrack.logicalListeningResource()
     add(ListeningResourceRelation(primary, ListeningResourceRelationType.Primary))
 
-    artistRefs.forEach { artist ->
+    logicalTrack.artistRefs.forEach { artist ->
         add(
             ListeningResourceRelation(
                 resource = ListeningResourceSnapshot(
@@ -286,8 +290,8 @@ private fun MusicTrack.listeningRelations(queueState: PlaybackQueueState?): List
         )
     }
 
-    albumItemId?.takeIf { it.isNotBlank() }?.let { albumId ->
-        val sourceId = logicalListeningSourceId()
+    logicalTrack.albumItemId?.takeIf { it.isNotBlank() }?.let { albumId ->
+        val sourceId = logicalTrack.logicalListeningSourceId()
         add(
             ListeningResourceRelation(
                 resource = ListeningResourceSnapshot(
@@ -295,15 +299,15 @@ private fun MusicTrack.listeningRelations(queueState: PlaybackQueueState?): List
                     type = ListeningResourceType.Album,
                     sourceId = sourceId,
                     sourceResourceId = albumId,
-                    title = originalAlbum?.takeIf { isSmartReplacement } ?: album,
-                    coverUrl = originalCoverUrl?.takeIf { isSmartReplacement } ?: coverUrl,
+                    title = logicalTrack.album,
+                    coverUrl = logicalTrack.coverUrl,
                 ),
                 relation = ListeningResourceRelationType.Album,
             )
         )
     }
 
-    localDirectoryId?.takeIf { it.isNotBlank() }?.let { directoryId ->
+    logicalTrack.localDirectoryId?.takeIf { it.isNotBlank() }?.let { directoryId ->
         add(
             ListeningResourceRelation(
                 resource = ListeningResourceSnapshot(
@@ -355,9 +359,12 @@ private fun MusicTrack.listeningRelations(queueState: PlaybackQueueState?): List
         }
     }
 
-    resolvedListeningResource()?.let { resolved ->
-        add(ListeningResourceRelation(resolved, ListeningResourceRelationType.ResolvedSource))
-    }
+    resolvedSource
+        ?.takeIf { it.isReplacement || it.trackId != logicalTrack.id || it.source != logicalTrack.source }
+        ?.toListeningResource()
+        ?.let { resolved ->
+            add(ListeningResourceRelation(resolved, ListeningResourceRelationType.ResolvedSource))
+        }
 }.distinctBy { relation -> relation.relation to relation.resource.resourceKey }
 
 private fun PlaybackContextSnapshot.toListeningRelation(): ListeningResourceRelation {
@@ -384,44 +391,44 @@ private fun PlaybackContextSnapshot.toListeningRelation(): ListeningResourceRela
 }
 
 private fun MusicTrack.logicalListeningResource(): ListeningResourceSnapshot {
-    val sourceId = logicalListeningSourceId()
-    val resourceId = originalId?.takeIf { isSmartReplacement && it.isNotBlank() } ?: id
+    val logicalTrack = logicalPlaybackTrack()
+    val sourceId = logicalTrack.logicalListeningSourceId()
     return ListeningResourceSnapshot(
-        resourceKey = listeningResourceKey(ListeningResourceType.Track, sourceId, resourceId),
+        resourceKey = listeningResourceKey(ListeningResourceType.Track, sourceId, logicalTrack.id),
         type = ListeningResourceType.Track,
         sourceId = sourceId,
-        sourceResourceId = resourceId,
-        title = originalTitle?.takeIf { isSmartReplacement && it.isNotBlank() } ?: title,
-        subtitle = originalArtists?.takeIf { isSmartReplacement && it.isNotBlank() } ?: artists,
-        coverUrl = originalCoverUrl?.takeIf { isSmartReplacement } ?: coverUrl,
+        sourceResourceId = logicalTrack.id,
+        title = logicalTrack.title,
+        subtitle = logicalTrack.artists,
+        coverUrl = logicalTrack.coverUrl,
     )
 }
 
-private fun MusicTrack.resolvedListeningResource(): ListeningResourceSnapshot? {
-    val resolvedId = replacementId?.takeIf { it.isNotBlank() } ?: return null
-    val resolvedSource = replacementSource?.takeIf { it.isNotBlank() } ?: return null
-    return ListeningResourceSnapshot(
-        resourceKey = listeningResourceKey(ListeningResourceType.Track, resolvedSource, resolvedId),
-        type = ListeningResourceType.Track,
-        sourceId = resolvedSource,
-        sourceResourceId = resolvedId,
-        title = replacementTitle?.takeIf { it.isNotBlank() } ?: title,
-        subtitle = replacementArtists?.takeIf { it.isNotBlank() } ?: artists,
-        coverUrl = replacementCoverUrl ?: coverUrl,
-    )
-}
-
-private fun MusicTrack.logicalListeningSourceId(): String {
-    if (isSmartReplacement) {
-        originalSource?.takeIf { it.isNotBlank() }?.let { return it }
-    }
-    return source.takeIf { it.isNotBlank() }
+private fun ResolvedPlaybackSource.toListeningResource(): ListeningResourceSnapshot {
+    val sourceId = source.takeIf { it.isNotBlank() }
         ?: when (sourceType) {
             TrackSourceType.LocalMediaStore -> "local"
             TrackSourceType.Downloaded -> "downloaded"
             TrackSourceType.Provider -> "provider"
         }
+    return ListeningResourceSnapshot(
+        resourceKey = listeningResourceKey(ListeningResourceType.Track, sourceId, trackId),
+        type = ListeningResourceType.Track,
+        sourceId = sourceId,
+        sourceResourceId = trackId,
+        title = title,
+        subtitle = artists,
+        coverUrl = coverUrl,
+    )
 }
+
+private fun MusicTrack.logicalListeningSourceId(): String =
+    logicalPlaybackTrack().source.takeIf { it.isNotBlank() }
+        ?: when (logicalPlaybackTrack().sourceType) {
+            TrackSourceType.LocalMediaStore -> "local"
+            TrackSourceType.Downloaded -> "downloaded"
+            TrackSourceType.Provider -> "provider"
+        }
 
 private fun listeningResourceKey(
     type: ListeningResourceType,

@@ -53,6 +53,7 @@ internal class PlaybackStartCoordinator(
     private val scope: CoroutineScope,
     private val currentPlaybackState: () -> PlaybackState,
     private val publishPlaybackState: (PlaybackState) -> Unit,
+    /** Builds the physical resolver input without changing logical queue identity. */
     private val prepareTrack: (MusicTrack) -> MusicTrack,
     private val unavailablePlaybackPolicy: () -> UnavailablePlaybackPolicy,
     private val smartReplacementProviderIds: () -> Set<String>,
@@ -87,23 +88,28 @@ internal class PlaybackStartCoordinator(
         messageAfterStart: String? = null,
         suppressPlaybackRecovery: Boolean = false,
     ) {
-        prepareSleepTimer(track.id)
-        val playbackTrack = if (manualSelection != null) track else prepareTrack(track)
+        val logicalTrack = track.logicalPlaybackTrack()
+        prepareSleepTimer(logicalTrack.id)
+        val preparedResolveTrack = when {
+            manualSelection != null -> logicalTrack.withReplacementSelection(manualSelection)
+            suppressPlaybackRecovery && track.isSmartReplacement -> track
+            else -> prepareTrack(logicalTrack)
+        }
         val transaction = when {
             manualSelection != null -> queue.beginPlaybackTransaction(
-                trackId = playbackTrack.id,
+                trackId = logicalTrack.id,
                 reason = PlaybackStartReason.USER_SELECTION,
                 recordPlaybackStart = false,
             )
             suppressPlaybackRecovery -> queue.beginPlaybackTransaction(
-                trackId = playbackTrack.id,
+                trackId = logicalTrack.id,
                 reason = PlaybackStartReason.RECOVERY,
                 recordPlaybackStart = false,
             )
             else -> queue.activePlaybackTransaction()
-                ?.takeIf { it.targetTrackId == playbackTrack.id }
+                ?.takeIf { it.targetTrackId == logicalTrack.id }
                 ?: queue.beginPlaybackTransaction(
-                    trackId = playbackTrack.id,
+                    trackId = logicalTrack.id,
                     reason = PlaybackStartReason.RECOVERY,
                     recordPlaybackStart = false,
                 )
@@ -113,12 +119,12 @@ internal class PlaybackStartCoordinator(
         _startFailure.value = null
         onRequestStarted(serial, suppressPlaybackRecovery)
         manualSelection?.let { selection ->
-            onManualSelectionStarted(serial, playbackTrack, selection, rollbackTrack)
+            onManualSelectionStarted(serial, logicalTrack, selection, rollbackTrack)
         }
 
         val previousPlaybackState = currentPlaybackState()
         val isManualSourceSwitch = manualSelection != null &&
-            previousPlaybackState.currentTrack?.id == playbackTrack.id
+            previousPlaybackState.currentTrack?.id == logicalTrack.id
         val preservedLyrics = previousPlaybackState.lyrics
             ?.takeIf { isManualSourceSwitch && it.isNotBlank() }
 
@@ -128,7 +134,7 @@ internal class PlaybackStartCoordinator(
             setPlaybackParts(emptyList())
             setCurrentPartIndex(-1)
         }
-        queue.updateCurrentTrack(playbackTrack)
+        queue.updateCurrentTrack(logicalTrack)
         if (!isManualSourceSwitch) {
             resetLyricsForPlaybackRequest()
         }
@@ -140,40 +146,41 @@ internal class PlaybackStartCoordinator(
         // have discarded the old resumable session and stale service state is generation-gated.
         val reasonAwareEngine = playbackEngine as? PlaybackStartReasonAwareEngine
         if (reasonAwareEngine != null) {
-            reasonAwareEngine.prepareLoading(playbackTrack, startReason)
+            reasonAwareEngine.prepareLoading(logicalTrack, startReason)
         } else {
-            playbackEngine.prepareLoading(playbackTrack)
+            playbackEngine.prepareLoading(logicalTrack)
         }
 
         publishPlaybackState(
             currentPlaybackState().copy(
                 status = PlayerStatus.Loading,
-                currentTrack = playbackTrack,
+                currentTrack = logicalTrack,
+                resolvedSource = null,
                 queue = queue.displayQueue(),
                 queueIndex = queue.displayQueueIndex(),
                 positionMs = 0,
                 playbackParts = playbackParts(),
                 currentPartIndex = requestedPartIndex.takeIf { isPlaybackPartRequest } ?: -1,
-                lyrics = preservedLyrics ?: playbackTrack.lyrics,
+                lyrics = preservedLyrics ?: logicalTrack.lyrics,
                 playbackGeneration = transaction.id,
                 errorMessage = null,
             )
         )
         persistQueue()
         setLoading(true)
-        setMessage(messageAfterStart ?: "正在播放：${track.title}")
+        setMessage(messageAfterStart ?: "正在播放：${logicalTrack.title}")
 
         val resolveTrack = requestedPartIndex
             ?.let { index -> playbackParts().getOrNull(index) }
-            ?.toTrack(playbackTrack)
-            ?: playbackTrack
-        maybeLoadLyrics(playbackTrack)
+            ?.toTrack(preparedResolveTrack)
+            ?: preparedResolveTrack
+        maybeLoadLyrics(logicalTrack)
 
         if (!playbackEngine.resolvesResourcesInternally) {
             resolveAndStart(
                 serial = serial,
                 transaction = transaction,
-                playbackTrack = playbackTrack,
+                logicalTrack = logicalTrack,
                 resolveTrack = resolveTrack,
                 skippedUnavailableCount = skippedUnavailableCount,
                 requestedPartIndex = requestedPartIndex,
@@ -189,7 +196,7 @@ internal class PlaybackStartCoordinator(
                 requests = buildList {
                     add(
                         PlaybackRequest(
-                            track = playbackTrack,
+                            track = logicalTrack,
                             resolveTrack = resolveTrack,
                             requestedPartIndex = requestedPartIndex,
                             unavailablePolicy = unavailablePlaybackPolicy(),
@@ -204,10 +211,11 @@ internal class PlaybackStartCoordinator(
                         .drop(1)
                         .take(PLAYBACK_START_PLAN_LOOKAHEAD)
                         .forEach { queuedTrack ->
-                            val nextTrack = prepareTrack(queuedTrack)
+                            val logicalQueuedTrack = queuedTrack.logicalPlaybackTrack()
                             add(
                                 PlaybackRequest(
-                                    track = nextTrack,
+                                    track = logicalQueuedTrack,
+                                    resolveTrack = prepareTrack(logicalQueuedTrack),
                                     unavailablePolicy = unavailablePlaybackPolicy(),
                                     smartReplacementProviderIds = smartReplacementProviderIds(),
                                     smartReplacementMinScore = smartReplacementMinScore(),
@@ -224,7 +232,7 @@ internal class PlaybackStartCoordinator(
     private fun resolveAndStart(
         serial: Long,
         transaction: PlaybackTransaction,
-        playbackTrack: MusicTrack,
+        logicalTrack: MusicTrack,
         resolveTrack: MusicTrack,
         skippedUnavailableCount: Int,
         requestedPartIndex: Int?,
@@ -266,13 +274,26 @@ internal class PlaybackStartCoordinator(
                 }
                 setPlaybackParts(nextParts)
                 setCurrentPartIndex(nextPartIndex)
-                val playableTrack = playbackTrack.withResolvedPayload(payload, manualSelection != null)
-                queue.updateCurrentTrack(playableTrack)
-                playbackEngine.play(playableTrack, payload)
+                val resolvedSource = payload.toResolvedPlaybackSource(
+                    logicalTrack = logicalTrack,
+                    resolveTrack = resolveTrack,
+                    selectedReplacement = manualSelection != null,
+                )
+                val sourceAwareEngine = playbackEngine as? ResolvedPlaybackSourceAwareEngine
+                if (sourceAwareEngine != null) {
+                    sourceAwareEngine.playResolved(
+                        logicalTrack = logicalTrack,
+                        resolveTrack = resolveTrack,
+                        payload = payload,
+                    )
+                } else {
+                    playbackEngine.play(logicalTrack, payload)
+                }
                 publishPlaybackState(
                     currentPlaybackState().copy(
                         status = PlayerStatus.Loading,
-                        currentTrack = playableTrack,
+                        currentTrack = logicalTrack,
+                        resolvedSource = resolvedSource,
                         queue = queue.displayQueue(),
                         queueIndex = queue.displayQueueIndex(),
                         lyrics = payload.lyrics?.takeIf { it.isNotBlank() } ?: currentPlaybackState().lyrics,
@@ -282,23 +303,23 @@ internal class PlaybackStartCoordinator(
                         playbackGeneration = transaction.id,
                     )
                 )
-                maybeLoadLyrics(playableTrack)
+                maybeLoadLyrics(logicalTrack)
                 persistQueue()
                 setMessage(
                     messageAfterStart
-                        ?: currentPlaybackPartLabel(playableTrack)
-                        ?: "${playableTrack.title} - ${playableTrack.artists}"
+                        ?: currentPlaybackPartLabel(logicalTrack)
+                        ?: "${logicalTrack.title} - ${logicalTrack.artists}"
                 )
                 prefetchQueue()
             }.onFailure { throwable ->
                 if (serial == currentRequestSerial() && queue.activePlaybackTransaction()?.id == transaction.id) {
                     _startFailure.value = PlaybackStartFailure(
-                        trackId = playbackTrack.id,
+                        trackId = logicalTrack.id,
                         message = failureMessage(throwable),
                     )
                     onStartFailure(
                         serial,
-                        playbackTrack,
+                        logicalTrack,
                         skippedUnavailableCount,
                         manualSelection,
                         throwable,
@@ -357,63 +378,3 @@ private fun PlaybackPart.toTrack(parent: MusicTrack): MusicTrack = parent.copy(
     durationMs = durationMs ?: parent.durationMs,
     providerId = id,
 )
-
-private fun MusicTrack.withResolvedPayload(
-    payload: PlaybackPayload,
-    manualSelection: Boolean,
-): MusicTrack {
-    val isMultipartPlayback = payload.parts.isNotEmpty()
-    val isSmartReplacementPlayback = payload.isSmartReplacement || manualSelection
-    return copy(
-        title = if (isMultipartPlayback) title else payload.title.ifBlank { title },
-        artists = payload.artists.ifBlank { artists },
-        album = payload.album.ifBlank { album },
-        source = if (isSmartReplacementPlayback) {
-            payload.originalSource?.takeIf { it.isNotBlank() } ?: source
-        } else {
-            payload.source.ifBlank { source }
-        },
-        coverUrl = payload.coverUrl ?: coverUrl,
-        durationMs = if (isMultipartPlayback) durationMs else payload.durationMs ?: durationMs,
-        providerName = if (isSmartReplacementPlayback) {
-            payload.providerName ?: payload.replacementProviderName ?: providerName
-        } else {
-            payload.providerName ?: providerName
-        },
-        providerId = if (isSmartReplacementPlayback) payload.originalId ?: providerId else providerId,
-        isSmartReplacement = isSmartReplacementPlayback,
-        originalId = payload.originalId.takeIf { isSmartReplacementPlayback }
-            ?: originalId.takeIf { isSmartReplacementPlayback },
-        originalTitle = payload.originalTitle.takeIf { isSmartReplacementPlayback }
-            ?: originalTitle.takeIf { isSmartReplacementPlayback },
-        originalArtists = payload.originalArtists.takeIf { isSmartReplacementPlayback }
-            ?: originalArtists.takeIf { isSmartReplacementPlayback },
-        originalAlbum = payload.originalAlbum.takeIf { isSmartReplacementPlayback }
-            ?: originalAlbum.takeIf { isSmartReplacementPlayback },
-        originalSource = payload.originalSource.takeIf { isSmartReplacementPlayback }
-            ?: originalSource.takeIf { isSmartReplacementPlayback },
-        originalProviderName = payload.originalProviderName.takeIf { isSmartReplacementPlayback }
-            ?: originalProviderName.takeIf { isSmartReplacementPlayback },
-        originalCoverUrl = payload.originalCoverUrl.takeIf { isSmartReplacementPlayback }
-            ?: originalCoverUrl.takeIf { isSmartReplacementPlayback },
-        replacementId = payload.replacementId.takeIf { isSmartReplacementPlayback }
-            ?: replacementId.takeIf { isSmartReplacementPlayback },
-        replacementTitle = payload.replacementTitle.takeIf { isSmartReplacementPlayback }
-            ?: replacementTitle.takeIf { isSmartReplacementPlayback },
-        replacementArtists = payload.replacementArtists.takeIf { isSmartReplacementPlayback }
-            ?: replacementArtists.takeIf { isSmartReplacementPlayback },
-        replacementAlbum = payload.replacementAlbum.takeIf { isSmartReplacementPlayback }
-            ?: replacementAlbum.takeIf { isSmartReplacementPlayback },
-        replacementSource = payload.replacementSource.takeIf { isSmartReplacementPlayback }
-            ?: replacementSource.takeIf { isSmartReplacementPlayback },
-        replacementProviderName = payload.replacementProviderName.takeIf { isSmartReplacementPlayback }
-            ?: replacementProviderName.takeIf { isSmartReplacementPlayback },
-        replacementCoverUrl = payload.replacementCoverUrl.takeIf { isSmartReplacementPlayback }
-            ?: replacementCoverUrl.takeIf { isSmartReplacementPlayback },
-        replacementStrategy = payload.replacementStrategy.takeIf { isSmartReplacementPlayback }
-            ?: replacementStrategy.takeIf { isSmartReplacementPlayback },
-        replacementScore = payload.replacementScore.takeIf { isSmartReplacementPlayback }
-            ?: replacementScore.takeIf { isSmartReplacementPlayback },
-        isUnavailable = false,
-    )
-}

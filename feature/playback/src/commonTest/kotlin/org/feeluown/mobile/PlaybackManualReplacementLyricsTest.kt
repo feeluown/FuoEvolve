@@ -44,15 +44,13 @@ class PlaybackManualReplacementLyricsTest {
         )
 
         assertEquals(lyrics, fixture.playbackState.lyrics)
-        assertEquals(replacement, fixture.playbackState.currentTrack)
+        assertEquals(original, fixture.playbackState.currentTrack)
         assertEquals(0, fixture.lyricsResetCount)
-        assertEquals(replacement, fixture.lastLyricsLoadTrack)
-        assertTrue(
-            assertNotNull(fixture.engine.playedPlan)
-                .requests
-                .first()
-                .resolveOnlySelectedReplacement,
-        )
+        assertEquals(original, fixture.lastLyricsLoadTrack)
+        val request = assertNotNull(fixture.engine.playedPlan).requests.first()
+        assertTrue(request.resolveOnlySelectedReplacement)
+        assertEquals(original, request.track)
+        assertEquals(replacement, request.resolveTrack)
     }
 
     @Test
