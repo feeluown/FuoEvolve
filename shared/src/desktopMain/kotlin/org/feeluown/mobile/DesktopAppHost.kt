@@ -8,7 +8,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import org.feeluown.mobile.provider.core.InMemoryProviderCredentialStore
 
 /** Desktop composition root. It hosts the same AppRoot/UI graph used by Android and iOS. */
 @Composable
@@ -36,8 +35,9 @@ fun DesktopAppHost() {
 
 private class DesktopAppContainer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val providerCredentialStore = createDesktopProviderCredentialStore()
     private val providerGraph = createFuoProviderGraph(
-        credentials = InMemoryProviderCredentialStore(),
+        credentials = providerCredentialStore,
         persistentCache = null,
         isCellularConnection = { false },
     )
