@@ -45,6 +45,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":core:model"))
             api(project(":playback:api"))
+            implementation(project(":playback:runtime"))
             api(project(":provider:api"))
             api(project(":provider:runtime"))
             implementation(project(":provider:bilibili"))
@@ -115,6 +116,7 @@ val p4RequiredContractFiles = listOf(
     "provider/runtime/src/commonMain/kotlin/org/feeluown/mobile/provider/core/network/ProviderNetwork.kt",
     "provider/runtime/src/androidMain/kotlin/org/feeluown/mobile/provider/core/network/ProviderNetwork.android.kt",
     "provider/runtime/src/iosMain/kotlin/org/feeluown/mobile/provider/core/network/ProviderNetwork.ios.kt",
+    "provider/runtime/src/desktopMain/kotlin/org/feeluown/mobile/provider/core/network/ProviderNetwork.desktop.kt",
     "provider/runtime/src/commonMain/kotlin/org/feeluown/mobile/ProviderFailureMapping.kt",
     "playback/api/src/commonMain/kotlin/org/feeluown/mobile/PlaybackContracts.kt",
     "persistence/settings/build.gradle.kts",
