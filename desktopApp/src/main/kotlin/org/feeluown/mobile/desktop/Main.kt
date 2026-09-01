@@ -8,7 +8,7 @@ import org.feeluown.mobile.DesktopAppHost
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 
 fun main() {
-    installDesktopPlaybackEngineFactory(::DesktopMpvPlaybackEngine)
+    installDesktopPlaybackEngineFactory { DesktopMpvPlaybackEngine() }
     application {
         Window(
             onCloseRequest = ::exitApplication,
