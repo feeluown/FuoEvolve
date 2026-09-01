@@ -181,7 +181,7 @@ class AndroidNativeAudioEngine(
             playbackGeneration = 0L,
             errorMessage = null,
         )
-        if (reason.isActiveSelection) {
+        if (reason.shouldDiscardLiveSession) {
             discardLivePausedSession(track.id)
         }
         connectController()
