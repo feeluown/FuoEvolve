@@ -359,7 +359,7 @@ private fun defaultDesktopMusicRoots(): List<Path> {
     val home = Path.of(System.getProperty("user.home").orEmpty())
     val candidates = linkedSetOf<Path>()
     linuxXdgMusicDirectory(home)?.let(candidates::add)
-    candidates += home.resolve("Music")
+    candidates.add(home.resolve("Music"))
     return candidates.map { it.toAbsolutePath().normalize() }.distinct()
 }
 
