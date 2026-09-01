@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Explicit placeholders for desktop capabilities that are intentionally outside the foundation PR.
+ * Explicit placeholders for desktop capabilities that are intentionally outside the current phase.
  * Keeping them at the platform composition edge lets feature/common code stay identical on desktop.
  */
 internal object DesktopUnsupportedLocalMusicRepository : LocalMusicRepository {
@@ -18,17 +18,6 @@ internal object DesktopUnsupportedLocalMusicRepository : LocalMusicRepository {
     override suspend fun refreshDatabase(): List<MusicTrack> = emptyList()
 
     override suspend fun search(keyword: String): List<MusicTrack> = emptyList()
-}
-
-internal object DesktopUnsupportedDownloadRepository : DownloadRepository {
-    private val mutableStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
-    override val states: StateFlow<Map<String, DownloadState>> = mutableStates.asStateFlow()
-
-    override suspend fun load() = Unit
-
-    override suspend fun download(track: MusicTrack) = Unit
-
-    override suspend fun deleteDownloaded(track: MusicTrack) = Unit
 }
 
 @Volatile
@@ -48,7 +37,10 @@ fun installDesktopPlaybackEngineFactory(factory: () -> PlaybackEngine) {
  * Compatibility name kept so the existing desktop composition root does not own a native runtime.
  * The real implementation is supplied by `desktopApp` before [DesktopAppHost] is created.
  */
-internal class DesktopUnsupportedPlaybackEngine : PlaybackEngine, ResolvedPlaybackSourceAwareEngine {
+internal class DesktopUnsupportedPlaybackEngine :
+    PlaybackEngine,
+    ResolvedPlaybackSourceAwareEngine,
+    AutoCloseable {
     private val delegate: PlaybackEngine = desktopPlaybackEngineFactory?.invoke()
         ?: MissingDesktopPlaybackEngine()
 
@@ -86,6 +78,10 @@ internal class DesktopUnsupportedPlaybackEngine : PlaybackEngine, ResolvedPlayba
     override fun seekTo(positionMs: Long) = delegate.seekTo(positionMs)
 
     override fun setStopAfterCurrentTrack(enabled: Boolean) = delegate.setStopAfterCurrentTrack(enabled)
+
+    override fun close() {
+        (delegate as? AutoCloseable)?.close()
+    }
 }
 
 private class MissingDesktopPlaybackEngine : PlaybackEngine {
