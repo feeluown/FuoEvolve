@@ -37,32 +37,34 @@ internal class DesktopSecureProviderCredentialStore(
         }.getOrNull()
     }
 
-    override suspend fun write(providerId: String, credentials: ProviderCredentials) = mutex.withLock {
-        val store = requireSecretStore()
-        val previous = readManifest(store, providerId)
-        val serialized = json.encodeToString(ProviderCredentials.serializer(), credentials)
-        val generation = generationProvider()
-        val chunks = serialized.chunked(SECRET_CHUNK_CHAR_LIMIT).ifEmpty { listOf("") }
-        val writtenKeys = mutableListOf<String>()
+    override suspend fun write(providerId: String, credentials: ProviderCredentials) {
+        mutex.withLock {
+            val store = requireSecretStore()
+            val previous = readManifest(store, providerId)
+            val serialized = json.encodeToString(ProviderCredentials.serializer(), credentials)
+            val generation = generationProvider()
+            val chunks = serialized.chunked(SECRET_CHUNK_CHAR_LIMIT).ifEmpty { listOf("") }
+            val writtenKeys = mutableListOf<String>()
 
-        try {
-            chunks.forEachIndexed { index, value ->
-                val key = chunkKey(providerId, generation, index)
-                check(writeSecret(store, key, value)) { "系统安全凭证存储写入失败" }
-                writtenKeys += key
+            try {
+                chunks.forEachIndexed { index, value ->
+                    val key = chunkKey(providerId, generation, index)
+                    check(writeSecret(store, key, value)) { "系统安全凭证存储写入失败" }
+                    writtenKeys += key
+                }
+                val manifest = DesktopCredentialManifest(generation, chunks.size)
+                check(writeSecret(store, manifestKey(providerId), manifest.encode())) {
+                    "系统安全凭证存储索引写入失败"
+                }
+            } catch (throwable: Throwable) {
+                writtenKeys.forEach(store::delete)
+                throw throwable
             }
-            val manifest = DesktopCredentialManifest(generation, chunks.size)
-            check(writeSecret(store, manifestKey(providerId), manifest.encode())) {
-                "系统安全凭证存储索引写入失败"
-            }
-        } catch (throwable: Throwable) {
-            writtenKeys.forEach(store::delete)
-            throw throwable
+
+            previous
+                ?.takeIf { it.generation != generation }
+                ?.let { removeGeneration(store, providerId, it) }
         }
-
-        previous
-            ?.takeIf { it.generation != generation }
-            ?.let { removeGeneration(store, providerId, it) }
     }
 
     override suspend fun delete(providerId: String) = mutex.withLock {
