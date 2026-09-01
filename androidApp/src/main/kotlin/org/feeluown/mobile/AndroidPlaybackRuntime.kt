@@ -34,7 +34,12 @@ internal fun createPlaybackRuntimeSession(
         )
 
     return DefaultPlaybackRuntime(
-        engine = PlaybackRuntimeEngineAdapter(playbackEngine, startFailureSource, scope),
+        engine = PlaybackRuntimeEngineAdapter(
+            playbackEngine = playbackEngine,
+            startFailureSource = startFailureSource,
+            scope = scope,
+            resumePlayback = transportCoordinator::startCurrent,
+        ),
         overlay = overlay,
         queueActions = PlaybackCoordinatorQueueActions(transportCoordinator),
         scope = scope,
@@ -45,6 +50,7 @@ private class PlaybackRuntimeEngineAdapter(
     private val playbackEngine: PlaybackEngine,
     startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
+    private val resumePlayback: () -> Unit,
 ) : PlaybackRuntimeEngine {
     override val state: StateFlow<PlaybackRuntimeEngineState> = combine(
         playbackEngine.state,
@@ -61,7 +67,9 @@ private class PlaybackRuntimeEngineAdapter(
 
     override fun pause() = playbackEngine.pause()
 
-    override fun resume() = playbackEngine.resume()
+    // Android resume must re-enter PlaybackStartCoordinator so restored and live-paused sessions
+    // share the same explicit RESUME transaction and generation gating.
+    override fun resume() = resumePlayback()
 }
 
 private class PlaybackCoordinatorQueueActions(

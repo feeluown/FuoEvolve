@@ -30,7 +30,7 @@ internal data class AndroidPlaybackResumeSnapshot(
         )
     }
 
-    fun resumePlan(): PlaybackPlan? {
+    fun resumePlan(generation: Long = plan.generation): PlaybackPlan? {
         val requestIndex = plan.requests.indexOfFirst { request ->
             request.track.id == currentTrack.id
         }
@@ -48,7 +48,10 @@ internal data class AndroidPlaybackResumeSnapshot(
         } else {
             currentRequest
         }
-        return plan.copy(requests = remainingRequests)
+        return plan.copy(
+            generation = generation,
+            requests = remainingRequests,
+        )
     }
 }
 
