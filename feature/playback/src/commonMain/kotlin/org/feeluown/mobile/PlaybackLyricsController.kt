@@ -71,6 +71,7 @@ internal class PlaybackLyricsController(
     private val rememberAssociation: (String, String?) -> Unit,
     private val alignmentOffsetForTrackId: (String) -> Long = { 0L },
     private val rememberAlignmentOffset: (String, Long) -> Unit = { _, _ -> },
+    private val currentResolvedSource: () -> ResolvedPlaybackSource? = { null },
 ) : PlaybackLyricsPort {
     constructor(
         providerRegistryRepository: ProviderRegistryRepository,
@@ -86,6 +87,7 @@ internal class PlaybackLyricsController(
         rememberAssociation: (String, String?) -> Unit,
         alignmentOffsetForTrackId: (String) -> Long = { 0L },
         rememberAlignmentOffset: (String, Long) -> Unit = { _, _ -> },
+        currentResolvedSource: () -> ResolvedPlaybackSource? = { null },
     ) : this(
         repository = ProviderPlaybackLyricsRepository(
             registryRepository = providerRegistryRepository,
@@ -102,6 +104,7 @@ internal class PlaybackLyricsController(
         rememberAssociation = rememberAssociation,
         alignmentOffsetForTrackId = alignmentOffsetForTrackId,
         rememberAlignmentOffset = rememberAlignmentOffset,
+        currentResolvedSource = currentResolvedSource,
     )
 
     private val mutableAssociationState = MutableStateFlow(LyricsAssociationUiState())
@@ -142,7 +145,7 @@ internal class PlaybackLyricsController(
         currentQueueTrackId: String?,
         previousPlaybackState: PlaybackState,
     ): String? {
-        val engineTrackId = engineState.currentTrack?.id
+        val engineTrackId = engineState.currentTrack?.logicalPlaybackTrack()?.id
         val currentId = currentQueueTrackId
             ?: engineTrackId
             ?: previousPlaybackState.currentTrack?.id
@@ -166,12 +169,14 @@ internal class PlaybackLyricsController(
 
     fun maybeLoad(track: MusicTrack?) {
         if (track == null) return
-        val lyricTrack = lyricSourceTrackForPlayback(track)
-        val playbackSourceTrackId = alignmentSourceTrackIdForPlayback(track)
+        val logicalTrack = track.logicalPlaybackTrack()
+        val lyricTrack = lyricSourceTrackForPlayback(logicalTrack)
+        val playbackSourceTrackId = alignmentSourceTrackIdForPlayback(logicalTrack)
         val associatedTrackId = associationForTrackId(lyricTrack.id)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-        val defaultAlignmentKey = if (track.isSmartReplacement) {
+        val hasReplacementSource = currentResolvedSource()?.isReplacement == true
+        val defaultAlignmentKey = if (hasReplacementSource) {
             lyricsAlignmentPersistenceKey(playbackSourceTrackId, lyricTrack.id)
         } else {
             null
@@ -185,7 +190,7 @@ internal class PlaybackLyricsController(
         currentAlignmentPersistenceKey = defaultAlignmentKey
 
         if (
-            loadedForTrackId == track.id &&
+            loadedForTrackId == logicalTrack.id &&
             loadedForPlaybackSourceTrackId == playbackSourceTrackId &&
             loadedAssociationTrackId == associatedTrackId
         ) {
@@ -200,7 +205,7 @@ internal class PlaybackLyricsController(
             } ?: 0L
             currentAlignmentPersistenceKey = effectiveAlignmentKey
             if (
-                current.trackId == track.id &&
+                current.trackId == logicalTrack.id &&
                 current.alignmentOffsetMs != effectiveAlignmentOffsetMs
             ) {
                 mutableAssociationState.value = current.copy(
@@ -210,7 +215,7 @@ internal class PlaybackLyricsController(
             return
         }
 
-        loadedForTrackId = track.id
+        loadedForTrackId = logicalTrack.id
         loadedForPlaybackSourceTrackId = playbackSourceTrackId
         loadedAssociationTrackId = associatedTrackId
         val requestSerial = currentRequestSerial()
@@ -218,19 +223,19 @@ internal class PlaybackLyricsController(
 
         if (associatedTrackId != null) {
             mutableAssociationState.value = LyricsAssociationUiState(
-                trackId = track.id,
+                trackId = logicalTrack.id,
             )
             loadJob = scope.launch {
                 val associatedTrack = repository.trackDetail(associatedTrackId)
                 val associatedLyrics = associatedTrack?.let { candidate ->
                     runCatching { repository.lyrics(candidate) }.getOrNull()
                 }?.takeIf { it.isNotBlank() }
-                if (!isCurrent(track, requestSerial)) return@launch
+                if (!isCurrent(logicalTrack, requestSerial)) return@launch
                 if (associatedTrack != null && associatedLyrics != null) {
                     updateLyrics(associatedLyrics)
                     currentAlignmentPersistenceKey = associationAlignmentKey
                     mutableAssociationState.value = LyricsAssociationUiState(
-                        trackId = track.id,
+                        trackId = logicalTrack.id,
                         isManualAssociation = true,
                         associatedTrackId = associatedTrack.id,
                         associatedTrackTitle = associatedTrack.title,
@@ -239,19 +244,19 @@ internal class PlaybackLyricsController(
                     return@launch
                 }
 
-                val fallbackLyrics = track.lyrics
+                val fallbackLyrics = logicalTrack.lyrics
                     ?.takeIf { it.isNotBlank() }
                     ?: runCatching { repository.lyrics(lyricTrack) }
                         .getOrNull()
                         ?.takeIf { it.isNotBlank() }
-                if (!isCurrent(track, requestSerial)) return@launch
+                if (!isCurrent(logicalTrack, requestSerial)) return@launch
                 if (fallbackLyrics != null) updateLyrics(fallbackLyrics)
                 val fallbackAlignmentOffsetMs = defaultAlignmentKey?.let { alignmentKey ->
                     alignmentOffsetForTrackId(alignmentKey).coerceIn(-3_000L, 3_000L)
                 } ?: 0L
                 currentAlignmentPersistenceKey = defaultAlignmentKey
                 mutableAssociationState.value = LyricsAssociationUiState(
-                    trackId = track.id,
+                    trackId = logicalTrack.id,
                     isLyricsUnavailable = fallbackLyrics == null,
                     alignmentOffsetMs = fallbackAlignmentOffsetMs,
                 )
@@ -261,15 +266,15 @@ internal class PlaybackLyricsController(
 
         currentLyrics()?.takeIf { it.isNotBlank() }?.let {
             mutableAssociationState.value = LyricsAssociationUiState(
-                trackId = track.id,
+                trackId = logicalTrack.id,
                 alignmentOffsetMs = alignmentOffsetMs,
             )
             return
         }
-        track.lyrics?.takeIf { it.isNotBlank() }?.let {
+        logicalTrack.lyrics?.takeIf { it.isNotBlank() }?.let {
             updateLyrics(it)
             mutableAssociationState.value = LyricsAssociationUiState(
-                trackId = track.id,
+                trackId = logicalTrack.id,
                 alignmentOffsetMs = alignmentOffsetMs,
             )
             return
@@ -279,10 +284,10 @@ internal class PlaybackLyricsController(
             val lyrics = runCatching {
                 repository.lyrics(lyricTrack)
             }.getOrNull()?.takeIf { it.isNotBlank() }
-            if (!isCurrent(track, requestSerial)) return@launch
+            if (!isCurrent(logicalTrack, requestSerial)) return@launch
             if (lyrics != null) updateLyrics(lyrics)
             mutableAssociationState.value = LyricsAssociationUiState(
-                trackId = track.id,
+                trackId = logicalTrack.id,
                 isLyricsUnavailable = lyrics == null,
                 alignmentOffsetMs = alignmentOffsetMs,
             )
@@ -290,23 +295,25 @@ internal class PlaybackLyricsController(
     }
 
     override fun openAssociationSearch(track: MusicTrack) {
-        associationSearchTrack = track
+        val logicalTrack = track.logicalPlaybackTrack()
+        associationSearchTrack = logicalTrack
         associationQueryEdited = false
-        val sourceTrack = lyricSourceTrackForPlayback(track)
-        val playbackSourceTrackId = alignmentSourceTrackIdForPlayback(track)
-        val previous = mutableAssociationState.value.takeIf { it.trackId == track.id }
+        val sourceTrack = lyricSourceTrackForPlayback(logicalTrack)
+        val playbackSourceTrackId = alignmentSourceTrackIdForPlayback(logicalTrack)
+        val previous = mutableAssociationState.value.takeIf { it.trackId == logicalTrack.id }
         val persistedAssociationTrackId = associationForTrackId(sourceTrack.id)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
+        val hasReplacementSource = currentResolvedSource()?.isReplacement == true
         val alignmentKey = when {
             previous?.isManualAssociation == true && previous.associatedTrackId != null ->
                 lyricsAlignmentPersistenceKey(playbackSourceTrackId, previous.associatedTrackId)
-            previous != null && track.isSmartReplacement ->
+            previous != null && hasReplacementSource ->
                 lyricsAlignmentPersistenceKey(playbackSourceTrackId, sourceTrack.id)
             previous != null -> null
             persistedAssociationTrackId != null ->
                 lyricsAlignmentPersistenceKey(playbackSourceTrackId, persistedAssociationTrackId)
-            track.isSmartReplacement ->
+            hasReplacementSource ->
                 lyricsAlignmentPersistenceKey(playbackSourceTrackId, sourceTrack.id)
             else -> null
         }
@@ -317,7 +324,7 @@ internal class PlaybackLyricsController(
             }
             ?: 0L
         mutableAssociationState.value = LyricsAssociationUiState(
-            trackId = track.id,
+            trackId = logicalTrack.id,
             isLyricsUnavailable = previous?.isLyricsUnavailable ?: currentLyrics().isNullOrBlank(),
             isManualAssociation = previous?.isManualAssociation == true,
             associatedTrackId = previous?.associatedTrackId,
@@ -336,13 +343,13 @@ internal class PlaybackLyricsController(
             val keyword = normalizeAssociationSearchKeyword(sourceTrack, rawKeyword)
                 .takeIf { it.isNotBlank() }
                 ?: sourceTrack.title.trim()
-            if (associationSearchTrack?.id != track.id || currentTrackId() != track.id) return@launch
+            if (associationSearchTrack?.id != logicalTrack.id || currentTrackId() != logicalTrack.id) return@launch
             if (associationQueryEdited) {
                 mutableAssociationState.value = mutableAssociationState.value.copy(isSearching = false)
                 return@launch
             }
             mutableAssociationState.value = mutableAssociationState.value.copy(query = keyword)
-            performSearch(track, keyword)
+            performSearch(logicalTrack, keyword)
         }
     }
 
@@ -492,27 +499,9 @@ internal class PlaybackLyricsController(
     }
 
     private fun alignmentSourceTrackIdForPlayback(track: MusicTrack): String {
-        if (!track.isSmartReplacement) return track.id
-        return track.replacementId?.takeIf { it.isNotBlank() } ?: track.id
+        val resolvedSource = currentResolvedSource()?.takeIf { it.isReplacement }
+        return resolvedSource?.trackId?.takeIf { it.isNotBlank() } ?: track.logicalPlaybackTrack().id
     }
 
-    private fun lyricSourceTrackForPlayback(track: MusicTrack): MusicTrack {
-        if (!track.isSmartReplacement) return track
-        val originalId = track.originalId?.takeIf { it.isNotBlank() } ?: return track
-        val originalSource = track.originalSource?.takeIf { it.isNotBlank() }
-            ?: originalId.substringBefore(':').takeIf { it.isNotBlank() }
-            ?: track.source
-        return track.copy(
-            id = originalId,
-            providerId = originalId,
-            source = originalSource,
-            providerName = track.originalProviderName ?: track.providerName,
-            title = track.originalTitle ?: track.title,
-            artists = track.originalArtists ?: track.artists,
-            album = track.originalAlbum ?: track.album,
-            coverUrl = track.originalCoverUrl ?: track.coverUrl,
-            isSmartReplacement = false,
-            lyrics = null,
-        )
-    }
+    private fun lyricSourceTrackForPlayback(track: MusicTrack): MusicTrack = track.logicalPlaybackTrack()
 }

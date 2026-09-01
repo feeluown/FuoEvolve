@@ -42,6 +42,7 @@ data class PlaybackPlan(
 data class PlaybackState(
     val status: PlayerStatus = PlayerStatus.Idle,
     val currentTrack: MusicTrack? = null,
+    val resolvedSource: ResolvedPlaybackSource? = null,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val bufferedMs: Long = 0,

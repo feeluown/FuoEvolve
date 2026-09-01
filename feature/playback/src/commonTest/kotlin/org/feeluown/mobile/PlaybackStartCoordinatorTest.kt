@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 
 class PlaybackStartCoordinatorTest {
     @Test
-    fun directResolutionStartsEngineAndPublishesResolvedTrack() = runTest {
+    fun directResolutionKeepsLogicalTrackAndPublishesResolvedSource() = runTest {
         val track = track("netease:1")
         val payload = payload(title = "Resolved title")
         val queue = PlaybackQueueController().apply {
@@ -32,10 +32,11 @@ class PlaybackStartCoordinatorTest {
         assertEquals(track, engine.preparedTrack)
         assertEquals(1, repository.resolveCalls)
         assertEquals(payload, engine.playedPayload)
-        assertEquals("Resolved title", engine.playedTrack?.title)
-        assertEquals("Resolved title", queue.currentTrack()?.title)
+        assertEquals(track, engine.playedTrack)
+        assertEquals(track, queue.currentTrack())
         assertEquals(PlayerStatus.Loading, fixture.playbackState.status)
-        assertEquals("Resolved title", fixture.playbackState.currentTrack?.title)
+        assertEquals(track, fixture.playbackState.currentTrack)
+        assertEquals("Resolved title", fixture.playbackState.resolvedSource?.title)
         assertEquals(queue.activePlaybackTransaction()?.id, fixture.playbackState.playbackGeneration)
         assertNull(fixture.coordinator.startFailure.value)
         assertEquals(0, fixture.failureCount)

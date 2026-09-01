@@ -12,7 +12,7 @@ class PlaybackLyricsReplacementAlignmentTest {
     @Test
     fun nativeLyricsOffsetUsesActualReplacementSource() = runTest {
         val original = providerTrack("netease:original", "原曲", "netease")
-        val replacement = replacementTrack(original, "ytmusic:replacement-a")
+        val source = replacementSource("ytmusic:replacement-a")
         val rememberedOffsets = mutableListOf<Pair<String, Long>>()
         var currentLyrics: String? = null
         val controller = PlaybackLyricsController(
@@ -21,15 +21,16 @@ class PlaybackLyricsReplacementAlignmentTest {
             ),
             scope = this,
             currentRequestSerial = { 1L },
-            currentTrackId = { replacement.id },
+            currentTrackId = { original.id },
             currentLyrics = { currentLyrics },
             updateLyrics = { currentLyrics = it },
             associationForTrackId = { null },
             rememberAssociation = { _, _ -> },
             rememberAlignmentOffset = { key, offsetMs -> rememberedOffsets += key to offsetMs },
+            currentResolvedSource = { source },
         )
 
-        controller.maybeLoad(replacement)
+        controller.maybeLoad(original)
         advanceUntilIdle()
         controller.updateAlignmentOffset(750L)
 
@@ -44,9 +45,7 @@ class PlaybackLyricsReplacementAlignmentTest {
     @Test
     fun switchingReplacementSourceRestoresEachSourcesOffset() = runTest {
         val original = providerTrack("netease:original", "原曲", "netease")
-        val replacementA = replacementTrack(original, "ytmusic:replacement-a")
-        val replacementB = replacementTrack(original, "qqmusic:replacement-b")
-        var currentTrack = replacementA
+        var currentSource = replacementSource("ytmusic:replacement-a")
         var currentLyrics: String? = null
         val savedOffsets = mapOf(
             lyricsAlignmentPersistenceKey("ytmusic:replacement-a", original.id) to 750L,
@@ -58,20 +57,21 @@ class PlaybackLyricsReplacementAlignmentTest {
             ),
             scope = this,
             currentRequestSerial = { 1L },
-            currentTrackId = { currentTrack.id },
+            currentTrackId = { original.id },
             currentLyrics = { currentLyrics },
             updateLyrics = { currentLyrics = it },
             associationForTrackId = { null },
             rememberAssociation = { _, _ -> },
             alignmentOffsetForTrackId = { savedOffsets[it] ?: 0L },
+            currentResolvedSource = { currentSource },
         )
 
-        controller.maybeLoad(currentTrack)
+        controller.maybeLoad(original)
         advanceUntilIdle()
         assertEquals(750L, controller.associationState.value.alignmentOffsetMs)
 
-        currentTrack = replacementB
-        controller.maybeLoad(currentTrack)
+        currentSource = replacementSource("qqmusic:replacement-b")
+        controller.maybeLoad(original)
         advanceUntilIdle()
 
         assertEquals(-500L, controller.associationState.value.alignmentOffsetMs)
@@ -80,7 +80,7 @@ class PlaybackLyricsReplacementAlignmentTest {
     @Test
     fun manualAssociationOnReplacementAlsoUsesActualPlaybackSource() = runTest {
         val original = providerTrack("netease:original", "原曲", "netease")
-        val replacement = replacementTrack(original, "ytmusic:replacement-a")
+        val source = replacementSource("ytmusic:replacement-a")
         val associated = providerTrack("qqmusic:lyrics", "歌词歌曲", "qqmusic")
         val rememberedOffsets = mutableListOf<Pair<String, Long>>()
         val alignmentKey = lyricsAlignmentPersistenceKey("ytmusic:replacement-a", associated.id)
@@ -92,16 +92,17 @@ class PlaybackLyricsReplacementAlignmentTest {
             ),
             scope = this,
             currentRequestSerial = { 1L },
-            currentTrackId = { replacement.id },
+            currentTrackId = { original.id },
             currentLyrics = { currentLyrics },
             updateLyrics = { currentLyrics = it },
             associationForTrackId = { if (it == original.id) associated.id else null },
             rememberAssociation = { _, _ -> },
             alignmentOffsetForTrackId = { if (it == alignmentKey) 1_000L else 0L },
             rememberAlignmentOffset = { key, offsetMs -> rememberedOffsets += key to offsetMs },
+            currentResolvedSource = { source },
         )
 
-        controller.maybeLoad(replacement)
+        controller.maybeLoad(original)
         advanceUntilIdle()
 
         assertTrue(controller.associationState.value.isManualAssociation)
@@ -123,21 +124,15 @@ class PlaybackLyricsReplacementAlignmentTest {
         providerName = source,
     )
 
-    private fun replacementTrack(original: MusicTrack, replacementId: String) = original.copy(
-        isSmartReplacement = true,
-        originalId = original.id,
-        originalTitle = original.title,
-        originalArtists = original.artists,
-        originalAlbum = original.album,
-        originalSource = original.source,
-        originalProviderName = original.providerName,
-        originalCoverUrl = original.coverUrl,
-        replacementId = replacementId,
-        replacementTitle = "替代音源",
-        replacementArtists = "artist",
-        replacementAlbum = "",
-        replacementSource = replacementId.substringBefore(':'),
-        replacementProviderName = replacementId.substringBefore(':'),
+    private fun replacementSource(id: String) = ResolvedPlaybackSource(
+        trackId = id,
+        title = "替代音源",
+        artists = "artist",
+        album = "",
+        source = id.substringBefore(':'),
+        sourceType = TrackSourceType.Provider,
+        providerName = id.substringBefore(':'),
+        isReplacement = true,
     )
 
     private class FakePlaybackLyricsRepository(

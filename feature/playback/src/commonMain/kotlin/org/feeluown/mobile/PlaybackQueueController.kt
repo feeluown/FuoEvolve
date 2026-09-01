@@ -40,19 +40,19 @@ internal class PlaybackQueueController {
 
     var mainQueue: List<MusicTrack>
         get() = mutableState.value.mainQueue
-        set(value) = update { it.copy(mainQueue = value) }
+        set(value) = update { it.copy(mainQueue = value.logicalTracks()) }
     var originalMainQueue: List<MusicTrack>
         get() = mutableState.value.originalMainQueue
-        set(value) = update { it.copy(originalMainQueue = value) }
+        set(value) = update { it.copy(originalMainQueue = value.logicalTracks()) }
     var upNextQueue: List<MusicTrack>
         get() = mutableState.value.upNextQueue
-        set(value) = update { it.copy(upNextQueue = value) }
+        set(value) = update { it.copy(upNextQueue = value.logicalTracks()) }
     var mainQueueIndex: Int
         get() = mutableState.value.mainQueueIndex
         set(value) = update { it.copy(mainQueueIndex = value) }
     var currentUpNextTrack: MusicTrack?
         get() = mutableState.value.currentUpNextTrack
-        set(value) = update { it.copy(currentUpNextTrack = value) }
+        set(value) = update { it.copy(currentUpNextTrack = value?.logicalPlaybackTrack()) }
     var currentIsUpNext: Boolean
         get() = mutableState.value.currentIsUpNext
         set(value) = update { it.copy(currentIsUpNext = value) }
@@ -120,16 +120,17 @@ internal class PlaybackQueueController {
     }
 
     fun updateCurrentTrack(track: MusicTrack) {
+        val logicalTrack = track.logicalPlaybackTrack()
         val current = mutableState.value
         when {
-            current.currentIsUpNext -> update { it.copy(currentUpNextTrack = track) }
+            current.currentIsUpNext -> update { it.copy(currentUpNextTrack = logicalTrack) }
             current.mainQueueIndex in current.mainQueue.indices -> update { snapshot ->
                 snapshot.copy(
                     mainQueue = snapshot.mainQueue.mapIndexed { index, item ->
-                        if (index == snapshot.mainQueueIndex) track else item
+                        if (index == snapshot.mainQueueIndex) logicalTrack else item
                     },
                     originalMainQueue = snapshot.originalMainQueue.map { item ->
-                        if (item.id == track.id) track else item
+                        if (item.id == logicalTrack.id) logicalTrack else item
                     },
                 )
             }
@@ -142,19 +143,22 @@ internal class PlaybackQueueController {
      * An already-started playback transaction is intentionally preserved across hydration. A resume
      * may begin from the independently restored engine state before the durable queue snapshot arrives;
      * resetting its transaction here would make an in-flight provider result look stale.
+     * Legacy snapshots may still contain replacement-decorated tracks; hydration normalizes them back
+     * to logical queue identity before they become observable.
      *
      * @return true when the snapshot was applied, false when a newer live queue mutation won the race.
      */
     fun restore(snapshot: PlaybackQueueSnapshot): Boolean {
         if (startupDirty) return false
         val current = mutableState.value
+        val mainQueue = snapshot.mainQueue.logicalTracks()
         applyingStartupSnapshot = true
         try {
             mutableState.value = PlaybackQueueState(
-                mainQueue = snapshot.mainQueue,
-                originalMainQueue = snapshot.originalMainQueue,
-                upNextQueue = snapshot.upNextQueue,
-                mainQueueIndex = snapshot.queueIndex.coerceIn(-1, snapshot.mainQueue.lastIndex),
+                mainQueue = mainQueue,
+                originalMainQueue = snapshot.originalMainQueue.logicalTracks(),
+                upNextQueue = snapshot.upNextQueue.logicalTracks(),
+                mainQueueIndex = snapshot.queueIndex.coerceIn(-1, mainQueue.lastIndex),
                 shuffleEnabled = snapshot.shuffleEnabled,
                 repeatMode = snapshot.repeatMode,
                 isFmQueue = snapshot.isFmQueue,
@@ -198,6 +202,8 @@ internal class PlaybackQueueController {
         mutableState.update { current -> transform(current) }
     }
 }
+
+private fun List<MusicTrack>.logicalTracks(): List<MusicTrack> = map(MusicTrack::logicalPlaybackTrack)
 
 /** Read-only projection used by app/player presentation outside the playback module. */
 fun PlaybackQueueState.currentTrack(): MusicTrack? =

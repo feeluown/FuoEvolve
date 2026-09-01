@@ -11,7 +11,7 @@ class IosNativeAudioEngine(
     scope: CoroutineScope,
     private val output: IosAudioOutput,
     settingsRepository: AppSettingsRepository,
-) : PlaybackEngine {
+) : PlaybackEngine, ResolvedPlaybackSourceAwareEngine {
     private val mutableState = MutableStateFlow(PlaybackState())
     private var rawAudioQuality: String? = null
 
@@ -37,19 +37,34 @@ class IosNativeAudioEngine(
         rawAudioQuality = null
         mutableState.value = PlaybackState(
             status = PlayerStatus.Loading,
-            currentTrack = track,
+            currentTrack = track.logicalPlaybackTrack(),
+            resolvedSource = null,
             durationMs = track.durationMs ?: 0,
             lyrics = track.lyrics,
         )
     }
 
     override fun play(track: MusicTrack, payload: PlaybackPayload) {
+        playResolved(
+            logicalTrack = track.logicalPlaybackTrack(),
+            resolveTrack = track,
+            payload = payload,
+        )
+    }
+
+    override fun playResolved(
+        logicalTrack: MusicTrack,
+        resolveTrack: MusicTrack,
+        payload: PlaybackPayload,
+    ) {
+        val normalizedLogicalTrack = logicalTrack.logicalPlaybackTrack()
         output.play(payload.url, payload.headers, payload.title, payload.artists, payload.album)
         rawAudioQuality = payload.audioQuality
         mutableState.value = PlaybackState(
             status = PlayerStatus.Loading,
-            currentTrack = track,
-            durationMs = payload.durationMs ?: track.durationMs ?: 0,
+            currentTrack = normalizedLogicalTrack,
+            resolvedSource = payload.toResolvedPlaybackSource(normalizedLogicalTrack, resolveTrack),
+            durationMs = payload.durationMs ?: normalizedLogicalTrack.durationMs ?: 0,
             lyrics = payload.lyrics,
             audioQuality = normalizedAudioQualityLabel(rawAudioQuality, null),
             playbackParts = payload.parts,

@@ -205,25 +205,46 @@ class ListeningHistoryRecorderTest {
         var wallClock = 3_000_000L
         var monotonicClock = 0L
         val recorder = ListeningHistoryRecorder(sink, backgroundScope, { wallClock }, { monotonicClock })
-        val track = track(durationMs = 180_000L).copy(
-            id = "replacement-runtime-id",
+        val track = MusicTrack(
+            id = "netease-song-1",
+            title = "Original Song",
+            artists = "Original Artist",
+            album = "Original Album",
+            source = "netease",
+            sourceType = TrackSourceType.Provider,
+            durationMs = 180_000L,
+            providerId = "netease-song-1",
+        )
+        val resolvedSource = ResolvedPlaybackSource(
+            trackId = "BV1-replacement",
+            title = "Replacement Video",
+            artists = "Uploader",
+            album = "",
             source = "bilibili",
-            isSmartReplacement = true,
-            originalId = "netease-song-1",
-            originalTitle = "Original Song",
-            originalArtists = "Original Artist",
-            originalAlbum = "Original Album",
-            originalSource = "netease",
-            replacementId = "BV1-replacement",
-            replacementTitle = "Replacement Video",
-            replacementArtists = "Uploader",
-            replacementSource = "bilibili",
+            sourceType = TrackSourceType.Provider,
+            isReplacement = true,
         )
 
-        recorder.onPlaybackState(PlaybackState(PlayerStatus.Playing, track, durationMs = 180_000L), PlaybackQueueState())
+        recorder.onPlaybackState(
+            PlaybackState(
+                PlayerStatus.Playing,
+                track,
+                resolvedSource = resolvedSource,
+                durationMs = 180_000L,
+            ),
+            PlaybackQueueState(),
+        )
         monotonicClock += 90_000L
         wallClock += 90_000L
-        recorder.onPlaybackState(PlaybackState(PlayerStatus.Ended, track, durationMs = 180_000L), PlaybackQueueState())
+        recorder.onPlaybackState(
+            PlaybackState(
+                PlayerStatus.Ended,
+                track,
+                resolvedSource = resolvedSource,
+                durationMs = 180_000L,
+            ),
+            PlaybackQueueState(),
+        )
         runCurrent()
 
         val record = sink.records.last()

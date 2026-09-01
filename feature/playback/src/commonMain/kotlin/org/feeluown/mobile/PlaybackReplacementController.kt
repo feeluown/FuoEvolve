@@ -16,6 +16,7 @@ internal class PlaybackReplacementController(
     private val smartReplacementProviderIds: () -> Set<String>,
     private val smartReplacementMinScore: () -> Double,
     private val currentTrack: () -> MusicTrack?,
+    private val currentResolvedSource: () -> ResolvedPlaybackSource?,
     private val startManualReplacement: (MusicTrack, SmartReplacementSelection, MusicTrack) -> Unit,
     private val closePlayer: () -> Unit,
     private val openTrackDetail: (MusicTrack) -> Unit,
@@ -30,8 +31,8 @@ internal class PlaybackReplacementController(
     private var candidatesJob: Job? = null
 
     override fun loadReplacementCandidates(track: MusicTrack) {
-        val originalTrack = track.originalDetailTrackForNavigation()
-        val trackId = originalTrack.id
+        val logicalTrack = track.logicalPlaybackTrack()
+        val trackId = logicalTrack.id
         candidatesJob?.cancel()
         mutableReplacementCandidateState.value = ReplacementCandidateState(
             trackId = trackId,
@@ -41,7 +42,7 @@ internal class PlaybackReplacementController(
             runCatching {
                 withTimeout(30_000) {
                     playbackRepository.replacementCandidates(
-                        track = originalTrack,
+                        track = logicalTrack,
                         smartReplacementProviderIds = smartReplacementProviderIds(),
                         smartReplacementMinScore = smartReplacementMinScore(),
                     )
@@ -60,7 +61,7 @@ internal class PlaybackReplacementController(
                 if (replacementCandidateState.trackId == trackId) {
                     mutableReplacementCandidateState.value = ReplacementCandidateState(
                         trackId = trackId,
-                        errorMessage = failureMessage(throwable, "查询失败", originalTrack.source),
+                        errorMessage = failureMessage(throwable, "查询失败", logicalTrack.source),
                     )
                 }
             }
@@ -68,21 +69,30 @@ internal class PlaybackReplacementController(
     }
 
     override fun selectReplacementCandidate(track: MusicTrack, candidate: ReplacementCandidate) {
-        val previousTrack = currentTrack() ?: return
-        val originalTrack = track.originalDetailTrackForNavigation()
+        val previousLogicalTrack = currentTrack()?.logicalPlaybackTrack() ?: return
+        val previousResolvedSource = currentResolvedSource()
+        val rollbackTrack = if (previousResolvedSource?.isReplacement == true) {
+            previousLogicalTrack.withReplacementSelection(previousResolvedSource.toSmartReplacementSelection())
+        } else {
+            previousLogicalTrack
+        }
+        val logicalTrack = track.logicalPlaybackTrack()
         val selection = candidate.toSmartReplacementSelection()
         mutableReplacementCandidateState.value = replacementCandidateState.copy(isLoading = false)
         startManualReplacement(
-            originalTrack.withReplacementSelection(selection),
+            logicalTrack,
             selection,
-            previousTrack,
+            rollbackTrack,
         )
     }
 
     override fun openReplacementTrackDetail(track: MusicTrack) {
-        val detailTrack = track.replacementDetailTrackForNavigation() ?: return
+        val logicalTrack = track.logicalPlaybackTrack()
+        val source = currentResolvedSource()
+            ?.takeIf { it.isReplacement }
+            ?: return
         closePlayer()
-        openTrackDetail(detailTrack)
+        openTrackDetail(source.toNavigationTrack(logicalTrack))
     }
 }
 
@@ -99,101 +109,68 @@ internal fun ReplacementCandidate.toSmartReplacementSelection(): SmartReplacemen
         replacementScore = score,
     )
 
-internal fun MusicTrack.withReplacementSelection(selection: SmartReplacementSelection): MusicTrack = copy(
-    id = id,
-    providerId = providerId ?: id,
-    sourceType = TrackSourceType.Provider,
-    localUri = null,
-    isSmartReplacement = true,
-    originalId = id,
-    originalTitle = title,
-    originalArtists = artists,
-    originalAlbum = album,
-    originalSource = source,
-    originalProviderName = providerName,
-    originalCoverUrl = coverUrl,
-    replacementId = selection.replacementId,
-    replacementTitle = selection.replacementTitle,
-    replacementArtists = selection.replacementArtists,
-    replacementAlbum = selection.replacementAlbum,
-    replacementSource = selection.replacementSource,
-    replacementProviderName = selection.replacementProviderName,
-    replacementCoverUrl = selection.replacementCoverUrl,
-    replacementStrategy = "user_selected",
-    replacementScore = selection.replacementScore,
-    isUnavailable = false,
-)
+private fun ResolvedPlaybackSource.toSmartReplacementSelection(): SmartReplacementSelection =
+    SmartReplacementSelection(
+        replacementId = trackId,
+        replacementTitle = title,
+        replacementArtists = artists,
+        replacementAlbum = album,
+        replacementSource = source,
+        replacementProviderName = providerName,
+        replacementCoverUrl = coverUrl,
+        replacementDurationMs = durationMs,
+        replacementScore = replacementScore ?: 0.0,
+    )
 
-/** Reconstructs the provider-native track represented by a smart-replacement playback item. */
-fun MusicTrack.originalDetailTrackForNavigation(): MusicTrack {
-    if (!isSmartReplacement) return this
-    val detailId = originalId ?: providerId ?: id
-    val detailSource = originalSource
-        ?: detailId.substringBefore(':').takeIf { it.isNotBlank() }
-        ?: source
-    return copy(
-        id = detailId,
-        title = originalTitle ?: title,
-        artists = originalArtists ?: artists,
-        album = originalAlbum ?: album,
-        source = detailSource,
+/**
+ * Compatibility resolver input for providers that still consume replacement metadata on MusicTrack.
+ * The returned value must never be stored in PlaybackQueueController or exposed as currentTrack.
+ */
+internal fun MusicTrack.withReplacementSelection(selection: SmartReplacementSelection): MusicTrack {
+    val logicalTrack = logicalPlaybackTrack()
+    return logicalTrack.copy(
+        providerId = logicalTrack.providerId ?: logicalTrack.id,
         sourceType = TrackSourceType.Provider,
         localUri = null,
-        coverUrl = originalCoverUrl ?: coverUrl,
-        providerId = detailId,
-        providerName = originalProviderName ?: detailSource,
-        isSmartReplacement = false,
-        originalId = null,
-        originalTitle = null,
-        originalArtists = null,
-        originalAlbum = null,
-        originalSource = null,
-        originalProviderName = null,
-        originalCoverUrl = null,
-        replacementId = null,
-        replacementTitle = null,
-        replacementArtists = null,
-        replacementAlbum = null,
-        replacementSource = null,
-        replacementProviderName = null,
-        replacementCoverUrl = null,
-        replacementStrategy = null,
-        replacementScore = null,
+        isSmartReplacement = true,
+        originalId = logicalTrack.id,
+        originalTitle = logicalTrack.title,
+        originalArtists = logicalTrack.artists,
+        originalAlbum = logicalTrack.album,
+        originalSource = logicalTrack.source,
+        originalProviderName = logicalTrack.providerName,
+        originalCoverUrl = logicalTrack.coverUrl,
+        replacementId = selection.replacementId,
+        replacementTitle = selection.replacementTitle,
+        replacementArtists = selection.replacementArtists,
+        replacementAlbum = selection.replacementAlbum,
+        replacementSource = selection.replacementSource,
+        replacementProviderName = selection.replacementProviderName,
+        replacementCoverUrl = selection.replacementCoverUrl,
+        replacementStrategy = "user_selected",
+        replacementScore = selection.replacementScore,
+        isUnavailable = false,
     )
 }
 
+/** Reconstructs the provider-native logical track from legacy replacement-decorated state. */
+fun MusicTrack.originalDetailTrackForNavigation(): MusicTrack = logicalPlaybackTrack()
+
+/** Legacy compatibility helper; new playback UI should use PlaybackState.resolvedSource. */
 internal fun MusicTrack.replacementDetailTrackForNavigation(): MusicTrack? {
     val detailId = replacementId?.takeIf { it.isNotBlank() } ?: return null
     val detailSource = replacementSource
         ?: detailId.substringBefore(':').takeIf { it.isNotBlank() }
         ?: return null
-    return copy(
+    return MusicTrack(
         id = detailId,
         title = replacementTitle ?: title,
         artists = replacementArtists ?: artists,
         album = replacementAlbum ?: album,
         source = detailSource,
         sourceType = TrackSourceType.Provider,
-        localUri = null,
         coverUrl = replacementCoverUrl ?: coverUrl,
         providerId = detailId,
         providerName = replacementProviderName ?: detailSource,
-        isSmartReplacement = false,
-        originalId = null,
-        originalTitle = null,
-        originalArtists = null,
-        originalAlbum = null,
-        originalSource = null,
-        originalProviderName = null,
-        originalCoverUrl = null,
-        replacementId = null,
-        replacementTitle = null,
-        replacementArtists = null,
-        replacementAlbum = null,
-        replacementSource = null,
-        replacementProviderName = null,
-        replacementCoverUrl = null,
-        replacementStrategy = null,
-        replacementScore = null,
     )
 }
