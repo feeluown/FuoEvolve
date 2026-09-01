@@ -155,12 +155,37 @@ class DesktopMpvPlaybackEngineTest {
                 "Cookie" to "ok\r\nbad",
             ),
         )
-        val expected = validHeaders.joinToString(",") { header ->
-            "%${header.toByteArray(Charsets.UTF_8).size}%$header"
-        }
+        val expected = validHeaders.joinToString(",") { header -> fixedLength(header) }
 
         assertEquals(expected, encoded)
     }
+
+    @Test
+    fun loadfileOptionsSeparateUserAgentAndQuoteNestedHeaderList() {
+        val userAgent = "FuoEvolve/desktop, mpv"
+        val rawHeaders = listOf(
+            "Referer: https://www.bilibili.com/",
+            "Cookie: a=b,c=d",
+        )
+        val headerList = rawHeaders.joinToString(",") { header -> fixedLength(header) }
+        val expected = listOf(
+            "user-agent=${fixedLength(userAgent)}",
+            "http-header-fields=${fixedLength(headerList)}",
+        ).joinToString(",")
+
+        val encoded = encodeMpvLoadfileOptions(
+            linkedMapOf(
+                "User-Agent" to userAgent,
+                "Referer" to "https://www.bilibili.com/",
+                "Cookie" to "a=b,c=d",
+            ),
+        )
+
+        assertEquals(expected, encoded)
+    }
+
+    private fun fixedLength(value: String): String =
+        "%${value.toByteArray(Charsets.UTF_8).size}%$value"
 
     private fun track(
         id: String,
