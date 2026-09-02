@@ -371,6 +371,8 @@ compose.desktop {
                 appCategory = "public.app-category.music"
                 infoPlist {
                     extraKeysRawXml = """
+                        <key>NSMicrophoneUsageDescription</key>
+                        <string>FuoEvolve 使用麦克风进行听歌识曲。</string>
                         <key>CFBundleURLTypes</key>
                         <array>
                             <dict>
