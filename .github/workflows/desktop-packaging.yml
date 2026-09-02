@@ -111,7 +111,13 @@ jobs:
           if (-not (Get-ChildItem "$root\exe" -Filter *.exe -ErrorAction SilentlyContinue)) { throw "EXE installer was not produced" }
           if (-not (Get-ChildItem "$root\app" -Recurse -File -Include mpv-2.dll,libmpv-2.dll,mpv.dll -ErrorAction SilentlyContinue)) { throw "Bundled libmpv DLL is missing" }
           if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter fuoevolve_smtc_bridge.dll -ErrorAction SilentlyContinue)) { throw "SMTC bridge is missing" }
-          if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter java.exe -ErrorAction SilentlyContinue | Where-Object FullName -Match "runtime")) { throw "Bundled JVM runtime is missing" }
+          $runtimeRelease = Get-ChildItem "$root\app" -Recurse -File -Filter release -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]runtime[\\/]release$' } |
+            Select-Object -First 1
+          if (-not $runtimeRelease) { throw "Bundled JVM runtime release marker is missing" }
+          $runtimeRoot = $runtimeRelease.Directory.FullName
+          if (-not (Test-Path (Join-Path $runtimeRoot "lib\modules"))) { throw "Bundled JVM runtime modules image is missing" }
+          if (-not (Select-String -Path $runtimeRelease.FullName -Pattern '^JAVA_VERSION="21\.' -Quiet)) { throw "Bundled JVM runtime is not Java 21" }
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
@@ -203,11 +209,19 @@ jobs:
       - name: Verify macOS package closure
         run: |
           ROOT=desktopApp/build/compose/binaries/main
-          find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit | grep -q .
-          find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q .
-          find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q .
-          find "$ROOT/app" -name libfuoevolve_now_playing_bridge.dylib -print -quit | grep -q .
-          find "$ROOT/app" -path '*/Contents/runtime/Contents/Home/bin/java' -print -quit | grep -q .
+          find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit | grep -q . || { echo "DMG was not produced" >&2; exit 1; }
+          find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q . || { echo "PKG was not produced" >&2; exit 1; }
+          find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q . || { echo "Bundled libmpv dylib is missing" >&2; exit 1; }
+          find "$ROOT/app" -name libfuoevolve_now_playing_bridge.dylib -print -quit | grep -q . || { echo "Now Playing bridge is missing" >&2; exit 1; }
+          RUNTIME_RELEASE="$(find "$ROOT/app" -path '*/Contents/runtime/Contents/Home/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$ROOT/app" -maxdepth 6 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_HOME="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_HOME/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
           while IFS= read -r dylib; do
             if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
               echo "Packaged dylib still references Homebrew: $dylib" >&2
@@ -294,7 +308,15 @@ jobs:
           fi
           APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
           test -x "$LAUNCHER"
-          test -x "$APP_IMAGE/lib/runtime/bin/java"
+          RUNTIME_RELEASE="$(find "$APP_IMAGE" -path '*/runtime/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$APP_IMAGE" -maxdepth 5 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
           TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
           test -n "$TRAY_BRIDGE"
           if [[ -n "$(find "$APP_IMAGE" -name 'libmpv.so*' -print -quit)" ]]; then
@@ -411,7 +433,15 @@ jobs:
           fi
           APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
           test -x "$LAUNCHER"
-          test -x "$APP_IMAGE/lib/runtime/bin/java"
+          RUNTIME_RELEASE="$(find "$APP_IMAGE" -path '*/runtime/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$APP_IMAGE" -maxdepth 5 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
           VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
           echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
