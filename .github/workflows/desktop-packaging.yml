@@ -119,15 +119,21 @@ jobs:
           if (-not (Test-Path (Join-Path $runtimeRoot "lib\modules"))) { throw "Bundled JVM runtime modules image is missing" }
           if (-not (Select-String -Path $runtimeRelease.FullName -Pattern '^JAVA_VERSION="21\.' -Quiet)) { throw "Bundled JVM runtime is not Java 21" }
 
-      - name: Upload Windows installers
+      - name: Upload Windows MSI
         uses: actions/upload-artifact@v4
         with:
-          name: fuoevolve-windows-x64
+          name: fuoevolve-windows-x64-msi
           retention-days: 14
           if-no-files-found: error
-          path: |
-            desktopApp/build/compose/binaries/main/msi/*.msi
-            desktopApp/build/compose/binaries/main/exe/*.exe
+          path: desktopApp/build/compose/binaries/main/msi/*.msi
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-windows-x64-exe
+          retention-days: 14
+          if-no-files-found: error
+          path: desktopApp/build/compose/binaries/main/exe/*.exe
 
   macos:
     name: Package macOS ${{ matrix.arch }} DMG and PKG
@@ -229,15 +235,21 @@ jobs:
             fi
           done < <(find "$ROOT/app" -name '*.dylib' -type f)
 
-      - name: Upload macOS installers
+      - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}
+          name: fuoevolve-macos-${{ matrix.arch }}-dmg
           retention-days: 14
           if-no-files-found: error
-          path: |
-            desktopApp/build/compose/binaries/main/dmg/*.dmg
-            desktopApp/build/compose/binaries/main/pkg/*.pkg
+          path: desktopApp/build/compose/binaries/main/dmg/*.dmg
+
+      - name: Upload macOS PKG
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-macos-${{ matrix.arch }}-pkg
+          retention-days: 14
+          if-no-files-found: error
+          path: desktopApp/build/compose/binaries/main/pkg/*.pkg
 
   linux-system:
     name: Package Linux DEB RPM and Arch
@@ -352,18 +364,29 @@ jobs:
           grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
           tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
 
-      - name: Upload Linux distro packages
+      - name: Upload Linux DEB
         uses: actions/upload-artifact@v4
         with:
-          name: fuoevolve-linux-system-x64
+          name: fuoevolve-linux-x64-deb
           retention-days: 14
           if-no-files-found: error
-          path: |
-            build/desktop-packages/system/*.deb
-            build/desktop-packages/system/*.rpm
-            build/desktop-packages/system/*.pkg.tar.zst
-            build/desktop-packages/system/*-info.txt
-            build/desktop-packages/system/*-requires.txt
+          path: build/desktop-packages/system/*.deb
+
+      - name: Upload Linux RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-linux-x64-rpm
+          retention-days: 14
+          if-no-files-found: error
+          path: build/desktop-packages/system/*.rpm
+
+      - name: Upload Arch Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-linux-x64-arch
+          retention-days: 14
+          if-no-files-found: error
+          path: build/desktop-packages/system/*.pkg.tar.zst
 
   linux-appimage:
     name: Package portable Linux AppImage
@@ -464,6 +487,12 @@ jobs:
           name: fuoevolve-linux-appimage-x64
           retention-days: 14
           if-no-files-found: error
-          path: |
-            build/desktop-packages/appimage/*.AppImage
-            build/desktop-packages/appimage/*.sha256
+          path: build/desktop-packages/appimage/*.AppImage
+
+      - name: Upload AppImage checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-linux-appimage-x64-sha256
+          retention-days: 14
+          if-no-files-found: error
+          path: build/desktop-packages/appimage/*.sha256
