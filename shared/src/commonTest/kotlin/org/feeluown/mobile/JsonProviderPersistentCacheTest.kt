@@ -37,6 +37,25 @@ class JsonProviderPersistentCacheTest {
 
         assertEquals(entry, JsonProviderPersistentCache(storage).read("key"))
     }
+
+    @Test
+    fun oldestEntriesAreEvictedWhenCapacityIsExceeded() = runTest {
+        val storage = MemoryProviderCacheStorage()
+        val cache = JsonProviderPersistentCache(storage, maxEntries = 2)
+
+        cache.write("oldest", PersistedProviderCacheEntry("one", 100L))
+        cache.write("newest", PersistedProviderCacheEntry("two", 300L))
+        cache.write("middle", PersistedProviderCacheEntry("three", 200L))
+
+        assertNull(cache.read("oldest"))
+        assertEquals("two", cache.read("newest")?.value)
+        assertEquals("three", cache.read("middle")?.value)
+
+        val reopened = JsonProviderPersistentCache(storage, maxEntries = 2)
+        assertNull(reopened.read("oldest"))
+        assertEquals("two", reopened.read("newest")?.value)
+        assertEquals("three", reopened.read("middle")?.value)
+    }
 }
 
 private class MemoryProviderCacheStorage(
