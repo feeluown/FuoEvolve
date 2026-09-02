@@ -24,18 +24,25 @@ if [[ ! -f "$SOURCE_LIB" ]]; then
   exit 1
 fi
 
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+WORKING_LIB="$WORK_DIR/libmpv.dylib"
+cp -L "$SOURCE_LIB" "$WORKING_LIB"
+
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
-cp -L "$SOURCE_LIB" "$OUTPUT_DIR/libmpv.dylib"
 
-# Rewrite non-system dependencies to @loader_path and copy the full dylib closure next to libmpv.
+# dylibbundler clears its dependency output directory before copying dependencies. Keep the root
+# libmpv dylib in a separate working directory while it is rewritten, then move it next to the
+# collected dylibs once the dependency closure is complete.
 dylibbundler \
   -od \
   -b \
-  -x "$OUTPUT_DIR/libmpv.dylib" \
+  -x "$WORKING_LIB" \
   -d "$OUTPUT_DIR" \
   -p "@loader_path/"
-install_name_tool -id "@loader_path/libmpv.dylib" "$OUTPUT_DIR/libmpv.dylib"
+install_name_tool -id "@loader_path/libmpv.dylib" "$WORKING_LIB"
+mv "$WORKING_LIB" "$OUTPUT_DIR/libmpv.dylib"
 
 # A relocatable bundle must not retain references to the Homebrew prefix/Cellar.
 while IFS= read -r dylib; do
