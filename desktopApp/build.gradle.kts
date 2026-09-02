@@ -11,6 +11,7 @@ kotlin {
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
 val isMacHost = hostOs.contains("mac") || hostOs.contains("darwin")
+val isLinuxHost = hostOs.contains("linux")
 
 val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
     group = "build"
@@ -28,10 +29,19 @@ val buildMacNowPlayingBridge by tasks.registering(Exec::class) {
     commandLine("cargo", "build", "--release")
 }
 
-if (isWindowsHost || isMacHost) {
+val buildLinuxTrayBridge by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the Rust Linux StatusNotifier tray bridge used by the desktop runtime."
+    onlyIf { isLinuxHost }
+    workingDir(layout.projectDirectory.dir("native/linux-tray"))
+    commandLine("cargo", "build", "--release")
+}
+
+if (isWindowsHost || isMacHost || isLinuxHost) {
     tasks.matching { it.name == "run" }.configureEach {
         if (isWindowsHost) dependsOn(buildWindowsSmtcBridge)
         if (isMacHost) dependsOn(buildMacNowPlayingBridge)
+        if (isLinuxHost) dependsOn(buildLinuxTrayBridge)
     }
 }
 
