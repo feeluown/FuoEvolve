@@ -170,6 +170,11 @@ val nativePackageTaskNames = setOf(
 tasks.matching { it.name in nativePackageTaskNames }.configureEach {
     dependsOn(prepareDesktopPackageResources)
 }
+// Compose's app resources task consumes appResourcesRootDir. Make that relationship explicit
+// so Gradle 9 task validation sees the staged native resources as a declared dependency.
+tasks.matching { it.name == "prepareAppResources" }.configureEach {
+    dependsOn(prepareDesktopPackageResources)
+}
 
 tasks.register("printDesktopPackageVersion") {
     group = "distribution"
