@@ -98,6 +98,7 @@ jobs:
             "-Dorg.gradle.java.installations.paths=$env:FUO_JDK17,$env:JAVA_HOME" `
             --no-configuration-cache `
             --warning-mode all `
+            :desktopApp:createDistributable `
             :desktopApp:packageMsi `
             :desktopApp:packageExe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -195,6 +196,7 @@ jobs:
             --warning-mode all \
             -Pfuoevolve.packageProfile=bundled \
             -Pfuoevolve.packageLibmpvDir="${{ github.workspace }}/build/desktop-native/macos/mpv" \
+            :desktopApp:createDistributable \
             :desktopApp:packageDmg \
             :desktopApp:packagePkg
 
@@ -205,7 +207,7 @@ jobs:
           find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q .
           find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q .
           find "$ROOT/app" -name libfuoevolve_now_playing_bridge.dylib -print -quit | grep -q .
-          find "$ROOT/app" -path '*/runtime/bin/java' -print -quit | grep -q .
+          find "$ROOT/app" -path '*/Contents/runtime/Contents/Home/bin/java' -print -quit | grep -q .
           while IFS= read -r dylib; do
             if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
               echo "Packaged dylib still references Homebrew: $dylib" >&2
@@ -292,7 +294,7 @@ jobs:
           fi
           APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
           test -x "$LAUNCHER"
-          test -x "$APP_IMAGE/runtime/bin/java"
+          test -x "$APP_IMAGE/lib/runtime/bin/java"
           TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
           test -n "$TRAY_BRIDGE"
           if [[ -n "$(find "$APP_IMAGE" -name 'libmpv.so*' -print -quit)" ]]; then
@@ -409,7 +411,7 @@ jobs:
           fi
           APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
           test -x "$LAUNCHER"
-          test -x "$APP_IMAGE/runtime/bin/java"
+          test -x "$APP_IMAGE/lib/runtime/bin/java"
           VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
           echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
