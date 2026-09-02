@@ -36,6 +36,23 @@ val packageResourceOs = when {
     else -> "common"
 }
 
+val defaultPackageProfile = if (isLinuxHost) "system" else "bundled"
+val desktopPackageProfile = providers.gradleProperty("fuoevolve.packageProfile")
+    .orElse(defaultPackageProfile)
+    .map { value -> value.lowercase() }
+    .get()
+if (desktopPackageProfile !in setOf("bundled", "system")) {
+    throw GradleException(
+        "Unsupported desktop package profile '$desktopPackageProfile'. Use bundled or system.",
+    )
+}
+if (!isLinuxHost && desktopPackageProfile != "bundled") {
+    throw GradleException(
+        "Windows and macOS packages must use the bundled native dependency profile.",
+    )
+}
+val bundlesLibMpv = desktopPackageProfile == "bundled"
+
 val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the Rust Windows SMTC bridge used by the desktop runtime."
@@ -81,13 +98,15 @@ val expectedLibMpvNames = when {
 
 val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     group = "distribution"
-    description = "Stage relocatable libmpv and platform bridges for native desktop packages."
-    inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
-    into(packagedResourcesRoot)
-
-    from(packageLibMpvDir) {
-        into("$packagedNativeRoot/mpv")
+    description = "Stage the platform bridge and optional bundled libmpv runtime for desktop packages."
+    inputs.property("packageProfile", desktopPackageProfile)
+    if (bundlesLibMpv) {
+        inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
+        from(packageLibMpvDir) {
+            into("$packagedNativeRoot/mpv")
+        }
     }
+    into(packagedResourcesRoot)
 
     when {
         isWindowsHost -> {
@@ -113,9 +132,10 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     }
 
     doFirst {
+        if (!bundlesLibMpv) return@doFirst
         val source = packageLibMpvDir.orNull
             ?: throw GradleException(
-                "Native desktop packaging requires FUOEVOLVE_PACKAGE_LIBMPV_DIR " +
+                "Bundled desktop packaging requires FUOEVOLVE_PACKAGE_LIBMPV_DIR " +
                     "(or -Pfuoevolve.packageLibmpvDir) pointing to a relocatable libmpv runtime bundle.",
             )
         if (!source.isDirectory) {
@@ -139,13 +159,25 @@ val nativePackageTaskNames = setOf(
     "packageReleaseDistributionForCurrentOS",
     "packageDmg",
     "packageReleaseDmg",
+    "packagePkg",
+    "packageReleasePkg",
     "packageMsi",
     "packageReleaseMsi",
-    "packageDeb",
-    "packageReleaseDeb",
+    "packageExe",
+    "packageReleaseExe",
 )
 tasks.matching { it.name in nativePackageTaskNames }.configureEach {
     dependsOn(prepareDesktopPackageResources)
+}
+
+tasks.register("printDesktopPackageVersion") {
+    group = "distribution"
+    doLast { println(desktopPackageVersion) }
+}
+
+tasks.register("printDesktopPackageProfile") {
+    group = "distribution"
+    doLast { println(desktopPackageProfile) }
 }
 
 dependencies {
@@ -173,7 +205,13 @@ compose.desktop {
         ).joinToString(File.pathSeparator)
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            when {
+                isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+                isMacHost -> targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
+                // Linux distro packages are produced from createDistributable by dedicated scripts
+                // so their dependency metadata can use each distribution's package manager.
+                isLinuxHost -> Unit
+            }
             packageName = "FuoEvolve"
             packageVersion = desktopPackageVersion
             description = "A cross-platform multi-source music player based on FeelUOwn"
