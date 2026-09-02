@@ -20,9 +20,17 @@ if [[ ! -f "$LOCK_FILE" ]]; then
   exit 1
 fi
 
-PINNED_MPV_VERSION="$(awk -F= '$1 == "mpv.version" { print $2; exit }' "$LOCK_FILE")"
+case "$(uname -m)" in
+  arm64) MPV_VERSION_KEY="macos.arm64.mpv.version" ;;
+  x86_64) MPV_VERSION_KEY="macos.x64.mpv.version" ;;
+  *)
+    echo "Unsupported macOS packaging architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+PINNED_MPV_VERSION="$(awk -F= -v key="$MPV_VERSION_KEY" '$1 == key { print $2; exit }' "$LOCK_FILE")"
 if [[ -z "$PINNED_MPV_VERSION" ]]; then
-  echo "mpv.version is missing from $LOCK_FILE" >&2
+  echo "$MPV_VERSION_KEY is missing from $LOCK_FILE" >&2
   exit 1
 fi
 
@@ -31,8 +39,8 @@ brew list dylibbundler >/dev/null 2>&1 || brew install dylibbundler
 
 INSTALLED_MPV_VERSION="$(brew list --versions mpv | awk '{ print $2; exit }')"
 if [[ "$INSTALLED_MPV_VERSION" != "$PINNED_MPV_VERSION" ]]; then
-  echo "Homebrew resolved mpv $INSTALLED_MPV_VERSION but packaging is pinned to $PINNED_MPV_VERSION in $LOCK_FILE" >&2
-  echo "Update the packaging lock deliberately before shipping a different macOS libmpv runtime." >&2
+  echo "Homebrew resolved mpv $INSTALLED_MPV_VERSION for $(uname -m) but packaging is pinned to $PINNED_MPV_VERSION in $LOCK_FILE" >&2
+  echo "Update the architecture-specific packaging lock deliberately before shipping a different macOS libmpv runtime." >&2
   exit 1
 fi
 
@@ -74,6 +82,7 @@ done < <(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
 
 {
   echo "Source: Homebrew mpv $INSTALLED_MPV_VERSION"
+  echo "Pinned version key: $MPV_VERSION_KEY"
   echo "Pinned version: $PINNED_MPV_VERSION"
   echo "Homebrew prefix: $MPV_PREFIX"
   echo "Purpose: bundled relocatable libmpv runtime for the FuoEvolve macOS desktop package"
