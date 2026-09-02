@@ -75,7 +75,7 @@ internal object DesktopResourceCache : ResourceCacheStorage {
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
                 Files.setLastModifiedTime(target, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis()))
                 trimImagesLocked()
-                target.takeIf(Files::isRegularFile)
+                target.takeIf { Files.isRegularFile(it) }
             }
         } catch (_: Throwable) {
             null
@@ -91,7 +91,7 @@ internal object DesktopResourceCache : ResourceCacheStorage {
             return
         }
         val files = Files.list(imageDirectory).use { stream ->
-            stream.filter(Files::isRegularFile).toList()
+            stream.filter { Files.isRegularFile(it) }.toList()
         }
         var total = files.sumOf { runCatching { Files.size(it) }.getOrDefault(0L) }
         files.sortedBy { runCatching { Files.getLastModifiedTime(it).toMillis() }.getOrDefault(0L) }
@@ -105,7 +105,7 @@ internal object DesktopResourceCache : ResourceCacheStorage {
     private fun directorySize(directory: Path): Long {
         if (!Files.isDirectory(directory)) return 0L
         return Files.walk(directory).use { stream ->
-            stream.filter(Files::isRegularFile)
+            stream.filter { Files.isRegularFile(it) }
                 .mapToLong { runCatching { Files.size(it) }.getOrDefault(0L) }
                 .sum()
         }
