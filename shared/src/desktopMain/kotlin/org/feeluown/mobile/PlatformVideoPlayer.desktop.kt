@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -66,9 +67,12 @@ actual fun PlatformVideoPlayer(
     LaunchedEffect(desktopController, payload) {
         desktopController?.setPayload(payload)
     }
-    val frame by desktopController?.frame?.collectAsState() ?: remember {
-        MutableStateFlow<ImageBitmap?>(null)
-    }.collectAsState()
+    val frame = if (desktopController != null) {
+        val value by desktopController.frame.collectAsState()
+        value
+    } else {
+        null
+    }
 
     Box(
         modifier = modifier.onSizeChanged { size ->
@@ -80,7 +84,7 @@ actual fun PlatformVideoPlayer(
             Image(
                 bitmap = bitmap,
                 contentDescription = payload?.video?.title,
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
         }
