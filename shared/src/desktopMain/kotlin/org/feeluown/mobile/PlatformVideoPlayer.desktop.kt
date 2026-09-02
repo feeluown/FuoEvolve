@@ -1,25 +1,59 @@
 package org.feeluown.mobile
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-private class DesktopUnsupportedVideoController : PlatformVideoController {
-    private val mutableState = MutableStateFlow(PlatformVideoPlaybackState())
-    override val state: StateFlow<PlatformVideoPlaybackState> = mutableState.asStateFlow()
+/** Desktop-only bridge implemented by the host module that owns libmpv/JNA. */
+interface DesktopPlatformVideoController : PlatformVideoController, AutoCloseable {
+    val frame: StateFlow<ImageBitmap?>
+    fun setPayload(payload: VideoPlaybackPayload?)
+    fun setViewportSize(width: Int, height: Int)
+}
 
+private var desktopPlatformVideoControllerFactory: () -> DesktopPlatformVideoController = {
+    UnsupportedDesktopPlatformVideoController()
+}
+
+fun installDesktopPlatformVideoControllerFactory(factory: () -> DesktopPlatformVideoController) {
+    desktopPlatformVideoControllerFactory = factory
+}
+
+private class UnsupportedDesktopPlatformVideoController : DesktopPlatformVideoController {
+    private val mutableState = MutableStateFlow(
+        PlatformVideoPlaybackState(errorMessage = "桌面视频播放组件未初始化"),
+    )
+    override val state: StateFlow<PlatformVideoPlaybackState> = mutableState.asStateFlow()
+    private val mutableFrame = MutableStateFlow<ImageBitmap?>(null)
+    override val frame: StateFlow<ImageBitmap?> = mutableFrame.asStateFlow()
     override fun play() = Unit
     override fun pause() = Unit
     override fun seekTo(positionMs: Long) = Unit
+    override fun setPayload(payload: VideoPlaybackPayload?) = Unit
+    override fun setViewportSize(width: Int, height: Int) = Unit
+    override fun close() = Unit
 }
 
 @Composable
-actual fun rememberPlatformVideoController(): PlatformVideoController = remember {
-    DesktopUnsupportedVideoController()
+actual fun rememberPlatformVideoController(): PlatformVideoController {
+    val controller = remember { desktopPlatformVideoControllerFactory() }
+    DisposableEffect(controller) {
+        onDispose(controller::close)
+    }
+    return controller
 }
 
 @Composable
@@ -28,7 +62,29 @@ actual fun PlatformVideoPlayer(
     controller: PlatformVideoController,
     modifier: Modifier,
 ) {
-    Box(modifier)
+    val desktopController = controller as? DesktopPlatformVideoController
+    LaunchedEffect(desktopController, payload) {
+        desktopController?.setPayload(payload)
+    }
+    val frame by desktopController?.frame?.collectAsState() ?: remember {
+        MutableStateFlow<ImageBitmap?>(null)
+    }.collectAsState()
+
+    Box(
+        modifier = modifier.onSizeChanged { size ->
+            desktopController?.setViewportSize(size.width, size.height)
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        frame?.let { bitmap ->
+            Image(
+                bitmap = bitmap,
+                contentDescription = payload?.video?.title,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+    }
 }
 
 @Composable
