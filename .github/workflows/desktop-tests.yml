@@ -92,6 +92,7 @@ jobs:
           :desktopApp:compileKotlin
           :desktopApp:test
           :shared:desktopTest
+          :persistence:listening:desktopTest
 
   windows-smtc:
     name: Compile Windows desktop, SMTC and WebView login helper
@@ -146,6 +147,7 @@ jobs:
           :desktopApp:compileKotlin
           :desktopApp:test
           :shared:desktopTest
+          :persistence:listening:desktopTest
 
   macos-now-playing:
     name: Compile macOS desktop, Now Playing and WebView login helper
@@ -196,3 +198,4 @@ jobs:
           :desktopApp:compileKotlin
           :desktopApp:test
           :shared:desktopTest
+          :persistence:listening:desktopTest
