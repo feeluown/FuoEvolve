@@ -4,6 +4,7 @@ name: Desktop Packaging
   pull_request:
     paths:
       - "desktopApp/build.gradle.kts"
+      - "desktopApp/compose-desktop.pro"
       - "desktopApp/packaging/**"
       - "desktopApp/native/**"
       - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
@@ -16,6 +17,7 @@ name: Desktop Packaging
       - "[0-9]*"
     paths:
       - "desktopApp/build.gradle.kts"
+      - "desktopApp/compose-desktop.pro"
       - "desktopApp/packaging/**"
       - "desktopApp/native/**"
       - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
@@ -110,7 +112,7 @@ jobs:
           ./desktopApp/packaging/windows/prepare-libmpv.ps1
           -OutputDir "${{ github.workspace }}\build\desktop-native\windows\mpv"
 
-      - name: Build self-contained Windows installers
+      - name: Build minified self-contained Windows installers
         shell: pwsh
         env:
           FUOEVOLVE_PACKAGE_PROFILE: bundled
@@ -120,15 +122,15 @@ jobs:
             "-Dorg.gradle.java.installations.paths=$env:FUO_JDK17,$env:JAVA_HOME" `
             --no-configuration-cache `
             --warning-mode all `
-            :desktopApp:createDistributable `
-            :desktopApp:packageMsi `
-            :desktopApp:packageExe
+            :desktopApp:createReleaseDistributable `
+            :desktopApp:packageReleaseMsi `
+            :desktopApp:packageReleaseExe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify Windows package closure
         shell: pwsh
         run: |
-          $root = "desktopApp\build\compose\binaries\main"
+          $root = "desktopApp\build\compose\binaries\main-release"
           if (-not (Get-ChildItem "$root\msi" -Filter *.msi -ErrorAction SilentlyContinue)) { throw "MSI was not produced" }
           if (-not (Get-ChildItem "$root\exe" -Filter *.exe -ErrorAction SilentlyContinue)) { throw "EXE installer was not produced" }
           if (-not (Get-ChildItem "$root\app" -Recurse -File -Include mpv-2.dll,libmpv-2.dll,mpv.dll -ErrorAction SilentlyContinue)) { throw "Bundled libmpv DLL is missing" }
@@ -141,11 +143,17 @@ jobs:
           if (-not (Test-Path (Join-Path $runtimeRoot "lib\modules"))) { throw "Bundled JVM runtime modules image is missing" }
           if (-not (Select-String -Path $runtimeRelease.FullName -Pattern '^JAVA_VERSION="21\.' -Quiet)) { throw "Bundled JVM runtime is not Java 21" }
 
+      - name: Report Windows package sizes
+        shell: pwsh
+        run: |
+          Get-ChildItem "desktopApp\build\compose\binaries\main-release\msi\*.msi", "desktopApp\build\compose\binaries\main-release\exe\*.exe" |
+            ForEach-Object { Write-Host ("{0}: {1:N2} MiB" -f $_.Name, ($_.Length / 1MB)) }
+
       - name: Upload Windows MSI
         uses: actions/upload-artifact@v7
         with:
           name: fuoevolve-windows-x64.msi
-          path: desktopApp/build/compose/binaries/main/msi/*.msi
+          path: desktopApp/build/compose/binaries/main-release/msi/*.msi
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -154,7 +162,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuoevolve-windows-x64.exe
-          path: desktopApp/build/compose/binaries/main/exe/*.exe
+          path: desktopApp/build/compose/binaries/main-release/exe/*.exe
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -257,7 +265,7 @@ jobs:
             fi
           done < <(find "$LIBMPV_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
 
-      - name: Build self-contained macOS installers
+      - name: Build minified self-contained macOS installers
         run: |
           ./gradlew \
             "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
@@ -265,13 +273,13 @@ jobs:
             --warning-mode all \
             -Pfuoevolve.packageProfile=bundled \
             -Pfuoevolve.packageLibmpvDir="${{ github.workspace }}/build/desktop-native/macos/mpv" \
-            :desktopApp:createDistributable \
-            :desktopApp:packageDmg \
-            :desktopApp:packagePkg
+            :desktopApp:createReleaseDistributable \
+            :desktopApp:packageReleaseDmg \
+            :desktopApp:packageReleasePkg
 
       - name: Verify macOS package closure
         run: |
-          ROOT=desktopApp/build/compose/binaries/main
+          ROOT=desktopApp/build/compose/binaries/main-release
           find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit | grep -q . || { echo "DMG was not produced" >&2; exit 1; }
           find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q . || { echo "PKG was not produced" >&2; exit 1; }
           find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q . || { echo "Bundled libmpv dylib is missing" >&2; exit 1; }
@@ -292,11 +300,16 @@ jobs:
             fi
           done < <(find "$ROOT/app" -name '*.dylib' -type f)
 
+      - name: Report macOS package sizes
+        run: |
+          du -h desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          du -h desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v7
         with:
           name: fuoevolve-macos-${{ matrix.arch }}.dmg
-          path: desktopApp/build/compose/binaries/main/dmg/*.dmg
+          path: desktopApp/build/compose/binaries/main-release/dmg/*.dmg
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -305,7 +318,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuoevolve-macos-${{ matrix.arch }}.pkg
-          path: desktopApp/build/compose/binaries/main/pkg/*.pkg
+          path: desktopApp/build/compose/binaries/main-release/pkg/*.pkg
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -375,7 +388,7 @@ jobs:
           jpackage --version
           docker --version
 
-      - name: Create Linux app image with system native dependency profile
+      - name: Create minified Linux app image with system native dependency profile
         id: app
         run: |
           ./gradlew \
@@ -383,8 +396,8 @@ jobs:
             --no-configuration-cache \
             --warning-mode all \
             -Pfuoevolve.packageProfile=system \
-            :desktopApp:createDistributable
-          APP_ROOT="desktopApp/build/compose/binaries/main/app"
+            :desktopApp:createReleaseDistributable
+          APP_ROOT="desktopApp/build/compose/binaries/main-release/app"
           LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
           if [[ -z "$LAUNCHER" ]]; then
             echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
@@ -436,6 +449,9 @@ jobs:
           rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
           grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
           tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
+
+      - name: Report Linux package sizes
+        run: du -h build/desktop-packages/system/*.deb build/desktop-packages/system/*.rpm build/desktop-packages/system/*.pkg.tar.zst
 
       - name: Upload Linux DEB
         uses: actions/upload-artifact@v7
@@ -528,7 +544,7 @@ jobs:
           ldconfig -p | grep libmpv
           ldconfig -p | grep libsecret-1
 
-      - name: Create Linux app image
+      - name: Create minified Linux app image
         id: app
         run: |
           ./gradlew \
@@ -536,8 +552,8 @@ jobs:
             --no-configuration-cache \
             --warning-mode all \
             -Pfuoevolve.packageProfile=system \
-            :desktopApp:createDistributable
-          APP_ROOT="desktopApp/build/compose/binaries/main/app"
+            :desktopApp:createReleaseDistributable
+          APP_ROOT="desktopApp/build/compose/binaries/main-release/app"
           LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
           if [[ -z "$LAUNCHER" ]]; then
             echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
@@ -570,6 +586,9 @@ jobs:
           test -n "$APPIMAGE"
           file "$APPIMAGE"
           sha256sum "$APPIMAGE" | tee "$APPIMAGE.sha256"
+
+      - name: Report AppImage size
+        run: du -h build/desktop-packages/appimage/*.AppImage
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7

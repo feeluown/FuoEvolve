@@ -210,6 +210,14 @@ compose.desktop {
             "$appDir/resources/native/bridges",
         ).joinToString(File.pathSeparator)
 
+        buildTypes.release.proguard {
+            // Phase 1 size optimization: remove unused JVM/Compose dependency code while keeping
+            // obfuscation disabled so stack traces and native/reflection boundaries stay readable.
+            optimize.set(true)
+            obfuscate.set(false)
+            configurationFiles.from(project.file("compose-desktop.pro"))
+        }
+
         nativeDistributions {
             // These dependencies are reached reflectively by desktop-only libraries and are not
             // always discovered by jdeps: JNA/credential storage uses sun.misc.Unsafe, while
@@ -219,8 +227,8 @@ compose.desktop {
             when {
                 isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
                 isMacHost -> targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
-                // Linux distro packages are produced from createDistributable by dedicated scripts
-                // so their dependency metadata can use each distribution's package manager.
+                // Linux distro packages are produced from createReleaseDistributable by dedicated
+                // scripts so dependency metadata can use each distribution's package manager.
                 isLinuxHost -> Unit
             }
             packageName = "FuoEvolve"
