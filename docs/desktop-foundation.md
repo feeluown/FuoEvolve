@@ -44,6 +44,8 @@ Desktop CI compiles the real platform adapters rather than relying on cross-plat
 - macOS builds the Rust Now Playing `cdylib` on a real macOS runner, then compiles/tests the macOS Kotlin/JNA desktop graph.
 - Android architecture, unit, coverage and PR compile validation continue to run against desktop changes to prevent dependency leakage or shared regressions.
 
+The system-media integration phase is complete for the three desktop targets; remaining work should extend `PlaybackSession` only when a platform capability genuinely cannot be represented by its current transport/state contract.
+
 ## Follow-up desktop phases
 
 1. Complete provider login integrations that require embedded browser cookie capture or other platform-specific handoff; keep the Linux Wayland requirement when selecting any embedded browser technology.
