@@ -19,7 +19,7 @@ private class DesktopProviderCacheSnapshotStorage(
     private val file: Path,
 ) : ProviderCacheSnapshotStorage {
     override suspend fun readText(): String? = withContext(Dispatchers.IO) {
-        file.takeIf(Files::isRegularFile)?.let { Files.readString(it, StandardCharsets.UTF_8) }
+        file.takeIf { Files.isRegularFile(it) }?.let { Files.readString(it, StandardCharsets.UTF_8) }
     }
 
     override suspend fun writeText(content: String) {
