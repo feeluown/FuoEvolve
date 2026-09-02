@@ -1,4 +1,5 @@
 import java.io.File
+import java.util.zip.ZipFile
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
@@ -20,6 +21,51 @@ fun gitOutput(vararg args: String): String? = runCatching {
     }.standardOutput.asText.get().trim()
     output.takeIf { it.isNotBlank() }
 }.getOrNull()
+
+fun verifyServiceProviderInReleaseImage(
+    appRoot: File,
+    serviceClassName: String,
+    providerClassName: String,
+) {
+    val jars = appRoot.walkTopDown()
+        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
+        .toList()
+    if (jars.isEmpty()) {
+        throw GradleException("No application JARs found in release image: ${appRoot.absolutePath}")
+    }
+
+    val serviceEntryName = "META-INF/services/$serviceClassName"
+    val providerEntryName = providerClassName.replace('.', '/') + ".class"
+    var serviceDeclaresProvider = false
+    var providerClassPresent = false
+
+    jars.forEach { jar ->
+        ZipFile(jar).use { zip ->
+            if (zip.getEntry(providerEntryName) != null) {
+                providerClassPresent = true
+            }
+            zip.getEntry(serviceEntryName)?.let { entry ->
+                val declaresProvider = zip.getInputStream(entry).bufferedReader().use { reader ->
+                    reader.lineSequence()
+                        .map { line -> line.substringBefore('#').trim() }
+                        .any { line -> line == providerClassName }
+                }
+                serviceDeclaresProvider = serviceDeclaresProvider || declaresProvider
+            }
+        }
+    }
+
+    if (!serviceDeclaresProvider) {
+        throw GradleException(
+            "Release image is missing ServiceLoader declaration for $providerClassName in $serviceEntryName",
+        )
+    }
+    if (!providerClassPresent) {
+        throw GradleException(
+            "Release shrink removed ServiceLoader provider class $providerClassName",
+        )
+    }
+}
 
 val desktopPackageVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
     ?.let { tag -> Regex("\\d+\\.\\d+\\.\\d+").find(tag)?.value }
@@ -174,6 +220,19 @@ tasks.matching { it.name in nativePackageTaskNames }.configureEach {
 // so Gradle 9 task validation sees the staged native resources as a declared dependency.
 tasks.matching { it.name == "prepareAppResources" }.configureEach {
     dependsOn(prepareDesktopPackageResources)
+}
+
+// ProGuard cannot infer java.util.ServiceLoader entry points from META-INF/services resources.
+// Verify the final minified image, not just the unshrunk compile classpath, so packaging fails if
+// a provider declaration survives while its implementation class was removed.
+tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
+    doLast {
+        verifyServiceProviderInReleaseImage(
+            appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile,
+            serviceClassName = "io.ktor.serialization.kotlinx.KotlinxSerializationExtensionProvider",
+            providerClassName = "io.ktor.serialization.kotlinx.json.KotlinxSerializationJsonExtensionProvider",
+        )
+    }
 }
 
 tasks.register("printDesktopPackageVersion") {
