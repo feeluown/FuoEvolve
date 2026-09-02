@@ -9,7 +9,7 @@ import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal fun createDesktopPlaybackResumeStore(): PlaybackResumeStore =
+fun createDesktopPlaybackResumeStore(): PlaybackResumeStore =
     DesktopPlaybackResumeStore(DesktopAppDirectories.state().resolve("playback-resume.txt"))
 
 internal fun createDesktopPlaybackQueueStore(
