@@ -54,8 +54,8 @@ find_shared_library() {
   printf '%s' "$result"
 }
 
-LIBMPV="$(find_shared_library 'libmpv\.so' 'libmpv.so.*')"
-LIBSECRET="$(find_shared_library 'libsecret-1\.so\.0' 'libsecret-1.so.0*')"
+LIBMPV="$(find_shared_library 'libmpv[.]so' 'libmpv.so.*')"
+LIBSECRET="$(find_shared_library 'libsecret-1[.]so[.]0' 'libsecret-1.so.0*')"
 if [[ -z "$LIBMPV" || ! -f "$LIBMPV" ]]; then
   echo "A distribution libmpv package must be installed before building the AppImage" >&2
   exit 1
@@ -70,8 +70,10 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 APPDIR="$WORK_DIR/FuoEvolve.AppDir"
 BUNDLED_APP="$APPDIR/usr/lib/fuoevolve"
 NATIVE_LIB_DIR="$BUNDLED_APP/resources/native/mpv"
-mkdir -p "$APPDIR/usr/lib" "$NATIVE_LIB_DIR"
-cp -a "$APP_IMAGE" "$BUNDLED_APP"
+mkdir -p "$NATIVE_LIB_DIR"
+# Copy the contents of the Compose app image into the runtime root. Copying the source directory
+# itself into the already-created BUNDLED_APP directory would add an unintended FuoEvolve/ layer.
+cp -a "$APP_IMAGE/." "$BUNDLED_APP/"
 
 is_base_system_library() {
   local name="$1"
@@ -188,9 +190,18 @@ chmod +x "$OUTPUT_FILE"
 (
   cd "$WORK_DIR"
   "$OUTPUT_FILE" --appimage-extract >/dev/null
-  test -x squashfs-root/usr/lib/fuoevolve/bin/FuoEvolve
-  test -e squashfs-root/usr/lib/fuoevolve/resources/native/mpv/libmpv.so
-  find squashfs-root/usr/lib/fuoevolve/resources/native/mpv -name 'libsecret-1.so.0*' -print -quit | grep -q .
+  test -x squashfs-root/usr/lib/fuoevolve/bin/FuoEvolve || {
+    echo "Packaged AppImage is missing the FuoEvolve launcher at the expected root" >&2
+    exit 1
+  }
+  test -e squashfs-root/usr/lib/fuoevolve/resources/native/mpv/libmpv.so || {
+    echo "Packaged AppImage is missing the bundled libmpv loader alias" >&2
+    exit 1
+  }
+  find squashfs-root/usr/lib/fuoevolve/resources/native/mpv -name 'libsecret-1.so.0*' -print -quit | grep -q . || {
+    echo "Packaged AppImage is missing bundled libsecret" >&2
+    exit 1
+  }
 )
 
 printf 'Built self-contained AppImage: %s\n' "$OUTPUT_FILE"
