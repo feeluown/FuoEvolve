@@ -15,6 +15,7 @@ import androidx.compose.ui.window.rememberWindowState
 import java.awt.Window as AwtWindow
 import javax.swing.SwingUtilities
 import org.feeluown.mobile.DesktopAppHost
+import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.installDesktopLocalMusicRepositoryFactory
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
@@ -22,7 +23,12 @@ import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
 
 fun main() {
-    installDesktopPlaybackEngineFactory { DesktopMpvPlaybackEngine() }
+    installDesktopPlaybackEngineFactory {
+        PersistentDesktopPlaybackEngine(
+            delegate = DesktopMpvPlaybackEngine(),
+            resumeStore = createDesktopPlaybackResumeStore(),
+        )
+    }
     installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
     installDesktopLocalMusicRepositoryFactory { DesktopLocalMusicRepository() }
     installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
