@@ -1,7 +1,7 @@
 # Native dependency inputs used by desktop packaging CI.
 # Keep immutable release URLs and SHA-256 values here so packaging does not silently follow latest assets.
 
-mpv.version=0.41.0
+mpv.version=0.41.0_6
 
 # shinchiro/mpv-winbuild-cmake development archive contains the libmpv DLL + development runtime.
 windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260902/mpv-dev-x86_64-20260902-git-174b638f29.7z
