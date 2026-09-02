@@ -130,8 +130,8 @@ class DesktopExternalActivationSession private constructor(
         }
 
         private fun relayToPrimary(endpointFile: Path, inputs: List<String>) {
-            val payload = inputs.filter(String::isNotBlank).take(MAX_ACTIVATION_INPUTS)
-            if (payload.isEmpty()) return
+            val requested = inputs.filter(String::isNotBlank).take(MAX_ACTIVATION_INPUTS)
+            val payload = requested.ifEmpty { listOf(DESKTOP_ACTIVATION_FOCUS) }
             repeat(RELAY_ATTEMPTS) { attempt ->
                 val endpoint = runCatching {
                     Files.readAllLines(endpointFile, StandardCharsets.UTF_8)
