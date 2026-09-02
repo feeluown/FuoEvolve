@@ -36,6 +36,8 @@ fun DesktopAppHost() {
                 },
                 onOpenProviderWebLogin = container::openProviderWebLogin,
                 onLogoutProvider = container::logoutProvider,
+                onImportLocalPlaylistFile = container::importLocalPlaylistFile,
+                onExportLocalPlaylistFile = container::exportLocalPlaylistFile,
                 appVersionInfo = "Desktop development build",
             ),
         )
@@ -65,7 +67,7 @@ private class DesktopAppContainer {
         providerPlaybackSource = providerGraph.playbackSource,
     )
     private val localRepository: LocalMusicRepository = DesktopUnsupportedLocalMusicRepository
-    private val localPlaylistRepository: LocalPlaylistRepository = NoOpLocalPlaylistRepository
+    private val localPlaylistRepository: LocalPlaylistRepository = createDesktopLocalPlaylistRepository()
     private val desktopDownloadRepository = DesktopDownloadRepository(
         resolvePayload = { track -> playbackProvider.resolve(track) },
     )
@@ -80,7 +82,8 @@ private class DesktopAppContainer {
     private val navigator = AppNavigator()
     private val trackNavigationPort: TrackNavigationPort = createTrackNavigationPort(navigator)
     private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
-    private val playbackQueueStore: PlaybackQueueStore = NoOpPlaybackQueueStore
+    private val playbackResumeStore: PlaybackResumeStore = createDesktopPlaybackResumeStore()
+    private val playbackQueueStore = createDesktopPlaybackQueueStore(playbackResumeStore)
     private val listeningHistorySink: ListeningHistorySink = NoOpListeningHistorySink
     private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository
     private val debugLogFeatureController by lazy {
@@ -407,10 +410,38 @@ private class DesktopAppContainer {
         providerAuthFeatureController.logout(provider.providerId)
     }
 
+    fun importLocalPlaylistFile() {
+        val file = openDesktopTextFile(
+            dialogTitle = "导入本地歌单",
+            filterDescription = "FeelUOwn 歌单 (*.fuo)",
+            extensions = listOf("fuo"),
+            onFeedback = appViewModel::showFeedback,
+        ) ?: return
+        if (file.content.isBlank()) {
+            appViewModel.showFeedback("无法读取本地歌单文件")
+            return
+        }
+        runCatching { localPlaylistFeatureController.prepareImport(file.fileName, file.content) }
+            .onFailure { appViewModel.showFeedback(it.message ?: "无法解析本地歌单文件") }
+    }
+
+    fun exportLocalPlaylistFile(fileName: String, content: String) {
+        val saved = saveDesktopTextFile(
+            dialogTitle = "导出本地歌单",
+            suggestedFileName = fileName,
+            filterDescription = "FeelUOwn 歌单 (*.fuo)",
+            extensions = listOf("fuo"),
+            content = content,
+            onFeedback = appViewModel::showFeedback,
+        )
+        if (saved) appViewModel.showFeedback("本地歌单已导出")
+    }
+
     fun close() {
         if (playbackSessionIntegration.isInitialized()) {
             playbackSessionIntegration.value.close()
         }
+        playbackQueueStore.flushLatest()
         webLoginLauncher.close()
         scope.cancel()
         desktopDownloadRepository.close()
