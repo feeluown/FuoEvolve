@@ -28,6 +28,11 @@
 -keep interface org.freedesktop.dbus.** { *; }
 -dontwarn org.freedesktop.dbus.**
 
+# SQLDelight's desktop SQLite backend reaches the Xerial JDBC driver through DriverManager /
+# ServiceLoader, which ProGuard cannot infer from META-INF/services/java.sql.Driver.
+-keep class org.sqlite.** { *; }
+-dontwarn org.sqlite.**
+
 # Ktor discovers kotlinx.serialization format integrations through java.util.ServiceLoader.
 # ProGuard keeps META-INF/services resources but cannot infer that their implementation
 # classes are runtime entry points, so preserve the JSON provider explicitly.
