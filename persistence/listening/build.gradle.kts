@@ -16,6 +16,12 @@ kotlin {
         }
     }
 
+    jvm("desktop") {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+
     iosArm64()
     iosSimulatorArm64()
 
@@ -27,6 +33,9 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.sqldelight.android.driver)
+        }
+        desktopMain.dependencies {
+            implementation(libs.sqldelight.sqlite.driver)
         }
         iosMain.dependencies {
             implementation(libs.sqldelight.native.driver)
