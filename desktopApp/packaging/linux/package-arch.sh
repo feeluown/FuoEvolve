@@ -74,8 +74,20 @@ EOF
 
 # makepkg intentionally runs as a non-root user; the package itself retains distro-managed
 # dependencies on mpv/libsecret while the Compose app image keeps its bundled JBR runtime.
-docker run --rm -v "$WORK_DIR:/work" archlinux:latest bash -lc '
+# The bind-mounted work directory must be returned to the host runner's numeric ownership before
+# Docker exits, otherwise chown-ing it to the container-only builder user makes host cleanup fail.
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+docker run --rm \
+  -e HOST_UID="$HOST_UID" \
+  -e HOST_GID="$HOST_GID" \
+  -v "$WORK_DIR:/work" \
+  archlinux:latest bash -lc '
   set -e
+  restore_host_ownership() {
+    chown -R "$HOST_UID:$HOST_GID" /work || true
+  }
+  trap restore_host_ownership EXIT
   pacman -Syu --noconfirm --needed base-devel namcap
   useradd -m builder
   chown -R builder:builder /work
