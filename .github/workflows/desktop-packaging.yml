@@ -283,8 +283,15 @@ jobs:
             --warning-mode all \
             -Pfuoevolve.packageProfile=system \
             :desktopApp:createDistributable
-          APP_IMAGE="desktopApp/build/compose/binaries/main/app"
-          test -x "$APP_IMAGE/bin/FuoEvolve"
+          APP_ROOT="desktopApp/build/compose/binaries/main/app"
+          LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
+          if [[ -z "$LAUNCHER" ]]; then
+            echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
+            find "$APP_ROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
+          test -x "$LAUNCHER"
           test -x "$APP_IMAGE/runtime/bin/java"
           TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
           test -n "$TRAY_BRIDGE"
@@ -393,8 +400,15 @@ jobs:
             --warning-mode all \
             -Pfuoevolve.packageProfile=system \
             :desktopApp:createDistributable
-          APP_IMAGE="desktopApp/build/compose/binaries/main/app"
-          test -x "$APP_IMAGE/bin/FuoEvolve"
+          APP_ROOT="desktopApp/build/compose/binaries/main/app"
+          LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
+          if [[ -z "$LAUNCHER" ]]; then
+            echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
+            find "$APP_ROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
+          test -x "$LAUNCHER"
           test -x "$APP_IMAGE/runtime/bin/java"
           VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
           echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
