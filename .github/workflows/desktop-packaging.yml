@@ -120,20 +120,22 @@ jobs:
           if (-not (Select-String -Path $runtimeRelease.FullName -Pattern '^JAVA_VERSION="21\.' -Quiet)) { throw "Bundled JVM runtime is not Java 21" }
 
       - name: Upload Windows MSI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-windows-x64-msi
+          name: fuoevolve-windows-x64.msi
+          path: desktopApp/build/compose/binaries/main/msi/*.msi
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: desktopApp/build/compose/binaries/main/msi/*.msi
 
       - name: Upload Windows EXE
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-windows-x64-exe
+          name: fuoevolve-windows-x64.exe
+          path: desktopApp/build/compose/binaries/main/exe/*.exe
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: desktopApp/build/compose/binaries/main/exe/*.exe
 
   macos:
     name: Package macOS ${{ matrix.arch }} DMG and PKG
@@ -236,20 +238,22 @@ jobs:
           done < <(find "$ROOT/app" -name '*.dylib' -type f)
 
       - name: Upload macOS DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}-dmg
+          name: fuoevolve-macos-${{ matrix.arch }}.dmg
+          path: desktopApp/build/compose/binaries/main/dmg/*.dmg
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: desktopApp/build/compose/binaries/main/dmg/*.dmg
 
       - name: Upload macOS PKG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}-pkg
+          name: fuoevolve-macos-${{ matrix.arch }}.pkg
+          path: desktopApp/build/compose/binaries/main/pkg/*.pkg
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: desktopApp/build/compose/binaries/main/pkg/*.pkg
 
   linux-system:
     name: Package Linux DEB RPM and Arch
@@ -365,28 +369,31 @@ jobs:
           tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
 
       - name: Upload Linux DEB
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-linux-x64-deb
+          name: fuoevolve-linux-x64.deb
+          path: build/desktop-packages/system/*.deb
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: build/desktop-packages/system/*.deb
 
       - name: Upload Linux RPM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-linux-x64-rpm
+          name: fuoevolve-linux-x64.rpm
+          path: build/desktop-packages/system/*.rpm
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: build/desktop-packages/system/*.rpm
 
       - name: Upload Arch Linux package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-linux-x64-arch
+          name: fuoevolve-linux-x64.pkg.tar.zst
+          path: build/desktop-packages/system/*.pkg.tar.zst
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: build/desktop-packages/system/*.pkg.tar.zst
 
   linux-appimage:
     name: Package portable Linux AppImage
@@ -482,17 +489,19 @@ jobs:
           sha256sum "$APPIMAGE" | tee "$APPIMAGE.sha256"
 
       - name: Upload AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-linux-appimage-x64
+          name: fuoevolve-linux-x64.AppImage
+          path: build/desktop-packages/appimage/*.AppImage
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: build/desktop-packages/appimage/*.AppImage
 
       - name: Upload AppImage checksum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-linux-appimage-x64-sha256
+          name: fuoevolve-linux-x64.AppImage.sha256
+          path: build/desktop-packages/appimage/*.sha256
+          archive: false
           retention-days: 14
           if-no-files-found: error
-          path: build/desktop-packages/appimage/*.sha256
