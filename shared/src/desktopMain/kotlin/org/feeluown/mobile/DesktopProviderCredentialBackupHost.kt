@@ -13,22 +13,22 @@ import javax.swing.filechooser.FileNameExtensionFilter
 
 @Composable
 internal fun DesktopProviderCredentialBackupHost(
-    backup: DesktopProviderCredentialBackup,
+    backup: ProviderCredentialBackup,
     availableProviders: () -> List<ProviderInfo>,
     refreshProviders: (List<ProviderInfo>) -> Unit,
     onFeedback: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    var exportTarget by remember { mutableStateOf<DesktopProviderCredentialBackupTarget?>(null) }
+    var exportTarget by remember { mutableStateOf<ProviderCredentialBackupTarget?>(null) }
     val actions = ProviderCredentialBackupActions(
         exportAll = {
-            exportTarget = DesktopProviderCredentialBackupTarget(
+            exportTarget = ProviderCredentialBackupTarget(
                 providerId = null,
                 providerName = "全部已登录音源",
             )
         },
         exportProvider = { provider ->
-            exportTarget = DesktopProviderCredentialBackupTarget(
+            exportTarget = ProviderCredentialBackupTarget(
                 providerId = provider.providerId,
                 providerName = provider.providerName,
             )
@@ -40,7 +40,7 @@ internal fun DesktopProviderCredentialBackupHost(
 
     CompositionLocalProvider(LocalProviderCredentialBackupActions provides actions) {
         content()
-        DesktopProviderCredentialBackupDialogs(
+        ProviderCredentialBackupDialogs(
             backup = backup,
             exportTarget = exportTarget,
             onDismissExport = { exportTarget = null },
@@ -55,7 +55,7 @@ internal fun DesktopProviderCredentialBackupHost(
 }
 
 private fun openCredentialBackupFile(
-    backup: DesktopProviderCredentialBackup,
+    backup: ProviderCredentialBackup,
     onFeedback: (String) -> Unit,
 ) {
     val chooser = credentialFileChooser().apply {
@@ -73,7 +73,7 @@ private fun openCredentialBackupFile(
 }
 
 private fun saveCredentialBackupFile(
-    backup: DesktopProviderCredentialBackup,
+    backup: ProviderCredentialBackup,
     fileName: String,
     onFeedback: (String) -> Unit,
 ) {
