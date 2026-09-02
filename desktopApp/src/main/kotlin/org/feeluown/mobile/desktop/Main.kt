@@ -64,7 +64,7 @@ fun main(args: Array<String>) {
             }
 
             LaunchedEffect(activation) {
-                activation.inputs.collect { showWindow() }
+                activation.focusRequests.collect { showWindow() }
             }
 
             DisposableEffect(Unit) {
