@@ -8,7 +8,10 @@ kotlin {
     jvmToolchain(17)
 }
 
-val isWindowsHost = System.getProperty("os.name").orEmpty().lowercase().contains("windows")
+val hostOs = System.getProperty("os.name").orEmpty().lowercase()
+val isWindowsHost = hostOs.contains("windows")
+val isMacHost = hostOs.contains("mac") || hostOs.contains("darwin")
+
 val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the Rust Windows SMTC bridge used by the desktop runtime."
@@ -17,9 +20,18 @@ val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
     commandLine("cargo", "build", "--release")
 }
 
-if (isWindowsHost) {
+val buildMacNowPlayingBridge by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the Rust macOS Now Playing bridge used by the desktop runtime."
+    onlyIf { isMacHost }
+    workingDir(layout.projectDirectory.dir("native/macos-now-playing"))
+    commandLine("cargo", "build", "--release")
+}
+
+if (isWindowsHost || isMacHost) {
     tasks.matching { it.name == "run" }.configureEach {
-        dependsOn(buildWindowsSmtcBridge)
+        if (isWindowsHost) dependsOn(buildWindowsSmtcBridge)
+        if (isMacHost) dependsOn(buildMacNowPlayingBridge)
     }
 }
 
