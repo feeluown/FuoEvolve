@@ -4,6 +4,7 @@ import java.io.OutputStream
 import java.io.PrintStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.text.SimpleDateFormat
@@ -35,13 +36,11 @@ private object DesktopDebugLogCapture {
         if (installed) return
         runCatching {
             Files.createDirectories(logDirectory)
-            rotateIfNeeded()
-            val sink = Files.newOutputStream(
-                logFile,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.APPEND,
-                StandardOpenOption.WRITE,
-            ).buffered()
+            val sink = RollingFileOutputStream(
+                activeFile = logFile,
+                previousFile = logDirectory.resolve("application.previous.log"),
+                maxBytes = MAX_DEBUG_LOG_BYTES,
+            )
             val originalOut = System.out
             val originalErr = System.err
             System.setOut(PrintStream(TeeOutputStream(originalOut, sink), true, StandardCharsets.UTF_8))
@@ -52,12 +51,82 @@ private object DesktopDebugLogCapture {
             System.err.println("FuoEvolve: unable to enable desktop debug log capture: ${throwable.message}")
         }
     }
+}
 
-    private fun rotateIfNeeded() {
-        if (!Files.isRegularFile(logFile) || Files.size(logFile) < MAX_DEBUG_LOG_BYTES) return
-        val previous = logDirectory.resolve("application.previous.log")
-        Files.move(logFile, previous, StandardCopyOption.REPLACE_EXISTING)
+/**
+ * A small platform filesystem primitive used by desktop log capture.
+ *
+ * Rotation happens at write time, so a long-running process cannot grow the active log without
+ * bound. Both stdout and stderr share the same instance, making rotation and file writes serialized.
+ */
+internal class RollingFileOutputStream(
+    private val activeFile: Path,
+    private val previousFile: Path,
+    private val maxBytes: Long,
+) : OutputStream() {
+    private var activeBytes: Long
+    private var file: OutputStream
+
+    init {
+        require(maxBytes > 0L) { "maxBytes must be positive" }
+        Files.createDirectories(requireNotNull(activeFile.parent))
+        if (Files.isRegularFile(activeFile) && Files.size(activeFile) >= maxBytes) {
+            Files.move(activeFile, previousFile, StandardCopyOption.REPLACE_EXISTING)
+        }
+        activeBytes = if (Files.isRegularFile(activeFile)) Files.size(activeFile) else 0L
+        file = openActiveFile()
     }
+
+    @Synchronized
+    override fun write(value: Int) {
+        ensureWritableFile()
+        file.write(value)
+        activeBytes += 1L
+    }
+
+    @Synchronized
+    override fun write(buffer: ByteArray, offset: Int, length: Int) {
+        if (length <= 0) return
+        var position = offset
+        var remaining = length
+        while (remaining > 0) {
+            ensureWritableFile()
+            val capacity = maxBytes - activeBytes
+            val chunkSize = minOf(remaining.toLong(), capacity).toInt()
+            file.write(buffer, position, chunkSize)
+            activeBytes += chunkSize.toLong()
+            position += chunkSize
+            remaining -= chunkSize
+        }
+    }
+
+    @Synchronized
+    override fun flush() {
+        file.flush()
+    }
+
+    @Synchronized
+    override fun close() {
+        file.close()
+    }
+
+    private fun ensureWritableFile() {
+        if (activeBytes < maxBytes) return
+        file.flush()
+        file.close()
+        if (Files.isRegularFile(activeFile)) {
+            Files.move(activeFile, previousFile, StandardCopyOption.REPLACE_EXISTING)
+        }
+        activeBytes = 0L
+        file = openActiveFile()
+    }
+
+    private fun openActiveFile(): OutputStream = Files.newOutputStream(
+        activeFile,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.APPEND,
+        StandardOpenOption.WRITE,
+    )
 }
 
 private class TeeOutputStream(
