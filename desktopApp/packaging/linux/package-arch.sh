@@ -57,7 +57,7 @@ pkgdesc='A cross-platform multi-source music player based on FeelUOwn'
 arch=('x86_64')
 url='https://github.com/feeluown/FuoEvolve'
 license=('GPL-3.0-only')
-depends=('mpv' 'libsecret')
+depends=('mpv' 'libsecret' 'webkit2gtk-4.1')
 options=('!strip')
 source=('FuoEvolve.tar.gz' 'fuoevolve.desktop' 'fuoevolve.png')
 sha256sums=('$APP_SHA' '$DESKTOP_SHA' '$ICON_SHA')
@@ -73,7 +73,7 @@ package() {
 EOF
 
 # makepkg intentionally runs as a non-root user; the package itself retains distro-managed
-# dependencies on mpv/libsecret while the Compose app image keeps its bundled JBR runtime.
+# dependencies on mpv/libsecret/WebKitGTK while the Compose app image keeps its bundled JBR runtime.
 # The bind-mounted work directory must be returned to the host runner's numeric ownership before
 # Docker exits, otherwise chown-ing it to the container-only builder user makes host cleanup fail.
 HOST_UID="$(id -u)"
