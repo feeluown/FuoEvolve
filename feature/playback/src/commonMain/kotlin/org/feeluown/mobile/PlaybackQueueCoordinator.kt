@@ -66,7 +66,9 @@ internal class PlaybackQueueCoordinator(
 
     override fun startCurrent() {
         (queueState.currentTrack() ?: fallbackTrack())?.let { track ->
-            startTrack(track, 0, null, PlaybackStartReason.RESUME)
+            val parts = playbackParts()
+            val resumePartIndex = currentPartIndex().takeIf { it in parts.indices }
+            startTrack(track, 0, resumePartIndex, PlaybackStartReason.RESUME)
         }
     }
 

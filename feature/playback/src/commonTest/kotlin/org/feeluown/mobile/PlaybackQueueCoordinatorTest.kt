@@ -221,6 +221,30 @@ class PlaybackQueueCoordinatorTest {
     }
 
     @Test
+    fun startCurrentPreservesRestoredPlaybackPart() = runTest {
+        val current = track("main:1")
+        val queue = PlaybackQueueController().apply {
+            mainQueue = listOf(current)
+            mainQueueIndex = 0
+        }
+        var started: StartRequest? = null
+        val coordinator = coordinator(
+            queue = queue,
+            parts = listOf(
+                PlaybackPart("part:1", "P1"),
+                PlaybackPart("part:2", "P2"),
+            ),
+            currentPartIndex = 1,
+            onStart = { track, skipped, part -> started = StartRequest(track, skipped, part) },
+        )
+
+        coordinator.startCurrent()
+
+        assertEquals(current, started?.track)
+        assertEquals(1, started?.partIndex)
+    }
+
+    @Test
     fun explicitMainSelectionResetsDirectionAfterPrevious() = runTest {
         val first = track("main:1")
         val second = track("main:2")

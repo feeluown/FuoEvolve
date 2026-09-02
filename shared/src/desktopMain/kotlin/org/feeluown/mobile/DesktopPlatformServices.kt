@@ -76,6 +76,7 @@ fun installDesktopPlaybackEngineFactory(factory: () -> PlaybackEngine) {
  */
 internal class DesktopUnsupportedPlaybackEngine :
     PlaybackEngine,
+    PlaybackStartReasonAwareEngine,
     ResolvedPlaybackSourceAwareEngine,
     AutoCloseable {
     private val delegate: PlaybackEngine = desktopPlaybackEngineFactory?.invoke()
@@ -88,6 +89,15 @@ internal class DesktopUnsupportedPlaybackEngine :
         get() = delegate.resolvesResourcesInternally
 
     override fun prepareLoading(track: MusicTrack) = delegate.prepareLoading(track)
+
+    override fun prepareLoading(track: MusicTrack, reason: PlaybackStartReason) {
+        val reasonAware = delegate as? PlaybackStartReasonAwareEngine
+        if (reasonAware != null) {
+            reasonAware.prepareLoading(track, reason)
+        } else {
+            delegate.prepareLoading(track)
+        }
+    }
 
     override fun play(track: MusicTrack, payload: PlaybackPayload) = delegate.play(track, payload)
 

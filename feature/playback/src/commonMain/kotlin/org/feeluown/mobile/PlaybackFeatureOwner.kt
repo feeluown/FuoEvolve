@@ -502,16 +502,24 @@ private class DefaultPlaybackFeatureOwner(
 
     private fun restorePlaybackQueue(snapshot: PlaybackQueueSnapshot) {
         if (!queueState.restore(snapshot)) return
-        playbackParts = emptyList()
-        currentPartIndex = -1
-        updatePlaybackState { current ->
-            current.copy(
-                currentTrack = queueState.mainQueue.getOrNull(queueState.mainQueueIndex),
+        val restoredTrack = queueState.mainQueue.getOrNull(queueState.mainQueueIndex)
+        val current = playbackState.value
+        val preserveRestoredSession = restoredTrack != null && current.currentTrack?.id == restoredTrack.id
+        if (preserveRestoredSession) {
+            playbackParts = current.playbackParts
+            currentPartIndex = current.currentPartIndex
+        } else {
+            playbackParts = emptyList()
+            currentPartIndex = -1
+        }
+        updatePlaybackState {
+            it.copy(
+                currentTrack = restoredTrack,
                 resolvedSource = null,
                 queue = queueState.displayQueue(),
                 queueIndex = queueState.displayQueueIndex(),
-                playbackParts = emptyList(),
-                currentPartIndex = -1,
+                playbackParts = playbackParts,
+                currentPartIndex = currentPartIndex,
             )
         }
     }
