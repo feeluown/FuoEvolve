@@ -9,5 +9,7 @@ publish = false
 name = "fuoevolve_now_playing_bridge"
 crate-type = ["cdylib"]
 
+# playwire owns the MPNowPlayingInfoCenter / MPRemoteCommandCenter Objective-C bridge.
+# Keep the JVM boundary as C ABI + JNA so Apple framework types never leak into shared code.
 [target.'cfg(target_os = "macos")'.dependencies]
 playwire = "=1.0.0"
