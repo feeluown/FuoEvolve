@@ -7,15 +7,34 @@ if [[ $# -ne 1 ]]; then
 fi
 
 OUTPUT_DIR="$1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCK_FILE="$SCRIPT_DIR/../native-deps.lock"
 export HOMEBREW_NO_AUTO_UPDATE=1
 
 if ! command -v brew >/dev/null 2>&1; then
   echo "Homebrew is required to prepare the macOS libmpv bundle" >&2
   exit 1
 fi
+if [[ ! -f "$LOCK_FILE" ]]; then
+  echo "Native dependency lock file is missing: $LOCK_FILE" >&2
+  exit 1
+fi
+
+PINNED_MPV_VERSION="$(awk -F= '$1 == "mpv.version" { print $2; exit }' "$LOCK_FILE")"
+if [[ -z "$PINNED_MPV_VERSION" ]]; then
+  echo "mpv.version is missing from $LOCK_FILE" >&2
+  exit 1
+fi
 
 brew list mpv >/dev/null 2>&1 || brew install mpv
 brew list dylibbundler >/dev/null 2>&1 || brew install dylibbundler
+
+INSTALLED_MPV_VERSION="$(brew list --versions mpv | awk '{ print $2; exit }')"
+if [[ "$INSTALLED_MPV_VERSION" != "$PINNED_MPV_VERSION" ]]; then
+  echo "Homebrew resolved mpv $INSTALLED_MPV_VERSION but packaging is pinned to $PINNED_MPV_VERSION in $LOCK_FILE" >&2
+  echo "Update the packaging lock deliberately before shipping a different macOS libmpv runtime." >&2
+  exit 1
+fi
 
 MPV_PREFIX="$(brew --prefix mpv)"
 SOURCE_LIB="$MPV_PREFIX/lib/libmpv.dylib"
@@ -54,7 +73,8 @@ while IFS= read -r dylib; do
 done < <(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
 
 {
-  echo "Source: Homebrew mpv $(brew list --versions mpv | head -n 1)"
+  echo "Source: Homebrew mpv $INSTALLED_MPV_VERSION"
+  echo "Pinned version: $PINNED_MPV_VERSION"
   echo "Homebrew prefix: $MPV_PREFIX"
   echo "Purpose: bundled relocatable libmpv runtime for the FuoEvolve macOS desktop package"
 } > "$OUTPUT_DIR/FUOEVOLVE_LIBMPV_SOURCE.txt"
