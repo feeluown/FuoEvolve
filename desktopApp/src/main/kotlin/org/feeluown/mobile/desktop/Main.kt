@@ -51,10 +51,9 @@ fun main() {
 
         Window(
             onCloseRequest = {
-                if (trayController?.isAvailable == true) {
-                    windowVisible = false
-                } else {
-                    System.err.println(
+                when (desktopCloseBehavior(trayController?.isAvailable == true)) {
+                    DesktopCloseBehavior.HideToTray -> windowVisible = false
+                    DesktopCloseBehavior.KeepVisible -> System.err.println(
                         "FuoEvolve: close-to-tray ignored because no usable tray integration is available",
                     )
                 }
