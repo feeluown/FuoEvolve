@@ -61,6 +61,14 @@
         }
     };
 
+    function postDesktopMessage(message) {
+        if (globalThis.ipc && typeof globalThis.ipc.postMessage === "function") {
+            globalThis.ipc.postMessage(JSON.stringify(message));
+            return true;
+        }
+        return false;
+    }
+
     function deliverFingerprint(requestId, fingerprint, error) {
         if (globalThis.FuoFingerprintBridge) {
             globalThis.FuoFingerprintBridge.onFingerprint(requestId, fingerprint, error);
@@ -72,7 +80,13 @@
                 fingerprint: fingerprint,
                 error: error
             });
+            return;
         }
+        postDesktopMessage({
+            requestId: requestId,
+            fingerprint: fingerprint,
+            error: error
+        });
     }
 
     function deliverRuntimeReady(error) {
@@ -85,7 +99,12 @@
                 runtimeReady: true,
                 error: error
             });
+            return;
         }
+        postDesktopMessage({
+            runtimeReady: true,
+            error: error
+        });
     }
 </script>
 </body>
