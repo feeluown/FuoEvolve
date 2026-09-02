@@ -4,6 +4,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -40,14 +41,12 @@ class DefaultAudioRecognitionRepository(
     private val sessionIdFactory: () -> String = ::newRecognitionSessionId,
 ) : AudioRecognitionRepository {
     private val recognitionMutex = Mutex()
-
-    @Volatile
-    private var cancelled = false
+    private val cancelled = MutableStateFlow(false)
 
     override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> =
         recognitionMutex.withLock {
             coroutineScope recognition@{
-                cancelled = false
+                cancelled.value = false
                 val windows = Channel<FloatArray>(Channel.CONFLATED)
                 var matching = false
                 var captureAttempt = 1
@@ -57,9 +56,9 @@ class DefaultAudioRecognitionRepository(
 
                 val captureJob = launch {
                     captureDevice.capture { chunk ->
-                        if (cancelled || chunk.isEmpty()) return@capture
+                        if (cancelled.value || chunk.isEmpty()) return@capture
                         var sourceOffset = 0
-                        while (sourceOffset < chunk.size && !cancelled) {
+                        while (sourceOffset < chunk.size && !cancelled.value) {
                             val copied = minOf(chunk.size - sourceOffset, window.size - windowOffset)
                             chunk.copyInto(
                                 destination = window,
@@ -95,7 +94,7 @@ class DefaultAudioRecognitionRepository(
                 val sessionId = sessionIdFactory()
                 var attempt = 1
                 try {
-                    while (isActive && !cancelled) {
+                    while (isActive && !cancelled.value) {
                         val capturedWindow = windows.receive()
                         matching = true
                         onEvent(AudioRecognitionEvent.Matching(attempt))
@@ -117,12 +116,12 @@ class DefaultAudioRecognitionRepository(
                     }
                     emptyList()
                 } catch (throwable: Throwable) {
-                    if (throwable !is CancellationException && !cancelled) {
+                    if (throwable !is CancellationException && !cancelled.value) {
                         onEvent(AudioRecognitionEvent.Error(throwable.message ?: "听歌识曲失败"))
                     }
                     throw throwable
                 } finally {
-                    cancelled = true
+                    cancelled.value = true
                     captureDevice.cancel()
                     fingerprintRuntime.cancel()
                     matcher.cancel()
@@ -133,7 +132,7 @@ class DefaultAudioRecognitionRepository(
         }
 
     override fun cancel() {
-        cancelled = true
+        cancelled.value = true
         captureDevice.cancel()
         fingerprintRuntime.cancel()
         matcher.cancel()
