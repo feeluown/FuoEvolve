@@ -211,6 +211,10 @@ compose.desktop {
         ).joinToString(File.pathSeparator)
 
         nativeDistributions {
+            // JNA and credential-secure-storage reach sun.misc.Unsafe through jdk.unsupported.
+            // jdeps cannot reliably see that reflective dependency, so keep the module explicitly.
+            modules("jdk.unsupported")
+
             when {
                 isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
                 isMacHost -> targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
