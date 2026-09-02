@@ -96,6 +96,39 @@ class DesktopSecureProviderCredentialStoreTest {
         assertTrue(error.message.orEmpty().contains("系统安全凭证存储不可用"))
     }
 
+    @Test
+    fun secureStoreInitializationFailureKeepsUnderlyingDiagnostic() = runBlocking {
+        val store = DesktopSecureProviderCredentialStore(
+            secretStoreProvider = {
+                throw UnsatisfiedLinkError("libsecret-1.so: cannot open shared object file")
+            },
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            store.write("netease", ProviderCredentials(cookieHeader = "MUSIC_U=secret"))
+        }
+
+        assertTrue(error.message.orEmpty().contains("UnsatisfiedLinkError"))
+        assertTrue(error.message.orEmpty().contains("libsecret-1.so"))
+        assertTrue(error.cause is UnsatisfiedLinkError)
+    }
+
+    @Test
+    fun rejectedSecretWriteIdentifiesWriteStage() = runBlocking {
+        val backend = FakeDesktopSecretStore().apply { failAllWrites = true }
+        val store = DesktopSecureProviderCredentialStore(
+            secretStoreProvider = { backend },
+            generationProvider = { "generation1" },
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            store.write("netease", ProviderCredentials(cookieHeader = "MUSIC_U=secret"))
+        }
+
+        assertTrue(error.message.orEmpty().contains("写入失败"))
+        assertTrue(error.message.orEmpty().contains("凭证数据"))
+    }
+
     private fun largeCredentials(cookiePrefix: String = "cookie"): ProviderCredentials = ProviderCredentials(
         cookies = (1..80).associate { index ->
             "key$index" to "$cookiePrefix-$index-${"x".repeat(48)}"
@@ -115,11 +148,12 @@ class DesktopSecureProviderCredentialStoreTest {
 private class FakeDesktopSecretStore : DesktopSecretStore {
     val values = linkedMapOf<String, CharArray>()
     var failManifestWrites = false
+    var failAllWrites = false
 
     override fun get(key: String): CharArray? = values[key]?.copyOf()
 
     override fun put(key: String, value: CharArray): Boolean {
-        if (failManifestWrites && key.endsWith(".manifest")) return false
+        if (failAllWrites || (failManifestWrites && key.endsWith(".manifest"))) return false
         values[key] = value.copyOf()
         return true
     }
