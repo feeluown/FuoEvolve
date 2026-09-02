@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import java.nio.file.Path
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,18 @@ fun installDesktopPlaybackSessionIntegrationFactory(factory: (PlaybackSession) -
 
 internal fun createDesktopPlaybackSessionIntegration(playbackSession: PlaybackSession): AutoCloseable =
     desktopPlaybackSessionIntegrationFactory?.invoke(playbackSession) ?: AutoCloseable { }
+
+@Volatile
+private var desktopListeningHistorySinkFactory: ((Path) -> ListeningHistorySink)? = null
+
+/** Installs the JVM SQLDelight history backend while shared playback sees only its sink contract. */
+fun installDesktopListeningHistorySinkFactory(factory: (Path) -> ListeningHistorySink) {
+    desktopListeningHistorySinkFactory = factory
+}
+
+internal fun createDesktopListeningHistorySink(): ListeningHistorySink =
+    desktopListeningHistorySinkFactory?.invoke(DesktopAppDirectories.data().resolve("listening_history.db"))
+        ?: NoOpListeningHistorySink
 
 @Volatile
 private var desktopLocalMusicRepositoryFactory: (() -> LocalMusicRepository)? = null
