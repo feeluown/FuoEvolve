@@ -302,6 +302,7 @@ tasks.register("printDesktopPackageProfile") {
 dependencies {
     implementation(project(":shared"))
     implementation(project(":playback:api"))
+    implementation(project(":persistence:listening"))
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.kotlinx.serialization.json)
@@ -334,9 +335,15 @@ compose.desktop {
 
         nativeDistributions {
             // These dependencies are reached reflectively by desktop-only libraries and are not
-            // always discovered by jdeps: JNA/credential storage uses sun.misc.Unsafe, while
-            // dbus-java uses com.sun.security.auth.module.UnixSystem for the MPRIS Unix identity.
-            modules("jdk.unsupported", "jdk.security.auth")
+            // always discovered by jdeps: JNA/credential storage uses sun.misc.Unsafe, dbus-java
+            // uses UnixSystem, and SQLDelight's desktop driver reaches JDBC through DriverManager.
+            modules("jdk.unsupported", "jdk.security.auth", "java.sql")
+
+            fileAssociation(
+                mimeType = "application/x-fuoevolve-playlist",
+                extension = "fuo",
+                description = "FeelUOwn playlist",
+            )
 
             when {
                 isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
@@ -362,6 +369,21 @@ compose.desktop {
                 bundleID = "org.feeluown.mobile.desktop"
                 dockName = "FuoEvolve"
                 appCategory = "public.app-category.music"
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>CFBundleURLTypes</key>
+                        <array>
+                            <dict>
+                                <key>CFBundleURLName</key>
+                                <string>org.feeluown.mobile.desktop</string>
+                                <key>CFBundleURLSchemes</key>
+                                <array>
+                                    <string>fuo</string>
+                                </array>
+                            </dict>
+                        </array>
+                    """.trimIndent()
+                }
             }
             linux {
                 packageName = "fuoevolve"

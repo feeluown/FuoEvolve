@@ -32,4 +32,17 @@ internal object DesktopAppDirectories {
         }
         return Paths.get(base, "FuoEvolve")
     }
+
+    fun cache(): Path {
+        val home = System.getProperty("user.home").orEmpty()
+        val osName = System.getProperty("os.name").orEmpty().lowercase()
+        val base = when {
+            osName.contains("win") -> System.getenv("LOCALAPPDATA")?.takeIf(String::isNotBlank)
+                ?: "$home/AppData/Local"
+            osName.contains("mac") -> "$home/Library/Caches"
+            else -> System.getenv("XDG_CACHE_HOME")?.takeIf(String::isNotBlank)
+                ?: "$home/.cache"
+        }
+        return Paths.get(base, "FuoEvolve")
+    }
 }

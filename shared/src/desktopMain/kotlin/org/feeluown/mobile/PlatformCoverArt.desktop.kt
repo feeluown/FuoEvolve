@@ -23,13 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.jetbrains.skia.Image
 import java.net.URI
 import java.net.URL
 import java.nio.file.Files
 import java.nio.file.Paths
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Image
 
 @Composable
 actual fun PlatformCoverArt(
@@ -86,7 +86,9 @@ private suspend fun loadDesktopCover(imageUrl: String): ImageBitmap? = withConte
 
     val bytes = when {
         resolvedUrl.startsWith("file:") -> Files.readAllBytes(Paths.get(URI(resolvedUrl)))
-        else -> URL(resolvedUrl).openStream().use { it.readBytes() }
+        else -> DesktopResourceCache.cachedRemoteImage(resolvedUrl)
+            ?.let(Files::readAllBytes)
+            ?: URL(resolvedUrl).openStream().use { it.readBytes() }
     }
     runCatching { Image.makeFromEncoded(bytes).toComposeImageBitmap() }.getOrNull()
 }
