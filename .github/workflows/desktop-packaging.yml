@@ -1,0 +1,421 @@
+name: Desktop Packaging
+
+"on":
+  pull_request:
+    paths:
+      - "desktopApp/build.gradle.kts"
+      - "desktopApp/packaging/**"
+      - "desktopApp/native/**"
+      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+      - "gradle/**"
+      - ".github/workflows/desktop-packaging.yml"
+  push:
+    branches:
+      - master
+    tags:
+      - "[0-9]*"
+    paths:
+      - "desktopApp/build.gradle.kts"
+      - "desktopApp/packaging/**"
+      - "desktopApp/native/**"
+      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+      - "gradle/**"
+      - ".github/workflows/desktop-packaging.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Package Windows x64 MSI and EXE
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        shell: pwsh
+        run: |
+          git show-ref --verify --quiet refs/heads/master
+          if ($LASTEXITCODE -ne 0) {
+            git branch master origin/master
+          }
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_ENV -Value "FUO_JDK17=$env:JAVA_HOME"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Rust stable
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+          java -version
+          jpackage --version
+
+      - name: Prepare pinned Windows libmpv runtime
+        shell: pwsh
+        run: >-
+          ./desktopApp/packaging/windows/prepare-libmpv.ps1
+          -OutputDir "${{ github.workspace }}\build\desktop-native\windows\mpv"
+
+      - name: Build self-contained Windows installers
+        shell: pwsh
+        run: |
+          $libmpv = "${{ github.workspace }}\build\desktop-native\windows\mpv"
+          & .\gradlew.bat `
+            "-Dorg.gradle.java.installations.paths=$env:FUO_JDK17,$env:JAVA_HOME" `
+            --no-configuration-cache `
+            --warning-mode all `
+            -Pfuoevolve.packageProfile=bundled `
+            "-Pfuoevolve.packageLibmpvDir=$libmpv" `
+            :desktopApp:packageMsi `
+            :desktopApp:packageExe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Windows package closure
+        shell: pwsh
+        run: |
+          $root = "desktopApp\build\compose\binaries\main"
+          if (-not (Get-ChildItem "$root\msi" -Filter *.msi -ErrorAction SilentlyContinue)) { throw "MSI was not produced" }
+          if (-not (Get-ChildItem "$root\exe" -Filter *.exe -ErrorAction SilentlyContinue)) { throw "EXE installer was not produced" }
+          if (-not (Get-ChildItem "$root\app" -Recurse -File -Include mpv-2.dll,libmpv-2.dll,mpv.dll -ErrorAction SilentlyContinue)) { throw "Bundled libmpv DLL is missing" }
+          if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter fuoevolve_smtc_bridge.dll -ErrorAction SilentlyContinue)) { throw "SMTC bridge is missing" }
+          if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter java.exe -ErrorAction SilentlyContinue | Where-Object FullName -Match "runtime")) { throw "Bundled JVM runtime is missing" }
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-windows-x64
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            desktopApp/build/compose/binaries/main/msi/*.msi
+            desktopApp/build/compose/binaries/main/exe/*.exe
+
+  macos:
+    name: Package macOS ${{ matrix.arch }} DMG and PKG
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            uname_arch: arm64
+          - arch: x64
+            runner: macos-15-intel
+            uname_arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify runner architecture
+        run: test "$(uname -m)" = "${{ matrix.uname_arch }}"
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+          java -version
+          jpackage --version
+
+      - name: Prepare relocatable macOS libmpv runtime
+        run: >-
+          bash desktopApp/packaging/macos/prepare-libmpv.sh
+          "${{ github.workspace }}/build/desktop-native/macos/mpv"
+
+      - name: Build self-contained macOS installers
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=bundled \
+            -Pfuoevolve.packageLibmpvDir="${{ github.workspace }}/build/desktop-native/macos/mpv" \
+            :desktopApp:packageDmg \
+            :desktopApp:packagePkg
+
+      - name: Verify macOS package closure
+        run: |
+          ROOT=desktopApp/build/compose/binaries/main
+          find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit | grep -q .
+          find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q .
+          find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q .
+          find "$ROOT/app" -name libfuoevolve_now_playing_bridge.dylib -print -quit | grep -q .
+          find "$ROOT/app" -path '*/runtime/bin/java' -print -quit | grep -q .
+          while IFS= read -r dylib; do
+            if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
+              echo "Packaged dylib still references Homebrew: $dylib" >&2
+              exit 1
+            fi
+          done < <(find "$ROOT/app" -name '*.dylib' -type f)
+
+      - name: Upload macOS installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-macos-${{ matrix.arch }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            desktopApp/build/compose/binaries/main/dmg/*.dmg
+            desktopApp/build/compose/binaries/main/pkg/*.pkg
+
+  linux-system:
+    name: Package Linux DEB RPM and Arch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Install native packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot rpm
+          java -version
+          jpackage --version
+          docker --version
+
+      - name: Create Linux app image with system native dependency profile
+        id: app
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=system \
+            :desktopApp:createDistributable
+          APP_IMAGE="$(find desktopApp/build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -name 'FuoEvolve*' -print -quit)"
+          test -n "$APP_IMAGE"
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          find "$APP_IMAGE" -path '*/runtime/bin/java' -print -quit | grep -q .
+          find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit | grep -q .
+          if find "$APP_IMAGE" -name 'libmpv.so*' -print -quit | grep -q .; then
+            echo "System Linux app image must not bundle libmpv" >&2
+            exit 1
+          fi
+
+      - name: Build DEB and RPM packages
+        run: |
+          mkdir -p build/desktop-packages/system
+          bash desktopApp/packaging/linux/package-system.sh deb "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
+          bash desktopApp/packaging/linux/package-system.sh rpm "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
+
+      - name: Build Arch Linux package
+        run: >-
+          bash desktopApp/packaging/linux/package-arch.sh
+          "${{ steps.app.outputs.app_image }}"
+          "${{ steps.app.outputs.version }}"
+          build/desktop-packages/system
+
+      - name: Verify Linux package metadata
+        run: |
+          DEB="$(find build/desktop-packages/system -name '*.deb' -print -quit)"
+          RPM="$(find build/desktop-packages/system -name '*.rpm' -print -quit)"
+          ARCH="$(find build/desktop-packages/system -name '*.pkg.tar.zst' -print -quit)"
+          test -n "$DEB" && test -n "$RPM" && test -n "$ARCH"
+          dpkg-deb -I "$DEB" | tee build/desktop-packages/system/deb-info.txt
+          grep -q 'libmpv2' build/desktop-packages/system/deb-info.txt
+          rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
+          grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
+          tar -tf "$ARCH" | grep -q 'opt/fuoevolve/bin/FuoEvolve'
+
+      - name: Upload Linux distro packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-linux-system-x64
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            build/desktop-packages/system/*.deb
+            build/desktop-packages/system/*.rpm
+            build/desktop-packages/system/*.pkg.tar.zst
+            build/desktop-packages/system/*-info.txt
+            build/desktop-packages/system/*-requires.txt
+
+  linux-appimage:
+    name: Package portable Linux AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Install portable native dependency inputs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv1 libsecret-1-0 patchelf pax-utils
+          ldconfig -p | grep libmpv
+          ldconfig -p | grep libsecret-1
+
+      - name: Create Linux app image
+        id: app
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=system \
+            :desktopApp:createDistributable
+          APP_IMAGE="$(find desktopApp/build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -name 'FuoEvolve*' -print -quit)"
+          test -n "$APP_IMAGE"
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build self-contained AppImage
+        run: |
+          mkdir -p build/desktop-packages/appimage
+          bash desktopApp/packaging/linux/package-appimage.sh \
+            "${{ steps.app.outputs.app_image }}" \
+            "${{ steps.app.outputs.version }}" \
+            build/desktop-packages/appimage
+          APPIMAGE="$(find build/desktop-packages/appimage -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          file "$APPIMAGE"
+          sha256sum "$APPIMAGE" | tee "$APPIMAGE.sha256"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-linux-appimage-x64
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            build/desktop-packages/appimage/*.AppImage
+            build/desktop-packages/appimage/*.sha256
