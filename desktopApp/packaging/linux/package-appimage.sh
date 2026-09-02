@@ -43,12 +43,25 @@ download_verified() {
   fi
 }
 
-LIBMPV="$(ldconfig -p 2>/dev/null | awk '/libmpv\.so/{print $NF; exit}')"
-if [[ -z "$LIBMPV" || ! -f "$LIBMPV" ]]; then
-  LIBMPV="$(find /usr/lib /lib -type f -name 'libmpv.so.*' 2>/dev/null | head -n 1 || true)"
-fi
+find_shared_library() {
+  local pattern="$1"
+  local fallback_name="$2"
+  local result
+  result="$(ldconfig -p 2>/dev/null | awk -v pattern="$pattern" '$0 ~ pattern {print $NF; exit}')"
+  if [[ -z "$result" || ! -f "$result" ]]; then
+    result="$(find /usr/lib /lib -type f -name "$fallback_name" 2>/dev/null | head -n 1 || true)"
+  fi
+  printf '%s' "$result"
+}
+
+LIBMPV="$(find_shared_library 'libmpv\.so' 'libmpv.so.*')"
+LIBSECRET="$(find_shared_library 'libsecret-1\.so\.0' 'libsecret-1.so.0*')"
 if [[ -z "$LIBMPV" || ! -f "$LIBMPV" ]]; then
   echo "A distribution libmpv package must be installed before building the AppImage" >&2
+  exit 1
+fi
+if [[ -z "$LIBSECRET" || ! -f "$LIBSECRET" ]]; then
+  echo "A distribution libsecret package must be installed before building the AppImage" >&2
   exit 1
 fi
 
@@ -56,8 +69,8 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 APPDIR="$WORK_DIR/FuoEvolve.AppDir"
 BUNDLED_APP="$APPDIR/usr/lib/fuoevolve"
-MPV_DIR="$BUNDLED_APP/resources/native/mpv"
-mkdir -p "$APPDIR/usr/lib" "$MPV_DIR"
+NATIVE_LIB_DIR="$BUNDLED_APP/resources/native/mpv"
+mkdir -p "$APPDIR/usr/lib" "$NATIVE_LIB_DIR"
 cp -a "$APP_IMAGE" "$BUNDLED_APP"
 
 is_base_system_library() {
@@ -84,7 +97,7 @@ copy_library() {
   if is_base_system_library "$name"; then
     return
   fi
-  local destination="$MPV_DIR/$name"
+  local destination="$NATIVE_LIB_DIR/$name"
   if [[ -f "$destination" ]]; then
     local old_sha new_sha
     old_sha="$(sha256sum "$destination" | awk '{print $1}')"
@@ -98,30 +111,38 @@ copy_library() {
   cp -L "$source" "$destination"
 }
 
-# lddtree resolves the transitive ELF closure, including ffmpeg/codec/audio client libraries that
-# JNA cannot discover statically from the Java launcher.
-while IFS= read -r library; do
-  [[ -f "$library" ]] || continue
-  copy_library "$library"
-done < <(lddtree -l "$LIBMPV" | awk '!seen[$0]++')
+# lddtree resolves transitive ELF closures that JNA cannot discover from the Java launcher.
+# libmpv contributes codecs/audio clients; libsecret is bundled as a client library while the
+# Secret Service D-Bus daemon itself remains a host service.
+for root_library in "$LIBMPV" "$LIBSECRET"; do
+  while IFS= read -r library; do
+    [[ -f "$library" ]] || continue
+    copy_library "$library"
+  done < <(lddtree -l "$root_library" | awk '!seen[$0]++')
+done
 
-BUNDLED_LIBMPV="$(find "$MPV_DIR" -maxdepth 1 -type f -name 'libmpv.so.*' -print -quit)"
+BUNDLED_LIBMPV="$(find "$NATIVE_LIB_DIR" -maxdepth 1 -type f -name 'libmpv.so.*' -print -quit)"
+BUNDLED_LIBSECRET="$(find "$NATIVE_LIB_DIR" -maxdepth 1 -type f -name 'libsecret-1.so.0*' -print -quit)"
 if [[ -z "$BUNDLED_LIBMPV" ]]; then
   echo "libmpv was not copied into the AppImage dependency closure" >&2
   exit 1
 fi
-ln -sfn "$(basename "$BUNDLED_LIBMPV")" "$MPV_DIR/libmpv.so"
+if [[ -z "$BUNDLED_LIBSECRET" ]]; then
+  echo "libsecret was not copied into the AppImage dependency closure" >&2
+  exit 1
+fi
+ln -sfn "$(basename "$BUNDLED_LIBMPV")" "$NATIVE_LIB_DIR/libmpv.so"
 
 while IFS= read -r library; do
   patchelf --set-rpath '$ORIGIN' "$library" 2>/dev/null || true
-done < <(find "$MPV_DIR" -maxdepth 1 -type f -print)
+done < <(find "$NATIVE_LIB_DIR" -maxdepth 1 -type f -print)
 
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/sh
 set -e
 APPDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-MPV_DIR="$APPDIR/usr/lib/fuoevolve/resources/native/mpv"
-export LD_LIBRARY_PATH="$MPV_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+NATIVE_LIB_DIR="$APPDIR/usr/lib/fuoevolve/resources/native/mpv"
+export LD_LIBRARY_PATH="$NATIVE_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$APPDIR/usr/lib/fuoevolve/bin/FuoEvolve" "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"
@@ -169,6 +190,7 @@ chmod +x "$OUTPUT_FILE"
   "$OUTPUT_FILE" --appimage-extract >/dev/null
   test -x squashfs-root/usr/lib/fuoevolve/bin/FuoEvolve
   test -e squashfs-root/usr/lib/fuoevolve/resources/native/mpv/libmpv.so
+  find squashfs-root/usr/lib/fuoevolve/resources/native/mpv -name 'libsecret-1.so.0*' -print -quit | grep -q .
 )
 
 printf 'Built self-contained AppImage: %s\n' "$OUTPUT_FILE"
