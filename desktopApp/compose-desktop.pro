@@ -5,6 +5,11 @@
 # the credential store use reflection, native proxies and platform-selected providers
 # that static analysis cannot fully discover.
 
+# Keep shrinking enabled, but disable ProGuard bytecode optimization. The optimizer has
+# confirmed Kotlin/Compose JVM verifier issues and can rewrite valid Kotlin library bytecode
+# into methods that fail JVM verification (observed with Okio's buffered sink bridge).
+-dontoptimize
+
 # Preserve metadata commonly consumed by reflection/proxy libraries.
 -keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*
 
