@@ -79,9 +79,13 @@ mkdir -p "$NATIVE_LIB_DIR" "$WEBVIEW_LIB_DIR" "$WEBKIT_RUNTIME_DIR" "$GIO_MODULE
 # itself into the already-created BUNDLED_APP directory would add an unintended FuoEvolve/ layer.
 cp -a "$APP_IMAGE/." "$BUNDLED_APP/"
 
-WEB_LOGIN_HELPER="$BUNDLED_APP/resources/native/helpers/fuoevolve-web-login"
-if [[ ! -x "$WEB_LOGIN_HELPER" ]]; then
+# Compose may change the relative nesting of appResources between plugin versions. The helper was
+# already validated in the source app image, so resolve it by identity instead of duplicating an
+# internal Compose path assumption here.
+WEB_LOGIN_HELPER="$(find "$BUNDLED_APP" -type f -name fuoevolve-web-login -perm -u+x -print -quit 2>/dev/null || true)"
+if [[ -z "$WEB_LOGIN_HELPER" ]]; then
   echo "Compose app image is missing the desktop WebView login helper" >&2
+  find "$BUNDLED_APP" -type f -name 'fuoevolve-web-login*' -print >&2 || true
   exit 1
 fi
 
@@ -267,7 +271,7 @@ chmod +x "$OUTPUT_FILE"
     echo "Packaged AppImage is missing bundled libsecret" >&2
     exit 1
   }
-  test -x squashfs-root/usr/lib/fuoevolve/resources/native/helpers/fuoevolve-web-login || {
+  find squashfs-root/usr/lib/fuoevolve -type f -name fuoevolve-web-login -perm -u+x -print -quit | grep -q . || {
     echo "Packaged AppImage is missing the WebView login helper" >&2
     exit 1
   }
