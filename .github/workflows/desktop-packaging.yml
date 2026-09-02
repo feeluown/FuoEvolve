@@ -71,6 +71,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         shell: pwsh
@@ -82,7 +84,27 @@ jobs:
           java -version
           jpackage --version
 
+      - name: Cache Windows Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/windows-smtc/Cargo.lock
+            desktopApp/native/windows-smtc/target
+          key: desktop-rust-windows-x64-${{ hashFiles('desktopApp/native/windows-smtc/Cargo.toml', 'desktopApp/native/windows-smtc/src/**') }}
+          restore-keys: |
+            desktop-rust-windows-x64-
+
+      - name: Cache pinned Windows libmpv runtime
+        id: windows-libmpv-cache
+        uses: actions/cache@v4
+        with:
+          path: build/desktop-native/windows/mpv
+          key: desktop-windows-libmpv-x64-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/windows/prepare-libmpv.ps1') }}
+
       - name: Prepare pinned Windows libmpv runtime
+        if: steps.windows-libmpv-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: >-
           ./desktopApp/packaging/windows/prepare-libmpv.ps1
@@ -187,6 +209,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         run: |
@@ -197,10 +221,41 @@ jobs:
           java -version
           jpackage --version
 
+      - name: Cache macOS Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/macos-now-playing/Cargo.lock
+            desktopApp/native/macos-now-playing/target
+          key: desktop-rust-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/native/macos-now-playing/Cargo.toml', 'desktopApp/native/macos-now-playing/src/**') }}
+          restore-keys: |
+            desktop-rust-macos-${{ matrix.arch }}-
+
+      - name: Cache relocatable macOS libmpv runtime
+        id: macos-libmpv-cache
+        uses: actions/cache@v4
+        with:
+          path: build/desktop-native/macos/mpv
+          key: desktop-macos-libmpv-${{ matrix.arch }}-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/macos/prepare-libmpv.sh') }}
+
       - name: Prepare relocatable macOS libmpv runtime
+        if: steps.macos-libmpv-cache.outputs.cache-hit != 'true'
         run: >-
           bash desktopApp/packaging/macos/prepare-libmpv.sh
           "${{ github.workspace }}/build/desktop-native/macos/mpv"
+
+      - name: Verify relocatable macOS libmpv runtime
+        run: |
+          LIBMPV_DIR="${{ github.workspace }}/build/desktop-native/macos/mpv"
+          test -f "$LIBMPV_DIR/libmpv.dylib" || { echo "Cached macOS libmpv runtime is incomplete" >&2; exit 1; }
+          while IFS= read -r dylib; do
+            if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/' >/dev/null; then
+              echo "Cached macOS libmpv runtime is not relocatable: $dylib" >&2
+              exit 1
+            fi
+          done < <(find "$LIBMPV_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
 
       - name: Build self-contained macOS installers
         run: |
@@ -292,11 +347,25 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
+
+      - name: Cache Linux system Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/linux-tray/Cargo.lock
+            desktopApp/native/linux-tray/target
+          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**') }}
+          restore-keys: |
+            desktop-rust-linux-system-x64-
 
       - name: Install native packaging tools
         run: |
@@ -432,11 +501,25 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
+
+      - name: Cache Linux AppImage Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/linux-tray/Cargo.lock
+            desktopApp/native/linux-tray/target
+          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**') }}
+          restore-keys: |
+            desktop-rust-linux-appimage-x64-
 
       - name: Install portable native dependency inputs
         run: |
