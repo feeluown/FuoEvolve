@@ -6,10 +6,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import java.io.File
-import javax.swing.JFileChooser
-import javax.swing.JOptionPane
-import javax.swing.filechooser.FileNameExtensionFilter
 
 @Composable
 internal fun DesktopProviderCredentialBackupHost(
@@ -58,18 +54,14 @@ private fun openCredentialBackupFile(
     backup: ProviderCredentialBackup,
     onFeedback: (String) -> Unit,
 ) {
-    val chooser = credentialFileChooser().apply {
-        dialogTitle = "导入登录凭证"
-        fileSelectionMode = JFileChooser.FILES_ONLY
-    }
-    if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) return
-
-    runCatching { chooser.selectedFile.readText(Charsets.UTF_8) }
-        .onSuccess { content ->
-            if (content.isBlank()) onFeedback("无法读取登录凭证备份文件")
-            else backup.stageImport(content)
-        }
-        .onFailure { onFeedback(it.message ?: "无法读取登录凭证备份文件") }
+    val file = openDesktopTextFile(
+        dialogTitle = "导入登录凭证",
+        filterDescription = "FuoEvolve 登录凭证备份 (*.json)",
+        extensions = listOf("json"),
+        onFeedback = onFeedback,
+    ) ?: return
+    if (file.content.isBlank()) onFeedback("无法读取登录凭证备份文件")
+    else backup.stageImport(file.content)
 }
 
 private fun saveCredentialBackupFile(
@@ -78,29 +70,13 @@ private fun saveCredentialBackupFile(
     onFeedback: (String) -> Unit,
 ) {
     val pending = backup.consumePendingExport() ?: return
-    val chooser = credentialFileChooser().apply {
-        dialogTitle = "导出登录凭证"
-        selectedFile = File(fileName)
-    }
-    if (chooser.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return
-
-    val target = chooser.selectedFile
-    if (target.exists()) {
-        val overwrite = JOptionPane.showConfirmDialog(
-            null,
-            "${target.name} 已存在，是否覆盖？",
-            "导出登录凭证",
-            JOptionPane.YES_NO_OPTION,
-            JOptionPane.WARNING_MESSAGE,
-        )
-        if (overwrite != JOptionPane.YES_OPTION) return
-    }
-
-    runCatching { target.writeText(pending.content, Charsets.UTF_8) }
-        .onSuccess { onFeedback("登录凭证备份已导出") }
-        .onFailure { onFeedback(it.message ?: "导出登录凭证失败") }
-}
-
-private fun credentialFileChooser(): JFileChooser = JFileChooser().apply {
-    fileFilter = FileNameExtensionFilter("FuoEvolve 登录凭证备份 (*.json)", "json")
+    val saved = saveDesktopTextFile(
+        dialogTitle = "导出登录凭证",
+        suggestedFileName = fileName,
+        filterDescription = "FuoEvolve 登录凭证备份 (*.json)",
+        extensions = listOf("json"),
+        content = pending.content,
+        onFeedback = onFeedback,
+    )
+    if (saved) onFeedback("登录凭证备份已导出")
 }
