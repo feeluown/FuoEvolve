@@ -18,16 +18,21 @@ interface ProviderCacheSnapshotStorage {
 /**
  * Platform-neutral provider cache implementation.
  *
- * Cache serialization, prefix invalidation and corruption tolerance belong to shared runtime
- * semantics. Platforms only decide where and how the snapshot is stored atomically.
+ * Cache serialization, bounded eviction, prefix invalidation and corruption tolerance belong to
+ * shared runtime semantics. Platforms only decide where and how the snapshot is stored atomically.
  */
 class JsonProviderPersistentCache(
     private val storage: ProviderCacheSnapshotStorage,
+    private val maxEntries: Int = DEFAULT_PROVIDER_PERSISTENT_CACHE_ENTRIES,
     private val json: Json = Json {
         encodeDefaults = true
         ignoreUnknownKeys = true
     },
 ) : ProviderPersistentCache {
+    init {
+        require(maxEntries > 0) { "maxEntries must be positive" }
+    }
+
     private val mutex = Mutex()
 
     override suspend fun read(key: String): PersistedProviderCacheEntry? =
@@ -35,7 +40,8 @@ class JsonProviderPersistentCache(
 
     override suspend fun write(key: String, entry: PersistedProviderCacheEntry) {
         mutex.withLock {
-            save(load().toMutableMap().apply { put(key, entry) })
+            val entries = load().toMutableMap().apply { put(key, entry) }
+            save(entries.trimToNewest(maxEntries))
         }
     }
 
@@ -65,3 +71,18 @@ class JsonProviderPersistentCache(
         }
     }
 }
+
+private fun Map<String, PersistedProviderCacheEntry>.trimToNewest(
+    maxEntries: Int,
+): Map<String, PersistedProviderCacheEntry> {
+    if (size <= maxEntries) return this
+    return entries
+        .sortedWith(
+            compareByDescending<Map.Entry<String, PersistedProviderCacheEntry>> { it.value.storedAtMillis }
+                .thenBy { it.key },
+        )
+        .take(maxEntries)
+        .associate { it.toPair() }
+}
+
+private const val DEFAULT_PROVIDER_PERSISTENT_CACHE_ENTRIES = 256
