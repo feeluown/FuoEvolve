@@ -21,6 +21,7 @@ import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.installDesktopDebugLogCapture
 import org.feeluown.mobile.installDesktopListeningHistorySinkFactory
 import org.feeluown.mobile.installDesktopLocalMusicRepositoryFactory
+import org.feeluown.mobile.installDesktopPlatformVideoControllerFactory
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
@@ -43,6 +44,7 @@ fun main(args: Array<String>) {
             resumeStore = createDesktopPlaybackResumeStore(),
         )
     }
+    installDesktopPlatformVideoControllerFactory { DesktopMpvVideoController() }
     installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
     installDesktopLocalMusicRepositoryFactory { DesktopLocalMusicRepository() }
     installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
@@ -104,9 +106,6 @@ fun main(args: Array<String>) {
                     createDesktopSystemMediaSessionForWindow(playbackSession, window)
                 }
 
-                // Compose's desktop UriHandler is synchronous. On Linux the OS browser launcher may
-                // block while xdg-open/desktop integration resolves the target application, so never
-                // invoke it directly from the Compose UI dispatcher.
                 val platformUriHandler = LocalUriHandler.current
                 val nonBlockingUriHandler = remember(platformUriHandler) {
                     DesktopNonBlockingUriHandler(platformUriHandler)
