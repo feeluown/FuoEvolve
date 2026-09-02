@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   test:
-    name: Compile desktop app and shared JVM targets
+    name: Compile Linux desktop and StatusNotifier tray bridge
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -66,7 +66,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Compile desktop foundation
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Compile Rust StatusNotifier tray bridge
+        run: cargo build --manifest-path desktopApp/native/linux-tray/Cargo.toml --release
+
+      - name: Compile Linux desktop foundation
         run: >-
           ./gradlew
           --no-configuration-cache
