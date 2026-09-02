@@ -168,6 +168,11 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     dependsOn(buildDesktopWebLoginHelper)
     from(desktopWebLoginExecutable) {
         into("$packagedNativeRoot/helpers")
+        if (!isWindowsHost) {
+            filePermissions {
+                unix("755")
+            }
+        }
     }
     into(packagedResourcesRoot)
 
@@ -214,6 +219,18 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
             )
         }
     }
+
+    doLast {
+        if (!isWindowsHost) {
+            val stagedHelper = packagedResourcesRoot.get().asFile
+                .resolve("$packagedNativeRoot/helpers/$desktopWebLoginExecutableName")
+            if (!stagedHelper.isFile || !stagedHelper.canExecute()) {
+                throw GradleException(
+                    "Staged desktop web login helper is not executable: ${stagedHelper.absolutePath}",
+                )
+            }
+        }
+    }
 }
 
 val nativePackageTaskNames = setOf(
@@ -246,8 +263,26 @@ tasks.matching { it.name == "prepareAppResources" }.configureEach {
 // a provider declaration survives while its implementation class was removed.
 tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
     doLast {
+        val appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile
+        if (!isWindowsHost) {
+            val packagedHelper = appRoot.walkTopDown()
+                .firstOrNull { file -> file.isFile && file.name == desktopWebLoginExecutableName }
+                ?: throw GradleException(
+                    "Release image is missing desktop web login helper under ${appRoot.absolutePath}",
+                )
+            if (!packagedHelper.canExecute() && !packagedHelper.setExecutable(true, false)) {
+                throw GradleException(
+                    "Failed to mark release web login helper executable: ${packagedHelper.absolutePath}",
+                )
+            }
+            if (!packagedHelper.canExecute()) {
+                throw GradleException(
+                    "Release web login helper is not executable: ${packagedHelper.absolutePath}",
+                )
+            }
+        }
         verifyServiceProviderInReleaseImage(
-            appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile,
+            appRoot = appRoot,
             serviceClassName = "io.ktor.serialization.kotlinx.KotlinxSerializationExtensionProvider",
             providerClassName = "io.ktor.serialization.kotlinx.json.KotlinxSerializationJsonExtensionProvider",
         )
