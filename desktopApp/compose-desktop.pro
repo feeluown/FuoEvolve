@@ -23,6 +23,11 @@
 -keep interface org.freedesktop.dbus.** { *; }
 -dontwarn org.freedesktop.dbus.**
 
+# Ktor discovers kotlinx.serialization format integrations through java.util.ServiceLoader.
+# ProGuard keeps META-INF/services resources but cannot infer that their implementation
+# classes are runtime entry points, so preserve the JSON provider explicitly.
+-keep class io.ktor.serialization.kotlinx.json.KotlinxSerializationJsonExtensionProvider { *; }
+
 # OkHttp ships adapters for optional runtimes/providers which are intentionally absent
 # from this JVM desktop distribution. Their guarded references are safe to omit.
 -dontwarn org.graalvm.nativeimage.**
