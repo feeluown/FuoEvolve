@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
+private const val MAX_DESKTOP_ACTIVATION_INPUTS = 32
+
 /**
  * Desktop-only activation broker. It keeps one process owning persistence/native media integration
  * and forwards file/protocol activations from later launcher processes to that primary instance.
@@ -29,7 +31,12 @@ class DesktopExternalActivationSession private constructor(
     private val endpointFile: Path,
     initialInputs: List<String>,
 ) : AutoCloseable {
-    private val mutableInputs = MutableSharedFlow<String>(replay = 16, extraBufferCapacity = 48)
+    // Initial launcher arguments are emitted before Compose collectors attach, so replay must retain
+    // the same maximum batch that the secondary-instance relay accepts.
+    private val mutableInputs = MutableSharedFlow<String>(
+        replay = MAX_DESKTOP_ACTIVATION_INPUTS,
+        extraBufferCapacity = MAX_DESKTOP_ACTIVATION_INPUTS,
+    )
     val inputs: SharedFlow<String> = mutableInputs.asSharedFlow()
     private val token = UUID.randomUUID().toString()
     @Volatile
@@ -50,7 +57,11 @@ class DesktopExternalActivationSession private constructor(
             StandardOpenOption.TRUNCATE_EXISTING,
             StandardOpenOption.WRITE,
         )
-        initialInputs.filter(String::isNotBlank).forEach(mutableInputs::tryEmit)
+        initialInputs
+            .asSequence()
+            .filter(String::isNotBlank)
+            .take(MAX_DESKTOP_ACTIVATION_INPUTS)
+            .forEach(mutableInputs::tryEmit)
         serverThread.start()
         installAwtOpenHandlers()
     }
@@ -71,7 +82,7 @@ class DesktopExternalActivationSession private constructor(
                 runCatching {
                     val input = DataInputStream(incoming.getInputStream().buffered())
                     if (input.readUTF() != token) return@runCatching
-                    repeat(input.readInt().coerceIn(0, MAX_ACTIVATION_INPUTS)) {
+                    repeat(input.readInt().coerceIn(0, MAX_DESKTOP_ACTIVATION_INPUTS)) {
                         input.readUTF().takeIf(String::isNotBlank)?.let(mutableInputs::tryEmit)
                     }
                 }
@@ -130,7 +141,7 @@ class DesktopExternalActivationSession private constructor(
         }
 
         private fun relayToPrimary(endpointFile: Path, inputs: List<String>) {
-            val requested = inputs.filter(String::isNotBlank).take(MAX_ACTIVATION_INPUTS)
+            val requested = inputs.filter(String::isNotBlank).take(MAX_DESKTOP_ACTIVATION_INPUTS)
             val payload = requested.ifEmpty { listOf(DESKTOP_ACTIVATION_FOCUS) }
             repeat(RELAY_ATTEMPTS) { attempt ->
                 val endpoint = runCatching {
@@ -155,7 +166,6 @@ class DesktopExternalActivationSession private constructor(
             }
         }
 
-        private const val MAX_ACTIVATION_INPUTS = 32
         private const val RELAY_ATTEMPTS = 20
         private const val RELAY_RETRY_MS = 50L
     }
