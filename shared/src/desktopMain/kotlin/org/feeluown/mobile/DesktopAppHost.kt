@@ -35,10 +35,8 @@ fun DesktopAppHost(externalInputs: Flow<String>? = null) {
             platform = AppPlatformBindings(
                 hasAudioPermission = true,
                 onRequestAudioPermission = {},
-                hasMicrophonePermission = false,
-                onRequestMicrophonePermission = {
-                    container.appViewModel.showFeedback("桌面端听歌识曲将在后续开发阶段接入")
-                },
+                hasMicrophonePermission = true,
+                onRequestMicrophonePermission = {},
                 onOpenProviderWebLogin = container::openProviderWebLogin,
                 onLogoutProvider = container::logoutProvider,
                 onImportLocalPlaylistFile = container::importLocalPlaylistFile,
@@ -94,7 +92,7 @@ private class DesktopAppContainer {
     private val debugLogFeatureController by lazy {
         createDebugLogFeatureController(createDesktopDebugLogRepository(), scope)
     }
-    private val audioRecognitionRepository: AudioRecognitionRepository = UnsupportedAudioRecognitionRepository
+    private val audioRecognitionRepository: AudioRecognitionRepository = DesktopAudioRecognitionRepository()
 
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings
