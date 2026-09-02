@@ -22,7 +22,7 @@ private class DesktopLocalPlaylistFileStorage(
     override suspend fun listFileNames(): List<String> = withContext(Dispatchers.IO) {
         ensureDirectory()
         Files.list(directory).use { paths ->
-            paths.filter(Files::isRegularFile)
+            paths.filter { Files.isRegularFile(it) }
                 .map { it.fileName.toString() }
                 .toList()
         }
@@ -34,7 +34,7 @@ private class DesktopLocalPlaylistFileStorage(
         Files.readString(target, StandardCharsets.UTF_8)
     }
 
-    override suspend fun writeTextAtomically(fileName: String, content: String) = withContext(Dispatchers.IO) {
+    override suspend fun writeTextAtomically(fileName: String, content: String): Unit = withContext(Dispatchers.IO) {
         ensureDirectory()
         val target = fileFor(fileName)
         val temp = Files.createTempFile(directory, ".${target.fileName}.", ".tmp")
@@ -56,6 +56,7 @@ private class DesktopLocalPlaylistFileStorage(
         } finally {
             Files.deleteIfExists(temp)
         }
+        Unit
     }
 
     override suspend fun delete(fileName: String): Boolean = withContext(Dispatchers.IO) {
