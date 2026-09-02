@@ -68,7 +68,7 @@ internal class PersistentDesktopPlaybackEngine(
 
     override fun prepareLoading(track: MusicTrack, reason: PlaybackStartReason) {
         val restored = if (reason.mayResumePausedSession) {
-            restoredSession ?: resumeStore.load()
+            resumeStore.load()?.also { restoredSession = it }
         } else {
             null
         }
