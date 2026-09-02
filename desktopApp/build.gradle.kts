@@ -37,7 +37,8 @@ val packageResourceOs = when {
 }
 
 val defaultPackageProfile = if (isLinuxHost) "system" else "bundled"
-val desktopPackageProfile = providers.gradleProperty("fuoevolve.packageProfile")
+val desktopPackageProfile = providers.environmentVariable("FUOEVOLVE_PACKAGE_PROFILE")
+    .orElse(providers.gradleProperty("fuoevolve.packageProfile"))
     .orElse(defaultPackageProfile)
     .map { value -> value.lowercase() }
     .get()
