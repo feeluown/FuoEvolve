@@ -41,14 +41,15 @@ COMMON_ARGS=(
 )
 
 if [[ "$PACKAGE_TYPE" == "deb" ]]; then
-  # Debian 12/13 and Ubuntu 24.04+ expose libmpv through libmpv2.
-  PACKAGE_DEPS="libmpv2, libsecret-1-0"
+  # Debian/Ubuntu provide playback and credential libraries through the system package manager.
+  # WebKitGTK 4.1 supplies the native Wayland/X11 WebView used only by provider login windows.
+  PACKAGE_DEPS="libmpv2, libsecret-1-0, libwebkit2gtk-4.1-0"
   "$JAVA_HOME/bin/jpackage" "${COMMON_ARGS[@]}" \
     --linux-package-deps "$PACKAGE_DEPS"
 else
   # Depend on ELF capabilities rather than Fedora package names so compatible RPM distributions
-  # may satisfy the dependency from their own libmpv/libsecret package naming.
-  PACKAGE_DEPS="libmpv.so.2()(64bit), libsecret-1.so.0()(64bit)"
+  # may satisfy the dependencies from their own package naming.
+  PACKAGE_DEPS="libmpv.so.2()(64bit), libsecret-1.so.0()(64bit), libwebkit2gtk-4.1.so.0()(64bit)"
   "$JAVA_HOME/bin/jpackage" "${COMMON_ARGS[@]}" \
     --linux-package-deps "$PACKAGE_DEPS" \
     --linux-rpm-license-type "GPL-3.0-only"

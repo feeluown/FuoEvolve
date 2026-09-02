@@ -86,7 +86,7 @@ jobs:
           java -version
           jpackage --version
 
-      - name: Cache Windows Rust bridge
+      - name: Cache Windows Rust native components
         uses: actions/cache@v4
         with:
           path: |
@@ -94,7 +94,9 @@ jobs:
             ~/.cargo/git
             desktopApp/native/windows-smtc/Cargo.lock
             desktopApp/native/windows-smtc/target
-          key: desktop-rust-windows-x64-${{ hashFiles('desktopApp/native/windows-smtc/Cargo.toml', 'desktopApp/native/windows-smtc/src/**') }}
+            desktopApp/native/web-login/Cargo.lock
+            desktopApp/native/web-login/target
+          key: desktop-rust-windows-x64-${{ hashFiles('desktopApp/native/windows-smtc/Cargo.toml', 'desktopApp/native/windows-smtc/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-windows-x64-
 
@@ -135,6 +137,7 @@ jobs:
           if (-not (Get-ChildItem "$root\exe" -Filter *.exe -ErrorAction SilentlyContinue)) { throw "EXE installer was not produced" }
           if (-not (Get-ChildItem "$root\app" -Recurse -File -Include mpv-2.dll,libmpv-2.dll,mpv.dll -ErrorAction SilentlyContinue)) { throw "Bundled libmpv DLL is missing" }
           if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter fuoevolve_smtc_bridge.dll -ErrorAction SilentlyContinue)) { throw "SMTC bridge is missing" }
+          if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter fuoevolve-web-login.exe -ErrorAction SilentlyContinue)) { throw "WebView login helper is missing" }
           $runtimeRelease = Get-ChildItem "$root\app" -Recurse -File -Filter release -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '[\\/]runtime[\\/]release$' } |
             Select-Object -First 1
@@ -229,7 +232,7 @@ jobs:
           java -version
           jpackage --version
 
-      - name: Cache macOS Rust bridge
+      - name: Cache macOS Rust native components
         uses: actions/cache@v4
         with:
           path: |
@@ -237,7 +240,9 @@ jobs:
             ~/.cargo/git
             desktopApp/native/macos-now-playing/Cargo.lock
             desktopApp/native/macos-now-playing/target
-          key: desktop-rust-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/native/macos-now-playing/Cargo.toml', 'desktopApp/native/macos-now-playing/src/**') }}
+            desktopApp/native/web-login/Cargo.lock
+            desktopApp/native/web-login/target
+          key: desktop-rust-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/native/macos-now-playing/Cargo.toml', 'desktopApp/native/macos-now-playing/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-macos-${{ matrix.arch }}-
 
@@ -284,6 +289,7 @@ jobs:
           find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q . || { echo "PKG was not produced" >&2; exit 1; }
           find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q . || { echo "Bundled libmpv dylib is missing" >&2; exit 1; }
           find "$ROOT/app" -name libfuoevolve_now_playing_bridge.dylib -print -quit | grep -q . || { echo "Now Playing bridge is missing" >&2; exit 1; }
+          find "$ROOT/app" -name fuoevolve-web-login -type f -perm -u+x -print -quit | grep -q . || { echo "WebView login helper is missing" >&2; exit 1; }
           RUNTIME_RELEASE="$(find "$ROOT/app" -path '*/Contents/runtime/Contents/Home/release' -print -quit)"
           if [[ -z "$RUNTIME_RELEASE" ]]; then
             echo "Bundled JVM runtime release marker is missing" >&2
@@ -300,16 +306,24 @@ jobs:
             fi
           done < <(find "$ROOT/app" -name '*.dylib' -type f)
 
+      - name: Prepare architecture-specific macOS artifact names
+        run: |
+          ROOT=desktopApp/build/compose/binaries/main-release
+          DMG="$(find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
+          PKG="$(find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit)"
+          test -n "$DMG" && test -n "$PKG"
+          mv "$DMG" "$ROOT/dmg/FuoEvolve-macos-${{ matrix.arch }}.dmg"
+          mv "$PKG" "$ROOT/pkg/FuoEvolve-macos-${{ matrix.arch }}.pkg"
+
       - name: Report macOS package sizes
         run: |
-          du -h desktopApp/build/compose/binaries/main-release/dmg/*.dmg
-          du -h desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+          du -h desktopApp/build/compose/binaries/main-release/dmg/FuoEvolve-macos-${{ matrix.arch }}.dmg
+          du -h desktopApp/build/compose/binaries/main-release/pkg/FuoEvolve-macos-${{ matrix.arch }}.pkg
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}.dmg
-          path: desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          path: desktopApp/build/compose/binaries/main-release/dmg/FuoEvolve-macos-${{ matrix.arch }}.dmg
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -317,8 +331,7 @@ jobs:
       - name: Upload macOS PKG
         uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}.pkg
-          path: desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+          path: desktopApp/build/compose/binaries/main-release/pkg/FuoEvolve-macos-${{ matrix.arch }}.pkg
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -326,7 +339,7 @@ jobs:
   linux-system:
     name: Package Linux DEB RPM and Arch
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
 
     steps:
       - name: Checkout
@@ -368,7 +381,7 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
 
-      - name: Cache Linux system Rust bridge
+      - name: Cache Linux system Rust native components
         uses: actions/cache@v4
         with:
           path: |
@@ -376,17 +389,20 @@ jobs:
             ~/.cargo/git
             desktopApp/native/linux-tray/Cargo.lock
             desktopApp/native/linux-tray/target
-          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**') }}
+            desktopApp/native/web-login/Cargo.lock
+            desktopApp/native/web-login/target
+          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-linux-system-x64-
 
-      - name: Install native packaging tools
+      - name: Install native packaging tools and WebKitGTK
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot rpm
+          sudo apt-get install -y fakeroot rpm libwebkit2gtk-4.1-dev
           java -version
           jpackage --version
           docker --version
+          pkg-config --modversion webkit2gtk-4.1
 
       - name: Create minified Linux app image with system native dependency profile
         id: app
@@ -417,6 +433,8 @@ jobs:
           grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
           TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
           test -n "$TRAY_BRIDGE"
+          WEB_LOGIN_HELPER="$(find "$APP_IMAGE" -name fuoevolve-web-login -type f -perm -u+x -print -quit)"
+          test -n "$WEB_LOGIN_HELPER" || { echo "WebView login helper is missing" >&2; exit 1; }
           if [[ -n "$(find "$APP_IMAGE" -name 'libmpv.so*' -print -quit)" ]]; then
             echo "System Linux app image must not bundle libmpv" >&2
             exit 1
@@ -446,9 +464,12 @@ jobs:
           test -n "$DEB" && test -n "$RPM" && test -n "$ARCH"
           dpkg-deb -I "$DEB" | tee build/desktop-packages/system/deb-info.txt
           grep -q 'libmpv2' build/desktop-packages/system/deb-info.txt
+          grep -q 'libwebkit2gtk-4.1-0' build/desktop-packages/system/deb-info.txt
           rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
           grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
+          grep -q 'libwebkit2gtk-4.1.so.0' build/desktop-packages/system/rpm-requires.txt
           tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
+          tar -xOf "$ARCH" .PKGINFO | grep -q 'depend = webkit2gtk-4.1'
 
       - name: Report Linux package sizes
         run: du -h build/desktop-packages/system/*.deb build/desktop-packages/system/*.rpm build/desktop-packages/system/*.pkg.tar.zst
@@ -483,7 +504,7 @@ jobs:
   linux-appimage:
     name: Package portable Linux AppImage
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -525,7 +546,7 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
 
-      - name: Cache Linux AppImage Rust bridge
+      - name: Cache Linux AppImage Rust native components
         uses: actions/cache@v4
         with:
           path: |
@@ -533,16 +554,20 @@ jobs:
             ~/.cargo/git
             desktopApp/native/linux-tray/Cargo.lock
             desktopApp/native/linux-tray/target
-          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**') }}
+            desktopApp/native/web-login/Cargo.lock
+            desktopApp/native/web-login/target
+          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-linux-appimage-x64-
 
       - name: Install portable native dependency inputs
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmpv1 libsecret-1-0 patchelf pax-utils
+          sudo apt-get install -y libmpv1 libsecret-1-0 libwebkit2gtk-4.1-dev glib-networking patchelf pax-utils
           ldconfig -p | grep libmpv
           ldconfig -p | grep libsecret-1
+          pkg-config --modversion webkit2gtk-4.1
+          find /usr/lib -path '*/webkit2gtk-4.1/WebKitNetworkProcess' -print -quit | grep -q .
 
       - name: Create minified Linux app image
         id: app
@@ -571,6 +596,7 @@ jobs:
           RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
           test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
           grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
+          find "$APP_IMAGE" -name fuoevolve-web-login -type f -perm -u+x -print -quit | grep -q . || { echo "WebView login helper is missing" >&2; exit 1; }
           VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
           echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

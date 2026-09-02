@@ -35,6 +35,7 @@ fun DesktopAppHost() {
 
 private class DesktopAppContainer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val webLoginLauncher = DesktopWebLoginLauncher()
     private val providerCredentialStore = createDesktopProviderCredentialStore()
     private val providerGraph = createFuoProviderGraph(
         credentials = providerCredentialStore,
@@ -373,7 +374,17 @@ private class DesktopAppContainer {
     )
 
     fun openProviderWebLogin(provider: ProviderInfo) {
-        appViewModel.showFeedback("${provider.providerName} 的桌面网页登录将在后续开发阶段接入")
+        scope.launch {
+            when (val result = webLoginLauncher.open(provider)) {
+                is DesktopWebLoginResult.Success -> {
+                    providerAuthFeatureController.loginWithCookies(provider.providerId, result.cookiesJson)
+                }
+                DesktopWebLoginResult.Cancelled -> Unit
+                is DesktopWebLoginResult.Failure -> {
+                    appViewModel.showFeedback(result.message)
+                }
+            }
+        }
     }
 
     fun logoutProvider(provider: ProviderInfo) {
@@ -384,6 +395,7 @@ private class DesktopAppContainer {
         if (playbackSessionIntegration.isInitialized()) {
             playbackSessionIntegration.value.close()
         }
+        webLoginLauncher.close()
         scope.cancel()
         desktopDownloadRepository.close()
         playbackEngine.close()

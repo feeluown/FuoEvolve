@@ -3,6 +3,8 @@ package org.feeluown.mobile.desktop
 import com.microsoft.credentialstorage.SecretStore
 import com.microsoft.credentialstorage.StorageProvider
 import com.microsoft.credentialstorage.StorageProvider.SecureOption
+import com.microsoft.credentialstorage.implementation.posix.libsecret.LibSecretBackedTokenStore
+import com.microsoft.credentialstorage.implementation.posix.libsecret.LibSecretLibrary
 import com.microsoft.credentialstorage.model.StoredToken
 import com.microsoft.credentialstorage.model.StoredTokenType
 import java.security.MessageDigest
@@ -131,9 +133,22 @@ private class MicrosoftDesktopSecretStore(
 }
 
 private fun createMicrosoftSecretStore(): DesktopSecretStore? =
-    StorageProvider.getTokenStorage(true, SecureOption.REQUIRED)
-        ?.takeIf { it.isSecure }
-        ?.let(::MicrosoftDesktopSecretStore)
+    if (System.getProperty("os.name") == "Linux") {
+        createLinuxLibSecretStore()
+    } else {
+        StorageProvider.getTokenStorage(true, SecureOption.REQUIRED)
+            ?.takeIf { it.isSecure }
+            ?.let(::MicrosoftDesktopSecretStore)
+    }
+
+private fun createLinuxLibSecretStore(): DesktopSecretStore? = runCatching {
+    // StorageProvider performs a preflight that rejects a locked default collection before
+    // normal libsecret interaction can display the system unlock prompt. Use its underlying
+    // libsecret store directly on Linux instead: reads request SECRET_SEARCH_UNLOCK and writes
+    // use libsecret's default collection, so the Secret Service can handle user interaction.
+    LibSecretLibrary.INSTANCE
+    MicrosoftDesktopSecretStore(LibSecretBackedTokenStore())
+}.getOrNull()
 
 private data class DesktopCredentialManifest(
     val generation: String,

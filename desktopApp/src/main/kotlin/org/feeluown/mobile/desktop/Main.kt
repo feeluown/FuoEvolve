@@ -1,11 +1,13 @@
 package org.feeluown.mobile.desktop
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -73,7 +75,20 @@ fun main() {
             installDesktopPlaybackSessionIntegrationFactory { playbackSession ->
                 createDesktopSystemMediaSessionForWindow(playbackSession, window)
             }
-            DesktopAppHost()
+
+            // Compose's desktop UriHandler is synchronous. On Linux the OS browser launcher may
+            // block while xdg-open/desktop integration resolves the target application, so never
+            // invoke it directly from the Compose UI dispatcher.
+            val platformUriHandler = LocalUriHandler.current
+            val nonBlockingUriHandler = remember(platformUriHandler) {
+                DesktopNonBlockingUriHandler(platformUriHandler)
+            }
+            DisposableEffect(nonBlockingUriHandler) {
+                onDispose(nonBlockingUriHandler::close)
+            }
+            CompositionLocalProvider(LocalUriHandler provides nonBlockingUriHandler) {
+                DesktopAppHost()
+            }
         }
     }
 }

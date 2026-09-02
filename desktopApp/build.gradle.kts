@@ -124,8 +124,20 @@ val buildLinuxTrayBridge by tasks.registering(Exec::class) {
     commandLine("cargo", "build", "--release")
 }
 
+val desktopWebLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
+val desktopWebLoginExecutable = layout.projectDirectory.file(
+    "native/web-login/target/release/$desktopWebLoginExecutableName",
+)
+val buildDesktopWebLoginHelper by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the isolated system-WebView login helper used by the desktop runtime."
+    workingDir(layout.projectDirectory.dir("native/web-login"))
+    commandLine("cargo", "build", "--release")
+}
+
 if (isWindowsHost || isMacHost || isLinuxHost) {
     tasks.matching { it.name == "run" }.configureEach {
+        dependsOn(buildDesktopWebLoginHelper)
         if (isWindowsHost) dependsOn(buildWindowsSmtcBridge)
         if (isMacHost) dependsOn(buildMacNowPlayingBridge)
         if (isLinuxHost) dependsOn(buildLinuxTrayBridge)
@@ -145,12 +157,21 @@ val expectedLibMpvNames = when {
 
 val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     group = "distribution"
-    description = "Stage the platform bridge and optional bundled libmpv runtime for desktop packages."
+    description = "Stage desktop native bridges, web login helper and optional bundled libmpv runtime."
     inputs.property("packageProfile", desktopPackageProfile)
     if (bundlesLibMpv) {
         inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
         from(packageLibMpvDir) {
             into("$packagedNativeRoot/mpv")
+        }
+    }
+    dependsOn(buildDesktopWebLoginHelper)
+    from(desktopWebLoginExecutable) {
+        into("$packagedNativeRoot/helpers")
+        if (!isWindowsHost) {
+            filePermissions {
+                unix("755")
+            }
         }
     }
     into(packagedResourcesRoot)
@@ -179,6 +200,9 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     }
 
     doFirst {
+        if (!desktopWebLoginExecutable.asFile.isFile) {
+            throw GradleException("Desktop web login helper was not built: ${desktopWebLoginExecutable.asFile}")
+        }
         if (!bundlesLibMpv) return@doFirst
         val source = packageLibMpvDir.orNull
             ?: throw GradleException(
@@ -193,6 +217,18 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
                 "libmpv bundle ${source.absolutePath} must contain one of " +
                     expectedLibMpvNames.joinToString(),
             )
+        }
+    }
+
+    doLast {
+        if (!isWindowsHost) {
+            val stagedHelper = packagedResourcesRoot.get().asFile
+                .resolve("$packagedNativeRoot/helpers/$desktopWebLoginExecutableName")
+            if (!stagedHelper.isFile || !stagedHelper.canExecute()) {
+                throw GradleException(
+                    "Staged desktop web login helper is not executable: ${stagedHelper.absolutePath}",
+                )
+            }
         }
     }
 }
@@ -227,8 +263,26 @@ tasks.matching { it.name == "prepareAppResources" }.configureEach {
 // a provider declaration survives while its implementation class was removed.
 tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
     doLast {
+        val appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile
+        if (!isWindowsHost) {
+            val packagedHelper = appRoot.walkTopDown()
+                .firstOrNull { file -> file.isFile && file.name == desktopWebLoginExecutableName }
+                ?: throw GradleException(
+                    "Release image is missing desktop web login helper under ${appRoot.absolutePath}",
+                )
+            if (!packagedHelper.canExecute() && !packagedHelper.setExecutable(true, false)) {
+                throw GradleException(
+                    "Failed to mark release web login helper executable: ${packagedHelper.absolutePath}",
+                )
+            }
+            if (!packagedHelper.canExecute()) {
+                throw GradleException(
+                    "Release web login helper is not executable: ${packagedHelper.absolutePath}",
+                )
+            }
+        }
         verifyServiceProviderInReleaseImage(
-            appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile,
+            appRoot = appRoot,
             serviceClassName = "io.ktor.serialization.kotlinx.KotlinxSerializationExtensionProvider",
             providerClassName = "io.ktor.serialization.kotlinx.json.KotlinxSerializationJsonExtensionProvider",
         )
@@ -264,6 +318,7 @@ compose.desktop {
     application {
         mainClass = "org.feeluown.mobile.desktop.MainKt"
         val appDir = "\$APPDIR"
+        jvmArgs += "-Dfuoevolve.appdir=$appDir"
         jvmArgs += "-Djna.library.path=" + listOf(
             "$appDir/resources/native/mpv",
             "$appDir/resources/native/bridges",
