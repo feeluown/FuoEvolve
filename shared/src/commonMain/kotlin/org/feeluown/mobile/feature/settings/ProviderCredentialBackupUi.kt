@@ -28,8 +28,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun ProviderCredentialBackupDialogs(
-    backup: AndroidProviderCredentialBackup,
+fun ProviderCredentialBackupDialogs(
+    backup: ProviderCredentialBackup,
     exportTarget: ProviderCredentialBackupTarget?,
     onDismissExport: () -> Unit,
     onExportFile: (String) -> Unit,
@@ -106,7 +106,7 @@ internal fun ProviderCredentialBackupDialogs(
 
 @Composable
 private fun ProviderCredentialExportDialog(
-    backup: AndroidProviderCredentialBackup,
+    backup: ProviderCredentialBackup,
     target: ProviderCredentialBackupTarget,
     onDismiss: () -> Unit,
     onExportFile: (String) -> Unit,

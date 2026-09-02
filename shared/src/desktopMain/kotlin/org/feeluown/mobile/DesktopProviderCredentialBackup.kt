@@ -1,7 +1,7 @@
 package org.feeluown.mobile
 
-import android.util.Base64
 import java.security.SecureRandom
+import java.util.Base64
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.Mac
@@ -9,8 +9,8 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 
-/** Android adapter for the shared portable credential-backup implementation. */
-internal class AndroidProviderCredentialBackup(
+/** Desktop adapter for the shared portable credential-backup implementation. */
+internal class DesktopProviderCredentialBackup(
     credentialStore: ProviderCredentialStore,
     providerRegistry: ProviderRegistryRepository,
     providerAuth: ProviderAuthRepository,
@@ -18,10 +18,10 @@ internal class AndroidProviderCredentialBackup(
     credentialStore = credentialStore,
     providerRegistry = providerRegistry,
     providerAuth = providerAuth,
-    crypto = AndroidProviderCredentialBackupCrypto,
+    crypto = DesktopProviderCredentialBackupCrypto,
 )
 
-private object AndroidProviderCredentialBackupCrypto : ProviderCredentialBackupCrypto {
+private object DesktopProviderCredentialBackupCrypto : ProviderCredentialBackupCrypto {
     override fun encrypt(
         plaintext: String,
         password: String,
@@ -40,9 +40,9 @@ private object AndroidProviderCredentialBackupCrypto : ProviderCredentialBackupC
             cipher.updateAAD(aad)
             val payload = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
             return ProviderCredentialEncryptedPayload(
-                saltBase64 = base64(salt),
-                ivBase64 = base64(iv),
-                payloadBase64 = base64(payload),
+                saltBase64 = Base64.getEncoder().encodeToString(salt),
+                ivBase64 = Base64.getEncoder().encodeToString(iv),
+                payloadBase64 = Base64.getEncoder().encodeToString(payload),
             )
         } finally {
             keyBytes.fill(0)
@@ -112,10 +112,8 @@ private object AndroidProviderCredentialBackupCrypto : ProviderCredentialBackupC
         }
     }
 
-    private fun base64(value: ByteArray): String = Base64.encodeToString(value, Base64.NO_WRAP)
-
     private fun decodeBase64(value: String, error: String): ByteArray = try {
-        Base64.decode(value, Base64.NO_WRAP)
+        Base64.getDecoder().decode(value)
     } catch (_: IllegalArgumentException) {
         throw IllegalArgumentException(error)
     }
