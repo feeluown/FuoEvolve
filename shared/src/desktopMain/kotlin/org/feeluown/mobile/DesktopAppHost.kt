@@ -16,21 +16,30 @@ fun DesktopAppHost() {
     DisposableEffect(container) {
         onDispose(container::close)
     }
-    AppRoot(
-        appViewModel = container.appViewModel,
-        uiGraph = container.appUiGraph,
-        platform = AppPlatformBindings(
-            hasAudioPermission = true,
-            onRequestAudioPermission = {},
-            hasMicrophonePermission = false,
-            onRequestMicrophonePermission = {
-                container.appViewModel.showFeedback("桌面端听歌识曲将在后续开发阶段接入")
-            },
-            onOpenProviderWebLogin = container::openProviderWebLogin,
-            onLogoutProvider = container::logoutProvider,
-            appVersionInfo = "Desktop development build",
-        ),
-    )
+    DesktopProviderCredentialBackupHost(
+        backup = container.providerCredentialBackup,
+        availableProviders = { container.appUiGraph.providerCatalog.uiState.value.availableProviders },
+        refreshProviders = { providers ->
+            container.appUiGraph.providerAuth.refreshAll(providers, refreshUserInfo = true)
+        },
+        onFeedback = container.appViewModel::showFeedback,
+    ) {
+        AppRoot(
+            appViewModel = container.appViewModel,
+            uiGraph = container.appUiGraph,
+            platform = AppPlatformBindings(
+                hasAudioPermission = true,
+                onRequestAudioPermission = {},
+                hasMicrophonePermission = false,
+                onRequestMicrophonePermission = {
+                    container.appViewModel.showFeedback("桌面端听歌识曲将在后续开发阶段接入")
+                },
+                onOpenProviderWebLogin = container::openProviderWebLogin,
+                onLogoutProvider = container::logoutProvider,
+                appVersionInfo = "Desktop development build",
+            ),
+        )
+    }
 }
 
 private class DesktopAppContainer {
@@ -42,6 +51,13 @@ private class DesktopAppContainer {
         persistentCache = null,
         isCellularConnection = { false },
     )
+    val providerCredentialBackup by lazy {
+        DesktopProviderCredentialBackup(
+            credentialStore = providerCredentialStore,
+            providerRegistry = providerGraph.registry,
+            providerAuth = providerGraph.auth,
+        )
+    }
     private val playbackProvider = createAppPlaybackProviderPort(
         providerRegistry = providerGraph.registry,
         providerSearch = providerGraph.search,
