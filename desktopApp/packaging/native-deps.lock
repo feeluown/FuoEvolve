@@ -1,0 +1,17 @@
+# Native dependency inputs used by desktop packaging CI.
+# Keep immutable release URLs and SHA-256 values here so packaging does not silently follow latest assets.
+
+# GitHub's macOS arm64/x64 runner images currently carry different Homebrew core snapshots,
+# so pin the exact formula revision per architecture instead of silently accepting either.
+macos.arm64.mpv.version=0.41.0_6
+macos.x64.mpv.version=0.41.0_8
+
+# shinchiro/mpv-winbuild-cmake development archive contains the libmpv DLL + development runtime.
+windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260902/mpv-dev-x86_64-20260902-git-174b638f29.7z
+windows.x64.libmpv.sha256=f23fbdee1864958df65886b56b1d640a319a4430df89aaa4417473d9d581c57f
+
+# AppImage tooling is pinned independently of the Linux distribution packages used to collect libmpv.
+appimagetool.x64.url=https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+appimagetool.x64.sha256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+appimage.runtime.x64.url=https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+appimage.runtime.x64.sha256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d

@@ -1,4 +1,5 @@
 import java.io.File
+import java.util.zip.ZipFile
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
@@ -21,6 +22,51 @@ fun gitOutput(vararg args: String): String? = runCatching {
     output.takeIf { it.isNotBlank() }
 }.getOrNull()
 
+fun verifyServiceProviderInReleaseImage(
+    appRoot: File,
+    serviceClassName: String,
+    providerClassName: String,
+) {
+    val jars = appRoot.walkTopDown()
+        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
+        .toList()
+    if (jars.isEmpty()) {
+        throw GradleException("No application JARs found in release image: ${appRoot.absolutePath}")
+    }
+
+    val serviceEntryName = "META-INF/services/$serviceClassName"
+    val providerEntryName = providerClassName.replace('.', '/') + ".class"
+    var serviceDeclaresProvider = false
+    var providerClassPresent = false
+
+    jars.forEach { jar ->
+        ZipFile(jar).use { zip ->
+            if (zip.getEntry(providerEntryName) != null) {
+                providerClassPresent = true
+            }
+            zip.getEntry(serviceEntryName)?.let { entry ->
+                val declaresProvider = zip.getInputStream(entry).bufferedReader().use { reader ->
+                    reader.lineSequence()
+                        .map { line -> line.substringBefore('#').trim() }
+                        .any { line -> line == providerClassName }
+                }
+                serviceDeclaresProvider = serviceDeclaresProvider || declaresProvider
+            }
+        }
+    }
+
+    if (!serviceDeclaresProvider) {
+        throw GradleException(
+            "Release image is missing ServiceLoader declaration for $providerClassName in $serviceEntryName",
+        )
+    }
+    if (!providerClassPresent) {
+        throw GradleException(
+            "Release shrink removed ServiceLoader provider class $providerClassName",
+        )
+    }
+}
+
 val desktopPackageVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
     ?.let { tag -> Regex("\\d+\\.\\d+\\.\\d+").find(tag)?.value }
     ?: "0.1.0"
@@ -35,6 +81,24 @@ val packageResourceOs = when {
     isLinuxHost -> "linux"
     else -> "common"
 }
+
+val defaultPackageProfile = if (isLinuxHost) "system" else "bundled"
+val desktopPackageProfile = providers.environmentVariable("FUOEVOLVE_PACKAGE_PROFILE")
+    .orElse(providers.gradleProperty("fuoevolve.packageProfile"))
+    .orElse(defaultPackageProfile)
+    .map { value -> value.lowercase() }
+    .get()
+if (desktopPackageProfile !in setOf("bundled", "system")) {
+    throw GradleException(
+        "Unsupported desktop package profile '$desktopPackageProfile'. Use bundled or system.",
+    )
+}
+if (!isLinuxHost && desktopPackageProfile != "bundled") {
+    throw GradleException(
+        "Windows and macOS packages must use the bundled native dependency profile.",
+    )
+}
+val bundlesLibMpv = desktopPackageProfile == "bundled"
 
 val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
     group = "build"
@@ -81,13 +145,15 @@ val expectedLibMpvNames = when {
 
 val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     group = "distribution"
-    description = "Stage relocatable libmpv and platform bridges for native desktop packages."
-    inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
-    into(packagedResourcesRoot)
-
-    from(packageLibMpvDir) {
-        into("$packagedNativeRoot/mpv")
+    description = "Stage the platform bridge and optional bundled libmpv runtime for desktop packages."
+    inputs.property("packageProfile", desktopPackageProfile)
+    if (bundlesLibMpv) {
+        inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
+        from(packageLibMpvDir) {
+            into("$packagedNativeRoot/mpv")
+        }
     }
+    into(packagedResourcesRoot)
 
     when {
         isWindowsHost -> {
@@ -113,9 +179,10 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     }
 
     doFirst {
+        if (!bundlesLibMpv) return@doFirst
         val source = packageLibMpvDir.orNull
             ?: throw GradleException(
-                "Native desktop packaging requires FUOEVOLVE_PACKAGE_LIBMPV_DIR " +
+                "Bundled desktop packaging requires FUOEVOLVE_PACKAGE_LIBMPV_DIR " +
                     "(or -Pfuoevolve.packageLibmpvDir) pointing to a relocatable libmpv runtime bundle.",
             )
         if (!source.isDirectory) {
@@ -139,13 +206,43 @@ val nativePackageTaskNames = setOf(
     "packageReleaseDistributionForCurrentOS",
     "packageDmg",
     "packageReleaseDmg",
+    "packagePkg",
+    "packageReleasePkg",
     "packageMsi",
     "packageReleaseMsi",
-    "packageDeb",
-    "packageReleaseDeb",
+    "packageExe",
+    "packageReleaseExe",
 )
 tasks.matching { it.name in nativePackageTaskNames }.configureEach {
     dependsOn(prepareDesktopPackageResources)
+}
+// Compose's app resources task consumes appResourcesRootDir. Make that relationship explicit
+// so Gradle 9 task validation sees the staged native resources as a declared dependency.
+tasks.matching { it.name == "prepareAppResources" }.configureEach {
+    dependsOn(prepareDesktopPackageResources)
+}
+
+// ProGuard cannot infer java.util.ServiceLoader entry points from META-INF/services resources.
+// Verify the final minified image, not just the unshrunk compile classpath, so packaging fails if
+// a provider declaration survives while its implementation class was removed.
+tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
+    doLast {
+        verifyServiceProviderInReleaseImage(
+            appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile,
+            serviceClassName = "io.ktor.serialization.kotlinx.KotlinxSerializationExtensionProvider",
+            providerClassName = "io.ktor.serialization.kotlinx.json.KotlinxSerializationJsonExtensionProvider",
+        )
+    }
+}
+
+tasks.register("printDesktopPackageVersion") {
+    group = "distribution"
+    doLast { println(desktopPackageVersion) }
+}
+
+tasks.register("printDesktopPackageProfile") {
+    group = "distribution"
+    doLast { println(desktopPackageProfile) }
 }
 
 dependencies {
@@ -172,8 +269,27 @@ compose.desktop {
             "$appDir/resources/native/bridges",
         ).joinToString(File.pathSeparator)
 
+        buildTypes.release.proguard {
+            // Phase 1 size optimization: remove unused JVM/Compose dependency code while keeping
+            // obfuscation disabled so stack traces and native/reflection boundaries stay readable.
+            optimize.set(true)
+            obfuscate.set(false)
+            configurationFiles.from(project.file("compose-desktop.pro"))
+        }
+
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            // These dependencies are reached reflectively by desktop-only libraries and are not
+            // always discovered by jdeps: JNA/credential storage uses sun.misc.Unsafe, while
+            // dbus-java uses com.sun.security.auth.module.UnixSystem for the MPRIS Unix identity.
+            modules("jdk.unsupported", "jdk.security.auth")
+
+            when {
+                isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+                isMacHost -> targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
+                // Linux distro packages are produced from createReleaseDistributable by dedicated
+                // scripts so dependency metadata can use each distribution's package manager.
+                isLinuxHost -> Unit
+            }
             packageName = "FuoEvolve"
             packageVersion = desktopPackageVersion
             description = "A cross-platform multi-source music player based on FeelUOwn"

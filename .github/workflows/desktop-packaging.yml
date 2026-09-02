@@ -1,0 +1,609 @@
+name: Desktop Packaging
+
+"on":
+  pull_request:
+    paths:
+      - "desktopApp/build.gradle.kts"
+      - "desktopApp/compose-desktop.pro"
+      - "desktopApp/packaging/**"
+      - "desktopApp/native/**"
+      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+      - "gradle/**"
+      - ".github/workflows/desktop-packaging.yml"
+  push:
+    branches:
+      - master
+    tags:
+      - "[0-9]*"
+    paths:
+      - "desktopApp/build.gradle.kts"
+      - "desktopApp/compose-desktop.pro"
+      - "desktopApp/packaging/**"
+      - "desktopApp/native/**"
+      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+      - "gradle/**"
+      - ".github/workflows/desktop-packaging.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Package Windows x64 MSI and EXE
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        shell: pwsh
+        run: |
+          git show-ref --verify --quiet refs/heads/master
+          if ($LASTEXITCODE -ne 0) {
+            git branch master origin/master
+          }
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_ENV -Value "FUO_JDK17=$env:JAVA_HOME"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Set up Rust stable
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+          java -version
+          jpackage --version
+
+      - name: Cache Windows Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/windows-smtc/Cargo.lock
+            desktopApp/native/windows-smtc/target
+          key: desktop-rust-windows-x64-${{ hashFiles('desktopApp/native/windows-smtc/Cargo.toml', 'desktopApp/native/windows-smtc/src/**') }}
+          restore-keys: |
+            desktop-rust-windows-x64-
+
+      - name: Cache pinned Windows libmpv runtime
+        id: windows-libmpv-cache
+        uses: actions/cache@v4
+        with:
+          path: build/desktop-native/windows/mpv
+          key: desktop-windows-libmpv-x64-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/windows/prepare-libmpv.ps1') }}
+
+      - name: Prepare pinned Windows libmpv runtime
+        if: steps.windows-libmpv-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: >-
+          ./desktopApp/packaging/windows/prepare-libmpv.ps1
+          -OutputDir "${{ github.workspace }}\build\desktop-native\windows\mpv"
+
+      - name: Build minified self-contained Windows installers
+        shell: pwsh
+        env:
+          FUOEVOLVE_PACKAGE_PROFILE: bundled
+          FUOEVOLVE_PACKAGE_LIBMPV_DIR: ${{ github.workspace }}\build\desktop-native\windows\mpv
+        run: |
+          & .\gradlew.bat `
+            "-Dorg.gradle.java.installations.paths=$env:FUO_JDK17,$env:JAVA_HOME" `
+            --no-configuration-cache `
+            --warning-mode all `
+            :desktopApp:createReleaseDistributable `
+            :desktopApp:packageReleaseMsi `
+            :desktopApp:packageReleaseExe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Windows package closure
+        shell: pwsh
+        run: |
+          $root = "desktopApp\build\compose\binaries\main-release"
+          if (-not (Get-ChildItem "$root\msi" -Filter *.msi -ErrorAction SilentlyContinue)) { throw "MSI was not produced" }
+          if (-not (Get-ChildItem "$root\exe" -Filter *.exe -ErrorAction SilentlyContinue)) { throw "EXE installer was not produced" }
+          if (-not (Get-ChildItem "$root\app" -Recurse -File -Include mpv-2.dll,libmpv-2.dll,mpv.dll -ErrorAction SilentlyContinue)) { throw "Bundled libmpv DLL is missing" }
+          if (-not (Get-ChildItem "$root\app" -Recurse -File -Filter fuoevolve_smtc_bridge.dll -ErrorAction SilentlyContinue)) { throw "SMTC bridge is missing" }
+          $runtimeRelease = Get-ChildItem "$root\app" -Recurse -File -Filter release -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]runtime[\\/]release$' } |
+            Select-Object -First 1
+          if (-not $runtimeRelease) { throw "Bundled JVM runtime release marker is missing" }
+          $runtimeRoot = $runtimeRelease.Directory.FullName
+          if (-not (Test-Path (Join-Path $runtimeRoot "lib\modules"))) { throw "Bundled JVM runtime modules image is missing" }
+          if (-not (Select-String -Path $runtimeRelease.FullName -Pattern '^JAVA_VERSION="21\.' -Quiet)) { throw "Bundled JVM runtime is not Java 21" }
+
+      - name: Report Windows package sizes
+        shell: pwsh
+        run: |
+          Get-ChildItem "desktopApp\build\compose\binaries\main-release\msi\*.msi", "desktopApp\build\compose\binaries\main-release\exe\*.exe" |
+            ForEach-Object { Write-Host ("{0}: {1:N2} MiB" -f $_.Name, ($_.Length / 1MB)) }
+
+      - name: Upload Windows MSI
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-windows-x64.msi
+          path: desktopApp/build/compose/binaries/main-release/msi/*.msi
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-windows-x64.exe
+          path: desktopApp/build/compose/binaries/main-release/exe/*.exe
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+  macos:
+    name: Package macOS ${{ matrix.arch }} DMG and PKG
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            uname_arch: arm64
+          - arch: x64
+            runner: macos-15-intel
+            uname_arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify runner architecture
+        run: test "$(uname -m)" = "${{ matrix.uname_arch }}"
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+          java -version
+          jpackage --version
+
+      - name: Cache macOS Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/macos-now-playing/Cargo.lock
+            desktopApp/native/macos-now-playing/target
+          key: desktop-rust-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/native/macos-now-playing/Cargo.toml', 'desktopApp/native/macos-now-playing/src/**') }}
+          restore-keys: |
+            desktop-rust-macos-${{ matrix.arch }}-
+
+      - name: Cache relocatable macOS libmpv runtime
+        id: macos-libmpv-cache
+        uses: actions/cache@v4
+        with:
+          path: build/desktop-native/macos/mpv
+          key: desktop-macos-libmpv-${{ matrix.arch }}-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/macos/prepare-libmpv.sh') }}
+
+      - name: Prepare relocatable macOS libmpv runtime
+        if: steps.macos-libmpv-cache.outputs.cache-hit != 'true'
+        run: >-
+          bash desktopApp/packaging/macos/prepare-libmpv.sh
+          "${{ github.workspace }}/build/desktop-native/macos/mpv"
+
+      - name: Verify relocatable macOS libmpv runtime
+        run: |
+          LIBMPV_DIR="${{ github.workspace }}/build/desktop-native/macos/mpv"
+          test -f "$LIBMPV_DIR/libmpv.dylib" || { echo "Cached macOS libmpv runtime is incomplete" >&2; exit 1; }
+          while IFS= read -r dylib; do
+            if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/' >/dev/null; then
+              echo "Cached macOS libmpv runtime is not relocatable: $dylib" >&2
+              exit 1
+            fi
+          done < <(find "$LIBMPV_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
+
+      - name: Build minified self-contained macOS installers
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=bundled \
+            -Pfuoevolve.packageLibmpvDir="${{ github.workspace }}/build/desktop-native/macos/mpv" \
+            :desktopApp:createReleaseDistributable \
+            :desktopApp:packageReleaseDmg \
+            :desktopApp:packageReleasePkg
+
+      - name: Verify macOS package closure
+        run: |
+          ROOT=desktopApp/build/compose/binaries/main-release
+          find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit | grep -q . || { echo "DMG was not produced" >&2; exit 1; }
+          find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit | grep -q . || { echo "PKG was not produced" >&2; exit 1; }
+          find "$ROOT/app" -name libmpv.dylib -print -quit | grep -q . || { echo "Bundled libmpv dylib is missing" >&2; exit 1; }
+          find "$ROOT/app" -name libfuoevolve_now_playing_bridge.dylib -print -quit | grep -q . || { echo "Now Playing bridge is missing" >&2; exit 1; }
+          RUNTIME_RELEASE="$(find "$ROOT/app" -path '*/Contents/runtime/Contents/Home/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$ROOT/app" -maxdepth 6 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_HOME="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_HOME/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
+          while IFS= read -r dylib; do
+            if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
+              echo "Packaged dylib still references Homebrew: $dylib" >&2
+              exit 1
+            fi
+          done < <(find "$ROOT/app" -name '*.dylib' -type f)
+
+      - name: Report macOS package sizes
+        run: |
+          du -h desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          du -h desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-macos-${{ matrix.arch }}.dmg
+          path: desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload macOS PKG
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-macos-${{ matrix.arch }}.pkg
+          path: desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-system:
+    name: Package Linux DEB RPM and Arch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Cache Linux system Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/linux-tray/Cargo.lock
+            desktopApp/native/linux-tray/target
+          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**') }}
+          restore-keys: |
+            desktop-rust-linux-system-x64-
+
+      - name: Install native packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot rpm
+          java -version
+          jpackage --version
+          docker --version
+
+      - name: Create minified Linux app image with system native dependency profile
+        id: app
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=system \
+            :desktopApp:createReleaseDistributable
+          APP_ROOT="desktopApp/build/compose/binaries/main-release/app"
+          LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
+          if [[ -z "$LAUNCHER" ]]; then
+            echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
+            find "$APP_ROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
+          test -x "$LAUNCHER"
+          RUNTIME_RELEASE="$(find "$APP_IMAGE" -path '*/runtime/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$APP_IMAGE" -maxdepth 5 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
+          TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
+          test -n "$TRAY_BRIDGE"
+          if [[ -n "$(find "$APP_IMAGE" -name 'libmpv.so*' -print -quit)" ]]; then
+            echo "System Linux app image must not bundle libmpv" >&2
+            exit 1
+          fi
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build DEB and RPM packages
+        run: |
+          mkdir -p build/desktop-packages/system
+          bash desktopApp/packaging/linux/package-system.sh deb "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
+          bash desktopApp/packaging/linux/package-system.sh rpm "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
+
+      - name: Build Arch Linux package
+        run: >-
+          bash desktopApp/packaging/linux/package-arch.sh
+          "${{ steps.app.outputs.app_image }}"
+          "${{ steps.app.outputs.version }}"
+          build/desktop-packages/system
+
+      - name: Verify Linux package metadata
+        run: |
+          DEB="$(find build/desktop-packages/system -name '*.deb' -print -quit)"
+          RPM="$(find build/desktop-packages/system -name '*.rpm' -print -quit)"
+          ARCH="$(find build/desktop-packages/system -name '*.pkg.tar.zst' -print -quit)"
+          test -n "$DEB" && test -n "$RPM" && test -n "$ARCH"
+          dpkg-deb -I "$DEB" | tee build/desktop-packages/system/deb-info.txt
+          grep -q 'libmpv2' build/desktop-packages/system/deb-info.txt
+          rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
+          grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
+          tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
+
+      - name: Report Linux package sizes
+        run: du -h build/desktop-packages/system/*.deb build/desktop-packages/system/*.rpm build/desktop-packages/system/*.pkg.tar.zst
+
+      - name: Upload Linux DEB
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.deb
+          path: build/desktop-packages/system/*.deb
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload Linux RPM
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.rpm
+          path: build/desktop-packages/system/*.rpm
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload Arch Linux package
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.pkg.tar.zst
+          path: build/desktop-packages/system/*.pkg.tar.zst
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-appimage:
+    name: Package portable Linux AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Cache Linux AppImage Rust bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/linux-tray/Cargo.lock
+            desktopApp/native/linux-tray/target
+          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**') }}
+          restore-keys: |
+            desktop-rust-linux-appimage-x64-
+
+      - name: Install portable native dependency inputs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv1 libsecret-1-0 patchelf pax-utils
+          ldconfig -p | grep libmpv
+          ldconfig -p | grep libsecret-1
+
+      - name: Create minified Linux app image
+        id: app
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=system \
+            :desktopApp:createReleaseDistributable
+          APP_ROOT="desktopApp/build/compose/binaries/main-release/app"
+          LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
+          if [[ -z "$LAUNCHER" ]]; then
+            echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
+            find "$APP_ROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
+          test -x "$LAUNCHER"
+          RUNTIME_RELEASE="$(find "$APP_IMAGE" -path '*/runtime/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$APP_IMAGE" -maxdepth 5 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build self-contained AppImage
+        run: |
+          mkdir -p build/desktop-packages/appimage
+          bash desktopApp/packaging/linux/package-appimage.sh \
+            "${{ steps.app.outputs.app_image }}" \
+            "${{ steps.app.outputs.version }}" \
+            build/desktop-packages/appimage
+          APPIMAGE="$(find build/desktop-packages/appimage -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          file "$APPIMAGE"
+          sha256sum "$APPIMAGE" | tee "$APPIMAGE.sha256"
+
+      - name: Report AppImage size
+        run: du -h build/desktop-packages/appimage/*.AppImage
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.AppImage
+          path: build/desktop-packages/appimage/*.AppImage
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload AppImage checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.AppImage.sha256
+          path: build/desktop-packages/appimage/*.sha256
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
