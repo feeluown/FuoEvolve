@@ -19,6 +19,14 @@ internal fun registerDesktopFuoProtocolHandler() {
 }
 
 private fun packagedLauncher(): Path? {
+    if (isLinux()) {
+        // AppImage runs from a transient mount point, while APPIMAGE points to the stable image path.
+        System.getenv("APPIMAGE")
+            ?.takeIf(String::isNotBlank)
+            ?.let { runCatching { Paths.get(it).toAbsolutePath().normalize() }.getOrNull() }
+            ?.takeIf { Files.isRegularFile(it) }
+            ?.let { return it }
+    }
     val command = ProcessHandle.current().info().command().orElse(null) ?: return null
     val path = runCatching { Paths.get(command).toAbsolutePath().normalize() }.getOrNull() ?: return null
     val fileName = path.fileName?.toString().orEmpty().lowercase()
@@ -37,7 +45,9 @@ private fun registerWindowsProtocol(launcher: Path) {
 private fun registerLinuxProtocol(launcher: Path) {
     val home = System.getProperty("user.home").orEmpty()
     if (home.isBlank()) return
-    val applicationsDir = Paths.get(home, ".local", "share", "applications")
+    val dataHome = System.getenv("XDG_DATA_HOME")?.takeIf(String::isNotBlank)
+        ?: Paths.get(home, ".local", "share").toString()
+    val applicationsDir = Paths.get(dataHome).resolve("applications")
     Files.createDirectories(applicationsDir)
     val desktopFileName = "fuoevolve-url.desktop"
     val desktopFile = applicationsDir.resolve(desktopFileName)
