@@ -283,17 +283,18 @@ jobs:
             --warning-mode all \
             -Pfuoevolve.packageProfile=system \
             :desktopApp:createDistributable
-          APP_IMAGE="$(find desktopApp/build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -name 'FuoEvolve*' -print -quit)"
-          test -n "$APP_IMAGE"
-          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
-          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          find "$APP_IMAGE" -path '*/runtime/bin/java' -print -quit | grep -q .
-          find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit | grep -q .
-          if find "$APP_IMAGE" -name 'libmpv.so*' -print -quit | grep -q .; then
+          APP_IMAGE="desktopApp/build/compose/binaries/main/app"
+          test -x "$APP_IMAGE/bin/FuoEvolve"
+          test -x "$APP_IMAGE/runtime/bin/java"
+          TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
+          test -n "$TRAY_BRIDGE"
+          if [[ -n "$(find "$APP_IMAGE" -name 'libmpv.so*' -print -quit)" ]]; then
             echo "System Linux app image must not bundle libmpv" >&2
             exit 1
           fi
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build DEB and RPM packages
         run: |
@@ -392,8 +393,9 @@ jobs:
             --warning-mode all \
             -Pfuoevolve.packageProfile=system \
             :desktopApp:createDistributable
-          APP_IMAGE="$(find desktopApp/build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -name 'FuoEvolve*' -print -quit)"
-          test -n "$APP_IMAGE"
+          APP_IMAGE="desktopApp/build/compose/binaries/main/app"
+          test -x "$APP_IMAGE/bin/FuoEvolve"
+          test -x "$APP_IMAGE/runtime/bin/java"
           VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
           echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
