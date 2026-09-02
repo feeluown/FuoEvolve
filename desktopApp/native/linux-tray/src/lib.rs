@@ -73,7 +73,7 @@ pub extern "C" fn fuo_linux_tray_create(
         return ptr::null_mut();
     };
 
-    match FuoTray { callback }.spawn() {
+    match (FuoTray { callback }).spawn() {
         Ok(handle) => Box::into_raw(Box::new(Bridge { handle })),
         Err(error) => {
             write_error(error_buffer, error_capacity, &error.to_string());
