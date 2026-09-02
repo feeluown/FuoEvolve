@@ -105,17 +105,35 @@ internal class DesktopWebLoginLauncher : AutoCloseable {
         val executableName = if (isWindows()) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
         val appDir = System.getProperty("fuoevolve.appdir")
             ?.takeIf { it.isNotBlank() && !it.contains("\$APPDIR") }
+            ?.let(::File)
         val userDir = File(System.getProperty("user.dir").orEmpty().ifBlank { "." })
-        return buildList {
+
+        val directCandidates = buildList {
             if (appDir != null) {
+                // Current Compose layout. Keep this fast path, but do not make runtime correctness
+                // depend on the exact resource nesting used by a particular Compose plugin version.
                 add(File(appDir, "resources/native/helpers/$executableName"))
             }
             // Development fallbacks for `./gradlew :desktopApp:run` from either repository root
             // or the desktopApp project directory.
             add(File(userDir, "desktopApp/native/web-login/target/release/$executableName"))
             add(File(userDir, "native/web-login/target/release/$executableName"))
-        }.firstOrNull { candidate -> candidate.isFile && (isWindows() || candidate.canExecute()) }
+        }
+        directCandidates.firstOrNull(::isUsableHelper)?.let { return it }
+
+        // Native distributions may relocate app resources while preserving their contents. Search
+        // only below the installed app root and only when the direct path did not match.
+        return appDir
+            ?.takeIf { it.isDirectory }
+            ?.walkTopDown()
+            ?.maxDepth(6)
+            ?.firstOrNull { candidate ->
+                candidate.name == executableName && isUsableHelper(candidate)
+            }
     }
+
+    private fun isUsableHelper(candidate: File): Boolean =
+        candidate.isFile && (isWindows() || candidate.canExecute())
 
     private fun isWindows(): Boolean =
         System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)
