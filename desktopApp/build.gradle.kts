@@ -211,9 +211,10 @@ compose.desktop {
         ).joinToString(File.pathSeparator)
 
         nativeDistributions {
-            // JNA and credential-secure-storage reach sun.misc.Unsafe through jdk.unsupported.
-            // jdeps cannot reliably see that reflective dependency, so keep the module explicitly.
-            modules("jdk.unsupported")
+            // These dependencies are reached reflectively by desktop-only libraries and are not
+            // always discovered by jdeps: JNA/credential storage uses sun.misc.Unsafe, while
+            // dbus-java uses com.sun.security.auth.module.UnixSystem for the MPRIS Unix identity.
+            modules("jdk.unsupported", "jdk.security.auth")
 
             when {
                 isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
