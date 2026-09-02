@@ -31,6 +31,11 @@ internal enum class DesktopTrayBackend {
     Unsupported,
 }
 
+internal enum class DesktopCloseBehavior {
+    HideToTray,
+    KeepVisible,
+}
+
 internal fun desktopTrayBackend(osName: String): DesktopTrayBackend {
     val normalized = osName.lowercase(Locale.ROOT)
     return when {
@@ -40,6 +45,9 @@ internal fun desktopTrayBackend(osName: String): DesktopTrayBackend {
         else -> DesktopTrayBackend.Unsupported
     }
 }
+
+internal fun desktopCloseBehavior(trayAvailable: Boolean): DesktopCloseBehavior =
+    if (trayAvailable) DesktopCloseBehavior.HideToTray else DesktopCloseBehavior.KeepVisible
 
 internal fun createDesktopTrayController(
     onShow: () -> Unit,
