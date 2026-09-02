@@ -10,5 +10,4 @@ name = "fuoevolve_now_playing_bridge"
 crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-mediaplayer = "0.4.3"
-apple-cf = { version = "=0.7.1", features = ["cg"] }
+playwire = "=1.0.0"
