@@ -9,11 +9,12 @@ This document records the architectural baseline for the Windows, macOS and Linu
 - Desktop-only code lives at the platform composition edge (`desktopApp` and `shared/src/desktopMain`) or as platform `actual` implementations in the owning lower module.
 - Feature and common code must not depend on AWT, Windows, macOS, Linux, D-Bus or native desktop APIs.
 - `PlaybackSession` is the system-media integration boundary. Runtime state mapping and queue bridging are shared; platform media adapters consume the session rather than binding directly to libmpv.
-- Native playback, system-media and OS secure-storage dependencies stay in `desktopApp`. `shared` consumes narrow contracts such as `PlaybackEngine`, `ProviderCredentialStore` and `LocalMusicRepository` and must not depend on JNA, libmpv, WinRT, MediaPlayer.framework or D-Bus APIs.
+- Native playback, system-media, tray and OS secure-storage dependencies stay in `desktopApp`. `shared` consumes narrow contracts such as `PlaybackEngine`, `ProviderCredentialStore` and `LocalMusicRepository` and must not depend on JNA, libmpv, WinRT, MediaPlayer.framework or D-Bus APIs.
+- Closing a desktop window must not tear down the application runtime when a usable tray/status item can restore it. Normal application exit is owned by the tray/status-item action.
 
 ## Current capability baseline
 
-The desktop foundation uses the real shared application shell and now includes working audio playback, downloads, secure provider credentials, local-library indexing and system media controls:
+The desktop foundation uses the real shared application shell and now includes working audio playback, downloads, secure provider credentials, local-library indexing, system media controls and close-to-tray lifecycle:
 
 - `desktopApp` hosts the common `AppRoot`.
 - Provider networking and provider JVM primitives have desktop actuals.
@@ -32,31 +33,33 @@ The desktop foundation uses the real shared application shell and now includes w
 - Linux exposes MPRIS v2 over D-Bus, including transport controls, metadata, position, seek and dynamic capabilities.
 - Windows exposes SMTC through a Rust `cdylib` using the published `windows` crate. WinRT/COM lifetime stays in Rust and the JVM only sees a narrow JNA/C ABI.
 - macOS exposes Now Playing / Remote Command Center through a Rust `cdylib` backed by `playwire`; play/pause/stop/next/previous/seek events map back to `PlaybackSession`, while playback state, timeline and metadata flow from the same session.
+- Windows and macOS use their AWT-backed native system tray/status-item integration. Closing the window hides it without disposing `DesktopAppHost`, so playback, downloads and system-media sessions continue; Show restores/focuses the existing window and Exit terminates the application.
+- Linux uses a Rust `ksni` StatusNotifierItem/D-Bus bridge rather than AWT `SystemTray`, avoiding an X11/XWayland tray dependency. If no StatusNotifier watcher is available, or if the bridge cannot load, the application keeps the window visible instead of hiding it into an unrecoverable state. `FUOEVOLVE_LINUX_TRAY_BRIDGE_PATH` can override the development bridge location.
 
-Native packaging must bundle compatible libmpv and platform bridge binaries for each supported desktop target. Requiring end users to install system libmpv is acceptable only for development builds, not for production packages.
+Native packaging must bundle compatible libmpv and platform bridge binaries for each supported desktop target. Requiring end users to install system libmpv or the Rust bridge libraries is acceptable only for development builds, not for production packages.
 
 ## Validation baseline
 
 Desktop CI compiles the real platform adapters rather than relying on cross-platform stubs:
 
-- Ubuntu runs `:desktopApp:compileKotlin`, `:desktopApp:test` and `:shared:desktopTest`.
+- Ubuntu builds the Rust StatusNotifier tray `cdylib`, then runs `:desktopApp:compileKotlin`, `:desktopApp:test` and `:shared:desktopTest`.
 - Windows builds the Rust SMTC `cdylib`, then compiles/tests the Windows Kotlin/JNA desktop graph.
 - macOS builds the Rust Now Playing `cdylib` on a real macOS runner, then compiles/tests the macOS Kotlin/JNA desktop graph.
+- Desktop tray tests cover OS backend selection, close-to-tray policy and graceful controller creation/cleanup when the platform integration is unavailable.
 - Android architecture, unit, coverage and PR compile validation continue to run against desktop changes to prevent dependency leakage or shared regressions.
 
-The system-media integration phase is complete for the three desktop targets; remaining work should extend `PlaybackSession` only when a platform capability genuinely cannot be represented by its current transport/state contract.
+The system-media and tray-lifecycle phases are complete for the three desktop targets. Remaining work is primarily packaging/runtime distribution and capabilities that still have explicit unsupported adapters.
 
 ## Follow-up desktop phases
 
 1. Complete provider login integrations that require embedded browser cookie capture or other platform-specific handoff; keep the Linux Wayland requirement when selecting any embedded browser technology.
-2. Add tray/status-item lifecycle. Closing the application window must hide it; normal process exit is initiated from the tray/status item.
-3. Add native packaging for Windows, macOS and Linux, including bundled libmpv and the Rust platform bridge binaries.
-4. Add the Linux native-Wayland packaging/smoke test and verify tray integration does not force XWayland.
-5. Add desktop video playback on the same libmpv boundary without introducing a second media runtime.
-6. Add remaining desktop-only capabilities such as audio recognition where they provide product value.
+2. Add native packaging for Windows, macOS and Linux, including bundled libmpv and the Rust platform bridge binaries.
+3. Add the Linux native-Wayland packaging/smoke test and verify the packaged tray integration does not force XWayland.
+4. Add desktop video playback on the same libmpv boundary without introducing a second media runtime.
+5. Add remaining desktop-only capabilities such as audio recognition where they provide product value.
 
 ## Linux Wayland requirement
 
 Linux production packages must run natively under Wayland when launched from a Wayland session. Packaging must use a JetBrains Runtime with the Wayland AWT toolkit and must not depend on XWayland for the application window.
 
-The Linux tray implementation must not force the application back to the X11 AWT tray path. It should use a Wayland-compatible desktop status-item integration (for example StatusNotifierItem/D-Bus where supported by the desktop environment). A packaging PR must add a Wayland smoke test before Linux desktop support is considered complete.
+Linux tray lifecycle already uses StatusNotifierItem/D-Bus rather than the X11 AWT tray path. The packaging phase must preserve that behavior and add a native-Wayland smoke test before Linux desktop support is considered complete.
