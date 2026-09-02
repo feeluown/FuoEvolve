@@ -24,8 +24,8 @@ private const val MAX_DESKTOP_ACTIVATION_INPUTS = 32
  * Desktop-only activation broker. It keeps one process owning persistence/native media integration
  * and forwards file/protocol activations from later launcher processes to that primary instance.
  *
- * Inputs are queued for one composition-root consumer instead of replayed as state. This preserves
- * startup activations without making old deep links fire again if the UI collector is recreated.
+ * Payloads are queued for exactly one business consumer, while focus requests use a separate queue.
+ * This preserves startup events without replaying old deep links if a UI collector is recreated.
  */
 class DesktopExternalActivationSession private constructor(
     private val lockChannel: FileChannel,
@@ -35,7 +35,9 @@ class DesktopExternalActivationSession private constructor(
     initialInputs: List<String>,
 ) : AutoCloseable {
     private val inputChannel = Channel<String>(Channel.UNLIMITED)
+    private val focusChannel = Channel<Unit>(Channel.UNLIMITED)
     val inputs: Flow<String> = inputChannel.receiveAsFlow()
+    val focusRequests: Flow<Unit> = focusChannel.receiveAsFlow()
     private val token = UUID.randomUUID().toString()
     @Volatile
     private var closed = false
@@ -59,7 +61,7 @@ class DesktopExternalActivationSession private constructor(
             .asSequence()
             .filter(String::isNotBlank)
             .take(MAX_DESKTOP_ACTIVATION_INPUTS)
-            .forEach { inputChannel.trySend(it) }
+            .forEach(::enqueue)
         serverThread.start()
         installAwtOpenHandlers()
     }
@@ -67,11 +69,18 @@ class DesktopExternalActivationSession private constructor(
     override fun close() {
         closed = true
         inputChannel.close()
+        focusChannel.close()
         runCatching { server.close() }
         runCatching { serverThread.join(500) }
         runCatching { Files.deleteIfExists(endpointFile) }
         runCatching { processLock.release() }
         runCatching { lockChannel.close() }
+    }
+
+    private fun enqueue(value: String) {
+        if (value.isBlank() || closed) return
+        inputChannel.trySend(value)
+        focusChannel.trySend(Unit)
     }
 
     private fun acceptLoop() {
@@ -82,7 +91,7 @@ class DesktopExternalActivationSession private constructor(
                     val input = DataInputStream(incoming.getInputStream().buffered())
                     if (input.readUTF() != token) return@runCatching
                     repeat(input.readInt().coerceIn(0, MAX_DESKTOP_ACTIVATION_INPUTS)) {
-                        input.readUTF().takeIf(String::isNotBlank)?.let { value -> inputChannel.trySend(value) }
+                        input.readUTF().takeIf(String::isNotBlank)?.let(::enqueue)
                     }
                 }
             }
@@ -95,13 +104,13 @@ class DesktopExternalActivationSession private constructor(
         if (desktop.isSupported(Desktop.Action.APP_OPEN_FILE)) {
             runCatching {
                 desktop.setOpenFileHandler { event ->
-                    event.files.forEach { file -> inputChannel.trySend(file.absolutePath) }
+                    event.files.forEach { file -> enqueue(file.absolutePath) }
                 }
             }
         }
         if (desktop.isSupported(Desktop.Action.APP_OPEN_URI)) {
             runCatching {
-                desktop.setOpenURIHandler { event -> inputChannel.trySend(event.uri.toString()) }
+                desktop.setOpenURIHandler { event -> enqueue(event.uri.toString()) }
             }
         }
     }
