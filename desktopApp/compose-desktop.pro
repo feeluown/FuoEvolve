@@ -23,6 +23,15 @@
 -keep interface org.freedesktop.dbus.** { *; }
 -dontwarn org.freedesktop.dbus.**
 
+# OkHttp ships adapters for optional runtimes/providers which are intentionally absent
+# from this JVM desktop distribution. Their guarded references are safe to omit.
+-dontwarn org.graalvm.nativeimage.**
+-dontwarn com.oracle.svm.core.annotate.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.jsse.**
+-dontwarn org.openjsse.**
+-dontwarn android.util.Log
+
 # FuoEvolve's native interfaces and JNA Structure subclasses live in this package.
 # Keeping the thin desktop host layer avoids removing methods only called from native code;
 # the much larger shared/features/provider dependency graph remains shrinkable.
