@@ -318,7 +318,7 @@ jobs:
           grep -q 'libmpv2' build/desktop-packages/system/deb-info.txt
           rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
           grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
-          tar -tf "$ARCH" | grep -q 'opt/fuoevolve/bin/FuoEvolve'
+          tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
 
       - name: Upload Linux distro packages
         uses: actions/upload-artifact@v4
