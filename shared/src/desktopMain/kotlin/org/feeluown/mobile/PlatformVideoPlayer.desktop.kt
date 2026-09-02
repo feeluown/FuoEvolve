@@ -26,17 +26,17 @@ interface DesktopPlatformVideoController : PlatformVideoController, AutoCloseabl
 }
 
 private var desktopPlatformVideoControllerFactory: () -> DesktopPlatformVideoController = {
-    UnsupportedDesktopPlatformVideoController()
+    UnsupportedDesktopPlatformVideoController("桌面视频播放组件未初始化")
 }
 
 fun installDesktopPlatformVideoControllerFactory(factory: () -> DesktopPlatformVideoController) {
     desktopPlatformVideoControllerFactory = factory
 }
 
-private class UnsupportedDesktopPlatformVideoController : DesktopPlatformVideoController {
-    private val mutableState = MutableStateFlow(
-        PlatformVideoPlaybackState(errorMessage = "桌面视频播放组件未初始化"),
-    )
+private class UnsupportedDesktopPlatformVideoController(
+    message: String,
+) : DesktopPlatformVideoController {
+    private val mutableState = MutableStateFlow(PlatformVideoPlaybackState(errorMessage = message))
     override val state: StateFlow<PlatformVideoPlaybackState> = mutableState.asStateFlow()
     private val mutableFrame = MutableStateFlow<ImageBitmap?>(null)
     override val frame: StateFlow<ImageBitmap?> = mutableFrame.asStateFlow()
@@ -50,7 +50,13 @@ private class UnsupportedDesktopPlatformVideoController : DesktopPlatformVideoCo
 
 @Composable
 actual fun rememberPlatformVideoController(): PlatformVideoController {
-    val controller = remember { desktopPlatformVideoControllerFactory() }
+    val controller = remember {
+        runCatching(desktopPlatformVideoControllerFactory).getOrElse { throwable ->
+            UnsupportedDesktopPlatformVideoController(
+                throwable.message?.takeIf(String::isNotBlank) ?: "桌面视频播放组件初始化失败",
+            )
+        }
+    }
     DisposableEffect(controller) {
         onDispose(controller::close)
     }
