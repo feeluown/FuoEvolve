@@ -23,6 +23,7 @@ internal class DesktopSecureProviderCredentialStore(
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
     private var secretStoreResolved = false
     private var secretStore: DesktopSecretStore? = null
+    private var secretStoreFailure: Throwable? = null
 
     override suspend fun read(providerId: String): ProviderCredentials? = mutex.withLock {
         val store = resolveSecretStore() ?: return@withLock null
@@ -51,12 +52,12 @@ internal class DesktopSecureProviderCredentialStore(
             try {
                 chunks.forEachIndexed { index, value ->
                     val key = chunkKey(providerId, generation, index)
-                    check(writeSecret(store, key, value)) { "系统安全凭证存储写入失败" }
+                    check(writeSecret(store, key, value)) { secretWriteFailureMessage("凭证数据") }
                     writtenKeys += key
                 }
                 val manifest = DesktopCredentialManifest(generation, chunks.size)
                 check(writeSecret(store, manifestKey(providerId), manifest.encode())) {
-                    "系统安全凭证存储索引写入失败"
+                    secretWriteFailureMessage("凭证索引")
                 }
             } catch (throwable: Throwable) {
                 writtenKeys.forEach(store::delete)
@@ -77,7 +78,9 @@ internal class DesktopSecureProviderCredentialStore(
 
     private fun resolveSecretStore(): DesktopSecretStore? {
         if (!secretStoreResolved) {
-            secretStore = runCatching(secretStoreProvider).getOrNull()
+            val result = runCatching(secretStoreProvider)
+            secretStore = result.getOrNull()
+            secretStoreFailure = result.exceptionOrNull()
             secretStoreResolved = true
         }
         return secretStore
@@ -85,7 +88,8 @@ internal class DesktopSecureProviderCredentialStore(
 
     private fun requireSecretStore(): DesktopSecretStore = resolveSecretStore()
         ?: throw IllegalStateException(
-            "系统安全凭证存储不可用。Windows 需要 Credential Manager，macOS 需要 Keychain，Linux 需要可用的 Secret Service/Libsecret。",
+            secretStoreUnavailableMessage(secretStoreFailure),
+            secretStoreFailure,
         )
 
     private fun readManifest(store: DesktopSecretStore, providerId: String): DesktopCredentialManifest? =
@@ -141,14 +145,58 @@ private fun createMicrosoftSecretStore(): DesktopSecretStore? =
             ?.let(::MicrosoftDesktopSecretStore)
     }
 
-private fun createLinuxLibSecretStore(): DesktopSecretStore? = runCatching {
+private fun createLinuxLibSecretStore(): DesktopSecretStore {
     // StorageProvider performs a preflight that rejects a locked default collection before
     // normal libsecret interaction can display the system unlock prompt. Use its underlying
     // libsecret store directly on Linux instead: reads request SECRET_SEARCH_UNLOCK and writes
     // use libsecret's default collection, so the Secret Service can handle user interaction.
     LibSecretLibrary.INSTANCE
-    MicrosoftDesktopSecretStore(LibSecretBackedTokenStore())
-}.getOrNull()
+    return MicrosoftDesktopSecretStore(LibSecretBackedTokenStore())
+}
+
+private fun secretStoreUnavailableMessage(failure: Throwable?): String {
+    if (failure == null) {
+        return "系统安全凭证存储不可用。Windows 需要 Credential Manager，macOS 需要 Keychain，Linux 需要可用的 Secret Service/Libsecret。"
+    }
+
+    val cause = deepestRelevantCause(failure)
+    val detail = throwableSummary(cause)
+    return if (System.getProperty("os.name") == "Linux") {
+        when (cause) {
+            is UnsatisfiedLinkError ->
+                "Linux 安全凭证存储初始化失败：无法加载 Libsecret/GLib 原生库。请确认已安装 libsecret，且系统能够加载 libsecret-1.so。原因：$detail"
+            is NoClassDefFoundError, is ClassNotFoundException ->
+                "Linux 安全凭证存储初始化失败：Libsecret/JNA 运行时类加载失败。原因：$detail"
+            else ->
+                "Linux 安全凭证存储初始化失败：Libsecret 后端创建失败。原因：$detail"
+        }
+    } else {
+        "系统安全凭证存储初始化失败：$detail"
+    }
+}
+
+private fun secretWriteFailureMessage(target: String): String =
+    if (System.getProperty("os.name") == "Linux") {
+        "Linux 安全凭证存储写入失败（$target）：Libsecret 已加载，但 Secret Service 未能完成写入。" +
+            "请确认 org.freedesktop.secrets 服务可用且默认密钥环已解锁；KDE Plasma 可启用 KWallet 的 Secret Service 接口。"
+    } else {
+        "系统安全凭证存储写入失败（$target）"
+    }
+
+private fun deepestRelevantCause(throwable: Throwable): Throwable {
+    val causes = generateSequence(throwable) { current -> current.cause }
+        .take(16)
+        .toList()
+    return causes.firstOrNull { it is UnsatisfiedLinkError }
+        ?: causes.firstOrNull { it is NoClassDefFoundError || it is ClassNotFoundException }
+        ?: causes.last()
+}
+
+private fun throwableSummary(throwable: Throwable): String {
+    val type = throwable::class.java.simpleName.ifBlank { throwable::class.java.name }
+    val message = throwable.message?.trim()?.takeIf { it.isNotEmpty() }
+    return if (message == null) type else "$type: $message"
+}
 
 private data class DesktopCredentialManifest(
     val generation: String,
