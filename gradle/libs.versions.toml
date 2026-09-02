@@ -17,6 +17,10 @@ ktor = "3.5.1"
 kover = "0.9.8"
 lyriconProvider = "0.1.70"
 sqldelight = "2.3.2"
+jna = "5.19.1"
+credentialSecureStorage = "1.0.3"
+jaudiotagger = "3.0.1"
+dbusJava = "5.2.0"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -29,6 +33,7 @@ androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "medi
 jellyfin-media3-ffmpeg-decoder = { module = "org.jellyfin.media3:media3-ffmpeg-decoder", version = "1.6.1+1" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serializationJson" }
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose" }
@@ -54,12 +59,19 @@ lyricon-provider = { module = "io.github.proify.lyricon:provider", version.ref =
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+credential-secure-storage = { module = "com.microsoft:credential-secure-storage", version.ref = "credentialSecureStorage" }
+jaudiotagger = { module = "net.jthink:jaudiotagger", version.ref = "jaudiotagger" }
+dbus-java-core = { module = "com.github.hypfvieh:dbus-java-core", version.ref = "dbusJava" }
+dbus-java-transport-native-unixsocket = { module = "com.github.hypfvieh:dbus-java-transport-native-unixsocket", version.ref = "dbusJava" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlinx-kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }

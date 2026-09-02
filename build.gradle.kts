@@ -1,3 +1,6 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
+
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.kotlin.multiplatform.library) apply false
@@ -6,6 +9,22 @@ plugins {
     alias(libs.plugins.compose.multiplatform) apply false
     alias(libs.plugins.compose.compiler) apply false
     alias(libs.plugins.kotlinx.kover) apply false
+}
+
+// Desktop is a product-wide KMP platform. Register it centrally so new shared/feature/provider
+// modules cannot silently omit the desktop variant and break the dependency graph later.
+subprojects {
+    pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
+        extensions.configure<KotlinMultiplatformExtension> {
+            if (targets.findByName("desktop") == null) {
+                jvm("desktop") {
+                    compilerOptions {
+                        jvmTarget.set(JvmTarget.JVM_17)
+                    }
+                }
+            }
+        }
+    }
 }
 
 val migratedControllerBoundaryRoots = listOf(
@@ -86,7 +105,9 @@ val productionSourceRoots = listOf(
     "shared/src/commonMain/kotlin",
     "shared/src/androidMain/kotlin",
     "shared/src/iosMain/kotlin",
+    "shared/src/desktopMain/kotlin",
     "androidApp/src/main/kotlin",
+    "desktopApp/src/main/kotlin",
 )
 val playbackRuntimeAdapterFiles = listOf(
     "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidPlaybackRuntime.kt",
@@ -95,6 +116,7 @@ val playbackRuntimeAdapterFiles = listOf(
 val platformCompositionRootFiles = listOf(
     "androidApp/src/main/kotlin/org/feeluown/mobile/AndroidAppContainer.kt",
     "shared/src/iosMain/kotlin/org/feeluown/mobile/IosAppHost.kt",
+    "shared/src/desktopMain/kotlin/org/feeluown/mobile/DesktopAppHost.kt",
 )
 val appRootFile = "shared/src/commonMain/kotlin/org/feeluown/mobile/app/AppRoot.kt"
 val searchFeatureBuildFile = "feature/search/build.gradle.kts"

@@ -34,6 +34,8 @@ interface PlaybackRuntimeEngine {
 
     fun pause()
     fun resume()
+    fun stop() = pause()
+    fun seekTo(positionMs: Long) = Unit
 }
 
 /**
@@ -103,9 +105,19 @@ class DefaultPlaybackRuntime(
         }
     }
 
+    override fun stop() = engine.stop()
+
     override fun previous() = queueActions.previous()
 
     override fun next() = queueActions.next()
+
+    override fun seekTo(positionMs: Long) {
+        if (state.value.currentTrack == null) return
+        val duration = state.value.durationMs
+        engine.seekTo(
+            if (duration > 0L) positionMs.coerceIn(0L, duration) else positionMs.coerceAtLeast(0L),
+        )
+    }
 }
 
 private fun composeState(
