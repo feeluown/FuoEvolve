@@ -52,12 +52,21 @@ internal fun desktopCloseBehavior(trayAvailable: Boolean): DesktopCloseBehavior 
 internal fun createDesktopTrayController(
     onShow: () -> Unit,
     onExit: () -> Unit,
-): DesktopTrayController = when (desktopTrayBackend(System.getProperty("os.name").orEmpty())) {
-    DesktopTrayBackend.WindowsAwt,
-    DesktopTrayBackend.MacAwt -> AwtDesktopTrayController(onShow, onExit)
+): DesktopTrayController {
+    val backend = desktopTrayBackend(System.getProperty("os.name").orEmpty())
+    return runCatching {
+        when (backend) {
+            DesktopTrayBackend.WindowsAwt,
+            DesktopTrayBackend.MacAwt -> AwtDesktopTrayController(onShow, onExit)
 
-    DesktopTrayBackend.LinuxStatusNotifier -> LinuxStatusNotifierTrayController(onShow, onExit)
-    DesktopTrayBackend.Unsupported -> UnavailableDesktopTrayController("unsupported desktop platform")
+            DesktopTrayBackend.LinuxStatusNotifier -> LinuxStatusNotifierTrayController(onShow, onExit)
+            DesktopTrayBackend.Unsupported -> UnavailableDesktopTrayController("unsupported desktop platform")
+        }
+    }.getOrElse { error ->
+        UnavailableDesktopTrayController(
+            "${backend.name} initialization failed: ${error.message.orEmpty()}",
+        )
+    }
 }
 
 private class AwtDesktopTrayController(
