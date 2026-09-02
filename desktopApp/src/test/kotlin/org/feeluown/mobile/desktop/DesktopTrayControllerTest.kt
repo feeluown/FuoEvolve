@@ -18,4 +18,10 @@ class DesktopTrayControllerTest {
         assertEquals(DesktopCloseBehavior.HideToTray, desktopCloseBehavior(trayAvailable = true))
         assertEquals(DesktopCloseBehavior.KeepVisible, desktopCloseBehavior(trayAvailable = false))
     }
+
+    @Test
+    fun trayCreationAndCloseNeverFailWhenPlatformIntegrationIsUnavailable() {
+        val controller = createDesktopTrayController(onShow = {}, onExit = {})
+        controller.close()
+    }
 }
