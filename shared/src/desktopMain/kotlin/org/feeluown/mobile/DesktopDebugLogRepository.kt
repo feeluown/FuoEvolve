@@ -90,27 +90,25 @@ private class DesktopDebugLogRepository : DebugLogRepository {
         val file = DesktopDebugLogCapture.logFile
         if (!Files.isRegularFile(file)) return@withContext emptyList()
         Files.readAllLines(file, StandardCharsets.UTF_8)
-            .asSequence()
             .map(String::trimEnd)
             .filter(String::isNotBlank)
             .takeLast(MAX_DEBUG_LOG_LINES)
-            .toList()
     }
 
     override suspend fun exportLogFile(lines: List<String>): String {
         if (lines.isEmpty()) return "没有可导出的日志"
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val fileName = "fuo-evolve-log-$timestamp.txt"
-        val saved = withContext(Dispatchers.IO) {
-            saveDesktopTextFile(
-                dialogTitle = "导出应用日志",
-                suggestedFileName = fileName,
-                filterDescription = "文本日志 (*.txt)",
-                extensions = listOf("txt"),
-                content = lines.joinToString("\n"),
-                onFeedback = {},
-            )
-        }
+        // The common feature invokes export from its UI scope. Keep JFileChooser on that thread;
+        // only log reading itself belongs on Dispatchers.IO.
+        val saved = saveDesktopTextFile(
+            dialogTitle = "导出应用日志",
+            suggestedFileName = fileName,
+            filterDescription = "文本日志 (*.txt)",
+            extensions = listOf("txt"),
+            content = lines.joinToString("\n"),
+            onFeedback = {},
+        )
         return if (saved) "日志已导出：$fileName" else "已取消导出日志"
     }
 }
