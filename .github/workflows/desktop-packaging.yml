@@ -306,16 +306,24 @@ jobs:
             fi
           done < <(find "$ROOT/app" -name '*.dylib' -type f)
 
+      - name: Prepare architecture-specific macOS artifact names
+        run: |
+          ROOT=desktopApp/build/compose/binaries/main-release
+          DMG="$(find "$ROOT/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
+          PKG="$(find "$ROOT/pkg" -maxdepth 1 -name '*.pkg' -print -quit)"
+          test -n "$DMG" && test -n "$PKG"
+          mv "$DMG" "$ROOT/dmg/FuoEvolve-macos-${{ matrix.arch }}.dmg"
+          mv "$PKG" "$ROOT/pkg/FuoEvolve-macos-${{ matrix.arch }}.pkg"
+
       - name: Report macOS package sizes
         run: |
-          du -h desktopApp/build/compose/binaries/main-release/dmg/*.dmg
-          du -h desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+          du -h desktopApp/build/compose/binaries/main-release/dmg/FuoEvolve-macos-${{ matrix.arch }}.dmg
+          du -h desktopApp/build/compose/binaries/main-release/pkg/FuoEvolve-macos-${{ matrix.arch }}.pkg
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}.dmg
-          path: desktopApp/build/compose/binaries/main-release/dmg/*.dmg
+          path: desktopApp/build/compose/binaries/main-release/dmg/FuoEvolve-macos-${{ matrix.arch }}.dmg
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -323,8 +331,7 @@ jobs:
       - name: Upload macOS PKG
         uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-macos-${{ matrix.arch }}.pkg
-          path: desktopApp/build/compose/binaries/main-release/pkg/*.pkg
+          path: desktopApp/build/compose/binaries/main-release/pkg/FuoEvolve-macos-${{ matrix.arch }}.pkg
           archive: false
           retention-days: 14
           if-no-files-found: error
