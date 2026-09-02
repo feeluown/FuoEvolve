@@ -14,15 +14,18 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.util.UUID
 import kotlin.concurrent.thread
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 private const val MAX_DESKTOP_ACTIVATION_INPUTS = 32
 
 /**
  * Desktop-only activation broker. It keeps one process owning persistence/native media integration
  * and forwards file/protocol activations from later launcher processes to that primary instance.
+ *
+ * Inputs are queued for one composition-root consumer instead of replayed as state. This preserves
+ * startup activations without making old deep links fire again if the UI collector is recreated.
  */
 class DesktopExternalActivationSession private constructor(
     private val lockChannel: FileChannel,
@@ -31,13 +34,8 @@ class DesktopExternalActivationSession private constructor(
     private val endpointFile: Path,
     initialInputs: List<String>,
 ) : AutoCloseable {
-    // Initial launcher arguments are emitted before Compose collectors attach, so replay must retain
-    // the same maximum batch that the secondary-instance relay accepts.
-    private val mutableInputs = MutableSharedFlow<String>(
-        replay = MAX_DESKTOP_ACTIVATION_INPUTS,
-        extraBufferCapacity = MAX_DESKTOP_ACTIVATION_INPUTS,
-    )
-    val inputs: SharedFlow<String> = mutableInputs.asSharedFlow()
+    private val inputChannel = Channel<String>(Channel.UNLIMITED)
+    val inputs: Flow<String> = inputChannel.receiveAsFlow()
     private val token = UUID.randomUUID().toString()
     @Volatile
     private var closed = false
@@ -61,13 +59,14 @@ class DesktopExternalActivationSession private constructor(
             .asSequence()
             .filter(String::isNotBlank)
             .take(MAX_DESKTOP_ACTIVATION_INPUTS)
-            .forEach(mutableInputs::tryEmit)
+            .forEach { inputChannel.trySend(it) }
         serverThread.start()
         installAwtOpenHandlers()
     }
 
     override fun close() {
         closed = true
+        inputChannel.close()
         runCatching { server.close() }
         runCatching { serverThread.join(500) }
         runCatching { Files.deleteIfExists(endpointFile) }
@@ -83,7 +82,7 @@ class DesktopExternalActivationSession private constructor(
                     val input = DataInputStream(incoming.getInputStream().buffered())
                     if (input.readUTF() != token) return@runCatching
                     repeat(input.readInt().coerceIn(0, MAX_DESKTOP_ACTIVATION_INPUTS)) {
-                        input.readUTF().takeIf(String::isNotBlank)?.let(mutableInputs::tryEmit)
+                        input.readUTF().takeIf(String::isNotBlank)?.let { value -> inputChannel.trySend(value) }
                     }
                 }
             }
@@ -96,13 +95,13 @@ class DesktopExternalActivationSession private constructor(
         if (desktop.isSupported(Desktop.Action.APP_OPEN_FILE)) {
             runCatching {
                 desktop.setOpenFileHandler { event ->
-                    event.files.forEach { file -> mutableInputs.tryEmit(file.absolutePath) }
+                    event.files.forEach { file -> inputChannel.trySend(file.absolutePath) }
                 }
             }
         }
         if (desktop.isSupported(Desktop.Action.APP_OPEN_URI)) {
             runCatching {
-                desktop.setOpenURIHandler { event -> mutableInputs.tryEmit(event.uri.toString()) }
+                desktop.setOpenURIHandler { event -> inputChannel.trySend(event.uri.toString()) }
             }
         }
     }
