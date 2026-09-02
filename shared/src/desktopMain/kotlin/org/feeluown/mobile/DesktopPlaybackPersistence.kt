@@ -23,11 +23,17 @@ internal class DesktopPlaybackQueueStore(
     private val file: Path,
     private val resumeStore: PlaybackResumeStore,
 ) : PlaybackQueueStore {
+    private val writeVersionLock = Any()
+    private val fileWriteLock = Any()
+
     @Volatile
     private var latestSnapshot: PlaybackQueueSnapshot? = null
 
     @Volatile
     private var loadCompleted = false
+
+    private var nextWriteVersion = 0L
+    private var lastWrittenVersion = 0L
 
     override suspend fun load(): PlaybackQueueSnapshot = withContext(Dispatchers.IO) {
         val persisted = readTextIfExists(file)
@@ -38,23 +44,39 @@ internal class DesktopPlaybackQueueStore(
             plan = null,
             currentTrack = restoredSession?.currentTrack,
         )
-        latestSnapshot = snapshot
+        synchronized(writeVersionLock) {
+            latestSnapshot = snapshot
+        }
         loadCompleted = true
         snapshot
     }
 
     override suspend fun save(snapshot: PlaybackQueueSnapshot) {
         if (!loadCompleted) return
-        latestSnapshot = snapshot
+        val version = synchronized(writeVersionLock) {
+            latestSnapshot = snapshot
+            ++nextWriteVersion
+        }
         withContext(Dispatchers.IO) {
-            writeAtomicText(file, PlaybackQueueCodec.encode(snapshot))
+            synchronized(fileWriteLock) {
+                if (version <= lastWrittenVersion) return@synchronized
+                writeAtomicText(file, PlaybackQueueCodec.encode(snapshot))
+                lastWrittenVersion = version
+            }
         }
     }
 
     fun flushLatest() {
         if (!loadCompleted) return
-        latestSnapshot?.let { snapshot ->
-            writeAtomicText(file, PlaybackQueueCodec.encode(snapshot))
+        val pending = synchronized(writeVersionLock) {
+            val snapshot = latestSnapshot ?: return
+            val version = ++nextWriteVersion
+            version to snapshot
+        }
+        synchronized(fileWriteLock) {
+            if (pending.first <= lastWrittenVersion) return
+            writeAtomicText(file, PlaybackQueueCodec.encode(pending.second))
+            lastWrittenVersion = pending.first
         }
     }
 }
