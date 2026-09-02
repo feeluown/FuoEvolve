@@ -71,6 +71,35 @@ class PersistentDesktopPlaybackEngineTest {
         engine.close()
     }
 
+    @Test
+    fun resumeUsesLatestPersistedPositionInsteadOfInitialCachedSnapshot() {
+        val restoredTrack = track("a")
+        val store = FakeResumeStore(
+            PlaybackResumeSnapshot(
+                currentTrack = restoredTrack,
+                positionMs = 42_000L,
+                durationMs = 180_000L,
+            ),
+        )
+        val delegate = FakePlaybackEngine()
+        val engine = PersistentDesktopPlaybackEngine(delegate, store)
+
+        store.savePosition(88_000L, 180_000L)
+        engine.prepareLoading(restoredTrack, PlaybackStartReason.RESUME)
+        engine.playResolved(
+            logicalTrack = restoredTrack,
+            resolveTrack = restoredTrack,
+            payload = payload(restoredTrack),
+        )
+
+        repeat(100) {
+            if (delegate.lastSeekPositionMs == 88_000L) return@repeat
+            Thread.sleep(5)
+        }
+        assertEquals(88_000L, delegate.lastSeekPositionMs)
+        engine.close()
+    }
+
     private fun track(id: String) = MusicTrack(
         id = "netease:$id",
         title = "Track $id",
