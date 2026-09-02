@@ -6,6 +6,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.Comparator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -51,8 +52,7 @@ internal object DesktopResourceCache : ResourceCacheStorage {
     }
 
     fun cachedRemoteImage(url: String): Path? = synchronized(lock) {
-        if (!isHttpUrl(url)) return null
-        if (imageLimitBytes <= 0L) return null
+        if (!isHttpUrl(url) || imageLimitBytes <= 0L) return null
         Files.createDirectories(imageDirectory)
         val target = imageDirectory.resolve("${sha256(url)}.img")
         if (Files.isRegularFile(target) && Files.size(target) > 0L) {
@@ -65,7 +65,9 @@ internal object DesktopResourceCache : ResourceCacheStorage {
             URL(url).openConnection().run {
                 connectTimeout = 15_000
                 readTimeout = 20_000
-                getInputStream().use { input -> Files.newOutputStream(temporary).use(input::copyTo) }
+                getInputStream().use { input ->
+                    Files.newOutputStream(temporary).use { output -> input.copyTo(output) }
+                }
             }
             if (Files.size(temporary) <= 0L) {
                 null
