@@ -90,14 +90,14 @@ jobs:
 
       - name: Build self-contained Windows installers
         shell: pwsh
+        env:
+          FUOEVOLVE_PACKAGE_PROFILE: bundled
+          FUOEVOLVE_PACKAGE_LIBMPV_DIR: ${{ github.workspace }}\build\desktop-native\windows\mpv
         run: |
-          $libmpv = "${{ github.workspace }}\build\desktop-native\windows\mpv"
           & .\gradlew.bat `
             "-Dorg.gradle.java.installations.paths=$env:FUO_JDK17,$env:JAVA_HOME" `
             --no-configuration-cache `
             --warning-mode all `
-            -Pfuoevolve.packageProfile=bundled `
-            "-Pfuoevolve.packageLibmpvDir=$libmpv" `
             :desktopApp:packageMsi `
             :desktopApp:packageExe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
