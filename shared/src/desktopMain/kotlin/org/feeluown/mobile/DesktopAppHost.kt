@@ -2,19 +2,24 @@ package org.feeluown.mobile
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 /** Desktop composition root. It hosts the same AppRoot/UI graph used by Android and iOS. */
 @Composable
-fun DesktopAppHost() {
+fun DesktopAppHost(externalInputs: Flow<String>? = null) {
     val container = remember { DesktopAppContainer() }
     DisposableEffect(container) {
         onDispose(container::close)
+    }
+    LaunchedEffect(container, externalInputs) {
+        externalInputs?.collect(container::openExternalInput)
     }
     DesktopProviderCredentialBackupHost(
         backup = container.providerCredentialBackup,
@@ -50,7 +55,7 @@ private class DesktopAppContainer {
     private val providerCredentialStore = createDesktopProviderCredentialStore()
     private val providerGraph = createFuoProviderGraph(
         credentials = providerCredentialStore,
-        persistentCache = null,
+        persistentCache = createDesktopProviderCacheStore(),
         isCellularConnection = { false },
     )
     val providerCredentialBackup by lazy {
@@ -84,10 +89,10 @@ private class DesktopAppContainer {
     private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
     private val playbackResumeStore: PlaybackResumeStore = createDesktopPlaybackResumeStore()
     private val playbackQueueStore = createDesktopPlaybackQueueStore(playbackResumeStore)
-    private val listeningHistorySink: ListeningHistorySink = NoOpListeningHistorySink
-    private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository
+    private val listeningHistorySink: ListeningHistorySink = createDesktopListeningHistorySink()
+    private val resourceCacheRepository: ResourceCacheRepository = createDesktopResourceCacheRepository()
     private val debugLogFeatureController by lazy {
-        createDebugLogFeatureController(NoOpDebugLogRepository, scope)
+        createDebugLogFeatureController(createDesktopDebugLogRepository(), scope)
     }
     private val audioRecognitionRepository: AudioRecognitionRepository = UnsupportedAudioRecognitionRepository
 
@@ -408,6 +413,23 @@ private class DesktopAppContainer {
 
     fun logoutProvider(provider: ProviderInfo) {
         providerAuthFeatureController.logout(provider.providerId)
+    }
+
+    fun openExternalInput(input: String) {
+        if (input == DESKTOP_ACTIVATION_FOCUS) return
+        val normalized = input.trim().trim('"')
+        if (normalized.isBlank()) return
+        val playlistResult = runCatching { readDesktopExternalPlaylist(normalized) }
+        playlistResult.exceptionOrNull()?.let { throwable ->
+            appViewModel.showFeedback(throwable.message ?: "无法读取本地歌单文件")
+            return
+        }
+        playlistResult.getOrNull()?.let { file ->
+            runCatching { localPlaylistFeatureController.prepareImport(file.fileName, file.content) }
+                .onFailure { appViewModel.showFeedback(it.message ?: "无法解析本地歌单文件") }
+            return
+        }
+        sharedResourceActionPort.open(normalized)
     }
 
     fun importLocalPlaylistFile() {
