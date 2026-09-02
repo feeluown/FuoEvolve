@@ -29,6 +29,7 @@ class DefaultAudioRecognitionRepositoryTest {
             neteaseSongId = "42",
             title = "Song",
             artists = listOf("Artist"),
+            album = "Album",
         )
         var matcherSession = ""
         val matcher = object : AudioRecognitionMatcher {
