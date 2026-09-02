@@ -124,8 +124,20 @@ val buildLinuxTrayBridge by tasks.registering(Exec::class) {
     commandLine("cargo", "build", "--release")
 }
 
+val desktopWebLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
+val desktopWebLoginExecutable = layout.projectDirectory.file(
+    "native/web-login/target/release/$desktopWebLoginExecutableName",
+)
+val buildDesktopWebLoginHelper by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the isolated system-WebView login helper used by the desktop runtime."
+    workingDir(layout.projectDirectory.dir("native/web-login"))
+    commandLine("cargo", "build", "--release")
+}
+
 if (isWindowsHost || isMacHost || isLinuxHost) {
     tasks.matching { it.name == "run" }.configureEach {
+        dependsOn(buildDesktopWebLoginHelper)
         if (isWindowsHost) dependsOn(buildWindowsSmtcBridge)
         if (isMacHost) dependsOn(buildMacNowPlayingBridge)
         if (isLinuxHost) dependsOn(buildLinuxTrayBridge)
@@ -145,13 +157,17 @@ val expectedLibMpvNames = when {
 
 val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     group = "distribution"
-    description = "Stage the platform bridge and optional bundled libmpv runtime for desktop packages."
+    description = "Stage desktop native bridges, web login helper and optional bundled libmpv runtime."
     inputs.property("packageProfile", desktopPackageProfile)
     if (bundlesLibMpv) {
         inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
         from(packageLibMpvDir) {
             into("$packagedNativeRoot/mpv")
         }
+    }
+    dependsOn(buildDesktopWebLoginHelper)
+    from(desktopWebLoginExecutable) {
+        into("$packagedNativeRoot/helpers")
     }
     into(packagedResourcesRoot)
 
@@ -179,6 +195,9 @@ val prepareDesktopPackageResources by tasks.registering(Sync::class) {
     }
 
     doFirst {
+        if (!desktopWebLoginExecutable.asFile.isFile) {
+            throw GradleException("Desktop web login helper was not built: ${desktopWebLoginExecutable.asFile}")
+        }
         if (!bundlesLibMpv) return@doFirst
         val source = packageLibMpvDir.orNull
             ?: throw GradleException(
@@ -264,6 +283,7 @@ compose.desktop {
     application {
         mainClass = "org.feeluown.mobile.desktop.MainKt"
         val appDir = "\$APPDIR"
+        jvmArgs += "-Dfuoevolve.appdir=$appDir"
         jvmArgs += "-Djna.library.path=" + listOf(
             "$appDir/resources/native/mpv",
             "$appDir/resources/native/bridges",
