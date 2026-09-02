@@ -2,10 +2,10 @@
 
 use std::ffi::{c_char, CStr};
 use std::ptr;
+use std::time::Duration;
 
-use mediaplayer::prelude::{
-    CommandToken, HandlerStatus, NowPlayingInfo, NowPlayingInfoCenter, NowPlayingMediaType,
-    PlaybackState, RemoteCommandCenter,
+use playwire::{
+    Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, Repeat, Track,
 };
 
 type EventCallback = extern "C" fn(action: i32, value: i64);
@@ -20,146 +20,77 @@ const ACTION_TOGGLE: i32 = 7;
 
 const STATUS_STOPPED: i32 = 0;
 const STATUS_PLAYING: i32 = 1;
-const STATUS_PAUSED: i32 = 2;
-const STATUS_LOADING: i32 = 3;
 
 struct Bridge {
-    center: NowPlayingInfoCenter,
-    remote: RemoteCommandCenter,
-    _tokens: Vec<CommandToken>,
+    controls: MediaControls,
 }
 
 impl Bridge {
-    fn new(callback: EventCallback) -> Self {
-        let center = NowPlayingInfoCenter::default_center();
-        let remote = RemoteCommandCenter::shared();
-
-        let play = remote.on_play(move |_| {
-            callback(ACTION_PLAY, 0);
-            HandlerStatus::Success
-        });
-        let pause = remote.on_pause(move |_| {
-            callback(ACTION_PAUSE, 0);
-            HandlerStatus::Success
-        });
-        let stop = remote.on_stop(move |_| {
-            callback(ACTION_STOP, 0);
-            HandlerStatus::Success
-        });
-        let toggle = remote.on_toggle_play_pause(move |_| {
-            callback(ACTION_TOGGLE, 0);
-            HandlerStatus::Success
-        });
-        let next = remote.on_next_track(move |_| {
-            callback(ACTION_NEXT, 0);
-            HandlerStatus::Success
-        });
-        let previous = remote.on_previous_track(move |_| {
-            callback(ACTION_PREVIOUS, 0);
-            HandlerStatus::Success
-        });
-        let seek = remote.on_change_playback_position(move |event| {
-            if let Some(position) = event.position {
-                let position_ms = (position.max(0.0) * 1000.0).round();
-                callback(ACTION_SEEK_TO, position_ms.min(i64::MAX as f64) as i64);
-            }
-            HandlerStatus::Success
-        });
-
-        remote.play_command().set_enabled(false);
-        remote.pause_command().set_enabled(false);
-        remote.stop_command().set_enabled(false);
-        remote.toggle_play_pause_command().set_enabled(false);
-        remote.next_track_command().set_enabled(false);
-        remote.previous_track_command().set_enabled(false);
-        remote.change_playback_position_command().set_enabled(false);
-        center.clear();
-        center.set_playback_state(PlaybackState::Stopped);
-
-        Self {
-            center,
-            remote,
-            _tokens: vec![play, pause, stop, toggle, next, previous, seek],
-        }
+    fn new(callback: EventCallback) -> playwire::Result<Self> {
+        let controls = MediaControls::new(PlayerConfig::new("FuoEvolve"), move |event| {
+            let (action, value) = match event {
+                Event::Play => (ACTION_PLAY, 0),
+                Event::Pause => (ACTION_PAUSE, 0),
+                Event::PlayPause => (ACTION_TOGGLE, 0),
+                Event::Stop => (ACTION_STOP, 0),
+                Event::Next => (ACTION_NEXT, 0),
+                Event::Previous => (ACTION_PREVIOUS, 0),
+                Event::SeekTo(position) => (
+                    ACTION_SEEK_TO,
+                    position.as_millis().min(i64::MAX as u128) as i64,
+                ),
+                _ => return,
+            };
+            callback(action, value);
+        })?;
+        Ok(Self { controls })
     }
 
     #[allow(clippy::too_many_arguments)]
     fn update(
-        &self,
+        &mut self,
         status: i32,
         position_ms: i64,
         duration_ms: i64,
         has_track: bool,
-        can_play: bool,
-        can_pause: bool,
+        _can_play: bool,
+        _can_pause: bool,
         can_next: bool,
         can_previous: bool,
-        queue_index: i64,
-        queue_count: i64,
+        _queue_index: i64,
+        _queue_count: i64,
         track_id: String,
         title: String,
         artist: String,
         album: String,
-    ) {
-        self.remote.play_command().set_enabled(can_play);
-        self.remote.pause_command().set_enabled(can_pause);
-        self.remote.stop_command().set_enabled(has_track);
-        self.remote
-            .toggle_play_pause_command()
-            .set_enabled(can_play || can_pause);
-        self.remote.next_track_command().set_enabled(can_next);
-        self.remote
-            .previous_track_command()
-            .set_enabled(can_previous);
-        self.remote
-            .change_playback_position_command()
-            .set_enabled(has_track && duration_ms > 0);
-
-        let playback_state = match status {
-            STATUS_PLAYING => PlaybackState::Playing,
-            STATUS_PAUSED | STATUS_LOADING => PlaybackState::Paused,
-            STATUS_STOPPED | _ => PlaybackState::Stopped,
+    ) -> playwire::Result<()> {
+        let duration = (duration_ms > 0).then(|| Duration::from_millis(duration_ms as u64));
+        let state = PlaybackState {
+            track: has_track.then(|| Track {
+                id: track_id,
+                title,
+                artists: if artist.is_empty() { Vec::new() } else { vec![artist] },
+                album,
+                artwork_url: String::new(),
+                url: String::new(),
+            }),
+            playing: status == STATUS_PLAYING,
+            position: Duration::from_millis(position_ms.max(0) as u64),
+            duration,
+            volume: 1.0,
+            repeat: Repeat::Off,
+            shuffle: false,
+            capabilities: Capabilities {
+                can_go_next: can_next,
+                can_go_previous: can_previous,
+                can_seek: has_track && duration_ms > 0,
+            },
         };
-        self.center.set_playback_state(playback_state);
-
-        if !has_track {
-            self.center.clear();
-            return;
-        }
-
-        let mut info = NowPlayingInfo::new()
-            .title(title)
-            .artist(artist)
-            .album_title(album)
-            .external_content_identifier(track_id)
-            .media_type(NowPlayingMediaType::Audio)
-            .elapsed_playback_time(position_ms.max(0) as f64 / 1000.0)
-            .playback_rate(if status == STATUS_PLAYING { 1.0 } else { 0.0 })
-            .default_playback_rate(1.0);
-        if duration_ms > 0 {
-            info = info.playback_duration(duration_ms as f64 / 1000.0);
-        }
-        if queue_count > 0 {
-            info = info.playback_queue_count(queue_count as u64);
-            if queue_index >= 0 {
-                info = info.playback_queue_index(queue_index as u64);
-            }
-        }
-        self.center.set_now_playing_info(&info);
+        self.controls.set_state(&state)
     }
-}
 
-impl Drop for Bridge {
-    fn drop(&mut self) {
-        self.remote.play_command().set_enabled(false);
-        self.remote.pause_command().set_enabled(false);
-        self.remote.stop_command().set_enabled(false);
-        self.remote.toggle_play_pause_command().set_enabled(false);
-        self.remote.next_track_command().set_enabled(false);
-        self.remote.previous_track_command().set_enabled(false);
-        self.remote.change_playback_position_command().set_enabled(false);
-        self.center.set_playback_state(PlaybackState::Stopped);
-        self.center.clear();
+    fn clear(&mut self) -> playwire::Result<()> {
+        self.controls.set_state(&PlaybackState::default())
     }
 }
 
@@ -173,7 +104,13 @@ pub extern "C" fn fuo_now_playing_create(
         write_error(error_buffer, error_capacity, "event callback is null");
         return ptr::null_mut();
     };
-    Box::into_raw(Box::new(Bridge::new(callback)))
+    match Bridge::new(callback) {
+        Ok(bridge) => Box::into_raw(Box::new(bridge)),
+        Err(error) => {
+            write_error(error_buffer, error_capacity, &error.to_string());
+            ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]
@@ -195,8 +132,8 @@ pub unsafe extern "C" fn fuo_now_playing_update(
     artist: *const c_char,
     album: *const c_char,
 ) {
-    let Some(bridge) = bridge.as_ref() else { return };
-    bridge.update(
+    let Some(bridge) = bridge.as_mut() else { return };
+    if let Err(error) = bridge.update(
         status,
         position_ms,
         duration_ms,
@@ -211,14 +148,17 @@ pub unsafe extern "C" fn fuo_now_playing_update(
         read_utf8(title),
         read_utf8(artist),
         read_utf8(album),
-    );
+    ) {
+        eprintln!("FuoEvolve Now Playing update failed: {error}");
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn fuo_now_playing_clear(bridge: *mut Bridge) {
-    let Some(bridge) = bridge.as_ref() else { return };
-    bridge.center.set_playback_state(PlaybackState::Stopped);
-    bridge.center.clear();
+    let Some(bridge) = bridge.as_mut() else { return };
+    if let Err(error) = bridge.clear() {
+        eprintln!("FuoEvolve Now Playing clear failed: {error}");
+    }
 }
 
 #[no_mangle]
