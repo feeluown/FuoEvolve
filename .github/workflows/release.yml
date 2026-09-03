@@ -1,0 +1,266 @@
+name: Release
+
+"on":
+  push:
+    tags:
+      - "[0-9]*"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  android-tests:
+    name: Android tests
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/android-tests.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+  desktop-tests:
+    name: Desktop tests
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/desktop-tests.yml
+
+  ios-tests:
+    name: iOS tests
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ios-tests.yml
+
+  build-android-release:
+    name: Build signed Android release APK
+    if: github.event_name == 'push'
+    needs:
+      - android-tests
+      - desktop-tests
+      - ios-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
+      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
+      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
+      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
+      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
+
+      - name: Prepare signing keystore
+        run: |
+          for name in FUO_SIGNING_KEYSTORE_BASE64 FUO_SIGNING_STORE_PASSWORD FUO_SIGNING_KEY_ALIAS FUO_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required signing secret: ${name}"
+              exit 1
+            fi
+          done
+          mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
+          printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
+
+      - name: Build signed release APK
+        env:
+          GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+        run: |
+          if [ -n "$GRADLE_ENCRYPTION_KEY" ]; then
+            echo "Using Gradle configuration cache."
+            ./gradlew --configuration-cache :androidApp:assembleRelease
+          else
+            echo "::warning::GRADLE_ENCRYPTION_KEY is not configured; configuration cache persistence is disabled."
+            ./gradlew --no-configuration-cache :androidApp:assembleRelease
+          fi
+
+      - name: Prepare release APK asset
+        id: asset
+        env:
+          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
+        run: |
+          mkdir -p build/artifacts
+          tag="${GITHUB_REF_NAME//\//-}"
+          mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
+            printf '%s\n' "${apks[@]}"
+            exit 1
+          fi
+          asset_path="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
+          cp "${apks[0]}" "$asset_path"
+          echo "path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release APK asset
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.asset.outputs.path }}
+          archive: false
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish Android release
+    needs: build-android-release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download release APK assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: fuo-evolve-*-android-signed.apk
+          path: build/artifacts
+          merge-multiple: true
+
+      - name: Verify release APK assets
+        run: |
+          tag="${GITHUB_REF_NAME//\//-}"
+          asset="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
+          if [ ! -f "$asset" ]; then
+            echo "::error::Missing release APK asset: $asset"
+            exit 1
+          fi
+          mapfile -t apks < <(find build/artifacts -maxdepth 1 -type f -name '*.apk' -print)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one release APK asset, found ${#apks[@]}"
+            printf '%s\n' "${apks[@]}"
+            exit 1
+          fi
+
+      - name: Collect release context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/collect-release-context.sh "$GITHUB_REF_NAME" "$GITHUB_SHA" build/release-context.md
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Generate release highlights with Copilot
+        id: release_summary
+        continue-on-error: true
+        uses: actions/ai-inference@v3
+        with:
+          prompt-file: ./.github/prompts/release-summary.prompt.yml
+          model: auto
+          file_input: |
+            release_context: ./build/release-context.md
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
+
+      - name: Prepare release intro
+        if: always()
+        env:
+          SUMMARY_OUTCOME: ${{ steps.release_summary.outcome }}
+          SUMMARY_FILE: ${{ steps.release_summary.outputs.response-file }}
+        run: |
+          : > build/release-intro.md
+          if [ "$SUMMARY_OUTCOME" = "success" ] && [ -n "$SUMMARY_FILE" ] && [ -s "$SUMMARY_FILE" ]; then
+            {
+              echo "## ✨ 重点改动"
+              echo
+              cat "$SUMMARY_FILE"
+              echo
+              echo
+              echo "---"
+              echo
+            } > build/release-intro.md
+          else
+            echo "::warning::Copilot release summary unavailable; publishing GitHub generated notes only."
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/artifacts/*.apk
+          body_path: build/release-intro.md
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          make_latest: true
+
+  publish-fdroid-pages:
+    name: Publish F-Droid repository to Pages
+    needs: publish-release
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.publish-release.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: fuoevolve-github-pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
+      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
+      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
+      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+      FDROID_DOCKER_IMAGE: registry.gitlab.com/fdroid/docker-executable-fdroidserver:master
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build F-Droid repository and Pages site
+        run: |
+          docker pull "$FDROID_DOCKER_IMAGE"
+          bash scripts/build-fdroid-pages.sh
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
