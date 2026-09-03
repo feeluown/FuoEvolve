@@ -11,16 +11,41 @@ permissions:
   contents: read
 
 jobs:
+  shared:
+    name: Shared
+    uses: ./.github/workflows/shared-tests.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   android:
     name: Android
+    needs: shared
     uses: ./.github/workflows/android-tests.yml
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-  desktop:
-    name: Desktop
-    uses: ./.github/workflows/desktop-tests.yml
-
   ios:
     name: iOS
+    needs: shared
     uses: ./.github/workflows/ios-tests.yml
+
+  windows:
+    name: Windows
+    needs: shared
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: windows
+
+  macos:
+    name: macOS
+    needs: shared
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: macos
+
+  linux:
+    name: Linux
+    needs: shared
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: linux
