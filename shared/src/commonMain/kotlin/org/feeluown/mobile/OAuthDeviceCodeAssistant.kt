@@ -1,5 +1,7 @@
 package org.feeluown.mobile
 
+import kotlin.concurrent.Volatile
+
 /**
  * Platform helper for YouTube Music TV OAuth device-code UX:
  * clipboard copy and a system notification that can surface the user code.
