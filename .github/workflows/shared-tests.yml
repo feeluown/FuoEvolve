@@ -1,0 +1,78 @@
+name: Shared Tests
+
+"on":
+  workflow_call:
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run shared architecture and JVM tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: Run architecture and feature boundary checks
+        run: >-
+          ./gradlew
+          --no-configuration-cache
+          --warning-mode all
+          checkArchitectureBoundaries
+          :feature:download:checkOfflineFeatureBoundaries
+          :feature:providerauth:checkProviderFeatureBoundaries
+          :feature:providerdetail:checkProviderDetailFeatureBoundaries
+          :feature:settings:checkSettingsFeatureBoundaries
+          :feature:onboarding:checkOnboardingFeatureBoundaries
+          :feature:home:checkHomeFeatureBoundaries
+          :feature:playback:checkPlaybackFeatureBoundaries
+          :shared:checkP4ContractBoundaries
+
+      - name: Run shared JVM and desktop regression tests
+        run: |
+          ./gradlew \
+            --configuration-cache \
+            --warning-mode all \
+            :feature:recognition:desktopTest \
+            :feature:search:desktopTest \
+            :feature:localplaylist:desktopTest \
+            :feature:localmusic:desktopTest \
+            :feature:download:desktopTest \
+            :feature:providercatalog:desktopTest \
+            :feature:providerauth:desktopTest \
+            :feature:providerdetail:desktopTest \
+            :feature:settings:desktopTest \
+            :feature:onboarding:desktopTest \
+            :feature:home:desktopTest \
+            :feature:playback:desktopTest \
+            :playback:runtime:desktopTest \
+            :provider:runtime:desktopTest \
+            :shared:desktopTest \
+            :persistence:listening:desktopTest \
+            :desktopApp:compileKotlin \
+            :desktopApp:test
