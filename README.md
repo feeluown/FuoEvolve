@@ -1,10 +1,9 @@
 # FuoEvolve
 
 [![Stable release](https://img.shields.io/github/v/release/feeluown/FuoEvolve?label=stable)](https://github.com/feeluown/FuoEvolve/releases/latest)
-[![Canary](https://img.shields.io/github/actions/workflow/status/feeluown/FuoEvolve/android-apk.yml?branch=master&label=canary)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster)
-[![Android APK](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster)
-[![iOS CI](https://img.shields.io/github/actions/workflow/status/feeluown/FuoEvolve/ios-debug-app.yml?branch=master&label=iOS%20CI)](https://github.com/feeluown/FuoEvolve/actions/workflows/ios-debug-app.yml?query=branch%3Amaster)
-[![Android Release](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml)
+[![Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster)
+[![PR Tests](https://github.com/feeluown/FuoEvolve/actions/workflows/pr-tests.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/pr-tests.yml)
+[![Release](https://github.com/feeluown/FuoEvolve/actions/workflows/release.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/release.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)
 ![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4?logo=jetpackcompose&logoColor=white)
@@ -23,7 +22,7 @@ Android is the primary supported platform. iOS builds are available for experime
 | --- | --- | --- |
 | Stable | [Latest GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | Signed multi-ABI Android APK for `arm64-v8a` and `x86_64`. |
 | F-Droid | [Official self-hosted repository](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | Keeps the latest stable releases and updates automatically after GitHub Releases. |
-| Canary | [Latest master Android build](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster) | Signed release APK built from the latest successful `master` workflow. |
+| Canary | [Latest master Android build](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) | Signed release APK built from the latest successful `master` workflow. |
 
 ## Highlights
 
@@ -148,7 +147,7 @@ Main Gradle module groups:
 - `shared` — shared Compose application/UI integration;
 - `androidApp` — Android application and platform services;
 - `iosApp/FuoEvolve` — experimental iOS application;
-- `.github/workflows` — Android release/build automation and iOS development builds.
+- `.github/workflows` — PR tests, master Canary builds, release automation, and reusable platform validation/packaging workflows.
 
 ## License
 
