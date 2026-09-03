@@ -13,26 +13,48 @@ permissions:
   contents: read
 
 jobs:
+  shared-tests:
+    name: Shared tests
+    uses: ./.github/workflows/shared-tests.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   android-tests:
     name: Android tests
+    needs: shared-tests
     uses: ./.github/workflows/android-tests.yml
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-  desktop-tests:
-    name: Desktop tests
-    uses: ./.github/workflows/desktop-tests.yml
-
   ios-tests:
     name: iOS tests
+    needs: shared-tests
     uses: ./.github/workflows/ios-tests.yml
+
+  windows-tests:
+    name: Windows tests
+    needs: shared-tests
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: windows
+
+  macos-tests:
+    name: macOS tests
+    needs: shared-tests
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: macos
+
+  linux-tests:
+    name: Linux tests
+    needs: shared-tests
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: linux
 
   android-canary:
     name: Build signed Android Canary APK
-    needs:
-      - android-tests
-      - desktop-tests
-      - ios-tests
+    needs: android-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -190,20 +212,30 @@ jobs:
 
           git push --force origin "$commit:refs/heads/canary-dist"
 
-  desktop-canary:
-    name: Desktop Canary packages
-    needs:
-      - android-tests
-      - desktop-tests
-      - ios-tests
+  windows-canary:
+    name: Windows Canary packages
+    needs: windows-tests
     uses: ./.github/workflows/desktop-packaging.yml
+    with:
+      platform: windows
+
+  macos-canary:
+    name: macOS Canary packages
+    needs: macos-tests
+    uses: ./.github/workflows/desktop-packaging.yml
+    with:
+      platform: macos
+
+  linux-canary:
+    name: Linux Canary packages
+    needs: linux-tests
+    uses: ./.github/workflows/desktop-packaging.yml
+    with:
+      platform: linux
 
   ios-canary:
     name: Build iOS simulator Canary app
-    needs:
-      - android-tests
-      - desktop-tests
-      - ios-tests
+    needs: ios-tests
     runs-on: macos-26
     timeout-minutes: 45
 
