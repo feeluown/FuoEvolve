@@ -58,8 +58,10 @@ class DesktopDownloadRepositoryTest {
                 "[00:00.00]Desktop lyrics",
                 Files.readString(completedPath.resolveSibling("${completedPath.fileName}.lrc")),
             )
-            val downloadedState = assertIs<DownloadState.Downloaded>(repository.states.value.getValue(track.id))
-            assertEquals(completedUri, downloadedState.uri)
+            val downloadedState = withTimeout(5_000) {
+                repository.states.first { states -> states[track.id] is DownloadState.Downloaded }
+            }.getValue(track.id)
+            assertEquals(completedUri, assertIs<DownloadState.Downloaded>(downloadedState).uri)
 
             repository.close()
 
