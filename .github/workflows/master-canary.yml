@@ -29,7 +29,10 @@ jobs:
 
   android-canary:
     name: Build signed Android Canary APK
-    needs: android-tests
+    needs:
+      - android-tests
+      - desktop-tests
+      - ios-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -189,12 +192,18 @@ jobs:
 
   desktop-canary:
     name: Desktop Canary packages
-    needs: desktop-tests
+    needs:
+      - android-tests
+      - desktop-tests
+      - ios-tests
     uses: ./.github/workflows/desktop-packaging.yml
 
   ios-canary:
     name: Build iOS simulator Canary app
-    needs: ios-tests
+    needs:
+      - android-tests
+      - desktop-tests
+      - ios-tests
     runs-on: macos-26
     timeout-minutes: 45
 
