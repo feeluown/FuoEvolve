@@ -1,47 +1,14 @@
 name: Desktop Tests
 
 "on":
-  push:
-    branches:
-      - master
-    paths:
-      - "desktopApp/**"
-      - "shared/**"
-      - "core/**"
-      - "feature/**"
-      - "playback/**"
-      - "provider/**"
-      - "persistence/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-      - "gradle/**"
-      - ".github/workflows/desktop-tests.yml"
-  pull_request:
-    paths:
-      - "desktopApp/**"
-      - "shared/**"
-      - "core/**"
-      - "feature/**"
-      - "playback/**"
-      - "provider/**"
-      - "persistence/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-      - "gradle/**"
-      - ".github/workflows/desktop-tests.yml"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: Compile Linux desktop, tray and WebView login helper
+  linux:
+    name: Linux desktop, tray and WebView login
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -84,7 +51,7 @@ jobs:
       - name: Test Rust WebView login helper
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
-      - name: Compile Linux desktop foundation
+      - name: Test Linux desktop foundation
         run: >-
           ./gradlew
           --no-configuration-cache
@@ -94,8 +61,8 @@ jobs:
           :shared:desktopTest
           :persistence:listening:desktopTest
 
-  windows-smtc:
-    name: Compile Windows desktop, SMTC and WebView login helper
+  windows:
+    name: Windows desktop, SMTC and WebView login
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -138,7 +105,7 @@ jobs:
         shell: pwsh
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
-      - name: Compile Windows desktop foundation
+      - name: Test Windows desktop foundation
         shell: pwsh
         run: >-
           ./gradlew.bat
@@ -149,8 +116,8 @@ jobs:
           :shared:desktopTest
           :persistence:listening:desktopTest
 
-  macos-now-playing:
-    name: Compile macOS desktop, Now Playing and WebView login helper
+  macos:
+    name: macOS desktop, Now Playing and WebView login
     runs-on: macos-latest
     timeout-minutes: 45
 
@@ -190,7 +157,7 @@ jobs:
       - name: Test Rust WebView login helper
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
-      - name: Compile macOS desktop foundation
+      - name: Test macOS desktop foundation
         run: >-
           ./gradlew
           --no-configuration-cache
