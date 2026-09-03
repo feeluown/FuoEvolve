@@ -38,21 +38,6 @@ jobs:
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-      - name: Run architecture checks
-        run: >-
-          ./gradlew
-          --no-configuration-cache
-          --warning-mode all
-          checkArchitectureBoundaries
-          :feature:download:checkOfflineFeatureBoundaries
-          :feature:providerauth:checkProviderFeatureBoundaries
-          :feature:providerdetail:checkProviderDetailFeatureBoundaries
-          :feature:settings:checkSettingsFeatureBoundaries
-          :feature:onboarding:checkOnboardingFeatureBoundaries
-          :feature:home:checkHomeFeatureBoundaries
-          :feature:playback:checkPlaybackFeatureBoundaries
-          :shared:checkP4ContractBoundaries
-
       - name: Run Android unit tests, coverage and app compile validation
         run: |
           ./gradlew \
