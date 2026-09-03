@@ -34,23 +34,17 @@ jobs:
   windows-tests:
     name: Windows tests
     needs: shared-tests
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: windows
+    uses: ./.github/workflows/windows-tests.yml
 
   macos-tests:
     name: macOS tests
     needs: shared-tests
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: macos
+    uses: ./.github/workflows/macos-tests.yml
 
   linux-tests:
     name: Linux tests
     needs: shared-tests
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: linux
+    uses: ./.github/workflows/linux-tests.yml
 
   android-canary:
     name: Build signed Android Canary APK
@@ -215,23 +209,17 @@ jobs:
   windows-canary:
     name: Windows Canary packages
     needs: windows-tests
-    uses: ./.github/workflows/desktop-packaging.yml
-    with:
-      platform: windows
+    uses: ./.github/workflows/windows-packaging.yml
 
   macos-canary:
     name: macOS Canary packages
     needs: macos-tests
-    uses: ./.github/workflows/desktop-packaging.yml
-    with:
-      platform: macos
+    uses: ./.github/workflows/macos-packaging.yml
 
   linux-canary:
     name: Linux Canary packages
     needs: linux-tests
-    uses: ./.github/workflows/desktop-packaging.yml
-    with:
-      platform: linux
+    uses: ./.github/workflows/linux-packaging.yml
 
   ios-canary:
     name: Build iOS simulator Canary app
