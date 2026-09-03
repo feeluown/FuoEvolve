@@ -39,25 +39,19 @@ jobs:
     name: Windows tests
     if: github.event_name == 'push'
     needs: shared-tests
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: windows
+    uses: ./.github/workflows/windows-tests.yml
 
   macos-tests:
     name: macOS tests
     if: github.event_name == 'push'
     needs: shared-tests
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: macos
+    uses: ./.github/workflows/macos-tests.yml
 
   linux-tests:
     name: Linux tests
     if: github.event_name == 'push'
     needs: shared-tests
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: linux
+    uses: ./.github/workflows/linux-tests.yml
 
   build-android-release:
     name: Build signed Android release APK
