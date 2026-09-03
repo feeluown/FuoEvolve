@@ -13,6 +13,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.sun.jna.Library
+import com.sun.jna.Native
+import com.sun.jna.Platform
 import java.awt.Window as AwtWindow
 import javax.swing.SwingUtilities
 import org.feeluown.mobile.DesktopAppHost
@@ -29,6 +32,25 @@ import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
 import org.feeluown.mobile.persistence.listening.DesktopListeningHistoryDriverFactory
 import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
 
+private interface CLocaleNative : Library {
+    fun setlocale(category: Int, locale: String): String?
+}
+
+private val cLocaleNative: CLocaleNative by lazy {
+    Native.load(Platform.C_LIBRARY_NAME, CLocaleNative::class.java)
+}
+
+private fun configureLibMpvNumericLocale() {
+    val lcNumeric = when {
+        Platform.isLinux() -> 1
+        Platform.isMac() || Platform.isWindows() -> 4
+        else -> return
+    }
+    check(cLocaleNative.setlocale(lcNumeric, "C") != null) {
+        "Failed to set LC_NUMERIC=C for libmpv"
+    }
+}
+
 fun main(args: Array<String>) {
     installDesktopDebugLogCapture()
     val activation = DesktopExternalActivationSession.open(args.toList()) ?: return
@@ -39,12 +61,16 @@ fun main(args: Array<String>) {
         )
     }
     installDesktopPlaybackEngineFactory {
+        configureLibMpvNumericLocale()
         PersistentDesktopPlaybackEngine(
             delegate = DesktopMpvPlaybackEngine(),
             resumeStore = createDesktopPlaybackResumeStore(),
         )
     }
-    installDesktopPlatformVideoControllerFactory { DesktopMpvVideoController() }
+    installDesktopPlatformVideoControllerFactory {
+        configureLibMpvNumericLocale()
+        DesktopMpvVideoController()
+    }
     installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
     installDesktopLocalMusicRepositoryFactory { DesktopLocalMusicRepository() }
     installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
