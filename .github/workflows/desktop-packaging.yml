@@ -2,19 +2,12 @@ name: Desktop Packaging
 
 "on":
   workflow_call:
-    inputs:
-      platform:
-        description: Desktop platform to package
-        required: false
-        default: all
-        type: string
 
 permissions:
   contents: read
 
 jobs:
   windows-x64:
-    if: inputs.platform == 'all' || inputs.platform == 'windows'
     name: Package Windows x64 MSI and EXE
     runs-on: windows-latest
     timeout-minutes: 60
@@ -150,7 +143,6 @@ jobs:
           if-no-files-found: error
 
   macos:
-    if: inputs.platform == 'all' || inputs.platform == 'macos'
     name: Package macOS ${{ matrix.arch }} DMG and PKG
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
@@ -315,7 +307,6 @@ jobs:
           if-no-files-found: error
 
   linux-system:
-    if: inputs.platform == 'all' || inputs.platform == 'linux'
     name: Package Linux DEB RPM and Arch
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -479,7 +470,6 @@ jobs:
           if-no-files-found: error
 
   linux-appimage:
-    if: inputs.platform == 'all' || inputs.platform == 'linux'
     name: Package portable Linux AppImage
     runs-on: ubuntu-22.04
     timeout-minutes: 90
