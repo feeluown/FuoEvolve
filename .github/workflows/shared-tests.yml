@@ -6,10 +6,6 @@ name: Shared Tests
       GRADLE_ENCRYPTION_KEY:
         required: false
 
-permissions:
-  contents: read
-  actions: read
-
 jobs:
   test:
     name: Run shared architecture and JVM tests
