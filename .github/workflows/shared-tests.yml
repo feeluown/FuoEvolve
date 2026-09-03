@@ -56,8 +56,8 @@ jobs:
           ./gradlew
           --configuration-cache
           --warning-mode all
-          :koverXmlReport
-          :koverHtmlReport
+          :coverage:koverXmlReportProjectJvm
+          :coverage:koverHtmlReportProjectJvm
 
       - name: Find latest master coverage baseline
         id: baseline
@@ -97,17 +97,19 @@ jobs:
 
       - name: Write Kotlin JVM coverage summary
         run: |
+          report=coverage/build/reports/kover/report.xml
+          metrics=coverage/build/reports/kover/metrics.json
           baseline=build/coverage-baseline/report.xml
           if [ -f "$baseline" ]; then
             python3 scripts/summarize-kover.py \
-              build/reports/kover/report.xml \
+              "$report" \
               "$baseline" \
-              --json-output build/reports/kover/metrics.json \
+              --json-output "$metrics" \
               >> "$GITHUB_STEP_SUMMARY"
           else
             python3 scripts/summarize-kover.py \
-              build/reports/kover/report.xml \
-              --json-output build/reports/kover/metrics.json \
+              "$report" \
+              --json-output "$metrics" \
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -116,8 +118,8 @@ jobs:
         with:
           name: kotlin-jvm-coverage
           path: |
-            build/reports/kover/report.xml
-            build/reports/kover/html
-            build/reports/kover/metrics.json
+            coverage/build/reports/kover/report.xml
+            coverage/build/reports/kover/html
+            coverage/build/reports/kover/metrics.json
           retention-days: 14
           if-no-files-found: error
