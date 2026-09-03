@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: Run Android tests and coverage
+    name: Run Android tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -37,8 +37,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          add-job-summary: never
 
-      - name: Run Android unit tests, coverage and app compile validation
+      - name: Run Android unit tests and app compile validation
         run: |
           ./gradlew \
             --configuration-cache \
@@ -63,7 +64,6 @@ jobs:
             :provider:qqmusic:testAndroidHostTest \
             :provider:ytmusic:testAndroidHostTest \
             :shared:testAndroidHostTest \
-            :shared:koverXmlReport \
             :androidApp:checkReleaseAarMetadata \
             :androidApp:compileDebugKotlin \
             :androidApp:compileDebugJavaWithJavac \
