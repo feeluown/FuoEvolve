@@ -1,0 +1,302 @@
+name: Linux Packaging
+
+"on":
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-system:
+    name: Package Linux DEB RPM and Arch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Cache Linux system Rust native components
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/linux-tray/Cargo.lock
+            desktopApp/native/linux-tray/target
+            desktopApp/native/web-login/Cargo.lock
+            desktopApp/native/web-login/target
+          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
+          restore-keys: |
+            desktop-rust-linux-system-x64-
+
+      - name: Install native packaging tools and WebKitGTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot rpm libwebkit2gtk-4.1-dev
+          java -version
+          jpackage --version
+          docker --version
+          pkg-config --modversion webkit2gtk-4.1
+
+      - name: Create minified Linux app image with system native dependency profile
+        id: app
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=system \
+            :desktopApp:createReleaseDistributable
+          APP_ROOT="desktopApp/build/compose/binaries/main-release/app"
+          LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
+          if [[ -z "$LAUNCHER" ]]; then
+            echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
+            find "$APP_ROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
+          test -x "$LAUNCHER"
+          RUNTIME_RELEASE="$(find "$APP_IMAGE" -path '*/runtime/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$APP_IMAGE" -maxdepth 5 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
+          TRAY_BRIDGE="$(find "$APP_IMAGE" -name libfuoevolve_linux_tray_bridge.so -print -quit)"
+          test -n "$TRAY_BRIDGE"
+          WEB_LOGIN_HELPER="$(find "$APP_IMAGE" -name fuoevolve-web-login -type f -perm -u+x -print -quit)"
+          test -n "$WEB_LOGIN_HELPER" || { echo "WebView login helper is missing" >&2; exit 1; }
+          if [[ -n "$(find "$APP_IMAGE" -name 'libmpv.so*' -print -quit)" ]]; then
+            echo "System Linux app image must not bundle libmpv" >&2
+            exit 1
+          fi
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build DEB and RPM packages
+        run: |
+          mkdir -p build/desktop-packages/system
+          bash desktopApp/packaging/linux/package-system.sh deb "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
+          bash desktopApp/packaging/linux/package-system.sh rpm "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
+
+      - name: Build Arch Linux package
+        run: >-
+          bash desktopApp/packaging/linux/package-arch.sh
+          "${{ steps.app.outputs.app_image }}"
+          "${{ steps.app.outputs.version }}"
+          build/desktop-packages/system
+
+      - name: Verify Linux package metadata
+        run: |
+          DEB="$(find build/desktop-packages/system -name '*.deb' -print -quit)"
+          RPM="$(find build/desktop-packages/system -name '*.rpm' -print -quit)"
+          ARCH="$(find build/desktop-packages/system -name '*.pkg.tar.zst' -print -quit)"
+          test -n "$DEB" && test -n "$RPM" && test -n "$ARCH"
+          dpkg-deb -I "$DEB" | tee build/desktop-packages/system/deb-info.txt
+          grep -q 'libmpv2' build/desktop-packages/system/deb-info.txt
+          grep -q 'libwebkit2gtk-4.1-0' build/desktop-packages/system/deb-info.txt
+          rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
+          grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
+          grep -q 'libwebkit2gtk-4.1.so.0' build/desktop-packages/system/rpm-requires.txt
+          tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
+          tar -xOf "$ARCH" .PKGINFO | grep -q 'depend = webkit2gtk-4.1'
+
+      - name: Report Linux package sizes
+        run: du -h build/desktop-packages/system/*.deb build/desktop-packages/system/*.rpm build/desktop-packages/system/*.pkg.tar.zst
+
+      - name: Upload Linux DEB
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.deb
+          path: build/desktop-packages/system/*.deb
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload Linux RPM
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.rpm
+          path: build/desktop-packages/system/*.rpm
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload Arch Linux package
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.pkg.tar.zst
+          path: build/desktop-packages/system/*.pkg.tar.zst
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-appimage:
+    name: Package portable Linux AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up compile JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Remember compile JDK
+        run: echo "FUO_JDK17=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up bundled JetBrains Runtime JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Cache Linux AppImage Rust native components
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/linux-tray/Cargo.lock
+            desktopApp/native/linux-tray/target
+            desktopApp/native/web-login/Cargo.lock
+            desktopApp/native/web-login/target
+          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
+          restore-keys: |
+            desktop-rust-linux-appimage-x64-
+
+      - name: Install portable native dependency inputs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv1 libsecret-1-0 libwebkit2gtk-4.1-dev glib-networking patchelf pax-utils
+          ldconfig -p | grep libmpv
+          ldconfig -p | grep libsecret-1
+          pkg-config --modversion webkit2gtk-4.1
+          find /usr/lib -path '*/webkit2gtk-4.1/WebKitNetworkProcess' -print -quit | grep -q .
+
+      - name: Create minified Linux app image
+        id: app
+        run: |
+          ./gradlew \
+            "-Dorg.gradle.java.installations.paths=$FUO_JDK17,$JAVA_HOME" \
+            --no-configuration-cache \
+            --warning-mode all \
+            -Pfuoevolve.packageProfile=system \
+            :desktopApp:createReleaseDistributable
+          APP_ROOT="desktopApp/build/compose/binaries/main-release/app"
+          LAUNCHER="$(find "$APP_ROOT" -mindepth 2 -maxdepth 3 -type f -path '*/bin/FuoEvolve' -print -quit)"
+          if [[ -z "$LAUNCHER" ]]; then
+            echo "Unable to locate Compose Linux launcher under $APP_ROOT" >&2
+            find "$APP_ROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          APP_IMAGE="${LAUNCHER%/bin/FuoEvolve}"
+          test -x "$LAUNCHER"
+          RUNTIME_RELEASE="$(find "$APP_IMAGE" -path '*/runtime/release' -print -quit)"
+          if [[ -z "$RUNTIME_RELEASE" ]]; then
+            echo "Bundled JVM runtime release marker is missing" >&2
+            find "$APP_IMAGE" -maxdepth 5 -type f -name release -print >&2
+            exit 1
+          fi
+          RUNTIME_ROOT="${RUNTIME_RELEASE%/release}"
+          test -f "$RUNTIME_ROOT/lib/modules" || { echo "Bundled JVM runtime modules image is missing" >&2; exit 1; }
+          grep -Eq '^JAVA_VERSION="21\.' "$RUNTIME_RELEASE" || { echo "Bundled JVM runtime is not Java 21" >&2; exit 1; }
+          find "$APP_IMAGE" -name fuoevolve-web-login -type f -perm -u+x -print -quit | grep -q . || { echo "WebView login helper is missing" >&2; exit 1; }
+          VERSION="$(./gradlew -q :desktopApp:printDesktopPackageVersion | tail -n 1)"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build self-contained AppImage
+        run: |
+          mkdir -p build/desktop-packages/appimage
+          bash desktopApp/packaging/linux/package-appimage.sh \
+            "${{ steps.app.outputs.app_image }}" \
+            "${{ steps.app.outputs.version }}" \
+            build/desktop-packages/appimage
+          APPIMAGE="$(find build/desktop-packages/appimage -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          file "$APPIMAGE"
+          sha256sum "$APPIMAGE" | tee "$APPIMAGE.sha256"
+
+      - name: Report AppImage size
+        run: du -h build/desktop-packages/appimage/*.AppImage
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.AppImage
+          path: build/desktop-packages/appimage/*.AppImage
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload AppImage checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuoevolve-linux-x64.AppImage.sha256
+          path: build/desktop-packages/appimage/*.sha256
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
