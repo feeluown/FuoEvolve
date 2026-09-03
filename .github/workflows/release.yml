@@ -14,30 +14,60 @@ permissions:
   contents: read
 
 jobs:
+  shared-tests:
+    name: Shared tests
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/shared-tests.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   android-tests:
     name: Android tests
     if: github.event_name == 'push'
+    needs: shared-tests
     uses: ./.github/workflows/android-tests.yml
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-  desktop-tests:
-    name: Desktop tests
-    if: github.event_name == 'push'
-    uses: ./.github/workflows/desktop-tests.yml
-
   ios-tests:
     name: iOS tests
     if: github.event_name == 'push'
+    needs: shared-tests
     uses: ./.github/workflows/ios-tests.yml
+
+  windows-tests:
+    name: Windows tests
+    if: github.event_name == 'push'
+    needs: shared-tests
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: windows
+
+  macos-tests:
+    name: macOS tests
+    if: github.event_name == 'push'
+    needs: shared-tests
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: macos
+
+  linux-tests:
+    name: Linux tests
+    if: github.event_name == 'push'
+    needs: shared-tests
+    uses: ./.github/workflows/desktop-tests.yml
+    with:
+      platform: linux
 
   build-android-release:
     name: Build signed Android release APK
     if: github.event_name == 'push'
     needs:
       - android-tests
-      - desktop-tests
       - ios-tests
+      - windows-tests
+      - macos-tests
+      - linux-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
