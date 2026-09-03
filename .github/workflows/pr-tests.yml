@@ -32,20 +32,14 @@ jobs:
   windows:
     name: Windows
     needs: shared
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: windows
+    uses: ./.github/workflows/windows-tests.yml
 
   macos:
     name: macOS
     needs: shared
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: macos
+    uses: ./.github/workflows/macos-tests.yml
 
   linux:
     name: Linux
     needs: shared
-    uses: ./.github/workflows/desktop-tests.yml
-    with:
-      platform: linux
+    uses: ./.github/workflows/linux-tests.yml
