@@ -1,0 +1,35 @@
+name: Linux Tests
+
+"on":
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Linux tray and WebView login
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Install Linux WebKitGTK build dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev
+
+      - name: Compile Rust StatusNotifier tray bridge
+        run: cargo build --manifest-path desktopApp/native/linux-tray/Cargo.toml --release
+
+      - name: Test Rust WebView login helper
+        run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
