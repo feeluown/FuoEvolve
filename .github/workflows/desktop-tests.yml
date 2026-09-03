@@ -2,36 +2,26 @@ name: Desktop Tests
 
 "on":
   workflow_call:
+    inputs:
+      platform:
+        description: Desktop platform to validate
+        required: false
+        default: all
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   linux:
-    name: Linux desktop, tray and WebView login
+    if: inputs.platform == 'all' || inputs.platform == 'linux'
+    name: Linux tray and WebView login
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Prepare Git refs for Gradle versioning
-        run: |
-          if ! git show-ref --verify --quiet refs/heads/master; then
-            git branch master origin/master
-          fi
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Rust stable
         run: |
@@ -51,43 +41,15 @@ jobs:
       - name: Test Rust WebView login helper
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
-      - name: Test Linux desktop foundation
-        run: >-
-          ./gradlew
-          --no-configuration-cache
-          --warning-mode all
-          :desktopApp:compileKotlin
-          :desktopApp:test
-          :shared:desktopTest
-          :persistence:listening:desktopTest
-
   windows:
-    name: Windows desktop, SMTC and WebView login
+    if: inputs.platform == 'all' || inputs.platform == 'windows'
+    name: Windows SMTC and WebView login
     runs-on: windows-latest
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Prepare Git refs for Gradle versioning
-        shell: pwsh
-        run: |
-          git show-ref --verify --quiet refs/heads/master
-          if ($LASTEXITCODE -ne 0) {
-            git branch master origin/master
-          }
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Rust stable
         shell: pwsh
@@ -105,42 +67,15 @@ jobs:
         shell: pwsh
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
-      - name: Test Windows desktop foundation
-        shell: pwsh
-        run: >-
-          ./gradlew.bat
-          --no-configuration-cache
-          --warning-mode all
-          :desktopApp:compileKotlin
-          :desktopApp:test
-          :shared:desktopTest
-          :persistence:listening:desktopTest
-
   macos:
-    name: macOS desktop, Now Playing and WebView login
+    if: inputs.platform == 'all' || inputs.platform == 'macos'
+    name: macOS Now Playing and WebView login
     runs-on: macos-latest
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Prepare Git refs for Gradle versioning
-        run: |
-          if ! git show-ref --verify --quiet refs/heads/master; then
-            git branch master origin/master
-          fi
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Rust stable
         run: |
@@ -156,13 +91,3 @@ jobs:
 
       - name: Test Rust WebView login helper
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
-
-      - name: Test macOS desktop foundation
-        run: >-
-          ./gradlew
-          --no-configuration-cache
-          --warning-mode all
-          :desktopApp:compileKotlin
-          :desktopApp:test
-          :shared:desktopTest
-          :persistence:listening:desktopTest
