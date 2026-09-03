@@ -15,14 +15,6 @@ name: Desktop Packaging
       - master
     tags:
       - "[0-9]*"
-    paths:
-      - "desktopApp/build.gradle.kts"
-      - "desktopApp/compose-desktop.pro"
-      - "desktopApp/packaging/**"
-      - "desktopApp/native/**"
-      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
-      - "gradle/**"
-      - ".github/workflows/desktop-packaging.yml"
   workflow_dispatch:
 
 concurrency:
