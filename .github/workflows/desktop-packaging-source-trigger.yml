@@ -1,0 +1,36 @@
+name: Desktop Packaging Source Trigger
+
+"on":
+  push:
+    branches:
+      - master
+    paths:
+      - "desktopApp/src/**"
+      - "shared/**"
+      - "core/**"
+      - "feature/**"
+      - "playback/**"
+      - "provider/**"
+      - "persistence/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
+      - "gradlew.bat"
+      - ".github/workflows/desktop-packaging-source-trigger.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch desktop packaging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Build installable packages from current master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run desktop-packaging.yml --repo "$GITHUB_REPOSITORY" --ref master
