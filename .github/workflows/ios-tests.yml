@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   test:
-    name: Run iOS and shared tests
+    name: Run iOS simulator tests
     runs-on: macos-26
     timeout-minutes: 30
 
@@ -39,22 +39,21 @@ jobs:
           path: ~/.konan
           key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
 
-      - name: Run Kotlin Multiplatform tests and architecture checks
+      - name: Run iOS simulator target tests
         run: >-
           ./gradlew
-          checkArchitectureBoundaries
-          :feature:recognition:allTests
-          :feature:search:allTests
-          :feature:localplaylist:allTests
-          :feature:localmusic:allTests
-          :feature:download:allTests
-          :feature:providercatalog:allTests
-          :feature:providerauth:allTests
-          :feature:providerdetail:allTests
-          :feature:settings:allTests
-          :feature:onboarding:allTests
-          :feature:home:allTests
-          :feature:playback:allTests
-          :playback:runtime:allTests
-          :provider:runtime:allTests
-          :shared:allTests
+          :feature:recognition:iosSimulatorArm64Test
+          :feature:search:iosSimulatorArm64Test
+          :feature:localplaylist:iosSimulatorArm64Test
+          :feature:localmusic:iosSimulatorArm64Test
+          :feature:download:iosSimulatorArm64Test
+          :feature:providercatalog:iosSimulatorArm64Test
+          :feature:providerauth:iosSimulatorArm64Test
+          :feature:providerdetail:iosSimulatorArm64Test
+          :feature:settings:iosSimulatorArm64Test
+          :feature:onboarding:iosSimulatorArm64Test
+          :feature:home:iosSimulatorArm64Test
+          :feature:playback:iosSimulatorArm64Test
+          :playback:runtime:iosSimulatorArm64Test
+          :provider:runtime:iosSimulatorArm64Test
+          :shared:iosSimulatorArm64Test
