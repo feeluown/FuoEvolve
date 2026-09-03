@@ -1,5 +1,9 @@
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
@@ -21,6 +25,101 @@ fun gitOutput(vararg args: String): String? = runCatching {
     }.standardOutput.asText.get().trim()
     output.takeIf { it.isNotBlank() }
 }.getOrNull()
+
+private val credentialLibSecretClassEntry =
+    "com/microsoft/credentialstorage/implementation/posix/libsecret/LibSecretLibrary.class"
+private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
+
+private fun isJarSignatureEntry(name: String): Boolean {
+    val normalized = name.replace('\\', '/')
+    if (!normalized.startsWith("META-INF/", ignoreCase = true)) return false
+    val fileName = normalized.substringAfter("META-INF/")
+    if (fileName.isBlank() || '/' in fileName) return false
+    val extension = fileName.substringAfterLast('.', missingDelimiterValue = "")
+    return extension.uppercase() in jarSignatureExtensions
+}
+
+private fun signatureEntries(zip: ZipFile): Set<String> = buildSet {
+    val entries = zip.entries()
+    while (entries.hasMoreElements()) {
+        val entry = entries.nextElement()
+        if (isJarSignatureEntry(entry.name)) add(entry.name)
+    }
+}
+
+private fun stripStaleCredentialJarSignatures(appRoot: File) {
+    val jars = appRoot.walkTopDown()
+        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
+        .toList()
+
+    jars.forEach { jar ->
+        val staleSignatures = ZipFile(jar).use { zip ->
+            if (zip.getEntry(credentialLibSecretClassEntry) == null) emptySet() else signatureEntries(zip)
+        }
+        if (staleSignatures.isEmpty()) return@forEach
+
+        val rewritten = File.createTempFile("${jar.nameWithoutExtension}-unsigned-", ".jar", jar.parentFile)
+        try {
+            ZipFile(jar).use { zip ->
+                ZipOutputStream(rewritten.outputStream().buffered()).use { output ->
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        if (entry.name in staleSignatures) continue
+
+                        val copy = ZipEntry(entry.name).apply {
+                            time = entry.time
+                            comment = entry.comment
+                            extra = entry.extra
+                        }
+                        output.putNextEntry(copy)
+                        if (!entry.isDirectory) {
+                            zip.getInputStream(entry).use { input -> input.copyTo(output) }
+                        }
+                        output.closeEntry()
+                    }
+                }
+            }
+            Files.move(
+                rewritten.toPath(),
+                jar.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            rewritten.delete()
+        }
+    }
+}
+
+private fun verifyCredentialJarSignaturesRemoved(appRoot: File) {
+    var credentialJarFound = false
+    val staleSignatures = mutableListOf<String>()
+
+    appRoot.walkTopDown()
+        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
+        .forEach { jar ->
+            ZipFile(jar).use { zip ->
+                if (zip.getEntry(credentialLibSecretClassEntry) != null) {
+                    credentialJarFound = true
+                    signatureEntries(zip).forEach { entry ->
+                        staleSignatures += "${jar.relativeTo(appRoot)}!/$entry"
+                    }
+                }
+            }
+        }
+
+    if (!credentialJarFound) {
+        throw GradleException(
+            "Release image is missing credential storage class $credentialLibSecretClassEntry",
+        )
+    }
+    if (staleSignatures.isNotEmpty()) {
+        throw GradleException(
+            "Release image still contains stale JAR signatures for credential storage: " +
+                staleSignatures.joinToString(),
+        )
+    }
+}
 
 fun verifyServiceProviderInReleaseImage(
     appRoot: File,
@@ -258,12 +357,15 @@ tasks.matching { it.name == "prepareAppResources" }.configureEach {
     dependsOn(prepareDesktopPackageResources)
 }
 
-// ProGuard cannot infer java.util.ServiceLoader entry points from META-INF/services resources.
-// Verify the final minified image, not just the unshrunk compile classpath, so packaging fails if
-// a provider declaration survives while its implementation class was removed.
+// ProGuard rewrites third-party class files while copying JAR signature resources unchanged.
+// credential-secure-storage is signed upstream, so those stale signatures make JarVerifier reject
+// the rewritten LibSecret classes at runtime. Unsign only the processed credential JAR in the
+// release image; the application/package keeps its own platform-level distribution signature.
 tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
     doLast {
         val appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile
+        stripStaleCredentialJarSignatures(appRoot)
+        verifyCredentialJarSignaturesRemoved(appRoot)
         if (!isWindowsHost) {
             val packagedHelper = appRoot.walkTopDown()
                 .firstOrNull { file -> file.isFile && file.name == desktopWebLoginExecutableName }
