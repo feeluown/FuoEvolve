@@ -1,33 +1,7 @@
 name: Desktop Packaging
 
 "on":
-  pull_request:
-    paths:
-      - "desktopApp/build.gradle.kts"
-      - "desktopApp/compose-desktop.pro"
-      - "desktopApp/packaging/**"
-      - "desktopApp/native/**"
-      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
-      - "gradle/**"
-      - ".github/workflows/desktop-packaging.yml"
-  push:
-    branches:
-      - master
-    tags:
-      - "[0-9]*"
-    paths:
-      - "desktopApp/build.gradle.kts"
-      - "desktopApp/compose-desktop.pro"
-      - "desktopApp/packaging/**"
-      - "desktopApp/native/**"
-      - "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
-      - "gradle/**"
-      - ".github/workflows/desktop-packaging.yml"
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 permissions:
   contents: read
@@ -73,8 +47,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         shell: pwsh
@@ -220,8 +192,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         run: |
@@ -373,8 +343,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         run: |
@@ -538,8 +506,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Set up Rust stable
         run: |

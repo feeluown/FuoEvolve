@@ -39,7 +39,7 @@ Releases, verifies their package name and signing certificate, runs
 complete site to GitHub Pages.
 
 To refresh the repository without publishing a new Android release, open
-**Actions → Android Release → Run workflow**. A manual run skips the APK build
+**Actions → Release → Run workflow**. A manual run skips the APK build
 and GitHub Release job, then rebuilds the index from the existing stable
 Releases and redeploys Pages.
 

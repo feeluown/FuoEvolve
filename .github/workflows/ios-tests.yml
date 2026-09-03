@@ -1,0 +1,60 @@
+name: iOS Tests
+
+"on":
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run iOS and shared tests
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: Run Kotlin Multiplatform tests and architecture checks
+        run: >-
+          ./gradlew
+          checkArchitectureBoundaries
+          :feature:recognition:allTests
+          :feature:search:allTests
+          :feature:localplaylist:allTests
+          :feature:localmusic:allTests
+          :feature:download:allTests
+          :feature:providercatalog:allTests
+          :feature:providerauth:allTests
+          :feature:providerdetail:allTests
+          :feature:settings:allTests
+          :feature:onboarding:allTests
+          :feature:home:allTests
+          :feature:playback:allTests
+          :playback:runtime:allTests
+          :provider:runtime:allTests
+          :shared:allTests

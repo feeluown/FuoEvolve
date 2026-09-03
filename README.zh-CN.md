@@ -1,10 +1,9 @@
 # FuoEvolve
 
 [![正式版](https://img.shields.io/github/v/release/feeluown/FuoEvolve?label=stable)](https://github.com/feeluown/FuoEvolve/releases/latest)
-[![Canary](https://img.shields.io/github/actions/workflow/status/feeluown/FuoEvolve/android-apk.yml?branch=master&label=canary)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster)
-[![Android APK](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster)
-[![iOS CI](https://img.shields.io/github/actions/workflow/status/feeluown/FuoEvolve/ios-debug-app.yml?branch=master&label=iOS%20CI)](https://github.com/feeluown/FuoEvolve/actions/workflows/ios-debug-app.yml?query=branch%3Amaster)
-[![Android Release](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/android-release.yml)
+[![Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster)
+[![PR Tests](https://github.com/feeluown/FuoEvolve/actions/workflows/pr-tests.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/pr-tests.yml)
+[![Release](https://github.com/feeluown/FuoEvolve/actions/workflows/release.yml/badge.svg)](https://github.com/feeluown/FuoEvolve/actions/workflows/release.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)
 ![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4?logo=jetpackcompose&logoColor=white)
@@ -23,7 +22,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | --- | --- | --- |
 | 正式版 | [GitHub 最新 Release](https://github.com/feeluown/FuoEvolve/releases/latest) | 签名的 Android multi-ABI APK，包含 `arm64-v8a` 和 `x86_64`。 |
 | F-Droid | [官方自托管仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | 保留近期稳定版本，并在 GitHub Release 发布后自动更新。 |
-| Canary | [master 最新 Android 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/android-apk.yml?query=branch%3Amaster) | 从最新成功的 `master` workflow 下载签名 release APK。 |
+| Canary | [master 最新 Android 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) | 从最新成功的 `master` workflow 下载签名 release APK。 |
 
 ## 项目亮点
 
@@ -148,7 +147,7 @@ FuoEvolve 使用 Kotlin Multiplatform 和 Compose Multiplatform 共享大部分�
 - `shared`：共享 Compose 应用/UI 集成；
 - `androidApp`：Android 应用和平台服务；
 - `iosApp/FuoEvolve`：实验性的 iOS 应用；
-- `.github/workflows`：Android 构建/发布流程和 iOS 开发构建。
+- `.github/workflows`：PR 测试、master Canary 构建、正式发布，以及可复用的平台测试/打包流程。
 
 ## 许可证
 

@@ -1,4 +1,4 @@
-name: Android Release
+name: Release
 
 "on":
   push:
@@ -6,22 +6,40 @@ name: Android Release
       - "[0-9]*"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
-  test:
+  android-tests:
+    name: Android tests
     if: github.event_name == 'push'
     uses: ./.github/workflows/android-tests.yml
-    permissions:
-      contents: read
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-  build-release-apks:
-    name: Build signed multi-ABI release APK
+  desktop-tests:
+    name: Desktop tests
     if: github.event_name == 'push'
+    uses: ./.github/workflows/desktop-tests.yml
+
+  ios-tests:
+    name: iOS tests
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ios-tests.yml
+
+  build-android-release:
+    name: Build signed Android release APK
+    if: github.event_name == 'push'
+    needs:
+      - android-tests
+      - desktop-tests
+      - ios-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      contents: read
     env:
       FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
       FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
@@ -103,10 +121,8 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Publish signed release APKs
-    needs:
-      - test
-      - build-release-apks
+    name: Publish Android release
+    needs: build-android-release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15

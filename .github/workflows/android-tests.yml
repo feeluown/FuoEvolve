@@ -2,11 +2,6 @@ name: Android Tests
 
 "on":
   workflow_call:
-    inputs:
-      validate_android_app:
-        required: false
-        type: boolean
-        default: false
     secrets:
       GRADLE_ENCRYPTION_KEY:
         required: false
@@ -58,42 +53,34 @@ jobs:
           :feature:playback:checkPlaybackFeatureBoundaries
           :shared:checkP4ContractBoundaries
 
-      - name: Run Android unit tests, coverage and PR compile validation
-        env:
-          VALIDATE_ANDROID_APP: ${{ inputs.validate_android_app }}
+      - name: Run Android unit tests, coverage and app compile validation
         run: |
-          tasks=(
-            :feature:recognition:testAndroidHostTest
-            :feature:search:testAndroidHostTest
-            :feature:localplaylist:testAndroidHostTest
-            :feature:localmusic:testAndroidHostTest
-            :feature:download:testAndroidHostTest
-            :feature:providercatalog:testAndroidHostTest
-            :feature:providerauth:testAndroidHostTest
-            :feature:providerdetail:testAndroidHostTest
-            :feature:settings:testAndroidHostTest
-            :feature:onboarding:testAndroidHostTest
-            :feature:home:testAndroidHostTest
-            :feature:playback:testAndroidHostTest
-            :playback:runtime:testAndroidHostTest
-            :provider:runtime:testAndroidHostTest
-            :persistence:settings:testAndroidHostTest
-            :provider:bilibili:testAndroidHostTest
-            :provider:netease:testAndroidHostTest
-            :provider:qqmusic:testAndroidHostTest
-            :provider:ytmusic:testAndroidHostTest
-            :shared:testAndroidHostTest
-            :shared:koverXmlReport
-          )
-
-          if [ "$VALIDATE_ANDROID_APP" = "true" ]; then
-            tasks+=(
-              :androidApp:checkReleaseAarMetadata
-              :androidApp:compileDebugKotlin
-              :androidApp:compileDebugJavaWithJavac
-              :androidApp:processDebugResources
-              :androidApp:testDebugUnitTest
-            )
-          fi
-
-          ./gradlew --configuration-cache --warning-mode all "${tasks[@]}"
+          ./gradlew \
+            --configuration-cache \
+            --warning-mode all \
+            :feature:recognition:testAndroidHostTest \
+            :feature:search:testAndroidHostTest \
+            :feature:localplaylist:testAndroidHostTest \
+            :feature:localmusic:testAndroidHostTest \
+            :feature:download:testAndroidHostTest \
+            :feature:providercatalog:testAndroidHostTest \
+            :feature:providerauth:testAndroidHostTest \
+            :feature:providerdetail:testAndroidHostTest \
+            :feature:settings:testAndroidHostTest \
+            :feature:onboarding:testAndroidHostTest \
+            :feature:home:testAndroidHostTest \
+            :feature:playback:testAndroidHostTest \
+            :playback:runtime:testAndroidHostTest \
+            :provider:runtime:testAndroidHostTest \
+            :persistence:settings:testAndroidHostTest \
+            :provider:bilibili:testAndroidHostTest \
+            :provider:netease:testAndroidHostTest \
+            :provider:qqmusic:testAndroidHostTest \
+            :provider:ytmusic:testAndroidHostTest \
+            :shared:testAndroidHostTest \
+            :shared:koverXmlReport \
+            :androidApp:checkReleaseAarMetadata \
+            :androidApp:compileDebugKotlin \
+            :androidApp:compileDebugJavaWithJavac \
+            :androidApp:processDebugResources \
+            :androidApp:testDebugUnitTest
