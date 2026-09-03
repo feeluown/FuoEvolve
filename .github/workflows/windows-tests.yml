@@ -1,0 +1,33 @@
+name: Windows Tests
+
+"on":
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Windows SMTC and WebView login
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Rust stable
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Compile Rust SMTC bridge
+        shell: pwsh
+        run: cargo build --manifest-path desktopApp/native/windows-smtc/Cargo.toml --release
+
+      - name: Test Rust WebView login helper
+        shell: pwsh
+        run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
