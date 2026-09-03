@@ -1,3 +1,4 @@
+import kotlinx.kover.gradle.plugin.dsl.KoverProjectExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
@@ -8,13 +9,58 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.compose.multiplatform) apply false
     alias(libs.plugins.compose.compiler) apply false
-    alias(libs.plugins.kotlinx.kover) apply false
+    alias(libs.plugins.kotlinx.kover)
+}
+
+val kotlinJvmCoverageProjects = listOf(
+    ":core:model",
+    ":feature:recognition",
+    ":feature:search",
+    ":feature:localplaylist",
+    ":feature:localmusic",
+    ":feature:download",
+    ":feature:providercatalog",
+    ":feature:providerauth",
+    ":feature:providerdetail",
+    ":feature:settings",
+    ":feature:onboarding",
+    ":feature:home",
+    ":feature:playback",
+    ":playback:api",
+    ":playback:runtime",
+    ":provider:api",
+    ":provider:runtime",
+    ":provider:bilibili",
+    ":provider:netease",
+    ":provider:qqmusic",
+    ":provider:ytmusic",
+    ":persistence:settings",
+    ":persistence:listening",
+    ":shared",
+    ":desktopApp",
+)
+
+dependencies {
+    kotlinJvmCoverageProjects.forEach { projectPath ->
+        kover(project(projectPath))
+    }
 }
 
 // Desktop is a product-wide KMP platform. Register it centrally so new shared/feature/provider
 // modules cannot silently omit the desktop variant and break the dependency graph later.
 subprojects {
     pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
+        pluginManager.apply("org.jetbrains.kotlinx.kover")
+        extensions.configure<KoverProjectExtension>("kover") {
+            currentProject {
+                instrumentation {
+                    disabledForTestTasks.add("testAndroidHostTest")
+                }
+                sources {
+                    excludedSourceSets.addAll("androidMain", "androidHostTest")
+                }
+            }
+        }
         extensions.configure<KotlinMultiplatformExtension> {
             if (targets.findByName("desktop") == null) {
                 jvm("desktop") {
@@ -24,6 +70,10 @@ subprojects {
                 }
             }
         }
+    }
+
+    pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        pluginManager.apply("org.jetbrains.kotlinx.kover")
     }
 }
 
