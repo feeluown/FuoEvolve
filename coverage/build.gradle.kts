@@ -1,6 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-    alias(libs.plugins.kotlinx.kover)
+    // Kotlin and Kover are already on the root buildscript classpath. Do not request
+    // their catalog versions again here, otherwise Gradle 9 rejects the duplicate
+    // plugin request as "already on the classpath with an unknown version".
+    id("org.jetbrains.kotlin.jvm")
+    id("org.jetbrains.kotlinx.kover")
 }
 
 val coveredProjects = listOf(
