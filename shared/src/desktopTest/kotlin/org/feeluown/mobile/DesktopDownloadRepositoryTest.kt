@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -31,10 +30,10 @@ class DesktopDownloadRepositoryTest {
             durationMs = track.durationMs,
             lyrics = "[00:00.00]Desktop lyrics",
         )
-        val resolverCalls = AtomicInteger(0)
+        var resolverCalls = 0
         val repository = DesktopDownloadRepository(
             resolvePayload = {
-                resolverCalls.incrementAndGet()
+                resolverCalls += 1
                 payload
             },
             storageRoot = root,
@@ -49,7 +48,7 @@ class DesktopDownloadRepositoryTest {
                 }.first { it.id == track.id }
             }
 
-            assertEquals(1, resolverCalls.get())
+            assertEquals(1, resolverCalls)
             assertEquals(bytes.size.toLong(), completed.downloadedBytes)
             val completedUri = requireNotNull(completed.completedUri)
             val completedPath = Path.of(URI(completedUri))
@@ -59,8 +58,10 @@ class DesktopDownloadRepositoryTest {
                 "[00:00.00]Desktop lyrics",
                 Files.readString(completedPath.resolveSibling("${completedPath.fileName}.lrc")),
             )
-            val downloadedState = assertIs<DownloadState.Downloaded>(repository.states.value.getValue(track.id))
-            assertEquals(completedUri, downloadedState.uri)
+            val downloadedState = withTimeout(5_000) {
+                repository.states.first { states -> states[track.id] is DownloadState.Downloaded }
+            }.getValue(track.id)
+            assertEquals(completedUri, assertIs<DownloadState.Downloaded>(downloadedState).uri)
 
             repository.close()
 
