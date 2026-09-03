@@ -1,0 +1,26 @@
+name: PR Tests
+
+"on":
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android
+    uses: ./.github/workflows/android-tests.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+  desktop:
+    name: Desktop
+    uses: ./.github/workflows/desktop-tests.yml
+
+  ios:
+    name: iOS
+    uses: ./.github/workflows/ios-tests.yml
