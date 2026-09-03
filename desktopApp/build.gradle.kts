@@ -26,7 +26,7 @@ fun gitOutput(vararg args: String): String? = runCatching {
     output.takeIf { it.isNotBlank() }
 }.getOrNull()
 
-private const val credentialLibSecretClassEntry =
+private val credentialLibSecretClassEntry =
     "com/microsoft/credentialstorage/implementation/posix/libsecret/LibSecretLibrary.class"
 private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
 
