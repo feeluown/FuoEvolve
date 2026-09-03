@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -30,10 +31,10 @@ class DesktopDownloadRepositoryTest {
             durationMs = track.durationMs,
             lyrics = "[00:00.00]Desktop lyrics",
         )
-        var resolverCalls = 0
+        val resolverCalls = AtomicInteger(0)
         val repository = DesktopDownloadRepository(
             resolvePayload = {
-                resolverCalls += 1
+                resolverCalls.incrementAndGet()
                 payload
             },
             storageRoot = root,
@@ -48,7 +49,7 @@ class DesktopDownloadRepositoryTest {
                 }.first { it.id == track.id }
             }
 
-            assertEquals(1, resolverCalls)
+            assertEquals(1, resolverCalls.get())
             assertEquals(bytes.size.toLong(), completed.downloadedBytes)
             val completedUri = requireNotNull(completed.completedUri)
             val completedPath = Path.of(URI(completedUri))
