@@ -8,6 +8,7 @@ name: Shared Tests
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   test:
@@ -37,6 +38,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          add-job-summary: never
 
       - name: Run architecture and feature boundary checks
         run: >-
@@ -53,26 +55,73 @@ jobs:
           :feature:playback:checkPlaybackFeatureBoundaries
           :shared:checkP4ContractBoundaries
 
-      - name: Run shared JVM and desktop regression tests
+      - name: Run shared JVM tests and generate project coverage
+        run: >-
+          ./gradlew
+          --configuration-cache
+          --warning-mode all
+          :koverXmlReport
+          :koverHtmlReport
+
+      - name: Find latest master coverage baseline
+        id: baseline
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ./gradlew \
-            --configuration-cache \
-            --warning-mode all \
-            :feature:recognition:desktopTest \
-            :feature:search:desktopTest \
-            :feature:localplaylist:desktopTest \
-            :feature:localmusic:desktopTest \
-            :feature:download:desktopTest \
-            :feature:providercatalog:desktopTest \
-            :feature:providerauth:desktopTest \
-            :feature:providerdetail:desktopTest \
-            :feature:settings:desktopTest \
-            :feature:onboarding:desktopTest \
-            :feature:home:desktopTest \
-            :feature:playback:desktopTest \
-            :playback:runtime:desktopTest \
-            :provider:runtime:desktopTest \
-            :shared:desktopTest \
-            :persistence:listening:desktopTest \
-            :desktopApp:compileKotlin \
-            :desktopApp:test
+          run_id=""
+          while read -r candidate; do
+            artifact_count="$(
+              gh api \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "/repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts?per_page=100" \
+                --jq '[.artifacts[] | select(.name == "kotlin-jvm-coverage" and .expired == false)] | length'
+            )"
+            if [ "$artifact_count" -gt 0 ]; then
+              run_id="$candidate"
+              break
+            fi
+          done < <(
+            gh api \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/master-canary.yml/runs?branch=master&event=push&status=success&per_page=20" \
+              --jq '.workflow_runs[].id'
+          )
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download master coverage baseline
+        if: steps.baseline.outputs.run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: kotlin-jvm-coverage
+          path: build/coverage-baseline
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.baseline.outputs.run_id }}
+
+      - name: Write Kotlin JVM coverage summary
+        run: |
+          baseline=build/coverage-baseline/report.xml
+          if [ -f "$baseline" ]; then
+            python3 scripts/summarize-kover.py \
+              build/reports/kover/report.xml \
+              "$baseline" \
+              --json-output build/reports/kover/metrics.json \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            python3 scripts/summarize-kover.py \
+              build/reports/kover/report.xml \
+              --json-output build/reports/kover/metrics.json \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Kotlin JVM coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: kotlin-jvm-coverage
+          path: |
+            build/reports/kover/report.xml
+            build/reports/kover/html
+            build/reports/kover/metrics.json
+          retention-days: 14
+          if-no-files-found: error
