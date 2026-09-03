@@ -1,0 +1,265 @@
+name: Master Canary
+
+"on":
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android-tests:
+    name: Android tests
+    uses: ./.github/workflows/android-tests.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+  desktop-tests:
+    name: Desktop tests
+    uses: ./.github/workflows/desktop-tests.yml
+
+  ios-tests:
+    name: iOS tests
+    uses: ./.github/workflows/ios-tests.yml
+
+  android-canary:
+    name: Build signed Android Canary APK
+    needs: android-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
+      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
+      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
+      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
+      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare Git refs for Gradle versioning
+        run: |
+          if ! git show-ref --verify --quiet refs/heads/master; then
+            git branch master origin/master
+          fi
+
+      - name: Validate update manifest script
+        run: bash -n scripts/write-update-manifest.sh
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
+
+      - name: Prepare signing keystore
+        run: |
+          for name in FUO_SIGNING_KEYSTORE_BASE64 FUO_SIGNING_STORE_PASSWORD FUO_SIGNING_KEY_ALIAS FUO_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required signing secret: ${name}"
+              exit 1
+            fi
+          done
+          mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
+          printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
+
+      - name: Build signed release APK
+        env:
+          GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+        run: |
+          if [ -n "$GRADLE_ENCRYPTION_KEY" ]; then
+            echo "Using Gradle configuration cache."
+            ./gradlew --configuration-cache :androidApp:assembleRelease
+          else
+            echo "::warning::GRADLE_ENCRYPTION_KEY is not configured; configuration cache persistence is disabled."
+            ./gradlew --no-configuration-cache :androidApp:assembleRelease
+          fi
+
+      - name: Prepare signed Canary APK artifact
+        id: artifact
+        env:
+          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
+        run: |
+          mkdir -p build/artifacts
+          mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
+            printf '%s\n' "${apks[@]}"
+            exit 1
+          fi
+          artifact_path="build/artifacts/fuo-evolve-release-multi-abi-signed-${GITHUB_SHA}.apk"
+          cp "${apks[0]}" "$artifact_path"
+          echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed Canary APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuo-evolve-release-multi-abi-signed-${{ github.sha }}.apk
+          path: ${{ steps.artifact.outputs.path }}
+          archive: false
+          if-no-files-found: error
+
+  publish-android-canary:
+    name: Publish Android Canary update
+    needs: android-canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download current master APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: fuo-evolve-release-multi-abi-signed-${{ github.sha }}.apk
+          path: build/canary
+
+      - name: Prepare Canary distribution
+        env:
+          CANARY_APK: build/canary/fuo-evolve-release-multi-abi-signed-${{ github.sha }}.apk
+          CANARY_URL: https://raw.githubusercontent.com/feeluown/FuoEvolve/canary-dist/fuo-evolve-canary.apk
+        run: |
+          test -f "$CANARY_APK"
+          dist_dir="$RUNNER_TEMP/canary-dist"
+          rm -rf "$dist_dir"
+          mkdir -p "$dist_dir"
+          cp "$CANARY_APK" "$dist_dir/fuo-evolve-canary.apk"
+          COMMIT_SHA="$GITHUB_SHA" \
+          WORKFLOW_RUN_ID="$GITHUB_RUN_ID" \
+          RELEASE_NOTES_URL="https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" \
+            bash scripts/write-update-manifest.sh \
+              canary \
+              "$dist_dir/fuo-evolve-canary.apk" \
+              "$dist_dir/canary.json" \
+              "$CANARY_URL"
+
+      - name: Publish Canary distribution branch
+        run: |
+          dist_dir="$RUNNER_TEMP/canary-dist"
+          index_file="$RUNNER_TEMP/canary-dist.index"
+          rm -f "$index_file"
+          trap 'rm -f "$index_file"' EXIT
+
+          GIT_INDEX_FILE="$index_file" git read-tree --empty
+
+          apk_blob=$(git hash-object -w "$dist_dir/fuo-evolve-canary.apk")
+          manifest_blob=$(git hash-object -w "$dist_dir/canary.json")
+
+          GIT_INDEX_FILE="$index_file" \
+            git update-index --add --cacheinfo "100644,$apk_blob,fuo-evolve-canary.apk"
+          GIT_INDEX_FILE="$index_file" \
+            git update-index --add --cacheinfo "100644,$manifest_blob,canary.json"
+
+          tree=$(GIT_INDEX_FILE="$index_file" git write-tree)
+          commit=$(
+            printf 'canary: %s\n' "$GITHUB_SHA" |
+              git -c user.name="github-actions[bot]" \
+                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                  commit-tree "$tree"
+          )
+
+          git push --force origin "$commit:refs/heads/canary-dist"
+
+  desktop-canary:
+    name: Desktop Canary packages
+    needs: desktop-tests
+    uses: ./.github/workflows/desktop-packaging.yml
+
+  ios-canary:
+    name: Build iOS simulator Canary app
+    needs: ios-tests
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          build-scan-publish: true
+          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
+          build-scan-terms-of-use-agree: "yes"
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: Resolve Swift package dependencies
+        run: |
+          defaults write com.apple.dt.Xcode IDEPackageSupportUseBuiltinSCM YES
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project iosApp/FuoEvolve.xcodeproj \
+            -scheme FuoEvolve \
+            -derivedDataPath build/ios-ci \
+            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages
+
+      - name: Build debug simulator app
+        run: |
+          xcodebuild \
+            -project iosApp/FuoEvolve.xcodeproj \
+            -scheme FuoEvolve \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath build/ios-ci \
+            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package debug app bundle
+        run: |
+          mkdir -p build/artifacts
+          tar -cf build/artifacts/FuoEvolve-debug-ios-simulator.tar \
+            -C build/ios-ci/Build/Products/Debug-iphonesimulator \
+            FuoEvolve.app
+
+      - name: Upload iOS simulator Canary app
+        uses: actions/upload-artifact@v7
+        with:
+          name: FuoEvolve-debug-ios-simulator
+          path: build/artifacts/FuoEvolve-debug-ios-simulator.tar
+          archive: false
+          if-no-files-found: error
