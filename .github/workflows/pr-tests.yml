@@ -18,10 +18,17 @@ jobs:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   android-package:
-    name: Android release APK
+    name: Android signed release APK
     needs: android
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      FUO_SIGNING_STORE_FILE: ${{ github.workspace }}/signing/fuo-evolve.jks
+      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
+      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
+      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
+      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
 
     steps:
       - name: Checkout
@@ -47,7 +54,18 @@ jobs:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           add-job-summary: never
 
-      - name: Build release APK
+      - name: Prepare signing keystore
+        run: |
+          for name in FUO_SIGNING_KEYSTORE_BASE64 FUO_SIGNING_STORE_PASSWORD FUO_SIGNING_KEY_ALIAS FUO_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required signing secret: ${name}"
+              exit 1
+            fi
+          done
+          mkdir -p "$(dirname "$FUO_SIGNING_STORE_FILE")"
+          printf '%s' "$FUO_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$FUO_SIGNING_STORE_FILE"
+
+      - name: Build signed release APK
         run: ./gradlew --configuration-cache :androidApp:assembleRelease
 
       - name: Prepare PR release APK artifact
@@ -62,14 +80,14 @@ jobs:
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
-          artifact_path="build/artifacts/fuo-evolve-pr-${{ github.event.pull_request.number }}-release-${GITHUB_SHA}.apk"
+          artifact_path="build/artifacts/fuo-evolve-pr-${{ github.event.pull_request.number }}-release-signed-${GITHUB_SHA}.apk"
           cp "${apks[0]}" "$artifact_path"
           echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
 
-      - name: Upload PR release APK
+      - name: Upload signed PR release APK
         uses: actions/upload-artifact@v7
         with:
-          name: fuo-evolve-pr-${{ github.event.pull_request.number }}-release-${{ github.sha }}.apk
+          name: fuo-evolve-pr-${{ github.event.pull_request.number }}-release-signed-${{ github.sha }}.apk
           path: ${{ steps.artifact.outputs.path }}
           archive: false
           if-no-files-found: error
