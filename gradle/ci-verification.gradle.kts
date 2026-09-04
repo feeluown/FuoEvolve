@@ -48,31 +48,35 @@ tasks.register("ciCoverage") {
     dependsOn("koverXmlReport")
 }
 
-// Resolve task topology after all projects have been configured. CI entry points
-// therefore follow module ownership automatically instead of duplicating a module
-// list in workflow YAML.
-gradle.projectsEvaluated {
-    val architectureTasks = allprojects
-        .flatMap { project -> project.tasks.toList() }
-        .filter { task ->
-            task.name != ciArchitectureCheck.name &&
-                task.name.startsWith("check") &&
-                task.name.endsWith("Boundaries")
+// Wire stable root entry points to conventionally named verification tasks as
+// subprojects create them. configureEach keeps this lazy and compatible with the
+// configuration cache while still allowing future modules to join automatically.
+tasks.matching {
+    it.name != ciArchitectureCheck.name &&
+        it.name.startsWith("check") &&
+        it.name.endsWith("Boundaries")
+}.configureEach {
+    ciArchitectureCheck.configure { dependsOn(this@configureEach) }
+}
+
+subprojects {
+    tasks.matching {
+        it.name.startsWith("check") && it.name.endsWith("Boundaries")
+    }.configureEach {
+        ciArchitectureCheck.configure { dependsOn(this@configureEach) }
+    }
+
+    tasks.matching { it.name == "testAndroidHostTest" }.configureEach {
+        ciAndroidTest.configure { dependsOn(this@configureEach) }
+    }
+
+    pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
+        tasks.matching { it.name == "allTests" }.configureEach {
+            ciIosTest.configure { dependsOn(this@configureEach) }
         }
-    ciArchitectureCheck.configure { dependsOn(architectureTasks) }
-
-    val androidHostTests = subprojects.mapNotNull { project ->
-        project.tasks.findByName("testAndroidHostTest")
     }
-    ciAndroidTest.configure { dependsOn(androidHostTests) }
 
-    val multiplatformTests = subprojects
-        .filter { project -> project.pluginManager.hasPlugin("org.jetbrains.kotlin.multiplatform") }
-        .mapNotNull { project -> project.tasks.findByName("allTests") }
-    ciIosTest.configure { dependsOn(multiplatformTests) }
-
-    val desktopTargetTests = subprojects.mapNotNull { project ->
-        project.tasks.findByName("desktopTest")
+    tasks.matching { it.name == "desktopTest" }.configureEach {
+        ciDesktopTest.configure { dependsOn(this@configureEach) }
     }
-    ciDesktopTest.configure { dependsOn(desktopTargetTests) }
 }
