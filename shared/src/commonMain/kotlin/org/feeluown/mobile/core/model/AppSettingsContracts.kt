@@ -66,6 +66,7 @@ data class AppSettings(
     val playlistFilter: PlaylistFilter = PlaylistFilter.All,
     val localMusicViewMode: LocalMusicViewMode = LocalMusicViewMode.All,
     val excludedLocalMusicDirectoryIds: Set<String> = emptySet(),
+    val includedLocalMusicDirectoryIds: Set<String> = emptySet(),
     val localMusicMinDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
     val searchScope: SearchScope = SearchScope.All,
     val selectedSearchProviderId: String? = null,
