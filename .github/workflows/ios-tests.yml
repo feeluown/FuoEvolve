@@ -32,6 +32,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Cache Kotlin/Native toolchain
         uses: actions/cache@v4
@@ -39,22 +41,5 @@ jobs:
           path: ~/.konan
           key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
 
-      - name: Run Kotlin Multiplatform tests and architecture checks
-        run: >-
-          ./gradlew
-          checkArchitectureBoundaries
-          :feature:recognition:allTests
-          :feature:search:allTests
-          :feature:localplaylist:allTests
-          :feature:localmusic:allTests
-          :feature:download:allTests
-          :feature:providercatalog:allTests
-          :feature:providerauth:allTests
-          :feature:providerdetail:allTests
-          :feature:settings:allTests
-          :feature:onboarding:allTests
-          :feature:home:allTests
-          :feature:playback:allTests
-          :playback:runtime:allTests
-          :provider:runtime:allTests
-          :shared:allTests
+      - name: Run Kotlin Multiplatform tests
+        run: ./gradlew --warning-mode all ciIosTest

@@ -8,13 +8,14 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.compose.multiplatform) apply false
     alias(libs.plugins.compose.compiler) apply false
-    alias(libs.plugins.kotlinx.kover) apply false
+    alias(libs.plugins.kotlinx.kover)
 }
 
 // Desktop is a product-wide KMP platform. Register it centrally so new shared/feature/provider
 // modules cannot silently omit the desktop variant and break the dependency graph later.
 subprojects {
     pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
+        pluginManager.apply("org.jetbrains.kotlinx.kover")
         extensions.configure<KotlinMultiplatformExtension> {
             if (targets.findByName("desktop") == null) {
                 jvm("desktop") {
@@ -25,7 +26,15 @@ subprojects {
             }
         }
     }
+    pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        pluginManager.apply("org.jetbrains.kotlinx.kover")
+    }
+    pluginManager.withPlugin("com.android.application") {
+        pluginManager.apply("org.jetbrains.kotlinx.kover")
+    }
 }
+
+apply(from = "gradle/ci-verification.gradle.kts")
 
 val migratedControllerBoundaryRoots = listOf(
     "feature/search/src/commonMain/kotlin",
