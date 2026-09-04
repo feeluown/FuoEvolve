@@ -34,6 +34,10 @@ internal class AndroidIndexedLocalMusicRepository(
     @Volatile
     private var scanSettings = LocalMusicScanSettings()
 
+    override val directoryPolicy = LocalMusicDirectoryPolicy(
+        defaultIncludedDirectoryIds = setOf(INDEX_MUSIC_ROOT_DIRECTORY_ID),
+        includeUnspecifiedDirectoriesByDefault = false,
+    )
     override val mediaChangeEvents: Flow<Unit> = legacy.mediaChangeEvents
 
     override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
@@ -540,11 +544,6 @@ private fun SQLiteDatabase.readIndexedTracks(
 ): List<MusicTrack> {
     val where = mutableListOf<String>()
     val args = mutableListOf<String>()
-    val excluded = settings.excludedDirectoryIds.flatMap(::localMusicDirectoryIdAliases).toSet()
-    if (excluded.isNotEmpty()) {
-        where += "directory_id NOT IN (${excluded.joinToString(",") { "?" }})"
-        args += excluded
-    }
     if (settings.minDurationSeconds > 0) {
         where += "duration_ms >= ?"
         args += (settings.minDurationSeconds * 1000L).toString()
@@ -567,6 +566,8 @@ private fun SQLiteDatabase.readIndexedTracks(
         args.toTypedArray(),
     ).use { cursor ->
         while (cursor.moveToNext()) {
+            val directoryId = cursor.getString(12).orEmpty()
+            if (!isLocalMusicDirectoryEnabled(directoryId, settings)) continue
             result += MusicTrack(
                 id = cursor.getString(0).orEmpty(),
                 title = cursor.getString(1).orEmpty(),
@@ -581,7 +582,7 @@ private fun SQLiteDatabase.readIndexedTracks(
                 durationMs = cursor.getLong(9).takeIf { it > 0 },
                 localUri = cursor.getString(10).orEmpty(),
                 lyrics = cursor.getString(11)?.takeIf { it.isNotBlank() },
-                localDirectoryId = cursor.getString(12).orEmpty(),
+                localDirectoryId = directoryId,
             )
         }
     }
@@ -637,24 +638,51 @@ private fun SQLiteDatabase.putIndexMeta(key: String, value: String) {
     replace("meta", null, ContentValues().apply { put("key", key); put("value", value) })
 }
 
-private fun indexedDirectoryInfo(relativePath: String, filePath: String): LocalMusicDirectory? {
-    val firstLevelName = if (relativePath.isNotBlank()) {
-        val segments = relativePath.replace('\\', '/').split('/').filter { it.isNotBlank() }
-        if (segments.firstOrNull()?.equals(INDEX_MUSIC_DIRECTORY_NAME, ignoreCase = true) != true) return null
-        segments.getOrNull(1)
-    } else {
-        val musicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            .path.replace('\\', '/').trimEnd('/')
-        val directoryPath = filePath.replace('\\', '/').substringBeforeLast('/', "").trimEnd('/')
-        if (directoryPath != musicRoot && !directoryPath.startsWith("$musicRoot/")) return null
-        if (directoryPath == musicRoot) null
-        else directoryPath.removePrefix("$musicRoot/").substringBefore('/').takeIf { it.isNotBlank() }
+private fun indexedDirectoryInfo(relativePath: String, filePath: String): LocalMusicDirectory {
+    val segments = when {
+        relativePath.isNotBlank() -> relativePath
+            .replace('\\', '/')
+            .split('/')
+            .filter { it.isNotBlank() }
+        filePath.isNotBlank() -> legacyRelativeDirectorySegments(filePath)
+        else -> emptyList()
     }
+    if (segments.isEmpty()) {
+        return LocalMusicDirectory(
+            id = INDEX_STORAGE_ROOT_DIRECTORY_ID,
+            name = "存储根目录",
+            trackCount = 0,
+        )
+    }
+    val topLevelName = segments.first()
+    if (!topLevelName.equals(INDEX_MUSIC_DIRECTORY_NAME, ignoreCase = true)) {
+        return LocalMusicDirectory(
+            id = "$topLevelName/",
+            name = topLevelName,
+            trackCount = 0,
+        )
+    }
+    val firstLevelName = segments.getOrNull(1)
     return if (firstLevelName.isNullOrBlank()) {
         LocalMusicDirectory(id = INDEX_MUSIC_ROOT_DIRECTORY_ID, name = "歌曲", trackCount = 0)
     } else {
         LocalMusicDirectory(id = "$INDEX_MUSIC_DIRECTORY_NAME/$firstLevelName/", name = firstLevelName, trackCount = 0)
     }
+}
+
+@Suppress("DEPRECATION")
+private fun legacyRelativeDirectorySegments(filePath: String): List<String> {
+    val normalizedFilePath = filePath.replace('\\', '/').trimEnd('/')
+    val directoryPath = normalizedFilePath.substringBeforeLast('/', "").trimEnd('/')
+    if (directoryPath.isBlank()) return emptyList()
+    val primaryRoot = Environment.getExternalStorageDirectory().path.replace('\\', '/').trimEnd('/')
+    val relativeDirectoryPath = when {
+        directoryPath == primaryRoot -> ""
+        directoryPath.startsWith("$primaryRoot/") -> directoryPath.removePrefix("$primaryRoot/")
+        directoryPath.startsWith("/storage/") -> directoryPath.removePrefix("/storage/").substringAfter('/', "")
+        else -> directoryPath.substringAfterLast('/')
+    }
+    return relativeDirectoryPath.split('/').filter { it.isNotBlank() }
 }
 
 private fun IndexedAudioRow.indexedLyrics(
@@ -715,12 +743,13 @@ private fun indexedLocalCoverUri(audioUri: Uri, albumId: Long): String = Uri.Bui
 
 private const val INDEX_DATABASE_NAME = "local_music_index_v3.db"
 private const val INDEX_DATABASE_VERSION = 2
-private const val INDEX_LAYOUT_VERSION = "music-first-level-v3-incremental"
+private const val INDEX_LAYOUT_VERSION = "all-media-top-level-v4-incremental"
 private const val INDEX_KEY_INITIALIZED = "initialized"
 private const val INDEX_KEY_LAYOUT_VERSION = "layout_version"
 private const val INDEX_KEY_FINGERPRINT = "media_fingerprint"
 private const val INDEX_MUSIC_DIRECTORY_NAME = "Music"
 private const val INDEX_MUSIC_ROOT_DIRECTORY_ID = "Music/"
+private const val INDEX_STORAGE_ROOT_DIRECTORY_ID = "__storage_root__/"
 private const val INDEX_FEELUOWN_DIRECTORY_ID = "Music/FeelUOwn/"
 private const val INDEX_METADATA_OVERRIDE_FILE = "local_music_metadata.json"
 private const val INDEX_LYRICS_FOLDER = "lyrics"
