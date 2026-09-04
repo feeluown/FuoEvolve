@@ -1,5 +1,8 @@
 package org.feeluown.mobile
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -46,6 +49,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+
+private const val PROVIDER_VIDEO_CONTROLS_AUTO_HIDE_MS = 3_000L
+
+internal data class ProviderVideoControlsVisibilityState(
+    val visible: Boolean = true,
+    val interactionEpoch: Long = 0L,
+) {
+    fun afterPlaybackChanged(isPlaying: Boolean): ProviderVideoControlsVisibilityState =
+        if (isPlaying) this else copy(visible = true)
+
+    fun afterSurfaceTap(): ProviderVideoControlsVisibilityState =
+        if (visible) copy(visible = false) else afterInteraction()
+
+    fun afterInteraction(): ProviderVideoControlsVisibilityState =
+        copy(visible = true, interactionEpoch = interactionEpoch + 1L)
+
+    fun afterAutoHide(isPlaying: Boolean): ProviderVideoControlsVisibilityState =
+        if (visible && isPlaying) copy(visible = false) else this
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -157,22 +180,48 @@ private fun ProviderOwnedVideoFrame(
     onToggleFullscreen: () -> Unit,
     modifier: Modifier,
 ) {
+    var controlsState by remember { mutableStateOf(ProviderVideoControlsVisibilityState()) }
     val interactionSource = remember { MutableInteractionSource() }
+
+    fun showControlsForInteraction() {
+        controlsState = controlsState.afterInteraction()
+    }
+
+    LaunchedEffect(playbackState.isPlaying) {
+        controlsState = controlsState.afterPlaybackChanged(playbackState.isPlaying)
+    }
+    LaunchedEffect(controlsState.visible, playbackState.isPlaying, controlsState.interactionEpoch) {
+        if (controlsState.visible && playbackState.isPlaying) {
+            delay(PROVIDER_VIDEO_CONTROLS_AUTO_HIDE_MS)
+            controlsState = controlsState.afterAutoHide(playbackState.isPlaying)
+        }
+    }
+
     Box(modifier = modifier.background(Color.Black), contentAlignment = Alignment.Center) {
         PlatformVideoPlayer(payload = payload, controller = controller, modifier = Modifier.fillMaxSize())
         Box(
             modifier = Modifier.fillMaxSize().clickable(
                 interactionSource = interactionSource,
                 indication = null,
-            ) {},
+            ) {
+                controlsState = controlsState.afterSurfaceTap()
+            },
         )
-        ProviderOwnedVideoControls(
-            controller = controller,
-            state = playbackState,
-            fullscreen = fullscreen,
-            onToggleFullscreen = onToggleFullscreen,
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-        )
+        AnimatedVisibility(
+            visible = controlsState.visible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            ProviderOwnedVideoControls(
+                controller = controller,
+                state = playbackState,
+                fullscreen = fullscreen,
+                onInteraction = ::showControlsForInteraction,
+                onToggleFullscreen = onToggleFullscreen,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -181,6 +230,7 @@ private fun ProviderOwnedVideoControls(
     controller: PlatformVideoController,
     state: PlatformVideoPlaybackState,
     fullscreen: Boolean,
+    onInteraction: () -> Unit,
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -195,25 +245,36 @@ private fun ProviderOwnedVideoControls(
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             Slider(
                 value = shownFraction,
-                onValueChange = { scrub = it },
+                onValueChange = {
+                    onInteraction()
+                    scrub = it
+                },
                 onValueChangeFinished = {
                     if (scrub >= 0f && duration > 0) controller.seekTo((scrub * duration).toLong())
                     scrub = -1f
+                    onInteraction()
                 },
                 enabled = duration > 0,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { if (state.isPlaying) controller.pause() else controller.play() }) {
+                IconButton(onClick = {
+                    onInteraction()
+                    if (state.isPlaying) controller.pause() else controller.play()
+                }) {
                     Icon(
                         if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (state.isPlaying) "暂停" else "播放",
                     )
                 }
-                IconButton(onClick = { controller.seekTo((state.positionMs - 10_000L).coerceAtLeast(0L)) }) {
+                IconButton(onClick = {
+                    onInteraction()
+                    controller.seekTo((state.positionMs - 10_000L).coerceAtLeast(0L))
+                }) {
                     Icon(Icons.Filled.Replay10, contentDescription = "后退 10 秒")
                 }
                 IconButton(onClick = {
+                    onInteraction()
                     val target = state.positionMs + 10_000L
                     controller.seekTo(if (duration > 0) target.coerceAtMost(duration) else target)
                 }) {
@@ -221,7 +282,10 @@ private fun ProviderOwnedVideoControls(
                 }
                 Text("${formatProviderVideoTime(state.positionMs)} / ${formatProviderVideoTime(duration)}")
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onToggleFullscreen) {
+                IconButton(onClick = {
+                    onInteraction()
+                    onToggleFullscreen()
+                }) {
                     Icon(
                         if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                         contentDescription = if (fullscreen) "退出全屏" else "全屏",
