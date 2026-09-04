@@ -18,7 +18,7 @@ jobs:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   android-package:
-    name: Android package
+    name: Android release APK
     needs: android
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -47,29 +47,29 @@ jobs:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           add-job-summary: never
 
-      - name: Build installable debug APK
-        run: ./gradlew --configuration-cache :androidApp:assembleDebug
+      - name: Build release APK
+        run: ./gradlew --configuration-cache :androidApp:assembleRelease
 
-      - name: Prepare PR APK artifact
+      - name: Prepare PR release APK artifact
         id: artifact
         env:
-          DEBUG_APK_GLOB: androidApp/build/outputs/apk/debug/*.apk
+          RELEASE_APK_GLOB: androidApp/build/outputs/apk/release/*.apk
         run: |
           mkdir -p build/artifacts
-          mapfile -t apks < <(compgen -G "$DEBUG_APK_GLOB" || true)
+          mapfile -t apks < <(compgen -G "$RELEASE_APK_GLOB" || true)
           if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one multi-ABI debug APK, found ${#apks[@]}"
+            echo "::error::Expected exactly one multi-ABI release APK, found ${#apks[@]}"
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
-          artifact_path="build/artifacts/fuo-evolve-pr-${{ github.event.pull_request.number }}-${GITHUB_SHA}.apk"
+          artifact_path="build/artifacts/fuo-evolve-pr-${{ github.event.pull_request.number }}-release-${GITHUB_SHA}.apk"
           cp "${apks[0]}" "$artifact_path"
           echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
 
-      - name: Upload PR APK
+      - name: Upload PR release APK
         uses: actions/upload-artifact@v7
         with:
-          name: fuo-evolve-pr-${{ github.event.pull_request.number }}-${{ github.sha }}.apk
+          name: fuo-evolve-pr-${{ github.event.pull_request.number }}-release-${{ github.sha }}.apk
           path: ${{ steps.artifact.outputs.path }}
           archive: false
           if-no-files-found: error
