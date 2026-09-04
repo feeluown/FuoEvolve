@@ -48,6 +48,7 @@ data class PersistedSettingsV1(
     val playlistFilter: String? = null,
     val localMusicViewMode: String? = null,
     val excludedLocalMusicDirectoryIds: Set<String>? = null,
+    val includedLocalMusicDirectoryIds: Set<String>? = null,
     val localMusicMinDurationSeconds: Int? = null,
     val searchScope: String? = null,
     val selectedSearchProviderId: String? = null,
