@@ -32,6 +32,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         run: |
@@ -52,14 +54,7 @@ jobs:
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
       - name: Test Linux desktop foundation
-        run: >-
-          ./gradlew
-          --no-configuration-cache
-          --warning-mode all
-          :desktopApp:compileKotlin
-          :desktopApp:test
-          :shared:desktopTest
-          :persistence:listening:desktopTest
+        run: ./gradlew --no-configuration-cache --warning-mode all ciDesktopTest
 
   windows:
     name: Windows desktop, SMTC and WebView login
@@ -88,6 +83,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         shell: pwsh
@@ -107,14 +104,7 @@ jobs:
 
       - name: Test Windows desktop foundation
         shell: pwsh
-        run: >-
-          ./gradlew.bat
-          --no-configuration-cache
-          --warning-mode all
-          :desktopApp:compileKotlin
-          :desktopApp:test
-          :shared:desktopTest
-          :persistence:listening:desktopTest
+        run: ./gradlew.bat --no-configuration-cache --warning-mode all ciDesktopTest
 
   macos:
     name: macOS desktop, Now Playing and WebView login
@@ -141,6 +131,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         run: |
@@ -158,11 +150,4 @@ jobs:
         run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
 
       - name: Test macOS desktop foundation
-        run: >-
-          ./gradlew
-          --no-configuration-cache
-          --warning-mode all
-          :desktopApp:compileKotlin
-          :desktopApp:test
-          :shared:desktopTest
-          :persistence:listening:desktopTest
+        run: ./gradlew --no-configuration-cache --warning-mode all ciDesktopTest
