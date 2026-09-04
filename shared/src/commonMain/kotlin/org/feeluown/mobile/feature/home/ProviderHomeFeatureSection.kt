@@ -36,11 +36,21 @@ fun ProviderContentHomeFeatureSection(
         sections.filter { it.isLoginRequired }.map { it.feature }.distinctBy { it.providerId }
     }
     var refreshRequested by remember(section) { mutableStateOf(false) }
+    var initialLoadPending by remember(section) { mutableStateOf(sections.isEmpty()) }
+    var initialLoadObserved by remember(section) { mutableStateOf(state.isLoading) }
     val isPullRefreshing = refreshRequested && state.isLoading
-    val showPageLoading = state.isLoading && !refreshRequested
+    val showPageLoading = !refreshRequested && (state.isLoading || initialLoadPending)
 
-    LaunchedEffect(state.isLoading) {
-        if (!state.isLoading) refreshRequested = false
+    LaunchedEffect(state.isLoading, sections.isEmpty()) {
+        if (sections.isNotEmpty()) {
+            initialLoadPending = false
+        }
+        if (state.isLoading) {
+            initialLoadObserved = true
+        } else {
+            if (initialLoadObserved) initialLoadPending = false
+            refreshRequested = false
+        }
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
