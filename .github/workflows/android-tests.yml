@@ -37,50 +37,25 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          add-job-summary: never
 
       - name: Run architecture checks
         run: >-
           ./gradlew
           --no-configuration-cache
           --warning-mode all
-          checkArchitectureBoundaries
-          :feature:download:checkOfflineFeatureBoundaries
-          :feature:providerauth:checkProviderFeatureBoundaries
-          :feature:providerdetail:checkProviderDetailFeatureBoundaries
-          :feature:settings:checkSettingsFeatureBoundaries
-          :feature:onboarding:checkOnboardingFeatureBoundaries
-          :feature:home:checkHomeFeatureBoundaries
-          :feature:playback:checkPlaybackFeatureBoundaries
-          :shared:checkP4ContractBoundaries
+          ciArchitectureCheck
 
-      - name: Run Android unit tests, coverage and app compile validation
-        run: |
-          ./gradlew \
-            --configuration-cache \
-            --warning-mode all \
-            :feature:recognition:testAndroidHostTest \
-            :feature:search:testAndroidHostTest \
-            :feature:localplaylist:testAndroidHostTest \
-            :feature:localmusic:testAndroidHostTest \
-            :feature:download:testAndroidHostTest \
-            :feature:providercatalog:testAndroidHostTest \
-            :feature:providerauth:testAndroidHostTest \
-            :feature:providerdetail:testAndroidHostTest \
-            :feature:settings:testAndroidHostTest \
-            :feature:onboarding:testAndroidHostTest \
-            :feature:home:testAndroidHostTest \
-            :feature:playback:testAndroidHostTest \
-            :playback:runtime:testAndroidHostTest \
-            :provider:runtime:testAndroidHostTest \
-            :persistence:settings:testAndroidHostTest \
-            :provider:bilibili:testAndroidHostTest \
-            :provider:netease:testAndroidHostTest \
-            :provider:qqmusic:testAndroidHostTest \
-            :provider:ytmusic:testAndroidHostTest \
-            :shared:testAndroidHostTest \
-            :shared:koverXmlReport \
-            :androidApp:checkReleaseAarMetadata \
-            :androidApp:compileDebugKotlin \
-            :androidApp:compileDebugJavaWithJavac \
-            :androidApp:processDebugResources \
-            :androidApp:testDebugUnitTest
+      - name: Run Android tests, coverage and app compile validation
+        run: >-
+          ./gradlew
+          --configuration-cache
+          --warning-mode all
+          ciAndroidTest
+          ciCoverage
+
+      - name: Write test and coverage summary
+        if: always()
+        env:
+          COVERAGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/master' }}
+        run: python3 tools/ci/coverage_report.py --base "$COVERAGE_BASE"
