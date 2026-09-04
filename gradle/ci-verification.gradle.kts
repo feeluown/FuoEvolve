@@ -39,15 +39,13 @@ tasks.register("ciCoverage") {
     dependsOn("koverXmlReport")
 }
 
-// Wire stable root entry points to conventionally named verification tasks as
-// subprojects create them. configureEach keeps this lazy and compatible with the
-// configuration cache while still allowing future modules to join automatically.
-tasks.matching {
-    it.name != ciArchitectureCheck.name &&
-        it.name.startsWith("check") &&
-        it.name.endsWith("Boundaries")
-}.configureEach {
-    ciArchitectureCheck.configure { dependsOn(this@configureEach) }
+// Observe every task, including tasks registered lazily after this script is
+// applied. Filtering inside configureEach ensures future modules are wired into
+// the stable CI entry points without requiring workflow changes.
+tasks.configureEach {
+    if (name.startsWith("check") && name.endsWith("Boundaries")) {
+        ciArchitectureCheck.configure { dependsOn(this@configureEach) }
+    }
 }
 
 subprojects {
@@ -58,23 +56,19 @@ subprojects {
         rootProject.dependencies.add("kover", project(path))
     }
 
-    tasks.matching {
-        it.name.startsWith("check") && it.name.endsWith("Boundaries")
-    }.configureEach {
-        ciArchitectureCheck.configure { dependsOn(this@configureEach) }
-    }
+    tasks.configureEach {
+        when {
+            name.startsWith("check") && name.endsWith("Boundaries") ->
+                ciArchitectureCheck.configure { dependsOn(this@configureEach) }
 
-    tasks.matching { it.name == "testAndroidHostTest" }.configureEach {
-        ciAndroidTest.configure { dependsOn(this@configureEach) }
-    }
+            name == "testAndroidHostTest" ->
+                ciAndroidTest.configure { dependsOn(this@configureEach) }
 
-    pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
-        tasks.matching { it.name == "allTests" }.configureEach {
-            ciIosTest.configure { dependsOn(this@configureEach) }
+            name == "allTests" ->
+                ciIosTest.configure { dependsOn(this@configureEach) }
+
+            name == "desktopTest" ->
+                ciDesktopTest.configure { dependsOn(this@configureEach) }
         }
-    }
-
-    tasks.matching { it.name == "desktopTest" }.configureEach {
-        ciDesktopTest.configure { dependsOn(this@configureEach) }
     }
 }
