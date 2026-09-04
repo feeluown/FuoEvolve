@@ -1,6 +1,11 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 typealias CoreLocalMusicFeatureController = LocalMusicFeatureOwner<
@@ -32,10 +37,19 @@ fun createLocalMusicFeatureController(
     scope: CoroutineScope,
     onTrackUpdated: (String, MusicTrack) -> Unit = { _, _ -> },
 ): LocalMusicFeatureController {
+    val includedDirectoryIds = MutableStateFlow<Set<String>>(emptySet())
+    val directoryPolicy = repository.directoryPolicy
     val featureRepository = object : LocalMusicRepositoryPort<MusicTrack, LocalMusicDirectory> {
         override val mediaChangeEvents = repository.mediaChangeEvents
         override suspend fun updateScanSettings(excludedDirectoryIds: Set<String>, minDurationSeconds: Int) {
-            repository.updateScanSettings(LocalMusicScanSettings(excludedDirectoryIds, minDurationSeconds))
+            repository.updateScanSettings(
+                LocalMusicScanSettings(
+                    excludedDirectoryIds = excludedDirectoryIds,
+                    minDurationSeconds = minDurationSeconds,
+                    includedDirectoryIds = includedDirectoryIds.value,
+                    directoryPolicy = directoryPolicy,
+                ),
+            )
         }
         override suspend fun isDatabaseReady(): Boolean = repository.isDatabaseReady()
         override suspend fun isDatabaseStale(): Boolean = repository.isDatabaseStale()
@@ -88,6 +102,7 @@ fun createLocalMusicFeatureController(
                     current.copy(
                         localMusicViewMode = viewMode,
                         excludedLocalMusicDirectoryIds = excludedDirectoryIds.mapNotNull(::canonicalLocalMusicDirectoryId).toSet(),
+                        includedLocalMusicDirectoryIds = includedDirectoryIds.value,
                         localMusicMinDurationSeconds = minDurationSeconds,
                     )
                 }
@@ -103,18 +118,111 @@ fun createLocalMusicFeatureController(
 
     scope.launch {
         val settings = settingsRepository.awaitSettings()
+        includedDirectoryIds.value = settings.includedLocalMusicDirectoryIds
+            .mapNotNull(::canonicalLocalMusicDirectoryId)
+            .toSet()
+        val defaultExclusions = settings.excludedLocalMusicDirectoryIds
+            .mapNotNull(::canonicalLocalMusicDirectoryId)
+            .filter { directoryId -> isDefaultDirectoryEnabled(directoryId, directoryPolicy) }
+            .toSet()
         owner.restore(
             viewMode = settings.localMusicViewMode,
-            excludedDirectoryIds = settings.excludedLocalMusicDirectoryIds,
+            excludedDirectoryIds = defaultExclusions,
             minDurationSeconds = settings.localMusicMinDurationSeconds,
         )
-        owner.updateScanSettings()
+        if (owner.hasPermission && isLocalMusicSectionActive()) {
+            owner.refresh(forceRefresh = false, showLoading = false)
+        } else {
+            owner.updateScanSettings()
+        }
     }
-    return BoundLocalMusicFeatureController(owner)
+    return BoundLocalMusicFeatureController(
+        delegate = owner,
+        includedDirectoryIds = includedDirectoryIds,
+        directoryPolicy = directoryPolicy,
+        settingsRepository = settingsRepository,
+        scope = scope,
+    )
 }
 
 private class BoundLocalMusicFeatureController(
     private val delegate: CoreLocalMusicFeatureController,
+    private val includedDirectoryIds: MutableStateFlow<Set<String>>,
+    private val directoryPolicy: LocalMusicDirectoryPolicy,
+    private val settingsRepository: AppSettingsRepository,
+    private val scope: CoroutineScope,
 ) : LocalMusicFeatureController, CoreLocalMusicFeatureController by delegate {
+    override val uiState: StateFlow<LocalMusicUiState> = combine(
+        delegate.uiState,
+        includedDirectoryIds,
+    ) { state, included ->
+        state.withEffectiveDirectoryExclusions(included, directoryPolicy)
+    }.stateIn(
+        scope = scope,
+        started = SharingStarted.Eagerly,
+        initialValue = delegate.uiState.value.withEffectiveDirectoryExclusions(
+            includedDirectoryIds.value,
+            directoryPolicy,
+        ),
+    )
+
+    override fun openDirectory(directoryId: String) {
+        if (isLocalMusicDirectoryExcluded(directoryId, uiState.value.excludedDirectoryIds)) return
+        delegate.openDirectory(directoryId)
+    }
+
+    override fun openCollection(mode: LocalMusicViewMode, key: String) {
+        val directory = uiState.value.directories.firstOrNull { it.id == key }
+        if (directory != null && isLocalMusicDirectoryExcluded(directory.id, uiState.value.excludedDirectoryIds)) return
+        delegate.openCollection(mode, key)
+    }
+
+    override fun onDirectoryEnabledChange(directoryId: String, enabled: Boolean) {
+        if (isDefaultDirectoryEnabled(directoryId, directoryPolicy)) {
+            delegate.onDirectoryEnabledChange(directoryId, enabled)
+            return
+        }
+        val canonical = canonicalLocalMusicDirectoryId(directoryId) ?: return
+        val current = includedDirectoryIds.value.mapNotNull(::canonicalLocalMusicDirectoryId).toSet()
+        val updated = if (enabled) current + canonical else current - canonical
+        if (updated == current) return
+        includedDirectoryIds.value = updated
+        scope.launch {
+            settingsRepository.update { settings ->
+                settings.copy(includedLocalMusicDirectoryIds = updated)
+            }
+        }
+        delegate.refresh(forceRefresh = false, showLoading = false)
+    }
+
     override fun openLocalMetadataEditor(track: MusicTrack) = delegate.openLocalMetadataEditor(track)
+}
+
+private fun isDefaultDirectoryEnabled(
+    directoryId: String,
+    directoryPolicy: LocalMusicDirectoryPolicy,
+): Boolean = isLocalMusicDirectoryEnabled(
+    directoryId,
+    LocalMusicScanSettings(directoryPolicy = directoryPolicy),
+)
+
+private fun LocalMusicUiState.withEffectiveDirectoryExclusions(
+    includedDirectoryIds: Set<String>,
+    directoryPolicy: LocalMusicDirectoryPolicy,
+): LocalMusicUiState {
+    val baseExcluded = excludedDirectoryIds.mapNotNull(::canonicalLocalMusicDirectoryId).toSet()
+    val scanSettings = LocalMusicScanSettings(
+        excludedDirectoryIds = baseExcluded,
+        includedDirectoryIds = includedDirectoryIds,
+        directoryPolicy = directoryPolicy,
+    )
+    val effectiveExcluded = buildSet {
+        addAll(baseExcluded)
+        directories.forEach { directory ->
+            if (!isLocalMusicDirectoryEnabled(directory.id, scanSettings)) {
+                add(canonicalLocalMusicDirectoryId(directory.id) ?: directory.id)
+            }
+        }
+    }
+    return copy(excludedDirectoryIds = effectiveExcluded)
 }

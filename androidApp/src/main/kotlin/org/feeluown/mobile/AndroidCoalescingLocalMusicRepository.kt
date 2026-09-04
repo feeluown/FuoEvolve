@@ -11,6 +11,7 @@ internal class AndroidCoalescingLocalMusicRepository(
     private val refreshMutex = Mutex()
     private var lastSuccessfulRefreshAt = 0L
 
+    override val directoryPolicy: LocalMusicDirectoryPolicy = delegate.directoryPolicy
     override val mediaChangeEvents: Flow<Unit> = delegate.mediaChangeEvents
 
     override suspend fun updateScanSettings(settings: LocalMusicScanSettings) =

@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -11,6 +12,31 @@ class LocalMusicPresentationTest {
         assertEquals("Music/Foo/", canonicalLocalMusicDirectoryId("Music/Foo"))
         assertTrue(isLocalMusicDirectoryExcluded("Music/Foo/", setOf("Music/Foo")))
         assertTrue(isLocalMusicDirectoryExcluded("Music/Foo", setOf("Music/Foo/")))
+    }
+
+    @Test
+    fun directoryPolicyDefaultsToMusicTreeAndRequiresExplicitExternalSelection() {
+        val policy = LocalMusicDirectoryPolicy(
+            defaultIncludedDirectoryIds = setOf("Music/"),
+            includeUnspecifiedDirectoriesByDefault = false,
+        )
+        val defaults = LocalMusicScanSettings(directoryPolicy = policy)
+
+        assertTrue(isLocalMusicDirectoryEnabled("Music/", defaults))
+        assertTrue(isLocalMusicDirectoryEnabled("Music/Album/", defaults))
+        assertFalse(isLocalMusicDirectoryEnabled("Download/", defaults))
+        assertTrue(
+            isLocalMusicDirectoryEnabled(
+                "Download/",
+                defaults.copy(includedDirectoryIds = setOf("Download/")),
+            ),
+        )
+        assertFalse(
+            isLocalMusicDirectoryEnabled(
+                "Music/Album/",
+                defaults.copy(excludedDirectoryIds = setOf("Music/Album")),
+            ),
+        )
     }
 
     @Test
