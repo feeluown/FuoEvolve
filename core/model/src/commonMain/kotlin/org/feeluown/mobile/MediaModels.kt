@@ -31,9 +31,16 @@ data class MediaRef(
         get() = providerUrl
 }
 
+data class LocalMusicDirectoryPolicy(
+    val defaultIncludedDirectoryIds: Set<String> = emptySet(),
+    val includeUnspecifiedDirectoriesByDefault: Boolean = true,
+)
+
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
     val minDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
+    val includedDirectoryIds: Set<String> = emptySet(),
+    val directoryPolicy: LocalMusicDirectoryPolicy = LocalMusicDirectoryPolicy(),
 )
 
 data class LocalMusicDirectory(
@@ -56,6 +63,30 @@ fun isLocalMusicDirectoryExcluded(directoryId: String, excludedDirectoryIds: Set
     return excludedDirectoryIds.any { excludedId ->
         directoryId in localMusicDirectoryIdAliases(excludedId)
     }
+}
+
+fun isLocalMusicDirectoryWithin(directoryId: String, rootDirectoryId: String): Boolean {
+    val canonicalDirectory = canonicalLocalMusicDirectoryId(directoryId) ?: return false
+    val canonicalRoot = canonicalLocalMusicDirectoryId(rootDirectoryId) ?: return false
+    return canonicalDirectory.startsWith(canonicalRoot)
+}
+
+fun isLocalMusicDirectoryIncluded(directoryId: String, includedDirectoryIds: Set<String>): Boolean {
+    return includedDirectoryIds.any { includedId ->
+        isLocalMusicDirectoryWithin(directoryId, includedId)
+    }
+}
+
+fun isLocalMusicDirectoryEnabled(directoryId: String, settings: LocalMusicScanSettings): Boolean {
+    if (isLocalMusicDirectoryExcluded(directoryId, settings.excludedDirectoryIds)) return false
+    if (isLocalMusicDirectoryIncluded(directoryId, settings.includedDirectoryIds)) return true
+    if (settings.directoryPolicy.defaultIncludedDirectoryIds.any { rootId ->
+            isLocalMusicDirectoryWithin(directoryId, rootId)
+        }
+    ) {
+        return true
+    }
+    return settings.directoryPolicy.includeUnspecifiedDirectoriesByDefault
 }
 
 data class LocalTrackMetadata(
