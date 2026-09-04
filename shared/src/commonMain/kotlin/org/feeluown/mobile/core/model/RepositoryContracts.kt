@@ -35,6 +35,9 @@ data class DownloadTask(
 )
 
 interface LocalMusicRepository {
+    val directoryPolicy: LocalMusicDirectoryPolicy
+        get() = LocalMusicDirectoryPolicy()
+
     val mediaChangeEvents: Flow<Unit>
         get() = emptyFlow()
 
