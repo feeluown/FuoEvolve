@@ -2,15 +2,6 @@
 // the repository's feature/provider module topology. New modules are picked up by
 // their standard Gradle test task names and Kover plugin application.
 
-// The root project is the Kover merge project. Every production subproject is a
-// coverage dependency; Kover will collect JVM/Android-host coverage from modules
-// where the plugin is applied by the root build.
-dependencies {
-    subprojects.forEach { subproject ->
-        add("kover", project(subproject.path))
-    }
-}
-
 val ciArchitectureCheck = tasks.register("ciArchitectureCheck") {
     group = "verification"
     description = "Runs all repository architecture-boundary checks."
@@ -60,6 +51,13 @@ tasks.matching {
 }
 
 subprojects {
+    // Only real Kover-enabled modules expose a coverage variant. Container
+    // projects such as :feature or :provider deliberately have no variants and
+    // must not be added to the merge configuration.
+    pluginManager.withPlugin("org.jetbrains.kotlinx.kover") {
+        rootProject.dependencies.add("kover", project(path))
+    }
+
     tasks.matching {
         it.name.startsWith("check") && it.name.endsWith("Boundaries")
     }.configureEach {
