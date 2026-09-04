@@ -43,7 +43,10 @@ dependencies {
 kover {
     currentProject {
         createVariant("projectJvm") {
-            addWithDependencies("jvm")
+            // The aggregate intentionally covers only JVM-capable variants. Some KMP
+            // projects also expose Android/Native variants, so the absence of a Kover
+            // JVM report variant must not make Gradle fail while resolving task dependencies.
+            addWithDependencies("jvm", optional = true)
         }
     }
 
