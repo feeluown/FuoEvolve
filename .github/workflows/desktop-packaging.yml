@@ -47,6 +47,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         shell: pwsh
@@ -192,6 +194,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         run: |
@@ -343,6 +347,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         run: |
@@ -506,6 +512,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Set up Rust stable
         run: |
