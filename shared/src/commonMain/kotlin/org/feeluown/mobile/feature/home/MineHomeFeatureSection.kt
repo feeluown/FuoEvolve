@@ -69,23 +69,24 @@ fun MineHomeSection(
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-            when (state.mineSection) {
-                MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
-                MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
-                MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
-                MineSection.LocalMusic -> LocalMusicSection(
-                    hasAudioPermission = hasAudioPermission,
-                    onRequestAudioPermission = onRequestAudioPermission,
-                    hasImagePermission = hasImagePermission,
-                    onRequestImagePermission = onRequestImagePermission,
-                    showModeFilter = !wide,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            PageLoadingContent(
+                loading = showPageLoading,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                when (state.mineSection) {
+                    MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
+                    MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
+                    MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
+                    MineSection.LocalMusic -> LocalMusicSection(
+                        hasAudioPermission = hasAudioPermission,
+                        onRequestAudioPermission = onRequestAudioPermission,
+                        hasImagePermission = hasImagePermission,
+                        onRequestImagePermission = onRequestImagePermission,
+                        showModeFilter = !wide,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
-            LoadingIndicator(
-                visible = showPageLoading,
-                modifier = Modifier.align(Alignment.Center),
-            )
         }
     }
 }
