@@ -1,12 +1,13 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,8 +19,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -30,6 +35,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -43,6 +50,7 @@ private const val PageContentFadeInDelayMillis = PageLoadingFadeOutMillis
 private const val PageContentFadeInMillis = 160
 private const val ShapeMorphIntervalMillis = 650
 private const val ShapeRotationDurationMillis = 4666
+private const val ShapeMorphRotationDegrees = 90f
 private const val ShapePointCount = 36
 private val ExpressiveLoadingShapes = listOf(
     radialShape(lobes = 10, depth = 0.17f, phase = 0.08f),
@@ -61,19 +69,11 @@ private val ExpressiveLoadingShapes = listOf(
  */
 @Composable
 fun ExpressiveLoadingIndicator(modifier: Modifier = Modifier) {
+    val morphProgress = remember { Animatable(0f) }
+    var currentMorphIndex by remember { mutableIntStateOf(0) }
+    var morphRotationTarget by remember { mutableFloatStateOf(0f) }
     val transition = rememberInfiniteTransition(label = "expressive-loading")
-    val shapeCycle by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = ExpressiveLoadingShapes.size.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = ShapeMorphIntervalMillis * ExpressiveLoadingShapes.size,
-                easing = LinearEasing,
-            ),
-        ),
-        label = "expressive-loading-shape",
-    )
-    val rotation by transition.animateFloat(
+    val globalRotation by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
@@ -82,7 +82,7 @@ fun ExpressiveLoadingIndicator(modifier: Modifier = Modifier) {
                 easing = LinearEasing,
             ),
         ),
-        label = "expressive-loading-rotation",
+        label = "expressive-loading-global-rotation",
     )
     val indicatorColor = MaterialTheme.colorScheme.primary
     // These objects are mutated only by the Canvas draw pass. Reusing them avoids allocating a
@@ -91,28 +91,51 @@ fun ExpressiveLoadingIndicator(modifier: Modifier = Modifier) {
     val morphPoints = remember { FloatArray(ShapePointCount * 2) }
     val morphPath = remember { Path() }
 
+    // Match the Material3 expressive cadence: spring each morph, start a new one every 650 ms,
+    // rotate a quarter turn with each shape change, and keep a slower global rotation underneath.
+    LaunchedEffect(Unit) {
+        val morphAnimationSpec = spring<Float>(
+            dampingRatio = 0.6f,
+            stiffness = 200f,
+            visibilityThreshold = 0.1f,
+        )
+        while (true) {
+            val morph = async {
+                morphProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = morphAnimationSpec,
+                )
+                currentMorphIndex = (currentMorphIndex + 1) % ExpressiveLoadingShapes.size
+                morphProgress.snapTo(0f)
+                morphRotationTarget = (morphRotationTarget + ShapeMorphRotationDegrees) % 360f
+            }
+            delay(ShapeMorphIntervalMillis.toLong())
+            morph.await()
+        }
+    }
+
     Canvas(
         modifier = modifier
             .size(48.dp)
             .semantics { contentDescription = "加载中" },
     ) {
-        val shapeCount = ExpressiveLoadingShapes.size
-        val cycle = if (shapeCycle >= shapeCount.toFloat()) 0f else shapeCycle
-        val shapeIndex = cycle.toInt().coerceIn(0, shapeCount - 1)
-        val morphProgress = FastOutSlowInEasing.transform(cycle - shapeIndex)
-        val start = ExpressiveLoadingShapes[shapeIndex]
-        val end = ExpressiveLoadingShapes[(shapeIndex + 1) % shapeCount]
+        val progress = morphProgress.value.coerceIn(0f, 1f)
+        val start = ExpressiveLoadingShapes[currentMorphIndex]
+        val end = ExpressiveLoadingShapes[(currentMorphIndex + 1) % ExpressiveLoadingShapes.size]
         val radius = min(size.width, size.height) / 3f
         val centerX = size.width / 2f
         val centerY = size.height / 2f
 
         for (index in morphPoints.indices step 2) {
-            morphPoints[index] = centerX + lerp(start[index], end[index], morphProgress) * radius
-            morphPoints[index + 1] = centerY + lerp(start[index + 1], end[index + 1], morphProgress) * radius
+            morphPoints[index] = centerX + lerp(start[index], end[index], progress) * radius
+            morphPoints[index + 1] = centerY + lerp(start[index + 1], end[index + 1], progress) * radius
         }
 
         morphPath.setSmoothClosed(morphPoints)
-        rotate(degrees = rotation, pivot = center) {
+        rotate(
+            degrees = progress * ShapeMorphRotationDegrees + morphRotationTarget + globalRotation,
+            pivot = center,
+        ) {
             drawPath(path = morphPath, color = indicatorColor)
         }
     }
