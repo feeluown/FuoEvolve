@@ -1,10 +1,11 @@
 // CI-facing verification tasks live here so GitHub Actions does not need to know
 // the repository's feature/provider module topology. New modules are picked up by
-// their standard Gradle test task names and Kover plugin application.
+// their standard Gradle test task names and Kover/plugin conventions.
 
 val ciArchitectureCheck = tasks.register("ciArchitectureCheck") {
     group = "verification"
     description = "Runs all repository architecture-boundary checks."
+    dependsOn("checkArchitectureBoundaries")
 }
 
 val ciAndroidTest = tasks.register("ciAndroidTest") {
@@ -39,16 +40,20 @@ tasks.register("ciCoverage") {
     dependsOn("koverXmlReport")
 }
 
-// Observe every task, including tasks registered lazily after this script is
-// applied. Filtering inside configureEach ensures future modules are wired into
-// the stable CI entry points without requiring workflow changes.
-tasks.configureEach {
-    if (name.startsWith("check") && name.endsWith("Boundaries")) {
-        ciArchitectureCheck.configure { dependsOn(this@configureEach) }
-    }
-}
-
 subprojects {
+    // Bind aggregate tasks from plugin application rather than discovering task
+    // instances through a lazy TaskCollection. Task-path dependencies resolve
+    // after the subproject has finished registering the plugin's standard tasks,
+    // so later/lazily registered tasks cannot be silently skipped.
+    pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
+        ciIosTest.configure { dependsOn("${project.path}:allTests") }
+        ciDesktopTest.configure { dependsOn("${project.path}:desktopTest") }
+    }
+
+    pluginManager.withPlugin("com.android.kotlin.multiplatform.library") {
+        ciAndroidTest.configure { dependsOn("${project.path}:testAndroidHostTest") }
+    }
+
     // Only real Kover-enabled modules expose a coverage variant. Container
     // projects such as :feature or :provider deliberately have no variants and
     // must not be added to the merge configuration.
@@ -56,19 +61,14 @@ subprojects {
         rootProject.dependencies.add("kover", project(path))
     }
 
-    tasks.configureEach {
-        when {
-            name.startsWith("check") && name.endsWith("Boundaries") ->
-                ciArchitectureCheck.configure { dependsOn(this@configureEach) }
-
-            name == "testAndroidHostTest" ->
-                ciAndroidTest.configure { dependsOn(this@configureEach) }
-
-            name == "allTests" ->
-                ciIosTest.configure { dependsOn(this@configureEach) }
-
-            name == "desktopTest" ->
-                ciDesktopTest.configure { dependsOn(this@configureEach) }
-        }
+    // Boundary checks are repository-defined tasks rather than plugin-standard
+    // tasks. Collect their registered names once each subproject has finished
+    // evaluation, without hard-coding the feature/provider module topology.
+    afterEvaluate {
+        tasks.names
+            .filter { it.startsWith("check") && it.endsWith("Boundaries") }
+            .forEach { taskName ->
+                ciArchitectureCheck.configure { dependsOn("${project.path}:$taskName") }
+            }
     }
 }
