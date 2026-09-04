@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -84,6 +85,11 @@ fun ExpressiveLoadingIndicator(modifier: Modifier = Modifier) {
         label = "expressive-loading-rotation",
     )
     val indicatorColor = MaterialTheme.colorScheme.primary
+    // These objects are mutated only by the Canvas draw pass. Reusing them avoids allocating a
+    // FloatArray and a native-backed Path on every animation frame, which is especially noticeable
+    // on lower-end Android devices and the Skia desktop targets.
+    val morphPoints = remember { FloatArray(ShapePointCount * 2) }
+    val morphPath = remember { Path() }
 
     Canvas(
         modifier = modifier
@@ -96,19 +102,18 @@ fun ExpressiveLoadingIndicator(modifier: Modifier = Modifier) {
         val morphProgress = FastOutSlowInEasing.transform(cycle - shapeIndex)
         val start = ExpressiveLoadingShapes[shapeIndex]
         val end = ExpressiveLoadingShapes[(shapeIndex + 1) % shapeCount]
-        val points = FloatArray(ShapePointCount * 2)
         val radius = min(size.width, size.height) / 3f
         val centerX = size.width / 2f
         val centerY = size.height / 2f
 
-        for (index in points.indices step 2) {
-            points[index] = centerX + lerp(start[index], end[index], morphProgress) * radius
-            points[index + 1] = centerY + lerp(start[index + 1], end[index + 1], morphProgress) * radius
+        for (index in morphPoints.indices step 2) {
+            morphPoints[index] = centerX + lerp(start[index], end[index], morphProgress) * radius
+            morphPoints[index + 1] = centerY + lerp(start[index + 1], end[index + 1], morphProgress) * radius
         }
 
-        val path = smoothClosedPath(points)
+        morphPath.setSmoothClosed(morphPoints)
         rotate(degrees = rotation, pivot = center) {
-            drawPath(path = path, color = indicatorColor)
+            drawPath(path = morphPath, color = indicatorColor)
         }
     }
 }
@@ -212,29 +217,28 @@ private fun superellipseShape(xScale: Float, yScale: Float, exponent: Float): Fl
         }
     }
 
-private fun smoothClosedPath(points: FloatArray): Path {
+private fun Path.setSmoothClosed(points: FloatArray) {
+    reset()
     val pointCount = points.size / 2
     fun x(index: Int): Float = points[((index + pointCount) % pointCount) * 2]
     fun y(index: Int): Float = points[((index + pointCount) % pointCount) * 2 + 1]
 
-    return Path().apply {
-        moveTo(x(0), y(0))
-        repeat(pointCount) { index ->
-            val p0 = index - 1
-            val p1 = index
-            val p2 = index + 1
-            val p3 = index + 2
-            cubicTo(
-                x(p1) + (x(p2) - x(p0)) / 6f,
-                y(p1) + (y(p2) - y(p0)) / 6f,
-                x(p2) - (x(p3) - x(p1)) / 6f,
-                y(p2) - (y(p3) - y(p1)) / 6f,
-                x(p2),
-                y(p2),
-            )
-        }
-        close()
+    moveTo(x(0), y(0))
+    repeat(pointCount) { index ->
+        val p0 = index - 1
+        val p1 = index
+        val p2 = index + 1
+        val p3 = index + 2
+        cubicTo(
+            x(p1) + (x(p2) - x(p0)) / 6f,
+            y(p1) + (y(p2) - y(p0)) / 6f,
+            x(p2) - (x(p3) - x(p1)) / 6f,
+            y(p2) - (y(p3) - y(p1)) / 6f,
+            x(p2),
+            y(p2),
+        )
     }
+    close()
 }
 
 private fun lerp(start: Float, end: Float, progress: Float): Float =
