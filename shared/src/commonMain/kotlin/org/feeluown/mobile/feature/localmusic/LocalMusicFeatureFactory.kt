@@ -130,7 +130,11 @@ fun createLocalMusicFeatureController(
             excludedDirectoryIds = defaultExclusions,
             minDurationSeconds = settings.localMusicMinDurationSeconds,
         )
-        owner.updateScanSettings()
+        if (owner.hasPermission && isLocalMusicSectionActive()) {
+            owner.refresh(forceRefresh = false, showLoading = false)
+        } else {
+            owner.updateScanSettings()
+        }
     }
     return BoundLocalMusicFeatureController(
         delegate = owner,
