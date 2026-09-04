@@ -15,7 +15,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,11 +36,21 @@ fun ProviderContentHomeFeatureSection(
         sections.filter { it.isLoginRequired }.map { it.feature }.distinctBy { it.providerId }
     }
     var refreshRequested by remember(section) { mutableStateOf(false) }
+    var initialLoadPending by remember(section) { mutableStateOf(sections.isEmpty()) }
+    var initialLoadObserved by remember(section) { mutableStateOf(state.isLoading) }
     val isPullRefreshing = refreshRequested && state.isLoading
-    val showPageLoading = state.isLoading && !refreshRequested
+    val showPageLoading = !refreshRequested && (state.isLoading || initialLoadPending)
 
-    LaunchedEffect(state.isLoading) {
-        if (!state.isLoading) refreshRequested = false
+    LaunchedEffect(state.isLoading, sections.isEmpty()) {
+        if (sections.isNotEmpty()) {
+            initialLoadPending = false
+        }
+        if (state.isLoading) {
+            initialLoadObserved = true
+        } else {
+            if (initialLoadObserved) initialLoadPending = false
+            refreshRequested = false
+        }
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -53,171 +62,172 @@ fun ProviderContentHomeFeatureSection(
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-            LazyColumn(
+            PageLoadingContent(
+                loading = showPageLoading,
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (sections.isEmpty()) {
-                    item { EmptyProviderContentHint(title) }
-                } else if (section == HomeSection.Music) {
-                    val entrySections = visibleSections.filter {
-                        it.feature.contentType == ProviderContentType.Songs ||
-                            it.feature.contentType == ProviderContentType.Videos ||
-                            it.feature.isBilibiliWeeklyMustWatch()
-                    }
-                    val previewSections = visibleSections.filter {
-                        (it.feature.contentType == ProviderContentType.Playlists ||
-                            it.feature.contentType == ProviderContentType.Artists ||
-                            it.feature.contentType == ProviderContentType.Albums) &&
-                            !it.feature.isBilibiliWeeklyMustWatch()
-                    }
-                    if (visibleSections.isNotEmpty()) {
-                        item(key = "header:explore") {
-                            ProviderFeatureHeader(
-                                feature = visibleSections.first().feature,
-                                title = "探索",
-                                providerLabel = visibleSections.map { it.feature.providerName }.distinct().joinToString(" / "),
-                            )
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (sections.isEmpty()) {
+                        item { EmptyProviderContentHint(title) }
+                    } else if (section == HomeSection.Music) {
+                        val entrySections = visibleSections.filter {
+                            it.feature.contentType == ProviderContentType.Songs ||
+                                it.feature.contentType == ProviderContentType.Videos ||
+                                it.feature.isBilibiliWeeklyMustWatch()
                         }
-                    }
-                    if (entrySections.isNotEmpty()) {
-                        item(key = "explore-grid") {
-                            ProviderFeatureCoverGrid(entrySections.map { it.feature }, home::openFeature)
+                        val previewSections = visibleSections.filter {
+                            (it.feature.contentType == ProviderContentType.Playlists ||
+                                it.feature.contentType == ProviderContentType.Artists ||
+                                it.feature.contentType == ProviderContentType.Albums) &&
+                                !it.feature.isBilibiliWeeklyMustWatch()
                         }
-                    }
-                    previewSections.forEach { contentSection ->
-                        val hasMore = contentSection.errorMessage == null && when {
-                            contentSection.playlists.isNotEmpty() -> contentSection.playlists.size > gridPreviewCapacity
-                            contentSection.mediaItems.isNotEmpty() -> contentSection.mediaItems.size > gridPreviewCapacity
-                            else -> false
-                        }
-                        item(key = "header:${contentSection.feature.id}") {
-                            ProviderFeatureHeader(
-                                feature = contentSection.feature,
-                                action = if (hasMore) {
-                                    { home.openFeature(contentSection.feature) }
-                                } else null,
-                                actionLabel = "查看更多",
-                            )
-                        }
-                        val errorMessage = contentSection.errorMessage
-                        when {
-                            errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
-                                ProviderContentMessage(errorMessage)
-                            }
-                            contentSection.playlists.isNotEmpty() -> item(key = "playlists:${contentSection.feature.id}") {
-                                ProviderPlaylistGrid(
-                                    playlists = contentSection.playlists,
-                                    onClick = { home.openPlaylist(it, contentSection.feature.category) },
-                                    maxRows = 2,
+                        if (visibleSections.isNotEmpty()) {
+                            item(key = "header:explore") {
+                                ProviderFeatureHeader(
+                                    feature = visibleSections.first().feature,
+                                    title = "探索",
+                                    providerLabel = visibleSections.map { it.feature.providerName }.distinct().joinToString(" / "),
                                 )
                             }
-                            contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
-                                ProviderMediaItemGrid(
-                                    items = contentSection.mediaItems,
-                                    onClick = home::openMediaItem,
-                                    maxRows = 2,
-                                )
+                        }
+                        if (entrySections.isNotEmpty()) {
+                            item(key = "explore-grid") {
+                                ProviderFeatureCoverGrid(entrySections.map { it.feature }, home::openFeature)
                             }
-                            else -> item(key = "empty:${contentSection.feature.id}") { ProviderContentMessage("暂无内容") }
                         }
-                    }
-                } else {
-                    val forYouSections = visibleSections.filter {
-                        it.feature.isDailySongs() || it.feature.isPrivateFm() ||
-                            it.feature.isBilibiliRecommendedVideos() || it.feature.isBilibiliDynamicVideos() ||
-                            it.feature.isRecommendedNewSongs()
-                    }
-                    val otherSections = visibleSections.filterNot {
-                        it.feature.isDailySongs() || it.feature.isPrivateFm() ||
-                            it.feature.isBilibiliRecommendedVideos() || it.feature.isBilibiliDynamicVideos() ||
-                            it.feature.isRecommendedNewSongs()
-                    }
-                    if (forYouSections.isNotEmpty()) {
-                        item(key = "header:for-you") {
-                            ProviderFeatureHeader(
-                                feature = forYouSections.first().feature,
-                                title = "为你推荐",
-                                providerLabel = forYouSections.map { it.feature.providerName }.distinct().joinToString(" / "),
-                            )
-                        }
-                        item(key = "for-you-grid") {
-                            ForYouRecommendGrid(
-                                sections = forYouSections,
-                                enabled = !state.isLoading,
-                                onFeatureClick = home::openFeature,
-                                onPrivateFmClick = home::playAllFeature,
-                            )
-                        }
-                    }
-                    otherSections.forEach { contentSection ->
-                        val hasMore = contentSection.errorMessage == null &&
-                            contentSection.tracks.isEmpty() &&
-                            contentSection.playlists.size > gridPreviewCapacity
-                        item(key = "header:${contentSection.feature.id}") {
-                            ProviderFeatureHeader(
-                                feature = contentSection.feature,
-                                onPlayAll = contentSection.tracks.takeIf { it.isNotEmpty() }?.let {
-                                    { home.playAllFeature(contentSection) }
-                                },
-                                action = if (hasMore) {
-                                    { home.openFeature(contentSection.feature) }
-                                } else null,
-                                actionLabel = "查看更多",
-                            )
-                        }
-                        val errorMessage = contentSection.errorMessage
-                        when {
-                            errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
-                                ProviderContentMessage(errorMessage)
+                        previewSections.forEach { contentSection ->
+                            val hasMore = contentSection.errorMessage == null && when {
+                                contentSection.playlists.isNotEmpty() -> contentSection.playlists.size > gridPreviewCapacity
+                                contentSection.mediaItems.isNotEmpty() -> contentSection.mediaItems.size > gridPreviewCapacity
+                                else -> false
                             }
-                            contentSection.tracks.isNotEmpty() -> itemsIndexed(
-                                contentSection.tracks,
-                                key = { _, item -> "${contentSection.feature.id}:${item.id}" },
-                            ) { index, track ->
-                                TrackRow(
-                                    track = track,
-                                    downloadState = graph.downloads.downloadStates[track.id],
-                                    onClick = { home.playFeature(contentSection, index) },
-                                    onAddToUpNext = { graph.playbackQueue.addToUpNext(track) },
-                                    onDownload = { graph.downloads.download(track) },
-                                    onDeleteDownload = { graph.downloads.deleteDownload(track) },
-                                    onOpenArtist = { graph.providerTrackActions.openTrackArtist(track) },
-                                    onOpenAlbum = { graph.providerTrackActions.openTrackAlbum(track) },
-                                    onOpenDetail = { graph.providerTrackActions.openOriginalTrackDetail(track) },
-                                    onAddToPlaylist = if (graph.playlists.canAddTrackToPlaylist(track)) {
-                                        { graph.playlists.openPlaylistTargetPicker(track) }
+                            item(key = "header:${contentSection.feature.id}") {
+                                ProviderFeatureHeader(
+                                    feature = contentSection.feature,
+                                    action = if (hasMore) {
+                                        { home.openFeature(contentSection.feature) }
                                     } else null,
-                                )
-                                HorizontalDivider()
-                            }
-                            contentSection.playlists.isNotEmpty() -> item(key = "playlists:${contentSection.feature.id}") {
-                                ProviderPlaylistGrid(
-                                    playlists = contentSection.playlists,
-                                    onClick = { home.openPlaylist(it, contentSection.feature.category) },
-                                    maxRows = 2,
+                                    actionLabel = "查看更多",
                                 )
                             }
-                            contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
-                                ProviderMediaItemGrid(contentSection.mediaItems, home::openMediaItem)
+                            val errorMessage = contentSection.errorMessage
+                            when {
+                                errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+                                    ProviderContentMessage(errorMessage)
+                                }
+                                contentSection.playlists.isNotEmpty() -> item(key = "playlists:${contentSection.feature.id}") {
+                                    ProviderPlaylistGrid(
+                                        playlists = contentSection.playlists,
+                                        onClick = { home.openPlaylist(it, contentSection.feature.category) },
+                                        maxRows = 2,
+                                    )
+                                }
+                                contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
+                                    ProviderMediaItemGrid(
+                                        items = contentSection.mediaItems,
+                                        onClick = home::openMediaItem,
+                                        maxRows = 2,
+                                    )
+                                }
+                                else -> item(key = "empty:${contentSection.feature.id}") { ProviderContentMessage("暂无内容") }
                             }
-                            contentSection.videos.isNotEmpty() -> item(key = "videos:${contentSection.feature.id}") {
-                                ProviderVideoList(contentSection.videos, home::openVideo)
+                        }
+                    } else {
+                        val forYouSections = visibleSections.filter {
+                            it.feature.isDailySongs() || it.feature.isPrivateFm() ||
+                                it.feature.isBilibiliRecommendedVideos() || it.feature.isBilibiliDynamicVideos() ||
+                                it.feature.isRecommendedNewSongs()
+                        }
+                        val otherSections = visibleSections.filterNot {
+                            it.feature.isDailySongs() || it.feature.isPrivateFm() ||
+                                it.feature.isBilibiliRecommendedVideos() || it.feature.isBilibiliDynamicVideos() ||
+                                it.feature.isRecommendedNewSongs()
+                        }
+                        if (forYouSections.isNotEmpty()) {
+                            item(key = "header:for-you") {
+                                ProviderFeatureHeader(
+                                    feature = forYouSections.first().feature,
+                                    title = "为你推荐",
+                                    providerLabel = forYouSections.map { it.feature.providerName }.distinct().joinToString(" / "),
+                                )
                             }
-                            else -> item(key = "empty:${contentSection.feature.id}") { ProviderContentMessage("暂无内容") }
+                            item(key = "for-you-grid") {
+                                ForYouRecommendGrid(
+                                    sections = forYouSections,
+                                    enabled = !state.isLoading,
+                                    onFeatureClick = home::openFeature,
+                                    onPrivateFmClick = home::playAllFeature,
+                                )
+                            }
+                        }
+                        otherSections.forEach { contentSection ->
+                            val hasMore = contentSection.errorMessage == null &&
+                                contentSection.tracks.isEmpty() &&
+                                contentSection.playlists.size > gridPreviewCapacity
+                            item(key = "header:${contentSection.feature.id}") {
+                                ProviderFeatureHeader(
+                                    feature = contentSection.feature,
+                                    onPlayAll = contentSection.tracks.takeIf { it.isNotEmpty() }?.let {
+                                        { home.playAllFeature(contentSection) }
+                                    },
+                                    action = if (hasMore) {
+                                        { home.openFeature(contentSection.feature) }
+                                    } else null,
+                                    actionLabel = "查看更多",
+                                )
+                            }
+                            val errorMessage = contentSection.errorMessage
+                            when {
+                                errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+                                    ProviderContentMessage(errorMessage)
+                                }
+                                contentSection.tracks.isNotEmpty() -> itemsIndexed(
+                                    contentSection.tracks,
+                                    key = { _, item -> "${contentSection.feature.id}:${item.id}" },
+                                ) { index, track ->
+                                    TrackRow(
+                                        track = track,
+                                        downloadState = graph.downloads.downloadStates[track.id],
+                                        onClick = { home.playFeature(contentSection, index) },
+                                        onAddToUpNext = { graph.playbackQueue.addToUpNext(track) },
+                                        onDownload = { graph.downloads.download(track) },
+                                        onDeleteDownload = { graph.downloads.deleteDownload(track) },
+                                        onOpenArtist = { graph.providerTrackActions.openTrackArtist(track) },
+                                        onOpenAlbum = { graph.providerTrackActions.openTrackAlbum(track) },
+                                        onOpenDetail = { graph.providerTrackActions.openOriginalTrackDetail(track) },
+                                        onAddToPlaylist = if (graph.playlists.canAddTrackToPlaylist(track)) {
+                                            { graph.playlists.openPlaylistTargetPicker(track) }
+                                        } else null,
+                                    )
+                                    HorizontalDivider()
+                                }
+                                contentSection.playlists.isNotEmpty() -> item(key = "playlists:${contentSection.feature.id}") {
+                                    ProviderPlaylistGrid(
+                                        playlists = contentSection.playlists,
+                                        onClick = { home.openPlaylist(it, contentSection.feature.category) },
+                                        maxRows = 2,
+                                    )
+                                }
+                                contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
+                                    ProviderMediaItemGrid(contentSection.mediaItems, home::openMediaItem)
+                                }
+                                contentSection.videos.isNotEmpty() -> item(key = "videos:${contentSection.feature.id}") {
+                                    ProviderVideoList(contentSection.videos, home::openVideo)
+                                }
+                                else -> item(key = "empty:${contentSection.feature.id}") { ProviderContentMessage("暂无内容") }
+                            }
                         }
                     }
-                }
-                if (lockedProviders.isNotEmpty()) {
-                    item(key = "locked-providers:${section.name}") {
-                        ProviderLockedSummary(lockedProviders) { home.openSettings(it.providerId) }
+                    if (lockedProviders.isNotEmpty()) {
+                        item(key = "locked-providers:${section.name}") {
+                            ProviderLockedSummary(lockedProviders) { home.openSettings(it.providerId) }
+                        }
                     }
                 }
             }
-            LoadingIndicator(
-                visible = showPageLoading,
-                modifier = Modifier.align(Alignment.Center),
-            )
         }
     }
 }

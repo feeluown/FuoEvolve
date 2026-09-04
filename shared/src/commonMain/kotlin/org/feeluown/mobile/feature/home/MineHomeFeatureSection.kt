@@ -49,43 +49,63 @@ fun MineHomeSection(
     val wide = LocalAppLayoutInfo.current.useWideLayout
     var refreshRequested by remember(state.mineSection) { mutableStateOf(false) }
     val isLoading = state.isLoading || (state.mineSection == MineSection.LocalMusic && localMusicState.isLoading)
+    val hasInitialContent = when (state.mineSection) {
+        MineSection.Playlists, MineSection.Songs ->
+            state.minePlaylistSections.isNotEmpty() || state.mineFavoritePlaylistSections.isNotEmpty()
+        MineSection.Artists -> state.mineSections.any { it.feature.contentType == ProviderContentType.Artists }
+        MineSection.Albums -> state.mineSections.any { it.feature.contentType == ProviderContentType.Albums }
+        MineSection.LocalMusic ->
+            !hasAudioPermission || localMusicState.tracks.isNotEmpty() || localMusicState.directories.isNotEmpty()
+    }
+    var initialLoadPending by rememberSaveable(state.mineSection) { mutableStateOf(!hasInitialContent) }
+    var initialLoadStarted by rememberSaveable(state.mineSection) { mutableStateOf(isLoading) }
     val isPullRefreshing = refreshRequested && isLoading
-    val showPageLoading = isLoading && !refreshRequested
+    val showPageLoading = !refreshRequested && (isLoading || initialLoadPending)
 
-    LaunchedEffect(isLoading) {
+    LaunchedEffect(state.mineSection, isLoading, hasInitialContent, hasAudioPermission) {
+        when {
+            hasInitialContent -> initialLoadPending = false
+            state.mineSection == MineSection.LocalMusic && !hasAudioPermission -> initialLoadPending = false
+            isLoading -> initialLoadStarted = true
+            initialLoadStarted -> initialLoadPending = false
+        }
         if (!isLoading) refreshRequested = false
     }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp)) {
-        MineOwnerChips(
-            home = home,
-            includeSecondary = wide,
-        )
-        PullToRefreshBox(
-            isRefreshing = isPullRefreshing,
-            onRefresh = {
-                refreshRequested = true
-                home.refreshMine()
-            },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+    PageLoadingContent(
+        loading = showPageLoading,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp),
         ) {
-            when (state.mineSection) {
-                MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
-                MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
-                MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
-                MineSection.LocalMusic -> LocalMusicSection(
-                    hasAudioPermission = hasAudioPermission,
-                    onRequestAudioPermission = onRequestAudioPermission,
-                    hasImagePermission = hasImagePermission,
-                    onRequestImagePermission = onRequestImagePermission,
-                    showModeFilter = !wide,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-            LoadingIndicator(
-                visible = showPageLoading,
-                modifier = Modifier.align(Alignment.Center),
+            MineOwnerChips(
+                home = home,
+                includeSecondary = wide,
             )
+            PullToRefreshBox(
+                isRefreshing = isPullRefreshing,
+                onRefresh = {
+                    refreshRequested = true
+                    home.refreshMine()
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) {
+                when (state.mineSection) {
+                    MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
+                    MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
+                    MineSection.Albums -> MineOwnerMediaItems(home, ProviderContentType.Albums, "专辑", Modifier.fillMaxSize())
+                    MineSection.LocalMusic -> LocalMusicSection(
+                        hasAudioPermission = hasAudioPermission,
+                        onRequestAudioPermission = onRequestAudioPermission,
+                        hasImagePermission = hasImagePermission,
+                        onRequestImagePermission = onRequestImagePermission,
+                        showModeFilter = !wide,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
     }
 }
