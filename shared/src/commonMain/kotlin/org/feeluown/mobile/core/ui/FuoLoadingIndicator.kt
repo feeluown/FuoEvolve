@@ -91,7 +91,7 @@ fun ExpressiveLoadingIndicator(modifier: Modifier = Modifier) {
             .semantics { contentDescription = "加载中" },
     ) {
         val shapeCount = ExpressiveLoadingShapes.size
-        val cycle = if (shapeCycle >= shapeCount) 0f else shapeCycle
+        val cycle = if (shapeCycle >= shapeCount.toFloat()) 0f else shapeCycle
         val shapeIndex = cycle.toInt().coerceIn(0, shapeCount - 1)
         val morphProgress = FastOutSlowInEasing.transform(cycle - shapeIndex)
         val start = ExpressiveLoadingShapes[shapeIndex]
