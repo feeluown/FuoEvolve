@@ -22,7 +22,7 @@ val ciAndroidTest = tasks.register("ciAndroidTest") {
 
 val ciIosTest = tasks.register("ciIosTest") {
     group = "verification"
-    description = "Runs all Kotlin Multiplatform test suites on the Apple CI runner."
+    description = "Runs all iOS simulator tests on the Apple CI runner."
 }
 
 val ciDesktopTest = tasks.register("ciDesktopTest") {
@@ -59,8 +59,8 @@ subprojects {
         if ("testAndroidHostTest" in taskNames) {
             ciAndroidTest.configure { dependsOn("$subprojectPath:testAndroidHostTest") }
         }
-        if ("allTests" in taskNames) {
-            ciIosTest.configure { dependsOn("$subprojectPath:allTests") }
+        if ("iosSimulatorArm64Test" in taskNames) {
+            ciIosTest.configure { dependsOn("$subprojectPath:iosSimulatorArm64Test") }
         }
         if ("desktopTest" in taskNames) {
             ciDesktopTest.configure { dependsOn("$subprojectPath:desktopTest") }
