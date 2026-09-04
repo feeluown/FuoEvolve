@@ -49,29 +49,48 @@ fun MineHomeSection(
     val wide = LocalAppLayoutInfo.current.useWideLayout
     var refreshRequested by remember(state.mineSection) { mutableStateOf(false) }
     val isLoading = state.isLoading || (state.mineSection == MineSection.LocalMusic && localMusicState.isLoading)
+    val hasInitialContent = when (state.mineSection) {
+        MineSection.Playlists, MineSection.Songs ->
+            state.minePlaylistSections.isNotEmpty() || state.mineFavoritePlaylistSections.isNotEmpty()
+        MineSection.Artists -> state.mineSections.any { it.feature.contentType == ProviderContentType.Artists }
+        MineSection.Albums -> state.mineSections.any { it.feature.contentType == ProviderContentType.Albums }
+        MineSection.LocalMusic ->
+            !hasAudioPermission || localMusicState.tracks.isNotEmpty() || localMusicState.directories.isNotEmpty()
+    }
+    var initialLoadPending by rememberSaveable(state.mineSection) { mutableStateOf(!hasInitialContent) }
+    var initialLoadStarted by rememberSaveable(state.mineSection) { mutableStateOf(isLoading) }
     val isPullRefreshing = refreshRequested && isLoading
-    val showPageLoading = isLoading && !refreshRequested
+    val showPageLoading = !refreshRequested && (isLoading || initialLoadPending)
 
-    LaunchedEffect(isLoading) {
+    LaunchedEffect(state.mineSection, isLoading, hasInitialContent, hasAudioPermission) {
+        when {
+            hasInitialContent -> initialLoadPending = false
+            state.mineSection == MineSection.LocalMusic && !hasAudioPermission -> initialLoadPending = false
+            isLoading -> initialLoadStarted = true
+            initialLoadStarted -> initialLoadPending = false
+        }
         if (!isLoading) refreshRequested = false
     }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp)) {
-        MineOwnerChips(
-            home = home,
-            includeSecondary = wide,
-        )
-        PullToRefreshBox(
-            isRefreshing = isPullRefreshing,
-            onRefresh = {
-                refreshRequested = true
-                home.refreshMine()
-            },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+    PageLoadingContent(
+        loading = showPageLoading,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp),
         ) {
-            PageLoadingContent(
-                loading = showPageLoading,
-                modifier = Modifier.fillMaxSize(),
+            MineOwnerChips(
+                home = home,
+                includeSecondary = wide,
+            )
+            PullToRefreshBox(
+                isRefreshing = isPullRefreshing,
+                onRefresh = {
+                    refreshRequested = true
+                    home.refreshMine()
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
                 when (state.mineSection) {
                     MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
