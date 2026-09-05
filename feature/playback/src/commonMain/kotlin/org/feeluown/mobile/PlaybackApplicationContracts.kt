@@ -17,10 +17,14 @@ data class ReplacementCandidateState(
 /**
  * A logical request for the platform playback runtime. The runtime, rather
  * than the UI controller, resolves provider media into a playable URL.
+ *
+ * [queueEntryId] identifies the concrete occurrence in the live queue. Multiple requests may
+ * reference the same logical track id, so platform runtimes must not use `track.id` as queue identity.
  */
 data class PlaybackRequest(
     val track: MusicTrack,
     val resolveTrack: MusicTrack = track,
+    val queueEntryId: Long? = null,
     val requestedPartIndex: Int? = null,
     val unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
@@ -57,6 +61,7 @@ data class PlaybackState(
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val playbackGeneration: Long = 0,
+    val playbackQueueEntryId: Long? = null,
     val errorMessage: String? = null,
 )
 
@@ -69,6 +74,10 @@ data class PlaybackQueueSnapshot(
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
+    val mainQueueEntryIds: List<Long> = emptyList(),
+    val originalMainQueueEntryIds: List<Long> = emptyList(),
+    val upNextQueueEntryIds: List<Long> = emptyList(),
+    val queueEntrySequence: Long = 0L,
 )
 
 interface PlaybackQueueStore {
@@ -83,7 +92,8 @@ object NoOpPlaybackQueueStore : PlaybackQueueStore {
 }
 
 object PlaybackQueueCodec {
-    private const val CURRENT_VERSION = "v2"
+    private const val CURRENT_VERSION = "v3"
+    private const val PREVIOUS_VERSION = "v2"
 
     fun encode(snapshot: PlaybackQueueSnapshot): String {
         return buildList {
@@ -95,11 +105,12 @@ object PlaybackQueueCodec {
                     snapshot.repeatMode.name,
                     snapshot.isFmQueue.toString(),
                     snapshot.shuffleBeforeFm?.toString().orEmpty(),
+                    snapshot.queueEntrySequence.toString(),
                 ).joinToString("\t")
             )
-            addTracks("main", snapshot.mainQueue)
-            addTracks("original", snapshot.originalMainQueue)
-            addTracks("upNext", snapshot.upNextQueue)
+            addTracks("main", snapshot.mainQueue, snapshot.mainQueueEntryIds)
+            addTracks("original", snapshot.originalMainQueue, snapshot.originalMainQueueEntryIds)
+            addTracks("upNext", snapshot.upNextQueue, snapshot.upNextQueueEntryIds)
         }.joinToString("\n")
     }
 
@@ -115,35 +126,77 @@ object PlaybackQueueCodec {
                 val boolValue = flags.getOrNull(2)?.toBooleanStrictOrNull() ?: true
                 if (boolValue) RepeatMode.QUEUE else RepeatMode.OFF
             }
-            CURRENT_VERSION -> {
+            PREVIOUS_VERSION, CURRENT_VERSION -> {
                 runCatching { RepeatMode.valueOf(flags.getOrNull(2) ?: "QUEUE") }
                     .getOrDefault(RepeatMode.QUEUE)
             }
             else -> RepeatMode.QUEUE
         }
 
-        val tracksBySection = lines.drop(2)
+        val entriesBySection = lines.drop(2)
             .mapNotNull { line ->
                 val fields = line.split("\t")
                 if (fields.size < 2 || fields[0] != "track") return@mapNotNull null
-                decodeTrack(fields.drop(2))?.let { track -> fields[1] to track }
+                if (version == CURRENT_VERSION) {
+                    if (fields.size < 3) return@mapNotNull null
+                    decodeTrack(fields.drop(3))?.let { track ->
+                        DecodedQueueEntry(
+                            section = fields[1],
+                            entryId = fields[2].toLongOrNull()?.takeIf { it > 0L },
+                            track = track,
+                        )
+                    }
+                } else {
+                    decodeTrack(fields.drop(2))?.let { track ->
+                        DecodedQueueEntry(section = fields[1], entryId = null, track = track)
+                    }
+                }
             }
-            .groupBy({ it.first }, { it.second })
+            .groupBy(DecodedQueueEntry::section)
+
+        fun tracks(section: String): List<MusicTrack> =
+            entriesBySection[section].orEmpty().map(DecodedQueueEntry::track)
+
+        fun entryIds(section: String): List<Long> {
+            val entries = entriesBySection[section].orEmpty()
+            val ids = entries.mapNotNull(DecodedQueueEntry::entryId)
+            return ids.takeIf { it.size == entries.size } ?: emptyList()
+        }
+
+        val mainEntryIds = entryIds("main")
+        val originalEntryIds = entryIds("original")
+        val upNextEntryIds = entryIds("upNext")
+        val maxEntryId = (mainEntryIds + originalEntryIds + upNextEntryIds).maxOrNull() ?: 0L
         return PlaybackQueueSnapshot(
-            mainQueue = tracksBySection["main"].orEmpty(),
-            originalMainQueue = tracksBySection["original"].orEmpty(),
-            upNextQueue = tracksBySection["upNext"].orEmpty(),
+            mainQueue = tracks("main"),
+            originalMainQueue = tracks("original"),
+            upNextQueue = tracks("upNext"),
             queueIndex = flags.getOrNull(0)?.toIntOrNull() ?: -1,
             shuffleEnabled = flags.getOrNull(1)?.toBooleanStrictOrNull() ?: false,
             repeatMode = repeatMode,
             isFmQueue = flags.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
             shuffleBeforeFm = flags.getOrNull(4)?.takeIf { it.isNotBlank() }?.toBooleanStrictOrNull(),
+            mainQueueEntryIds = mainEntryIds,
+            originalMainQueueEntryIds = originalEntryIds,
+            upNextQueueEntryIds = upNextEntryIds,
+            queueEntrySequence = maxOf(flags.getOrNull(5)?.toLongOrNull() ?: 0L, maxEntryId),
         )
     }
 
-    private fun MutableList<String>.addTracks(section: String, tracks: List<MusicTrack>) {
-        tracks.forEach { track ->
-            add((listOf("track", section) + encodeTrack(track)).joinToString("\t"))
+    private data class DecodedQueueEntry(
+        val section: String,
+        val entryId: Long?,
+        val track: MusicTrack,
+    )
+
+    private fun MutableList<String>.addTracks(
+        section: String,
+        tracks: List<MusicTrack>,
+        entryIds: List<Long>,
+    ) {
+        tracks.forEachIndexed { index, track ->
+            val entryId = entryIds.getOrNull(index)?.takeIf { it > 0L }?.toString().orEmpty()
+            add((listOf("track", section, entryId) + encodeTrack(track)).joinToString("\t"))
         }
     }
 

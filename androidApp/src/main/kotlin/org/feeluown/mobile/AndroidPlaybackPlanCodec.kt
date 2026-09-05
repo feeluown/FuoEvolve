@@ -26,6 +26,7 @@ internal fun String.toPlaybackPlan(): PlaybackPlan {
 private fun PlaybackRequest.toJsonObject(): JSONObject = JSONObject()
     .put("track", track.toJsonObject())
     .put("resolve_track", resolveTrack.toJsonObject())
+    .put("queue_entry_id", queueEntryId)
     .put("requested_part_index", requestedPartIndex)
     .put("unavailable_policy", unavailablePolicy.name)
     .put("replacement_provider_ids", JSONArray(smartReplacementProviderIds.toList()))
@@ -37,6 +38,7 @@ private fun PlaybackRequest.toJsonObject(): JSONObject = JSONObject()
 private fun JSONObject.toPlaybackRequest(): PlaybackRequest = PlaybackRequest(
     track = getJSONObject("track").toMusicTrack(),
     resolveTrack = getJSONObject("resolve_track").toMusicTrack(),
+    queueEntryId = optLong("queue_entry_id", 0L).takeIf { it > 0L },
     requestedPartIndex = optInt("requested_part_index", -1).takeIf { it >= 0 },
     unavailablePolicy = optString("unavailable_policy")
         .let { value -> runCatching { UnavailablePlaybackPolicy.valueOf(value) }.getOrDefault(DEFAULT_UNAVAILABLE_PLAYBACK_POLICY) },

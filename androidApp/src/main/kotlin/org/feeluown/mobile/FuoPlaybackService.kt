@@ -287,6 +287,7 @@ class FuoPlaybackService : MediaSessionService() {
             durationMs = first.track.durationMs ?: 0L,
             lyrics = first.track.lyrics,
             playbackGeneration = plan.generation,
+            playbackQueueEntryId = first.queueEntryId,
         )
         loadJob = serviceScope.launch {
             try {
@@ -313,6 +314,7 @@ class FuoPlaybackService : MediaSessionService() {
                     status = PlayerStatus.Error,
                     currentTrack = first.track,
                     playbackGeneration = plan.generation,
+                    playbackQueueEntryId = first.queueEntryId,
                     errorMessage = throwable.message ?: "音频资源加载失败",
                 )
             }
@@ -612,6 +614,7 @@ class FuoPlaybackService : MediaSessionService() {
                 playbackParts = prepared.payload.parts,
                 currentPartIndex = prepared.payload.currentPartIndex,
                 playbackGeneration = activeGeneration,
+                playbackQueueEntryId = prepared.request.queueEntryId,
                 errorMessage = pendingPreloadError,
             )
             return
@@ -640,6 +643,7 @@ class FuoPlaybackService : MediaSessionService() {
             playbackParts = prepared.payload.parts,
             currentPartIndex = prepared.payload.currentPartIndex,
             playbackGeneration = activeGeneration,
+            playbackQueueEntryId = prepared.request.queueEntryId,
         )
     }
 
@@ -943,5 +947,4 @@ class FuoPlaybackService : MediaSessionService() {
         fun previous()
         fun next()
     }
-
 }
