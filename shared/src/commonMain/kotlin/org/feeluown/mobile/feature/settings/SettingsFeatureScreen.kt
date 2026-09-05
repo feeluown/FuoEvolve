@@ -251,8 +251,10 @@ fun SettingsFeatureScreen(
                                 }
                             } else {
                                 SettingsDetailColumn(modifier = bodyModifier) {
-                                    ProviderAccountSettings(
+                                    ProviderDetailSettingsExpressive(
                                         provider = provider,
+                                        catalog = catalogState,
+                                        catalogController = providerCatalog,
                                         settings = settingsState,
                                         settingsController = settingsController,
                                         authController = providerAuth,
@@ -523,7 +525,7 @@ private fun SettingsCategoryDetail(
             }
         }
         when (category) {
-            FeatureSettingsCategory.Sources -> ProviderCatalogSettings(
+            FeatureSettingsCategory.Sources -> ProviderCatalogSettingsExpressive(
                 state = catalog,
                 controller = providerCatalog,
                 onOpenProvider = onOpenProvider,
