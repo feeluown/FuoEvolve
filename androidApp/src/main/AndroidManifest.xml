@@ -71,6 +71,25 @@
                     android:pathPrefix="/FuoEvolve/r"
                     android:scheme="https" />
             </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开音源链接">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="music.163.com" />
+                <data android:host="y.music.163.com" />
+                <data android:host="www.bilibili.com" />
+                <data android:host="m.bilibili.com" />
+                <data android:host="bilibili.com" />
+                <data android:host="y.qq.com" />
+                <data android:host="i.y.qq.com" />
+                <data android:host="music.youtube.com" />
+                <data android:host="www.youtube.com" />
+                <data android:host="youtube.com" />
+                <data android:host="youtu.be" />
+            </intent-filter>
         </activity>
         <activity
             android:name=".AppUpdateSavePermissionActivity"
