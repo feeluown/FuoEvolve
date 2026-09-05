@@ -60,6 +60,7 @@ data class PersistedSettingsV1(
     val recommendProviderIds: Set<String>? = null,
     val exploreProviderIds: Set<String>? = null,
     val mineProviderIds: Set<String>? = null,
+    val playbackReportingProviderIds: Set<String>? = null,
     val audioCacheLimitMb: Int? = null,
     val imageCacheLimitMb: Int? = null,
     val downloadParallelism: Int? = null,
