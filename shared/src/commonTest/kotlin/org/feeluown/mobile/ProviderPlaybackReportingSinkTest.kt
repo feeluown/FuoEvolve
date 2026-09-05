@@ -3,9 +3,11 @@ package org.feeluown.mobile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ProviderPlaybackReportingSinkTest {
     @Test
     fun reportingIsDisabledByDefault() = runTest {
@@ -19,7 +21,7 @@ class ProviderPlaybackReportingSinkTest {
         )
 
         sink.upsert(record(providerId = "netease"))
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals(1, local.records.size)
         assertTrue(remote.reports.isEmpty())
@@ -39,7 +41,7 @@ class ProviderPlaybackReportingSinkTest {
         )
 
         sink.upsert(record(providerId = "netease", playedMs = 30_000L, qualified = true))
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals(1, local.records.size)
         assertEquals(1, remote.reports.size)
@@ -66,7 +68,7 @@ class ProviderPlaybackReportingSinkTest {
                 resolvedTrackId = "bilibili:BV1replacement",
             ),
         )
-        advanceUntilIdle()
+        runCurrent()
 
         assertTrue(remote.reports.isEmpty())
     }
@@ -90,7 +92,7 @@ class ProviderPlaybackReportingSinkTest {
                 resolvedTrackId = "netease:456",
             ),
         )
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals("netease:456", remote.reports.single().second.trackId)
     }
@@ -108,7 +110,7 @@ class ProviderPlaybackReportingSinkTest {
         )
 
         sink.upsert(record(providerId = "qqmusic"))
-        advanceUntilIdle()
+        runCurrent()
 
         assertTrue(remote.reports.isEmpty())
     }
