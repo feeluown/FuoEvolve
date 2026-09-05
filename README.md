@@ -2,8 +2,9 @@
 
 [![Stable release](https://img.shields.io/github/v/release/feeluown/FuoEvolve?label=stable)](https://github.com/feeluown/FuoEvolve/releases/latest)
 [![Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster)
+[![Downloads](https://img.shields.io/github/downloads/feeluown/FuoEvolve/total?label=downloads)](https://github.com/feeluown/FuoEvolve/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/docs/multiplatform.html)
+[![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4?logo=jetpackcompose&logoColor=white)](https://www.jetbrains.com/compose-multiplatform/)
 
 [中文](README.zh-CN.md) | English
 
@@ -36,7 +37,7 @@ FuoEvolve is an open-source, cross-platform music player built around the [FeelU
 
 ## Desktop
 
-The desktop app uses the same shared interface and core experience as mobile instead of maintaining a reduced desktop-only UI.
+The desktop app shares the same experience as mobile and is available for Windows, macOS, and Linux.
 
 - **Windows:** system media controls through SMTC.
 - **macOS:** Now Playing / Remote Command Center integration.
@@ -69,7 +70,7 @@ Available content depends on the source, region, login state, and upstream servi
 
 ## Development
 
-FuoEvolve is built with Kotlin Multiplatform and Compose Multiplatform.
+FuoEvolve uses [Compose Multiplatform](https://www.jetbrains.com/compose-multiplatform/) across supported platforms.
 
 ```bash
 # Android debug build
@@ -79,7 +80,7 @@ FuoEvolve is built with Kotlin Multiplatform and Compose Multiplatform.
 ./gradlew :desktopApp:run
 ```
 
-Desktop development also requires a Rust/Cargo toolchain and the native dependencies for the target platform. See [docs/desktop-foundation.md](docs/desktop-foundation.md) and [docs/desktop-packaging.md](docs/desktop-packaging.md) for architecture, runtime, and packaging prerequisites.
+Desktop development also requires a Rust/Cargo toolchain and the native dependencies for the target platform. See [docs/desktop-foundation.md](docs/desktop-foundation.md) and [docs/desktop-packaging.md](docs/desktop-packaging.md) for setup and packaging prerequisites.
 
 ## Contributing
 
