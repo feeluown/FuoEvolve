@@ -568,6 +568,7 @@ private fun ProviderCatalogSettings(
     onOpenCredentialBackup: () -> Unit,
 ) {
     val credentialBackupActions = LocalProviderCredentialBackupActions.current
+    val openSupportedLinksSettings = rememberSupportedLinksSettingsAction()
     val ordered = remember(state.availableProviders, state.providerOrderIds) {
         val order = state.providerOrderIds.withIndex().associate { it.value to it.index }
         state.availableProviders.sortedBy { order[it.providerId] ?: Int.MAX_VALUE }
@@ -649,6 +650,23 @@ private fun ProviderCatalogSettings(
                 },
             )
             if (index < ordered.lastIndex) SettingsDivider()
+        }
+    }
+    openSupportedLinksSettings?.let { action ->
+        SettingsGroup(title = "链接打开") {
+            SettingsRow(
+                title = "支持的链接",
+                supportingText = "前往系统设置，按需开启网易云、QQ 音乐、哔哩哔哩和 YouTube Music 链接",
+                leadingContent = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = action,
+            )
         }
     }
     if (credentialBackupActions.isAvailable) {
