@@ -102,6 +102,7 @@ internal fun mergePlaybackStartFailure(
     }
     return PlaybackRuntimeEngineState(
         status = if (activeFailure != null) PlaybackSessionStatus.Error else engineState.status.toPlaybackSessionStatus(),
+        currentTrack = engineState.currentTrack?.logicalPlaybackTrack()?.toTrackRef(),
         positionMs = engineState.positionMs,
         durationMs = engineState.durationMs,
         bufferedMs = engineState.bufferedMs,

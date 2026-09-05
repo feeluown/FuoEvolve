@@ -17,6 +17,7 @@ class DefaultPlaybackRuntimeTest {
         val engine = FakeEngine(
             PlaybackRuntimeEngineState(
                 status = PlaybackSessionStatus.Playing,
+                currentTrack = track("a"),
                 positionMs = 12_000,
                 durationMs = 180_000,
                 bufferedMs = 30_000,
@@ -42,6 +43,7 @@ class DefaultPlaybackRuntimeTest {
         assertEquals("merged lyrics", runtime.state.value.lyrics)
         assertEquals(listOf("a", "b"), runtime.state.value.queueTrackIds)
 
+        engine.mutableState.value = engine.mutableState.value.copy(currentTrack = track("b"))
         overlay.value = overlay.value.copy(
             currentTrack = track("b"),
             lyrics = null,
@@ -54,6 +56,51 @@ class DefaultPlaybackRuntimeTest {
         assertEquals(-500, runtime.state.value.lyricsAlignmentOffsetMs)
         assertEquals(null, runtime.state.value.lyrics)
         assertEquals(listOf("b"), runtime.state.value.queueTrackIds)
+        scope.cancel()
+    }
+
+    @Test
+    fun engineTrackWinsWhilePresentationOverlayCatchesUp() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val engine = FakeEngine(
+            PlaybackRuntimeEngineState(
+                status = PlaybackSessionStatus.Playing,
+                currentTrack = track("b"),
+                positionMs = 4_000,
+                durationMs = 180_000,
+            ),
+        )
+        val overlay = MutableStateFlow(
+            PlaybackRuntimeOverlay(
+                currentTrack = track("a"),
+                lyrics = "lyrics for a",
+                lyricsAlignmentOffsetMs = 750,
+                queueTrackIds = listOf("a", "b", "c"),
+                queueIndex = 0,
+            ),
+        )
+        val runtime = DefaultPlaybackRuntime(engine, overlay, FakeQueueActions(), scope)
+
+        assertEquals("b", runtime.state.value.currentTrack?.id)
+        assertEquals(null, runtime.state.value.lyrics)
+        assertEquals(0, runtime.state.value.lyricsAlignmentOffsetMs)
+        assertEquals(4_000, runtime.state.value.lyricsPositionMs)
+        assertEquals(listOf("b"), runtime.state.value.queueTrackIds)
+        assertEquals(0, runtime.state.value.queueIndex)
+
+        overlay.value = PlaybackRuntimeOverlay(
+            currentTrack = track("b"),
+            lyrics = "lyrics for b",
+            lyricsAlignmentOffsetMs = 250,
+            queueTrackIds = listOf("b", "c"),
+            queueIndex = 0,
+        )
+
+        assertEquals("b", runtime.state.value.currentTrack?.id)
+        assertEquals("lyrics for b", runtime.state.value.lyrics)
+        assertEquals(250, runtime.state.value.lyricsAlignmentOffsetMs)
+        assertEquals(3_750, runtime.state.value.lyricsPositionMs)
+        assertEquals(listOf("b", "c"), runtime.state.value.queueTrackIds)
         scope.cancel()
     }
 
