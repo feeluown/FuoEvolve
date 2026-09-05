@@ -52,6 +52,7 @@ internal class DesktopPlaybackQueueStore(
             .reconcileRestoredPlayback(
                 plan = null,
                 currentTrack = restoredSession?.currentTrack,
+                currentQueueEntryId = restoredSession?.currentQueueEntryId,
             )
         synchronized(writeVersionLock) {
             latestSnapshot = snapshot
@@ -123,6 +124,7 @@ private class DesktopPlaybackResumeStore(
             durationMs = state.durationMs.coerceAtLeast(0L),
             playbackParts = state.playbackParts,
             currentPartIndex = state.currentPartIndex,
+            currentQueueEntryId = state.playbackQueueEntryId?.takeIf { it > 0L },
         )
         latest = snapshot
         loaded = true
