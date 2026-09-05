@@ -139,6 +139,10 @@ internal class PlaybackStartCoordinator(
             setCurrentPartIndex(-1)
         }
         queue.updateCurrentTrack(logicalTrack)
+        val playbackQueueEntries = queue.displayQueueEntries()
+        val currentQueueEntryId = playbackQueueEntries.firstOrNull()
+            ?.takeIf { entry -> entry.track.id == logicalTrack.id }
+            ?.id
         if (!isManualSourceSwitch) {
             resetLyricsForPlaybackRequest()
         }
@@ -167,6 +171,7 @@ internal class PlaybackStartCoordinator(
                 currentPartIndex = requestedPartIndex.takeIf { isPlaybackPartRequest } ?: -1,
                 lyrics = preservedLyrics ?: logicalTrack.lyrics,
                 playbackGeneration = transaction.id,
+                playbackQueueEntryId = currentQueueEntryId,
                 errorMessage = null,
             )
         )
@@ -186,6 +191,7 @@ internal class PlaybackStartCoordinator(
                 transaction = transaction,
                 logicalTrack = logicalTrack,
                 resolveTrack = resolveTrack,
+                queueEntryId = currentQueueEntryId,
                 skippedUnavailableCount = skippedUnavailableCount,
                 requestedPartIndex = requestedPartIndex,
                 manualSelection = manualSelection,
@@ -202,6 +208,7 @@ internal class PlaybackStartCoordinator(
                         PlaybackRequest(
                             track = logicalTrack,
                             resolveTrack = resolveTrack,
+                            queueEntryId = currentQueueEntryId,
                             requestedPartIndex = requestedPartIndex,
                             unavailablePolicy = unavailablePlaybackPolicy(),
                             smartReplacementProviderIds = smartReplacementProviderIds(),
@@ -211,15 +218,16 @@ internal class PlaybackStartCoordinator(
                             resolveOnlySelectedReplacement = manualSelection != null,
                         )
                     )
-                    queue.displayQueue()
+                    playbackQueueEntries
                         .drop(1)
                         .take(PLAYBACK_START_PLAN_LOOKAHEAD)
-                        .forEach { queuedTrack ->
-                            val logicalQueuedTrack = queuedTrack.logicalPlaybackTrack()
+                        .forEach { queuedEntry ->
+                            val logicalQueuedTrack = queuedEntry.track.logicalPlaybackTrack()
                             add(
                                 PlaybackRequest(
                                     track = logicalQueuedTrack,
                                     resolveTrack = prepareTrack(logicalQueuedTrack),
+                                    queueEntryId = queuedEntry.id,
                                     unavailablePolicy = unavailablePlaybackPolicy(),
                                     smartReplacementProviderIds = smartReplacementProviderIds(),
                                     smartReplacementMinScore = smartReplacementMinScore(),
@@ -238,6 +246,7 @@ internal class PlaybackStartCoordinator(
         transaction: PlaybackTransaction,
         logicalTrack: MusicTrack,
         resolveTrack: MusicTrack,
+        queueEntryId: Long?,
         skippedUnavailableCount: Int,
         requestedPartIndex: Int?,
         manualSelection: SmartReplacementSelection?,
@@ -305,6 +314,7 @@ internal class PlaybackStartCoordinator(
                         playbackParts = playbackParts(),
                         currentPartIndex = currentPartIndex(),
                         playbackGeneration = transaction.id,
+                        playbackQueueEntryId = queueEntryId,
                     )
                 )
                 maybeLoadLyrics(logicalTrack)

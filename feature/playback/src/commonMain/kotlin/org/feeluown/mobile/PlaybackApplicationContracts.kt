@@ -17,10 +17,14 @@ data class ReplacementCandidateState(
 /**
  * A logical request for the platform playback runtime. The runtime, rather
  * than the UI controller, resolves provider media into a playable URL.
+ *
+ * [queueEntryId] identifies the concrete occurrence in the live queue. Multiple requests may
+ * reference the same logical track id, so platform runtimes must not use `track.id` as queue identity.
  */
 data class PlaybackRequest(
     val track: MusicTrack,
     val resolveTrack: MusicTrack = track,
+    val queueEntryId: Long? = null,
     val requestedPartIndex: Int? = null,
     val unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
     val smartReplacementProviderIds: Set<String> = emptySet(),
@@ -57,6 +61,7 @@ data class PlaybackState(
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
     val playbackGeneration: Long = 0,
+    val playbackQueueEntryId: Long? = null,
     val errorMessage: String? = null,
 )
 
@@ -69,7 +74,39 @@ data class PlaybackQueueSnapshot(
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
     val isFmQueue: Boolean = false,
     val shuffleBeforeFm: Boolean? = null,
+    val mainQueueEntryIds: List<Long> = emptyList(),
+    val originalMainQueueEntryIds: List<Long> = emptyList(),
+    val upNextQueueEntryIds: List<Long> = emptyList(),
+    val queueEntrySequence: Long = 0L,
+    /** Ephemeral hydration hint; never encoded into the durable v2 queue payload. */
+    val restoredActiveQueueEntryId: Long? = null,
 )
+
+data class PlaybackQueueIdentitySnapshot(
+    val mainQueueEntryIds: List<Long> = emptyList(),
+    val originalMainQueueEntryIds: List<Long> = emptyList(),
+    val upNextQueueEntryIds: List<Long> = emptyList(),
+    val queueEntrySequence: Long = 0L,
+)
+
+fun PlaybackQueueSnapshot.toIdentitySnapshot(): PlaybackQueueIdentitySnapshot =
+    PlaybackQueueIdentitySnapshot(
+        mainQueueEntryIds = mainQueueEntryIds,
+        originalMainQueueEntryIds = originalMainQueueEntryIds,
+        upNextQueueEntryIds = upNextQueueEntryIds,
+        queueEntrySequence = queueEntrySequence,
+    )
+
+fun PlaybackQueueSnapshot.withIdentitySnapshot(
+    identity: PlaybackQueueIdentitySnapshot?,
+): PlaybackQueueSnapshot = identity?.let { value ->
+    copy(
+        mainQueueEntryIds = value.mainQueueEntryIds,
+        originalMainQueueEntryIds = value.originalMainQueueEntryIds,
+        upNextQueueEntryIds = value.upNextQueueEntryIds,
+        queueEntrySequence = value.queueEntrySequence,
+    )
+} ?: this
 
 interface PlaybackQueueStore {
     suspend fun load(): PlaybackQueueSnapshot
@@ -82,6 +119,7 @@ object NoOpPlaybackQueueStore : PlaybackQueueStore {
     override suspend fun save(snapshot: PlaybackQueueSnapshot) = Unit
 }
 
+/** Durable queue payload. Keep this format at v2 for backward compatibility. */
 object PlaybackQueueCodec {
     private const val CURRENT_VERSION = "v2"
 
@@ -273,6 +311,43 @@ object PlaybackQueueCodec {
             }
         }
         return result.toString()
+    }
+}
+
+/** Separate sidecar for occurrence identity; the queue payload above remains byte-compatible v2. */
+object PlaybackQueueIdentityCodec {
+    private const val CURRENT_VERSION = "i1"
+
+    fun encode(snapshot: PlaybackQueueIdentitySnapshot): String = buildList {
+        add(CURRENT_VERSION)
+        add(snapshot.queueEntrySequence.toString())
+        addIds("main", snapshot.mainQueueEntryIds)
+        addIds("original", snapshot.originalMainQueueEntryIds)
+        addIds("upNext", snapshot.upNextQueueEntryIds)
+    }.joinToString("\n")
+
+    fun decode(raw: String): PlaybackQueueIdentitySnapshot? {
+        val lines = raw.lineSequence().filter { it.isNotBlank() }.toList()
+        if (lines.firstOrNull() != CURRENT_VERSION) return null
+        val sequence = lines.getOrNull(1)?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
+        val sections = lines.drop(2).mapNotNull { line ->
+            val parts = line.split("\t", limit = 2)
+            if (parts.size != 2) return@mapNotNull null
+            parts[0] to parts[1]
+                .split(',')
+                .mapNotNull(String::toLongOrNull)
+                .filter { it > 0L }
+        }.toMap()
+        return PlaybackQueueIdentitySnapshot(
+            mainQueueEntryIds = sections["main"].orEmpty(),
+            originalMainQueueEntryIds = sections["original"].orEmpty(),
+            upNextQueueEntryIds = sections["upNext"].orEmpty(),
+            queueEntrySequence = sequence,
+        )
+    }
+
+    private fun MutableList<String>.addIds(section: String, ids: List<Long>) {
+        add("$section\t${ids.joinToString(",")}")
     }
 }
 

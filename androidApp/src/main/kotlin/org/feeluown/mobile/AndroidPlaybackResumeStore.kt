@@ -7,6 +7,7 @@ import org.json.JSONObject
 internal data class AndroidPlaybackResumeSnapshot(
     val plan: PlaybackPlan,
     val currentTrack: MusicTrack,
+    val currentQueueEntryId: Long?,
     val positionMs: Long,
     val durationMs: Long,
     val playbackParts: List<PlaybackPart>,
@@ -26,14 +27,16 @@ internal data class AndroidPlaybackResumeSnapshot(
             playbackParts = playbackParts,
             currentPartIndex = normalizedPartIndex,
             playbackGeneration = plan.generation,
+            playbackQueueEntryId = currentQueueEntryId,
             lyrics = currentTrack.lyrics,
         )
     }
 
     fun resumePlan(generation: Long = plan.generation): PlaybackPlan? {
-        val requestIndex = plan.requests.indexOfFirst { request ->
-            request.track.id == currentTrack.id
-        }
+        val requestIndex = currentQueueEntryId
+            ?.let { entryId -> plan.requests.indexOfFirst { request -> request.queueEntryId == entryId } }
+            ?.takeIf { it >= 0 }
+            ?: plan.requests.indexOfFirst { request -> request.track.id == currentTrack.id }
         if (requestIndex < 0) return null
 
         val remainingRequests = plan.requests.drop(requestIndex).toMutableList()
@@ -72,6 +75,7 @@ internal class AndroidPlaybackResumeStore(context: Context) {
             AndroidPlaybackResumeSnapshot(
                 plan = plan,
                 currentTrack = currentTrack,
+                currentQueueEntryId = preferences.getLong(KEY_QUEUE_ENTRY_ID, 0L).takeIf { it > 0L },
                 positionMs = preferences.getLong(KEY_POSITION_MS, 0L),
                 durationMs = preferences.getLong(KEY_DURATION_MS, 0L),
                 playbackParts = playbackParts,
@@ -86,6 +90,7 @@ internal class AndroidPlaybackResumeStore(context: Context) {
             .putInt(KEY_VERSION, CURRENT_VERSION)
             .putString(KEY_PLAN, plan.toJson())
             .putString(KEY_TRACK, currentTrack.toJsonObject().toString())
+            .putLong(KEY_QUEUE_ENTRY_ID, state.playbackQueueEntryId ?: 0L)
             .putString(KEY_PARTS, encodeParts(state.playbackParts))
             .putInt(KEY_PART_INDEX, state.currentPartIndex)
             .putLong(KEY_POSITION_MS, state.positionMs.coerceAtLeast(0L))
@@ -152,6 +157,7 @@ internal class AndroidPlaybackResumeStore(context: Context) {
         private const val KEY_VERSION = "version"
         private const val KEY_PLAN = "plan"
         private const val KEY_TRACK = "track"
+        private const val KEY_QUEUE_ENTRY_ID = "queue_entry_id"
         private const val KEY_POSITION_MS = "position_ms"
         private const val KEY_DURATION_MS = "duration_ms"
         private const val KEY_PARTS = "parts"

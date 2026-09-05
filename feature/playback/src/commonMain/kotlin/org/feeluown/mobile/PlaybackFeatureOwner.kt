@@ -260,7 +260,9 @@ private class DefaultPlaybackFeatureOwner(
     private fun onEngineState(engineState: PlaybackState) {
         val engineTrack = engineState.currentTrack
         val logicalEngineTrack = engineTrack?.logicalPlaybackTrack()
-        logicalEngineTrack?.let(::synchronizePlaybackTrack)
+        logicalEngineTrack?.let { track ->
+            synchronizePlaybackTrack(track, engineState.playbackQueueEntryId)
+        }
         val currentQueueTrackId = queueState.currentTrack()?.id
         val endAction = lifecycleOwner.evaluate(
             engineState.copy(currentTrack = logicalEngineTrack),
@@ -464,8 +466,17 @@ private class DefaultPlaybackFeatureOwner(
         }
     }
 
-    private fun synchronizePlaybackTrack(track: MusicTrack) {
+    private fun synchronizePlaybackTrack(track: MusicTrack, queueEntryId: Long?) {
         val logicalTrack = track.logicalPlaybackTrack()
+        val entryChanged = queueEntryId?.let { entryId ->
+            queueState.synchronizePlaybackEntry(entryId, logicalTrack)
+        }
+        if (entryChanged != null) {
+            if (entryChanged) persistPlaybackQueue()
+            return
+        }
+
+        // Compatibility path for engines/restored sessions that do not yet expose queue-entry identity.
         val current = queueState.currentTrack()
         var changed = current != logicalTrack
         if (current?.id != logicalTrack.id) {

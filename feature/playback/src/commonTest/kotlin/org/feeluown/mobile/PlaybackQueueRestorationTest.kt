@@ -50,6 +50,40 @@ class PlaybackQueueRestorationTest {
     }
 
     @Test
+    fun activeUpNextDuplicateIsReinsertedByOccurrenceId() {
+        val duplicateMain = track("song:duplicate")
+        val second = track("song:2")
+        val activeUpNext = track("song:duplicate")
+        val pendingUpNext = track("song:pending")
+        val snapshot = PlaybackQueueSnapshot(
+            mainQueue = listOf(duplicateMain, second),
+            upNextQueue = listOf(pendingUpNext),
+            queueIndex = 0,
+            mainQueueEntryIds = listOf(10L, 11L),
+            upNextQueueEntryIds = listOf(13L),
+            queueEntrySequence = 13L,
+        )
+
+        val restored = snapshot.reconcileRestoredPlayback(
+            plan = PlaybackPlan(
+                generation = 1L,
+                requests = listOf(
+                    PlaybackRequest(activeUpNext, queueEntryId = 12L),
+                    PlaybackRequest(pendingUpNext, queueEntryId = 13L),
+                    PlaybackRequest(second, queueEntryId = 11L),
+                ),
+            ),
+            currentTrack = activeUpNext,
+            currentQueueEntryId = 12L,
+        )
+
+        assertEquals(listOf(activeUpNext, pendingUpNext), restored.upNextQueue)
+        assertEquals(listOf(12L, 13L), restored.upNextQueueEntryIds)
+        assertEquals(listOf(10L, 11L), restored.mainQueueEntryIds)
+        assertEquals(13L, restored.queueEntrySequence)
+    }
+
+    @Test
     fun emptyLegacySnapshotRecoversCurrentAndLookAheadFromPlaybackPlan() {
         val alreadyPlayed = track("song:old")
         val current = track("song:current")

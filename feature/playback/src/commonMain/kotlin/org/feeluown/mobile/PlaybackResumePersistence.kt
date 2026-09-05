@@ -20,6 +20,7 @@ data class PlaybackResumeSnapshot(
     val durationMs: Long,
     val playbackParts: List<PlaybackPart> = emptyList(),
     val currentPartIndex: Int = -1,
+    val currentQueueEntryId: Long? = null,
 ) {
     fun toPlaybackState(): PlaybackState {
         val normalizedDuration = durationMs.takeIf { it > 0L } ?: currentTrack.durationMs ?: 0L
@@ -33,6 +34,7 @@ data class PlaybackResumeSnapshot(
             durationMs = normalizedDuration,
             playbackParts = playbackParts,
             currentPartIndex = currentPartIndex.takeIf { it in playbackParts.indices } ?: -1,
+            playbackQueueEntryId = currentQueueEntryId?.takeIf { it > 0L },
             lyrics = currentTrack.lyrics,
         )
     }
@@ -67,6 +69,7 @@ object PlaybackResumeCodec {
                 snapshot.positionMs.coerceAtLeast(0L).toString(),
                 snapshot.durationMs.coerceAtLeast(0L).toString(),
                 snapshot.currentPartIndex.toString(),
+                snapshot.currentQueueEntryId?.takeIf { it > 0L }?.toString().orEmpty(),
             ).joinToString("\t")
         )
         snapshot.playbackParts.forEach { part ->
@@ -113,6 +116,7 @@ object PlaybackResumeCodec {
             durationMs = state.getOrNull(1)?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L,
             playbackParts = parts,
             currentPartIndex = state.getOrNull(2)?.toIntOrNull() ?: -1,
+            currentQueueEntryId = state.getOrNull(3)?.toLongOrNull()?.takeIf { it > 0L },
         )
     }
 
