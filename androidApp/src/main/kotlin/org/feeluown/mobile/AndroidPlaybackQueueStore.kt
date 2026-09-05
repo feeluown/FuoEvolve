@@ -19,11 +19,15 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
         val persistedSnapshot = preferences.getString(KEY_QUEUE_SNAPSHOT, null)
             ?.let { raw -> runCatching { PlaybackQueueCodec.decode(raw) }.getOrNull() }
             ?: PlaybackQueueSnapshot()
+        val identity = preferences.getString(KEY_QUEUE_IDENTITY, null)
+            ?.let { raw -> runCatching { PlaybackQueueIdentityCodec.decode(raw) }.getOrNull() }
         val restoredSession = playbackResumeStore.load()
-        val snapshot = persistedSnapshot.reconcileRestoredPlayback(
-            plan = restoredSession?.plan,
-            currentTrack = restoredSession?.currentTrack,
-        )
+        val snapshot = persistedSnapshot
+            .withIdentitySnapshot(identity)
+            .reconcileRestoredPlayback(
+                plan = restoredSession?.plan,
+                currentTrack = restoredSession?.currentTrack,
+            )
         latestSnapshot = snapshot
         loadCompleted = true
         snapshot
@@ -44,12 +48,7 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
         }
     }
 
-    /**
-     * Durably writes the most recent complete controller queue snapshot. This is intentionally
-     * synchronous and is only used at important playback lifecycle boundaries (playing/paused),
-     * where surviving an abrupt process kill is more important than deferring a small preference
-     * write.
-     */
+    /** Durably writes the most recent complete controller queue snapshot. */
     fun flushLatest() {
         if (!loadCompleted) return
         latestSnapshot?.let(::writeSnapshot)
@@ -58,11 +57,13 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
     private fun writeSnapshot(snapshot: PlaybackQueueSnapshot) {
         preferences.edit()
             .putString(KEY_QUEUE_SNAPSHOT, PlaybackQueueCodec.encode(snapshot))
+            .putString(KEY_QUEUE_IDENTITY, PlaybackQueueIdentityCodec.encode(snapshot.toIdentitySnapshot()))
             .commit()
     }
 
     private companion object {
         private const val PREFS_NAME = "fuo_playback_queue"
         private const val KEY_QUEUE_SNAPSHOT = "queue_snapshot"
+        private const val KEY_QUEUE_IDENTITY = "queue_identity"
     }
 }
