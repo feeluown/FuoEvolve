@@ -15,7 +15,9 @@ class IosPlaybackQueueStore : PlaybackQueueStore {
         val identity = defaults.stringForKey(KEY_QUEUE_IDENTITY)
             ?.takeIf { it.isNotBlank() }
             ?.let { raw -> runCatching { PlaybackQueueIdentityCodec.decode(raw) }.getOrNull() }
-        snapshot.withIdentitySnapshot(identity)
+        val fingerprint = defaults.stringForKey(KEY_QUEUE_IDENTITY_FINGERPRINT)
+            ?.takeIf { it.isNotBlank() }
+        snapshot.withMatchingIdentitySnapshot(identity, fingerprint)
     }
 
     override suspend fun save(snapshot: PlaybackQueueSnapshot) {
@@ -25,6 +27,7 @@ class IosPlaybackQueueStore : PlaybackQueueStore {
                 PlaybackQueueIdentityCodec.encode(snapshot.toIdentitySnapshot()),
                 KEY_QUEUE_IDENTITY,
             )
+            defaults.setObject(snapshot.queueIdentityFingerprint(), KEY_QUEUE_IDENTITY_FINGERPRINT)
             defaults.synchronize()
         }
     }
@@ -32,5 +35,6 @@ class IosPlaybackQueueStore : PlaybackQueueStore {
     private companion object {
         private const val KEY_QUEUE_SNAPSHOT = "playback_queue_snapshot"
         private const val KEY_QUEUE_IDENTITY = "playback_queue_identity"
+        private const val KEY_QUEUE_IDENTITY_FINGERPRINT = "playback_queue_identity_fingerprint"
     }
 }
