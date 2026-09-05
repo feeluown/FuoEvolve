@@ -33,6 +33,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TonalToggleButton
@@ -53,7 +54,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
@@ -61,8 +61,8 @@ import kotlin.math.roundToInt
 private val EXPRESSIVE_PLAYBACK_REPORTING_PROVIDER_IDS = setOf("netease", "bilibili", "ytmusic")
 
 /**
- * Provider landing page: browse providers, inspect their state at a glance and freely reorder them.
- * Per-provider controls intentionally live on the provider detail page.
+ * Provider landing page: browse providers and freely reorder them.
+ * Provider state and all provider-specific controls intentionally live on the detail page.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -101,8 +101,6 @@ internal fun ProviderCatalogSettingsExpressive(
 
         ordered.forEachIndexed { index, provider ->
             key(provider.providerId) {
-                val enabled = provider.providerId in state.enabledProviderIds
-                val auth = state.sessions.authStates[provider.providerId]
                 val dragging = draggingProviderId == provider.providerId
                 val scale by animateFloatAsState(
                     targetValue = if (dragging) 1.025f else 1f,
@@ -173,10 +171,10 @@ internal fun ProviderCatalogSettingsExpressive(
                             )
                         },
                     shape = MaterialTheme.shapes.extraLarge,
-                    color = when {
-                        dragging -> MaterialTheme.colorScheme.secondaryContainer
-                        enabled -> MaterialTheme.colorScheme.surfaceContainer
-                        else -> MaterialTheme.colorScheme.surfaceContainerLow
+                    color = if (dragging) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainer
                     },
                     tonalElevation = if (dragging) 6.dp else 0.dp,
                     shadowElevation = if (dragging) 3.dp else 0.dp,
@@ -188,11 +186,7 @@ internal fun ProviderCatalogSettingsExpressive(
                     ) {
                         Surface(
                             shape = MaterialTheme.shapes.large,
-                            color = if (enabled) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHighest
-                            },
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         ) {
                             Box(
                                 modifier = Modifier.size(48.dp),
@@ -201,39 +195,15 @@ internal fun ProviderCatalogSettingsExpressive(
                                 Text(
                                     text = (index + 1).toString(),
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = if (enabled) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
-                        Column(
+                        Text(
+                            text = provider.providerName,
+                            style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
-                        ) {
-                            Text(
-                                provider.providerName,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                expressiveProviderStatusText(enabled, auth),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                expressiveProviderDisplaySummary(state, provider.providerId),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                        )
                         Icon(
                             Icons.Filled.DragHandle,
                             contentDescription = "长按拖动${provider.providerName}",
@@ -626,7 +596,7 @@ private fun ExpressiveProviderDisplaySettings(
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
         ) {
             Text(
-                "选择此音源参与的页面和功能。按钮会使用 Material Expressive 的状态形变反馈。",
+                "选择此音源参与的页面和功能。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -656,7 +626,6 @@ private fun ExpressiveProviderDisplaySettings(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ExpressiveToggleRow(
     title: String,
@@ -681,13 +650,11 @@ private fun ExpressiveToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TonalToggleButton(
+        Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             enabled = enabled,
-        ) {
-            Text(if (checked) "已开启" else "已关闭")
-        }
+        )
     }
 }
 
@@ -782,16 +749,6 @@ private fun expressiveProviderShownIn(
     ProviderDisplaySection.Mine -> state.mineProviderIds
     ProviderDisplaySection.Replace -> state.replacementProviderIds
 }
-
-private fun expressiveProviderDisplaySummary(state: ProviderCatalogUiState, providerId: String): String =
-    listOf(
-        ProviderDisplaySection.Search to "搜索",
-        ProviderDisplaySection.Recommend to "推荐",
-        ProviderDisplaySection.Explore to "探索",
-        ProviderDisplaySection.Mine to "我的",
-    ).filter { (section, _) -> expressiveProviderShownIn(state, providerId, section) }
-        .joinToString(" · ") { it.second }
-        .ifBlank { "未参与页面展示" }
 
 private fun expressiveProviderStatusText(enabled: Boolean, auth: ProviderAuthState?): String {
     val enabledText = if (enabled) "已启用" else "未启用"
