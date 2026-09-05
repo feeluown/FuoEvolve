@@ -28,6 +28,7 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
             .reconcileRestoredPlayback(
                 plan = restoredSession?.plan,
                 currentTrack = restoredSession?.currentTrack,
+                currentQueueEntryId = restoredSession?.currentQueueEntryId,
             )
         latestSnapshot = snapshot
         loadCompleted = true
