@@ -4,9 +4,15 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.tappableElement
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -51,6 +57,9 @@ internal fun AppShell(
         } else {
             16.dp
         }
+        val bottomOverlayInsets = WindowInsets.navigationBars
+            .union(WindowInsets.tappableElement)
+            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
 
         CompositionLocalProvider(
             LocalPlaybackSession provides uiGraph.playbackSession,
@@ -100,7 +109,7 @@ internal fun AppShell(
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.BottomCenter)
-                                            .navigationBarsPadding(),
+                                            .windowInsetsPadding(bottomOverlayInsets),
                                     ) {
                                         PlaybackMiniPlayerOverlay()
                                     }
@@ -108,7 +117,7 @@ internal fun AppShell(
                                 AppGlobalOverlays(uiGraph)
                                 val feedbackModifier = Modifier
                                     .align(Alignment.BottomCenter)
-                                    .navigationBarsPadding()
+                                    .windowInsetsPadding(bottomOverlayInsets)
                                     .padding(
                                         start = 16.dp,
                                         top = 16.dp,
