@@ -36,6 +36,7 @@ fun createPlaybackFeatureOwner(
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
     listeningHistorySink: ListeningHistorySink,
+    providerPlaybackReporting: ProviderPlaybackReportingRepository? = null,
     nowMillis: () -> Long = ::currentTimeMillis,
 ): PlaybackFeatureOwner {
     val owner = createPlaybackFeatureOwner(
@@ -51,8 +52,16 @@ fun createPlaybackFeatureOwner(
         openTrackDetail = openTrackDetail,
         nowMillis = nowMillis,
     )
+    val effectiveHistorySink = providerPlaybackReporting?.let { reporting ->
+        ProviderPlaybackReportingSink(
+            delegate = listeningHistorySink,
+            reporting = reporting,
+            settingsRepository = settingsRepository,
+            scope = scope,
+        )
+    } ?: listeningHistorySink
     val listeningHistoryRecorder = ListeningHistoryRecorder(
-        sink = listeningHistorySink,
+        sink = effectiveHistorySink,
         scope = scope,
         nowMillis = nowMillis,
     )
