@@ -117,6 +117,7 @@ class FuoProviderGraph internal constructor(
     val auth: ProviderAuthRepository,
     val content: ProviderContentRepository,
     val playbackSource: PlaybackProviderSourcePort,
+    val playbackReporting: ProviderPlaybackReportingRepository,
     val audioQuality: ProviderAudioQualityPort,
 )
 
@@ -134,6 +135,7 @@ fun createFuoProviderGraph(
         auth = base,
         content = content,
         playbackSource = base,
+        playbackReporting = base,
         audioQuality = base,
     )
 }
