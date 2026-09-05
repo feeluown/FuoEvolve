@@ -21,9 +21,10 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
             ?: PlaybackQueueSnapshot()
         val identity = preferences.getString(KEY_QUEUE_IDENTITY, null)
             ?.let { raw -> runCatching { PlaybackQueueIdentityCodec.decode(raw) }.getOrNull() }
+        val identityFingerprint = preferences.getString(KEY_QUEUE_IDENTITY_FINGERPRINT, null)
         val restoredSession = playbackResumeStore.load()
         val snapshot = persistedSnapshot
-            .withIdentitySnapshot(identity)
+            .withMatchingIdentitySnapshot(identity, identityFingerprint)
             .reconcileRestoredPlayback(
                 plan = restoredSession?.plan,
                 currentTrack = restoredSession?.currentTrack,
@@ -34,21 +35,13 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
     }
 
     override suspend fun save(snapshot: PlaybackQueueSnapshot) {
-        // The Android playback engine can publish its restored session before the controller has
-        // loaded the durable queue. Ignore those bootstrap writes: otherwise an empty/default
-        // controller queue can overwrite the real queue (including shuffle/repeat) during startup.
         if (!loadCompleted) return
-
-        // FuoPlayerController launches save from its main-immediate scope. Capture the complete
-        // snapshot before the first suspension so a later pause can synchronously flush exactly
-        // this queue even if the asynchronous IO write has not finished yet.
         latestSnapshot = snapshot
         withContext(Dispatchers.IO) {
             writeSnapshot(snapshot)
         }
     }
 
-    /** Durably writes the most recent complete controller queue snapshot. */
     fun flushLatest() {
         if (!loadCompleted) return
         latestSnapshot?.let(::writeSnapshot)
@@ -58,6 +51,7 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
         preferences.edit()
             .putString(KEY_QUEUE_SNAPSHOT, PlaybackQueueCodec.encode(snapshot))
             .putString(KEY_QUEUE_IDENTITY, PlaybackQueueIdentityCodec.encode(snapshot.toIdentitySnapshot()))
+            .putString(KEY_QUEUE_IDENTITY_FINGERPRINT, snapshot.queueIdentityFingerprint())
             .commit()
     }
 
@@ -65,5 +59,6 @@ class AndroidPlaybackQueueStore(context: Context) : PlaybackQueueStore {
         private const val PREFS_NAME = "fuo_playback_queue"
         private const val KEY_QUEUE_SNAPSHOT = "queue_snapshot"
         private const val KEY_QUEUE_IDENTITY = "queue_identity"
+        private const val KEY_QUEUE_IDENTITY_FINGERPRINT = "queue_identity_fingerprint"
     }
 }
