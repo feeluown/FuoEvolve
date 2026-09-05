@@ -179,6 +179,7 @@ class AndroidNativeAudioEngine(
             playbackParts = emptyList(),
             currentPartIndex = -1,
             playbackGeneration = 0L,
+            playbackQueueEntryId = null,
             errorMessage = null,
         )
         if (reason.shouldDiscardLiveSession) {
@@ -231,6 +232,7 @@ class AndroidNativeAudioEngine(
             playbackParts = emptyList(),
             currentPartIndex = -1,
             playbackGeneration = plan.generation,
+            playbackQueueEntryId = first.queueEntryId,
             errorMessage = null,
         )
         persistPlaybackState(forceSession = true)
@@ -463,6 +465,8 @@ class AndroidNativeAudioEngine(
             append(plan.generation)
             append('|')
             append(track.id)
+            append('|')
+            append(state.playbackQueueEntryId ?: 0L)
             append('|')
             append(state.currentPartIndex)
             append('|')
