@@ -253,6 +253,8 @@ fun SettingsFeatureScreen(
                                 SettingsDetailColumn(modifier = bodyModifier) {
                                     ProviderAccountSettings(
                                         provider = provider,
+                                        settings = settingsState,
+                                        settingsController = settingsController,
                                         authController = providerAuth,
                                         authUiState = authState,
                                         onOpenProviderWebLogin = onOpenProviderWebLogin,
@@ -1312,6 +1314,8 @@ private fun AboutFeatureSettings(
 @Composable
 private fun ProviderAccountSettings(
     provider: ProviderInfo,
+    settings: SettingsFeatureUiState,
+    settingsController: SettingsFeatureController,
     authController: ProviderAuthFeatureController,
     authUiState: ProviderAuthUiState,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
@@ -1345,6 +1349,20 @@ private fun ProviderAccountSettings(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("退出登录") }
             }
+        }
+    }
+
+    if (provider.providerId in PLAYBACK_REPORTING_PROVIDER_IDS) {
+        SettingsGroup(title = "播放数据") {
+            SettingsToggleRow(
+                title = "播放数据上报",
+                supportingText = "开启后仅在已登录时同步实际播放进度与完成状态，用于${provider.providerName}的播放历史与推荐优化",
+                checked = provider.providerId in settings.settings.playbackReportingProviderIds,
+                enabled = !busy,
+                onCheckedChange = { enabled ->
+                    settingsController.setProviderPlaybackReportingEnabled(provider.providerId, enabled)
+                },
+            )
         }
     }
 
@@ -1712,3 +1730,5 @@ private fun formatCacheBytes(bytes: Long): String = when {
     bytes >= 1024L -> "${bytes / 1024L} KB"
     else -> "$bytes B"
 }
+
+private val PLAYBACK_REPORTING_PROVIDER_IDS = setOf("netease", "bilibili", "ytmusic")
