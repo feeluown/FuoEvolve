@@ -113,7 +113,7 @@ internal class YtMusicPlaybackReportingProvider(
         val sapisid = YtMusicProvider.sapisidFromCookie(cookie)
         headers["Authorization"] = when {
             !sapisid.isNullOrBlank() -> YtMusicProvider.sapisidHashAuthorization(sapisid, YtMusicProvider.YTM_ORIGIN)
-            !stored.authorization.isNullOrBlank() -> stored.authorization
+            !stored.authorization.isNullOrBlank() -> stored.authorization.orEmpty()
             else -> return null
         }
         return AuthenticatedRequest(headers = headers, oauth = false)
