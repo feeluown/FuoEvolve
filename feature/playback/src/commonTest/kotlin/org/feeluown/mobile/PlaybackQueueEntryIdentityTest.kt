@@ -97,7 +97,10 @@ class PlaybackQueueEntryIdentityTest {
 
         val identityPayload = PlaybackQueueIdentityCodec.encode(snapshot.toIdentitySnapshot())
         val identity = assertNotNull(PlaybackQueueIdentityCodec.decode(identityPayload))
-        val decoded = decodedQueue.withIdentitySnapshot(identity)
+        val decoded = decodedQueue.withMatchingIdentitySnapshot(
+            identity = identity,
+            fingerprint = snapshot.queueIdentityFingerprint(),
+        )
         val restored = PlaybackQueueController()
         assertTrue(restored.restore(decoded))
 
@@ -109,6 +112,33 @@ class PlaybackQueueEntryIdentityTest {
         assertEquals(source.originalMainQueueEntries().map { it.id }, restored.originalMainQueueEntries().map { it.id })
         assertEquals(source.currentQueueEntryId(), restored.currentQueueEntryId())
         assertNotEquals(restored.mainQueueEntries()[0].id, restored.mainQueueEntries()[2].id)
+    }
+
+    @Test
+    fun staleIdentitySidecarIsRejectedForDifferentQueuePayload() {
+        val original = PlaybackQueueController().apply {
+            mainQueue = listOf(track("track:a", "A"), track("track:b", "B"))
+            mainQueueIndex = 0
+        }.snapshot()
+        val identity = original.toIdentitySnapshot()
+        val differentQueue = PlaybackQueueCodec.decode(
+            PlaybackQueueCodec.encode(
+                PlaybackQueueSnapshot(
+                    mainQueue = listOf(track("track:b", "B"), track("track:a", "A")),
+                    queueIndex = 0,
+                )
+            )
+        )
+
+        val merged = differentQueue.withMatchingIdentitySnapshot(
+            identity = identity,
+            fingerprint = original.queueIdentityFingerprint(),
+        )
+
+        assertTrue(merged.mainQueueEntryIds.isEmpty())
+        assertTrue(merged.originalMainQueueEntryIds.isEmpty())
+        assertTrue(merged.upNextQueueEntryIds.isEmpty())
+        assertEquals(0L, merged.queueEntrySequence)
     }
 
     @Test
