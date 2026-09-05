@@ -17,7 +17,7 @@ class PlaybackQueueEntryShuffleTest {
             mainQueueIndex = 2
         }
         val currentEntryId = assertNotNull(queue.currentQueueEntryId())
-        val coordinator = coordinator(queue) { it.reversed() }
+        val coordinator = coordinator(queue, shuffleTracks = { it.reversed() })
 
         coordinator.toggleShuffle()
 
