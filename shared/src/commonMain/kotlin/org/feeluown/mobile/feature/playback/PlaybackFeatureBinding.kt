@@ -14,17 +14,25 @@ fun createAppPlaybackProviderPort(
     providerSearch: ProviderSearchRepository,
     providerCatalog: ProviderCatalogRepository,
     providerPlaybackSource: PlaybackProviderSourcePort,
-): PlaybackProviderPort = createPlaybackProviderPort(
-    registry = providerRegistry,
-    search = providerSearch,
-    catalog = providerCatalog,
-    source = providerPlaybackSource,
-    failureMessage = { throwable, fallback, providerId ->
-        throwable.providerFailureOrNull(providerId)?.userMessage
-            ?: throwable.message
-            ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
-    },
-)
+): PlaybackProviderPort {
+    val delegate = createPlaybackProviderPort(
+        registry = providerRegistry,
+        search = providerSearch,
+        catalog = providerCatalog,
+        source = providerPlaybackSource,
+        failureMessage = { throwable, fallback, providerId ->
+            throwable.providerFailureOrNull(providerId)?.userMessage
+                ?: throwable.message
+                ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
+        },
+    )
+    val reporting = providerRegistry as? ProviderPlaybackReportingRepository
+    return object : PlaybackProviderPort by delegate, ProviderPlaybackReportingRepository {
+        override suspend fun reportPlayback(providerId: String, report: ProviderPlaybackReport) {
+            reporting?.reportPlayback(providerId, report)
+        }
+    }
+}
 
 /** Application binding kept in :shared while playback business ownership lives in :feature:playback. */
 fun createPlaybackFeatureOwner(
@@ -36,7 +44,7 @@ fun createPlaybackFeatureOwner(
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
     listeningHistorySink: ListeningHistorySink,
-    providerPlaybackReporting: ProviderPlaybackReportingRepository? = null,
+    providerPlaybackReporting: ProviderPlaybackReportingRepository? = playbackProvider as? ProviderPlaybackReportingRepository,
     nowMillis: () -> Long = ::currentTimeMillis,
 ): PlaybackFeatureOwner {
     val owner = createPlaybackFeatureOwner(
