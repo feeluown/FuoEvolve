@@ -80,6 +80,7 @@ data class AppSettings(
     val recommendProviderIds: Set<String> = emptySet(),
     val exploreProviderIds: Set<String> = emptySet(),
     val mineProviderIds: Set<String> = emptySet(),
+    val playbackReportingProviderIds: Set<String> = emptySet(),
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
     val downloadParallelism: Int = DEFAULT_DOWNLOAD_PARALLELISM,

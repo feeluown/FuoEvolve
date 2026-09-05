@@ -1,8 +1,10 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -14,17 +16,25 @@ fun createAppPlaybackProviderPort(
     providerSearch: ProviderSearchRepository,
     providerCatalog: ProviderCatalogRepository,
     providerPlaybackSource: PlaybackProviderSourcePort,
-): PlaybackProviderPort = createPlaybackProviderPort(
-    registry = providerRegistry,
-    search = providerSearch,
-    catalog = providerCatalog,
-    source = providerPlaybackSource,
-    failureMessage = { throwable, fallback, providerId ->
-        throwable.providerFailureOrNull(providerId)?.userMessage
-            ?: throwable.message
-            ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
-    },
-)
+): PlaybackProviderPort {
+    val delegate = createPlaybackProviderPort(
+        registry = providerRegistry,
+        search = providerSearch,
+        catalog = providerCatalog,
+        source = providerPlaybackSource,
+        failureMessage = { throwable, fallback, providerId ->
+            throwable.providerFailureOrNull(providerId)?.userMessage
+                ?: throwable.message
+                ?: throwable::class.simpleName.orEmpty().ifBlank { fallback }
+        },
+    )
+    val reporting = providerRegistry as? ProviderPlaybackReportingRepository
+    return object : PlaybackProviderPort by delegate, ProviderPlaybackReportingRepository {
+        override suspend fun reportPlayback(providerId: String, report: ProviderPlaybackReport) {
+            reporting?.reportPlayback(providerId, report)
+        }
+    }
+}
 
 /** Application binding kept in :shared while playback business ownership lives in :feature:playback. */
 fun createPlaybackFeatureOwner(
@@ -36,6 +46,7 @@ fun createPlaybackFeatureOwner(
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
     listeningHistorySink: ListeningHistorySink,
+    providerPlaybackReporting: ProviderPlaybackReportingRepository? = playbackProvider as? ProviderPlaybackReportingRepository,
     nowMillis: () -> Long = ::currentTimeMillis,
 ): PlaybackFeatureOwner {
     val owner = createPlaybackFeatureOwner(
@@ -51,8 +62,30 @@ fun createPlaybackFeatureOwner(
         openTrackDetail = openTrackDetail,
         nowMillis = nowMillis,
     )
+    val listeningHistoryRepository = (listeningHistorySink as? ListeningHistoryRepository)?.let { repository ->
+        LegacyPlaylistStatsMigratingRepository(
+            delegate = repository,
+            settingsRepository = settingsRepository,
+            scope = scope,
+        )
+    }
+    val wrappedTransport = ListeningHistoryPlaybackTransport(
+        delegate = owner.transport,
+        repository = listeningHistoryRepository,
+        scope = scope,
+    )
+    val effectiveHistorySink = providerPlaybackReporting?.let { reporting ->
+        ProviderPlaybackReportingSink(
+            delegate = listeningHistorySink,
+            reporting = reporting,
+            settingsRepository = settingsRepository,
+            onReportingFailure = wrappedTransport::showFeedback,
+            nowMillis = nowMillis,
+            scope = scope,
+        )
+    } ?: listeningHistorySink
     val listeningHistoryRecorder = ListeningHistoryRecorder(
-        sink = listeningHistorySink,
+        sink = effectiveHistorySink,
         scope = scope,
         nowMillis = nowMillis,
     )
@@ -64,17 +97,6 @@ fun createPlaybackFeatureOwner(
             )
         }
     }
-    val listeningHistoryRepository = (listeningHistorySink as? ListeningHistoryRepository)?.let { repository ->
-        LegacyPlaylistStatsMigratingRepository(
-            delegate = repository,
-            settingsRepository = settingsRepository,
-            scope = scope,
-        )
-    }
-    val wrappedTransport = ListeningHistoryPlaybackTransport(
-        delegate = owner.transport,
-        repository = listeningHistoryRepository,
-    )
     return object : PlaybackFeatureOwner by owner {
         override val transport: PlaybackTransportCoordinator = wrappedTransport
     }
@@ -87,15 +109,49 @@ fun createPlaybackFeatureOwner(
 private class ListeningHistoryPlaybackTransport(
     private val delegate: PlaybackTransportCoordinator,
     private val repository: ListeningHistoryRepository?,
+    scope: CoroutineScope,
 ) : PlaybackTransportCoordinator by delegate {
-    private var contextHint: PlaybackContextSnapshot? = null
+    private val mutableFeedback = MutableStateFlow(delegate.feedback.value)
+    private var delegateFeedback: String? = delegate.feedback.value
+    private var reportingFeedback: String? = null
 
     override val listeningHistoryRepository: ListeningHistoryRepository?
         get() = repository
+    override val feedback: StateFlow<String?> = mutableFeedback.asStateFlow()
+
+    init {
+        scope.launch {
+            delegate.feedback.collect { value ->
+                delegateFeedback = value
+                publishFeedback()
+            }
+        }
+    }
+
+    fun showFeedback(message: String) {
+        if (message.isBlank()) return
+        reportingFeedback = message
+        publishFeedback()
+    }
+
+    override fun dismissFeedback(feedback: String) {
+        if (reportingFeedback == feedback) {
+            reportingFeedback = null
+        } else {
+            delegate.dismissFeedback(feedback)
+        }
+        publishFeedback()
+    }
+
+    private fun publishFeedback() {
+        mutableFeedback.value = reportingFeedback ?: delegateFeedback
+    }
 
     override fun setPlaybackContextHint(context: PlaybackContextSnapshot?) {
         contextHint = context
     }
+
+    private var contextHint: PlaybackContextSnapshot? = null
 
     override fun playTracks(tracks: List<MusicTrack>, index: Int) {
         val context = contextHint
