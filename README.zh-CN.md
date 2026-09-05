@@ -40,7 +40,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 - **Windows**：支持 SMTC 系统媒体控制。
 - **macOS**：支持 Now Playing / Remote Command Center。
-- **Linux**：支持 MPRIS 媒体控制，并以原生 Wayland 运行作为目标。
+- **Linux**：支持 MPRIS 媒体控制；原生 Wayland 运行是目标，目前仍在完善打包验证。
 - **托盘生命周期**：关闭窗口后继续播放和下载，可从托盘 / 状态栏图标恢复窗口或退出应用。
 - **安全登录存储**：使用 Windows Credential Manager、macOS Keychain 和 Linux Secret Service / Libsecret。
 
@@ -79,7 +79,7 @@ FuoEvolve 基于 Kotlin Multiplatform 和 Compose Multiplatform。
 ./gradlew :desktopApp:run
 ```
 
-桌面端架构和打包说明见 [docs/desktop-foundation.md](docs/desktop-foundation.md) 与 [docs/desktop-packaging.md](docs/desktop-packaging.md)。
+桌面端开发还需要 Rust/Cargo 工具链以及目标平台所需的原生依赖。架构、运行时与打包前置条件见 [docs/desktop-foundation.md](docs/desktop-foundation.md) 与 [docs/desktop-packaging.md](docs/desktop-packaging.md)。
 
 ## 参与贡献
 
