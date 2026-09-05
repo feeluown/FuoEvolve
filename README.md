@@ -40,7 +40,7 @@ The desktop app uses the same shared interface and core experience as mobile ins
 
 - **Windows:** system media controls through SMTC.
 - **macOS:** Now Playing / Remote Command Center integration.
-- **Linux:** MPRIS media controls and native Wayland runtime support.
+- **Linux:** MPRIS media controls; native Wayland is the target, with packaging validation still in progress.
 - **Tray lifecycle:** closing the window keeps playback and downloads running; the tray/status item can restore or exit the app.
 - **Secure login storage:** Windows Credential Manager, macOS Keychain, and Linux Secret Service/Libsecret.
 
@@ -79,7 +79,7 @@ FuoEvolve is built with Kotlin Multiplatform and Compose Multiplatform.
 ./gradlew :desktopApp:run
 ```
 
-Desktop architecture and packaging details are documented in [docs/desktop-foundation.md](docs/desktop-foundation.md) and [docs/desktop-packaging.md](docs/desktop-packaging.md).
+Desktop development also requires a Rust/Cargo toolchain and the native dependencies for the target platform. See [docs/desktop-foundation.md](docs/desktop-foundation.md) and [docs/desktop-packaging.md](docs/desktop-packaging.md) for architecture, runtime, and packaging prerequisites.
 
 ## Contributing
 
