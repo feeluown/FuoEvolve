@@ -34,11 +34,22 @@ kotlin {
     }
 }
 
+val neteaseBuildFile = layout.projectDirectory.file("build.gradle.kts")
+val legacySharedNeteaseCommonDirectory = rootProject.layout.projectDirectory.dir(
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/provider/netease",
+)
+val legacySharedNeteaseAndroidDirectory = rootProject.layout.projectDirectory.dir(
+    "shared/src/androidMain/kotlin/org/feeluown/mobile/provider/netease",
+)
+val legacySharedNeteaseIosDirectory = rootProject.layout.projectDirectory.dir(
+    "shared/src/iosMain/kotlin/org/feeluown/mobile/provider/netease",
+)
+
 val checkConcreteProviderBoundaries = tasks.register("checkConcreteProviderBoundaries") {
     group = "verification"
     description = "Checks the NetEase concrete provider module boundary."
     doLast {
-        val buildText = project.buildFile.readText()
+        val buildText = neteaseBuildFile.asFile.readText()
         val forbidden = listOf(
             "project(\":shared\")",
             "project(\":androidApp\")",
@@ -51,13 +62,13 @@ val checkConcreteProviderBoundaries = tasks.register("checkConcreteProviderBound
         forbidden.forEach { dependency ->
             check(dependency !in buildText) { "NetEase provider must not depend upward/across on $dependency" }
         }
-        check(!rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/provider/netease").exists()) {
+        check(!legacySharedNeteaseCommonDirectory.asFile.exists()) {
             "NetEase implementation must not move back into :shared"
         }
-        check(!rootProject.file("shared/src/androidMain/kotlin/org/feeluown/mobile/provider/netease").exists()) {
+        check(!legacySharedNeteaseAndroidDirectory.asFile.exists()) {
             "NetEase Android implementation must not move back into :shared"
         }
-        check(!rootProject.file("shared/src/iosMain/kotlin/org/feeluown/mobile/provider/netease").exists()) {
+        check(!legacySharedNeteaseIosDirectory.asFile.exists()) {
             "NetEase iOS implementation must not move back into :shared"
         }
     }
