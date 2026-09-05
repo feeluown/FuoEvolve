@@ -77,7 +77,7 @@ class PlaybackQueueEntryIdentityTest {
     }
 
     @Test
-    fun snapshotCodecPreservesOccurrenceIdsAcrossRestart() {
+    fun v2QueuePayloadAndIdentitySidecarPreserveOccurrencesAcrossRestart() {
         val firstA = track("track:a", "A first")
         val trackB = track("track:b", "B")
         val secondA = track("track:a", "A second")
@@ -90,7 +90,14 @@ class PlaybackQueueEntryIdentityTest {
         }
         val snapshot = source.snapshot()
 
-        val decoded = PlaybackQueueCodec.decode(PlaybackQueueCodec.encode(snapshot))
+        val queuePayload = PlaybackQueueCodec.encode(snapshot)
+        assertTrue(queuePayload.startsWith("v2\n"))
+        val decodedQueue = PlaybackQueueCodec.decode(queuePayload)
+        assertTrue(decodedQueue.mainQueueEntryIds.isEmpty())
+
+        val identityPayload = PlaybackQueueIdentityCodec.encode(snapshot.toIdentitySnapshot())
+        val identity = assertNotNull(PlaybackQueueIdentityCodec.decode(identityPayload))
+        val decoded = decodedQueue.withIdentitySnapshot(identity)
         val restored = PlaybackQueueController()
         assertTrue(restored.restore(decoded))
 
