@@ -78,6 +78,8 @@ data class PlaybackQueueSnapshot(
     val originalMainQueueEntryIds: List<Long> = emptyList(),
     val upNextQueueEntryIds: List<Long> = emptyList(),
     val queueEntrySequence: Long = 0L,
+    /** Ephemeral hydration hint; never encoded into the durable v2 queue payload. */
+    val restoredActiveQueueEntryId: Long? = null,
 )
 
 data class PlaybackQueueIdentitySnapshot(
