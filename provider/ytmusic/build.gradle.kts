@@ -34,11 +34,16 @@ kotlin {
     }
 }
 
+val ytmusicBuildFile = layout.projectDirectory.file("build.gradle.kts")
+val legacySharedYtMusicDirectory = rootProject.layout.projectDirectory.dir(
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/provider/ytmusic",
+)
+
 val checkConcreteProviderBoundaries = tasks.register("checkConcreteProviderBoundaries") {
     group = "verification"
     description = "Checks the YouTube Music concrete provider module boundary."
     doLast {
-        val buildText = project.buildFile.readText()
+        val buildText = ytmusicBuildFile.asFile.readText()
         val forbidden = listOf(
             "project(\":shared\")",
             "project(\":androidApp\")",
@@ -51,7 +56,7 @@ val checkConcreteProviderBoundaries = tasks.register("checkConcreteProviderBound
         forbidden.forEach { dependency ->
             check(dependency !in buildText) { "YouTube Music provider must not depend upward/across on $dependency" }
         }
-        check(!rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/provider/ytmusic").exists()) {
+        check(!legacySharedYtMusicDirectory.asFile.exists()) {
             "YouTube Music implementation must not move back into :shared"
         }
     }
