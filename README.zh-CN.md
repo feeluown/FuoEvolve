@@ -2,8 +2,9 @@
 
 [![正式版](https://img.shields.io/github/v/release/feeluown/FuoEvolve?label=stable)](https://github.com/feeluown/FuoEvolve/releases/latest)
 [![Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml/badge.svg?branch=master)](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster)
+[![Downloads](https://img.shields.io/github/downloads/feeluown/FuoEvolve/total?label=downloads)](https://github.com/feeluown/FuoEvolve/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/docs/multiplatform.html)
+[![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4?logo=jetpackcompose&logoColor=white)](https://www.jetbrains.com/compose-multiplatform/)
 
 中文 | [English](README.md)
 
@@ -36,7 +37,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 ## 桌面端
 
-桌面端直接复用移动端的共享界面和核心体验，不维护一套功能缩水的独立桌面 UI。
+桌面端与移动端共享一致的使用体验，并提供 Windows、macOS 和 Linux 版本。
 
 - **Windows**：支持 SMTC 系统媒体控制。
 - **macOS**：支持 Now Playing / Remote Command Center。
@@ -69,7 +70,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 ## 开发
 
-FuoEvolve 基于 Kotlin Multiplatform 和 Compose Multiplatform。
+FuoEvolve 使用 [Compose Multiplatform](https://www.jetbrains.com/compose-multiplatform/) 支持多个平台。
 
 ```bash
 # 构建 Android Debug 包
@@ -79,7 +80,7 @@ FuoEvolve 基于 Kotlin Multiplatform 和 Compose Multiplatform。
 ./gradlew :desktopApp:run
 ```
 
-桌面端开发还需要 Rust/Cargo 工具链以及目标平台所需的原生依赖。架构、运行时与打包前置条件见 [docs/desktop-foundation.md](docs/desktop-foundation.md) 与 [docs/desktop-packaging.md](docs/desktop-packaging.md)。
+桌面端开发还需要 Rust/Cargo 工具链以及目标平台所需的原生依赖。具体环境与打包前置条件见 [docs/desktop-foundation.md](docs/desktop-foundation.md) 与 [docs/desktop-packaging.md](docs/desktop-packaging.md)。
 
 ## 参与贡献
 
