@@ -45,6 +45,7 @@ class ProviderAuthFeatureTest {
         runCurrent()
 
         assertTrue(session.oauthLoggedIn)
+        assertTrue(owner.authStateFor(Provider("ytmusic")).loggedIn)
         assertEquals(null, owner.state.value.oauthFlow)
         assertTrue(owner.state.value.feedback.orEmpty().contains("已通过 OAuth 登录"))
     }

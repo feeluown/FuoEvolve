@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
@@ -476,6 +477,6 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
     }
 
     private inline fun update(block: ProviderAuthFeatureState<Session>.() -> ProviderAuthFeatureState<Session>) {
-        mutableState.value = mutableState.value.block()
+        mutableState.update { current -> current.block() }
     }
 }
