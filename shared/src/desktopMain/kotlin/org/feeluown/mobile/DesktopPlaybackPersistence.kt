@@ -17,12 +17,14 @@ internal fun createDesktopPlaybackQueueStore(
 ): DesktopPlaybackQueueStore = DesktopPlaybackQueueStore(
     file = DesktopAppDirectories.state().resolve("playback-queue.txt"),
     identityFile = DesktopAppDirectories.state().resolve("playback-queue-identity.txt"),
+    fingerprintFile = DesktopAppDirectories.state().resolve("playback-queue-identity-fingerprint.txt"),
     resumeStore = resumeStore,
 )
 
 internal class DesktopPlaybackQueueStore(
     private val file: Path,
     private val identityFile: Path,
+    private val fingerprintFile: Path,
     private val resumeStore: PlaybackResumeStore,
 ) : PlaybackQueueStore {
     private val writeVersionLock = Any()
@@ -43,9 +45,10 @@ internal class DesktopPlaybackQueueStore(
             ?: PlaybackQueueSnapshot()
         val identity = readTextIfExists(identityFile)
             ?.let { raw -> runCatching { PlaybackQueueIdentityCodec.decode(raw) }.getOrNull() }
+        val fingerprint = readTextIfExists(fingerprintFile)?.takeIf { it.isNotBlank() }
         val restoredSession = resumeStore.load()
         val snapshot = persisted
-            .withIdentitySnapshot(identity)
+            .withMatchingIdentitySnapshot(identity, fingerprint)
             .reconcileRestoredPlayback(
                 plan = null,
                 currentTrack = restoredSession?.currentTrack,
@@ -92,6 +95,7 @@ internal class DesktopPlaybackQueueStore(
             identityFile,
             PlaybackQueueIdentityCodec.encode(snapshot.toIdentitySnapshot()),
         )
+        writeAtomicText(fingerprintFile, snapshot.queueIdentityFingerprint())
     }
 }
 
