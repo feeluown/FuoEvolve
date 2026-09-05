@@ -61,7 +61,7 @@ jobs:
           jpackage --version
 
       - name: Cache Windows Rust native components
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -76,7 +76,7 @@ jobs:
 
       - name: Cache pinned Windows libmpv runtime
         id: windows-libmpv-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/desktop-native/windows/mpv
           key: desktop-windows-libmpv-x64-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/windows/prepare-libmpv.ps1') }}
@@ -207,7 +207,7 @@ jobs:
           jpackage --version
 
       - name: Cache macOS Rust native components
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -222,7 +222,7 @@ jobs:
 
       - name: Cache relocatable macOS libmpv runtime
         id: macos-libmpv-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/desktop-native/macos/mpv
           key: desktop-macos-libmpv-${{ matrix.arch }}-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/macos/prepare-libmpv.sh') }}
@@ -356,7 +356,7 @@ jobs:
           rustup default stable
 
       - name: Cache Linux system Rust native components
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -521,7 +521,7 @@ jobs:
           rustup default stable
 
       - name: Cache Linux AppImage Rust native components
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry

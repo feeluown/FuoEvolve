@@ -209,7 +209,7 @@ internal class AndroidIndexedLocalMusicRepository(
             while (cursor.moveToNext()) {
                 val relativePath = if (relativePathColumn >= 0) cursor.getString(relativePathColumn).orEmpty() else ""
                 val filePath = if (dataColumn >= 0) cursor.getString(dataColumn).orEmpty() else ""
-                val directory = indexedDirectoryInfo(relativePath, filePath) ?: continue
+                val directory = indexedDirectoryInfo(relativePath, filePath)
                 val mediaId = cursor.getLong(idColumn)
                 rows += IndexedAudioRow(
                     uri = ContentUris.withAppendedId(collection, mediaId),
@@ -261,7 +261,7 @@ internal class AndroidIndexedLocalMusicRepository(
             while (cursor.moveToNext()) {
                 val relativePath = if (relativePathColumn >= 0) cursor.getString(relativePathColumn).orEmpty() else ""
                 val filePath = if (dataColumn >= 0) cursor.getString(dataColumn).orEmpty() else ""
-                val directory = indexedDirectoryInfo(relativePath, filePath) ?: continue
+                val directory = indexedDirectoryInfo(relativePath, filePath)
                 rows += IndexedImageRow(
                     directoryId = directory.id,
                     displayName = cursor.getString(nameColumn).orEmpty(),

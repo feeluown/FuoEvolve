@@ -123,14 +123,12 @@ private class DesktopPlaybackResumeStore(
 
     override fun flush(): Unit = synchronized(lock) {
         latest?.let(::writeSnapshot)
-        Unit
     }
 
     override fun clear(): Unit = synchronized(lock) {
         latest = null
         loaded = true
         runCatching { Files.deleteIfExists(file) }
-        Unit
     }
 
     private fun writeSnapshot(snapshot: PlaybackResumeSnapshot) {

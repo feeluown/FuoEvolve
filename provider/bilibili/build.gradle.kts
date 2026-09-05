@@ -34,6 +34,11 @@ kotlin {
     }
 }
 
+val bilibiliBuildFile = layout.projectDirectory.file("build.gradle.kts")
+val legacySharedBilibiliDirectory = rootProject.layout.projectDirectory.dir(
+    "shared/src/commonMain/kotlin/org/feeluown/mobile/provider/bilibili",
+)
+
 val checkP5BilibiliBoundaries = tasks.register("checkP5BilibiliBoundaries") {
     group = "verification"
     description = "Checks the P5 Bilibili physical provider boundary."
@@ -48,11 +53,11 @@ val checkP5BilibiliBoundaries = tasks.register("checkP5BilibiliBoundaries") {
             "project(\":provider:qqmusic\")",
             "project(\":provider:ytmusic\")",
         )
-        val buildText = project.buildFile.readText()
+        val buildText = bilibiliBuildFile.asFile.readText()
         forbiddenDependencies.forEach { dependency ->
             check(dependency !in buildText) { "Bilibili provider must not depend upward/across on $dependency" }
         }
-        check(!rootProject.file("shared/src/commonMain/kotlin/org/feeluown/mobile/provider/bilibili").exists()) {
+        check(!legacySharedBilibiliDirectory.asFile.exists()) {
             "Bilibili implementation must not move back into :shared"
         }
     }

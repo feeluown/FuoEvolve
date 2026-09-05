@@ -56,7 +56,6 @@ private class DesktopLocalPlaylistFileStorage(
         } finally {
             Files.deleteIfExists(temp)
         }
-        Unit
     }
 
     override suspend fun delete(fileName: String): Boolean = withContext(Dispatchers.IO) {
