@@ -4,7 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import org.feeluown.mobile.playback.api.PlaybackSession
 
-/** Android composition-edge adapter. Resume re-enters the explicit playback start transaction. */
+/** Android composition-edge adapter. Established playback resumes directly in the native engine. */
 internal fun createPlaybackRuntimeSession(
     playbackState: StateFlow<PlaybackState>,
     playbackEngine: PlaybackEngine,
@@ -17,5 +17,5 @@ internal fun createPlaybackRuntimeSession(
     transportCoordinator = transportCoordinator,
     startFailureSource = startFailureSource,
     scope = scope,
-    resumePlayback = transportCoordinator::startCurrent,
+    resumePlayback = playbackEngine::resume,
 )
