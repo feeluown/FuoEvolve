@@ -13,6 +13,7 @@ import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 /** Dynamic state emitted by the platform audio engine. */
 data class PlaybackRuntimeEngineState(
     val status: PlaybackSessionStatus = PlaybackSessionStatus.Idle,
+    val currentTrack: TrackRef? = null,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val bufferedMs: Long = 0L,
@@ -56,6 +57,10 @@ interface PlaybackRuntimeQueueActions {
  * Engine timing/status and coordinator queue presentation are merged here rather than in Android
  * service code, and play/pause/toggle decisions are made here rather than delegated to the global
  * controller facade.
+ *
+ * The platform engine is authoritative for the media item that is actually playing. During queue
+ * reconciliation the presentation overlay can briefly lag behind an engine transition; a stale
+ * overlay must never replace the engine track or leak lyrics belonging to the previous track.
  */
 class DefaultPlaybackRuntime(
     private val engine: PlaybackRuntimeEngine,
@@ -123,16 +128,29 @@ class DefaultPlaybackRuntime(
 private fun composeState(
     engine: PlaybackRuntimeEngineState,
     overlay: PlaybackRuntimeOverlay,
-): PlaybackSessionState = PlaybackSessionState(
-    status = engine.status,
-    currentTrack = overlay.currentTrack,
-    positionMs = engine.positionMs,
-    lyricsPositionMs = (engine.positionMs - overlay.lyricsAlignmentOffsetMs).coerceAtLeast(0L),
-    lyricsAlignmentOffsetMs = overlay.lyricsAlignmentOffsetMs,
-    durationMs = engine.durationMs,
-    bufferedMs = engine.bufferedMs,
-    lyrics = overlay.lyrics,
-    queueTrackIds = overlay.queueTrackIds,
-    queueIndex = overlay.queueIndex,
-    errorMessage = engine.errorMessage,
-)
+): PlaybackSessionState {
+    val engineTrack = engine.currentTrack
+    val overlayMatchesEngine = engineTrack == null || overlay.currentTrack?.id == engineTrack.id
+    val currentTrack = engineTrack ?: overlay.currentTrack
+    val lyricsAlignmentOffsetMs = if (overlayMatchesEngine) overlay.lyricsAlignmentOffsetMs else 0L
+    val queueTrackIds = if (overlayMatchesEngine) {
+        overlay.queueTrackIds
+    } else {
+        currentTrack?.let { listOf(it.id) }.orEmpty()
+    }
+    val queueIndex = if (overlayMatchesEngine) overlay.queueIndex else currentTrack?.let { 0 } ?: -1
+
+    return PlaybackSessionState(
+        status = engine.status,
+        currentTrack = currentTrack,
+        positionMs = engine.positionMs,
+        lyricsPositionMs = (engine.positionMs - lyricsAlignmentOffsetMs).coerceAtLeast(0L),
+        lyricsAlignmentOffsetMs = lyricsAlignmentOffsetMs,
+        durationMs = engine.durationMs,
+        bufferedMs = engine.bufferedMs,
+        lyrics = overlay.lyrics.takeIf { overlayMatchesEngine },
+        queueTrackIds = queueTrackIds,
+        queueIndex = queueIndex,
+        errorMessage = engine.errorMessage,
+    )
+}
