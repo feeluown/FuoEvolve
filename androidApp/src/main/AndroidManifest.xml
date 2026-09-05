@@ -71,6 +71,92 @@
                     android:pathPrefix="/FuoEvolve/r"
                     android:scheme="https" />
             </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开网易云音乐链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="music.163.com" />
+                <data android:host="y.music.163.com" />
+                <data android:path="/song" />
+                <data android:path="/playlist" />
+                <data android:path="/artist" />
+                <data android:path="/album" />
+                <data android:path="/m/song" />
+                <data android:path="/m/playlist" />
+                <data android:path="/m/artist" />
+                <data android:path="/m/album" />
+                <data android:path="/f/song" />
+                <data android:path="/f/playlist" />
+                <data android:path="/f/artist" />
+                <data android:path="/f/album" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开哔哩哔哩链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="bilibili.com" />
+                <data android:host="www.bilibili.com" />
+                <data android:host="m.bilibili.com" />
+                <data android:pathPrefix="/video/BV" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开 QQ 音乐链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="y.qq.com" />
+                <data android:pathPrefix="/n/ryqq/songDetail/" />
+                <data android:pathPrefix="/n/ryqq/playlist/" />
+                <data android:pathPrefix="/n/ryqq/singer/" />
+                <data android:pathPrefix="/n/ryqq/albumDetail/" />
+                <data android:pathPrefix="/n/ryqq/album/" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开 QQ 音乐分享链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="i.y.qq.com" />
+                <data android:path="/n2/m/share/details/taoge.html" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开 YouTube Music 链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="music.youtube.com" />
+                <data android:path="/watch" />
+                <data android:path="/playlist" />
+                <data android:pathPrefix="/channel/" />
+                <data android:pathPrefix="/browse/" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开 YouTube 链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="youtube.com" />
+                <data android:host="www.youtube.com" />
+                <data android:path="/watch" />
+                <data android:path="/playlist" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false" android:label="打开 YouTube 短链接">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="youtu.be" />
+                <data android:pathPrefix="/" />
+            </intent-filter>
         </activity>
         <activity
             android:name=".AppUpdateSavePermissionActivity"
