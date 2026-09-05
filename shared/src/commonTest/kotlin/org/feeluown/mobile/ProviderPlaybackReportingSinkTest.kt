@@ -50,7 +50,7 @@ class ProviderPlaybackReportingSinkTest {
     }
 
     @Test
-    fun replacementFromAnotherProviderIsNeverReported() = runTest {
+    fun replacementFromAnotherProviderStillReportsOriginalProviderIdentity() = runTest {
         val remote = RecordingReportingRepository()
         val sink = ProviderPlaybackReportingSink(
             delegate = RecordingHistorySink(),
@@ -70,11 +70,13 @@ class ProviderPlaybackReportingSinkTest {
         )
         runCurrent()
 
-        assertTrue(remote.reports.isEmpty())
+        assertEquals(1, remote.reports.size)
+        assertEquals("netease", remote.reports.single().first)
+        assertEquals("netease:123", remote.reports.single().second.trackId)
     }
 
     @Test
-    fun sameProviderResolvedTrackUsesPhysicalTrackIdentity() = runTest {
+    fun sameProviderResolvedTrackStillUsesOriginalTrackIdentity() = runTest {
         val remote = RecordingReportingRepository()
         val sink = ProviderPlaybackReportingSink(
             delegate = RecordingHistorySink(),
@@ -94,7 +96,56 @@ class ProviderPlaybackReportingSinkTest {
         )
         runCurrent()
 
-        assertEquals("netease:456", remote.reports.single().second.trackId)
+        assertEquals("netease:123", remote.reports.single().second.trackId)
+    }
+
+    @Test
+    fun reportingFailureIsSurfacedWithoutAffectingLocalHistory() = runTest {
+        val local = RecordingHistorySink()
+        val feedback = mutableListOf<String>()
+        val sink = ProviderPlaybackReportingSink(
+            delegate = local,
+            reporting = RecordingReportingRepository(IllegalStateException("HTTP 500")),
+            settingsRepository = InMemoryAppSettingsRepository(
+                AppSettings(playbackReportingProviderIds = setOf("netease")),
+            ),
+            onReportingFailure = feedback::add,
+            scope = backgroundScope,
+        )
+
+        sink.upsert(record(providerId = "netease", playedMs = 30_000L))
+        runCurrent()
+
+        assertEquals(1, local.records.size)
+        assertEquals(1, feedback.size)
+        assertTrue(feedback.single().contains("播放数据上报失败"))
+        assertTrue(feedback.single().contains("HTTP 500"))
+    }
+
+    @Test
+    fun duplicateReportingFailuresAreTemporarilySuppressed() = runTest {
+        val feedback = mutableListOf<String>()
+        var now = 1_000L
+        val sink = ProviderPlaybackReportingSink(
+            delegate = RecordingHistorySink(),
+            reporting = RecordingReportingRepository(IllegalStateException("offline")),
+            settingsRepository = InMemoryAppSettingsRepository(
+                AppSettings(playbackReportingProviderIds = setOf("netease")),
+            ),
+            onReportingFailure = feedback::add,
+            nowMillis = { now },
+            scope = backgroundScope,
+        )
+
+        sink.upsert(record(providerId = "netease"))
+        sink.upsert(record(providerId = "netease", playedMs = 1_000L))
+        runCurrent()
+        assertEquals(1, feedback.size)
+
+        now += 15_000L
+        sink.upsert(record(providerId = "netease", playedMs = 2_000L))
+        runCurrent()
+        assertEquals(2, feedback.size)
     }
 
     @Test
@@ -165,9 +216,12 @@ class ProviderPlaybackReportingSinkTest {
         }
     }
 
-    private class RecordingReportingRepository : ProviderPlaybackReportingRepository {
+    private class RecordingReportingRepository(
+        private val failure: Throwable? = null,
+    ) : ProviderPlaybackReportingRepository {
         val reports = mutableListOf<Pair<String, ProviderPlaybackReport>>()
         override suspend fun reportPlayback(providerId: String, report: ProviderPlaybackReport) {
+            failure?.let { throw it }
             reports += providerId to report
         }
     }
