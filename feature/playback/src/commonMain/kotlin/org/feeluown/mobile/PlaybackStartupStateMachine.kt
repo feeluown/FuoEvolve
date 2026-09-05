@@ -114,9 +114,14 @@ class PlaybackStartupStateMachine(
 
         is PlaybackStartupPhase.Active -> when {
             isEmptyIdleState -> PlaybackServiceStateAction.RepublishRestored
-            serviceTrackId != null && serviceTrackId != current.trackId -> PlaybackServiceStateAction.Ignore
             serviceGeneration != current.generation -> PlaybackServiceStateAction.Ignore
-            else -> PlaybackServiceStateAction.Accept
+            else -> {
+                phase = PlaybackStartupPhase.Active(
+                    trackId = serviceTrackId ?: current.trackId,
+                    generation = current.generation,
+                )
+                PlaybackServiceStateAction.Accept
+            }
         }
 
         is PlaybackStartupPhase.Restored -> when {

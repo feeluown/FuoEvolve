@@ -123,6 +123,38 @@ class PlaybackStartupStateMachineTest {
     }
 
     @Test
+    fun activeSessionAcceptsSameGenerationTrackTransition() {
+        val machine = PlaybackStartupStateMachine()
+        machine.beginFreshStart("track-a", 7L)
+        assertEquals(
+            PlaybackServiceStateAction.Accept,
+            machine.onServiceState("track-a", 7L, isEmptyIdleState = false),
+        )
+
+        assertEquals(
+            PlaybackServiceStateAction.Accept,
+            machine.onServiceState("track-b", 7L, isEmptyIdleState = false),
+        )
+        assertEquals(PlaybackStartupPhase.Active("track-b", 7L), machine.phase)
+    }
+
+    @Test
+    fun activeSessionRejectsTrackTransitionFromDifferentGeneration() {
+        val machine = PlaybackStartupStateMachine()
+        machine.beginFreshStart("track-a", 7L)
+        assertEquals(
+            PlaybackServiceStateAction.Accept,
+            machine.onServiceState("track-a", 7L, isEmptyIdleState = false),
+        )
+
+        assertEquals(
+            PlaybackServiceStateAction.Ignore,
+            machine.onServiceState("track-b", 6L, isEmptyIdleState = false),
+        )
+        assertEquals(PlaybackStartupPhase.Active("track-a", 7L), machine.phase)
+    }
+
+    @Test
     fun activeSessionRepublishesPersistedStateWhenServiceDropsToEmptyIdle() {
         val machine = PlaybackStartupStateMachine()
         machine.beginFreshStart("track-a", 7L)
