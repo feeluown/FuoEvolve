@@ -79,6 +79,7 @@ fun createPlaybackFeatureOwner(
             delegate = listeningHistorySink,
             reporting = reporting,
             settingsRepository = settingsRepository,
+            currentPlaybackState = { owner.playbackState.value },
             onReportingFailure = wrappedTransport::showFeedback,
             nowMillis = nowMillis,
             scope = scope,
