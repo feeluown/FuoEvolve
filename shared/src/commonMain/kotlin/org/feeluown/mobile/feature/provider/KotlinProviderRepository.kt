@@ -21,6 +21,7 @@ class KotlinProviderRepository :
     ProviderAuthRepository,
     ProviderCatalogRepository,
     ProviderLibraryRepository,
+    ProviderPlaybackReportingRepository,
     PlaybackProviderSourcePort,
     ProviderAudioQualityPort {
     private val stateMutex = Mutex()
@@ -196,6 +197,12 @@ class KotlinProviderRepository :
     override suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy) {
         wifiAudioQualityPolicy = wifiPolicy
         cellularAudioQualityPolicy = cellularPolicy
+    }
+
+    override suspend fun reportPlayback(providerId: String, report: ProviderPlaybackReport) {
+        initialize()
+        val capability = providerMap[providerId] as? ProviderPlaybackReportingCapability ?: return
+        capability.reportPlayback(report)
     }
 
     override suspend fun features(): List<ProviderFeature> {

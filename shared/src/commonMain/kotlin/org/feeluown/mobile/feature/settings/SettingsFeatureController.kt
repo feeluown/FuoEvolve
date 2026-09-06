@@ -61,6 +61,7 @@ interface SettingsFeatureController {
     fun setStatusBarLyricsAvailability(available: Boolean)
     fun setStatusBarLyricsEnabled(enabled: Boolean)
     fun setBydInstrumentLyricsEnabled(enabled: Boolean)
+    fun setProviderPlaybackReportingEnabled(providerId: String, enabled: Boolean)
     fun setAppUpdateChannel(channel: AppUpdateChannel) = Unit
     fun setAutoCheckAppUpdates(enabled: Boolean) = Unit
     fun checkAppUpdates() = Unit
@@ -168,6 +169,16 @@ private class BoundSettingsFeatureController(
     override fun setStatusBarLyricsEnabled(enabled: Boolean) = owner.setStatusBarLyricsEnabled(enabled)
     override fun setBydInstrumentLyricsEnabled(enabled: Boolean) {
         scope.launch { settingsRepository.update { settings -> settings.copy(bydInstrumentLyricsEnabled = enabled) } }
+    }
+    override fun setProviderPlaybackReportingEnabled(providerId: String, enabled: Boolean) {
+        scope.launch {
+            settingsRepository.update { settings ->
+                val next = settings.playbackReportingProviderIds.toMutableSet().apply {
+                    if (enabled) add(providerId) else remove(providerId)
+                }
+                settings.copy(playbackReportingProviderIds = next)
+            }
+        }
     }
     override fun setAppUpdateChannel(channel: AppUpdateChannel) = appUpdateController.setChannel(channel)
     override fun setAutoCheckAppUpdates(enabled: Boolean) = appUpdateController.setAutoCheckEnabled(enabled)

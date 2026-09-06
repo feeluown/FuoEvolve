@@ -24,7 +24,7 @@ object BilibiliProviderFactory : KotlinProviderFactory {
             http = dependencies.http,
             credentials = dependencies.credentials,
         )
-        return CapabilityDelegatingProvider(
+        val provider = CapabilityDelegatingProvider(
             base = base,
             presentation = content,
             account = base,
@@ -32,6 +32,11 @@ object BilibiliProviderFactory : KotlinProviderFactory {
             content = content,
             library = content,
             playback = base,
+        )
+        return BilibiliPlaybackReportingProvider(
+            delegate = provider,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
         )
     }
 

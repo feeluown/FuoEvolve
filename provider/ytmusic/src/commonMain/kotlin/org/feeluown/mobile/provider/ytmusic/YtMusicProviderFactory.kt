@@ -3,6 +3,8 @@ package org.feeluown.mobile.provider.ytmusic
 import org.feeluown.mobile.ProviderDeviceAuthorization
 import org.feeluown.mobile.ProviderDeviceAuthorizationPollResult
 import org.feeluown.mobile.ProviderOAuthToken
+import org.feeluown.mobile.ProviderPlaybackReport
+import org.feeluown.mobile.ProviderPlaybackReportingCapability
 import org.feeluown.mobile.ProviderSearchHit
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.provider.core.CapabilityDelegatingProvider
@@ -27,8 +29,13 @@ object YtMusicProviderFactory : KotlinProviderFactory {
             library = content,
             playback = content,
         )
+        val reportingProvider = YtMusicPlaybackReportingProvider(
+            delegate = provider,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
+        )
         return YtMusicApplicationProvider(
-            provider = provider,
+            provider = reportingProvider,
             oauth = content,
         )
     }
@@ -37,11 +44,17 @@ object YtMusicProviderFactory : KotlinProviderFactory {
 private class YtMusicApplicationProvider(
     private val provider: KotlinMusicProvider,
     private val oauth: YtMusicContentProvider,
-) : KotlinMusicProvider by provider, ProviderDeviceAuthorizationCapability {
+) : KotlinMusicProvider by provider,
+    ProviderDeviceAuthorizationCapability,
+    ProviderPlaybackReportingCapability {
     override suspend fun search(keyword: String): ProviderSearchResults {
         val results = provider.search(keyword)
         if (results.bestMatches.isNotEmpty()) return results
         return results.copy(bestMatches = listOfNotNull(bestMatch(keyword, results)))
+    }
+
+    override suspend fun reportPlayback(report: ProviderPlaybackReport) {
+        (provider as? ProviderPlaybackReportingCapability)?.reportPlayback(report)
     }
 
     override suspend fun beginDeviceAuthorization(

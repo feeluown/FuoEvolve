@@ -19,7 +19,7 @@ object NeteaseProviderFactory : KotlinProviderFactory {
             http = dependencies.http,
             credentials = dependencies.credentials,
         )
-        return CapabilityDelegatingProvider(
+        val provider = CapabilityDelegatingProvider(
             base = base,
             presentation = base,
             account = base,
@@ -27,6 +27,11 @@ object NeteaseProviderFactory : KotlinProviderFactory {
             content = base,
             library = base,
             playback = base,
+        )
+        return NeteasePlaybackReportingProvider(
+            delegate = provider,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
         )
     }
 }
