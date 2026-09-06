@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.net.Uri
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+private const val VIDEO_PLAYER_TAG = "FuoVideoPlayer"
+
 @OptIn(UnstableApi::class)
 private class AndroidPlatformVideoController(context: Context) : PlatformVideoController {
     private val _state = MutableStateFlow(PlatformVideoPlaybackState())
@@ -62,6 +65,14 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
         .also { exoPlayer ->
             exoPlayer.addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
+                    val rootCause = error.rootCause()
+                    Log.e(
+                        VIDEO_PLAYER_TAG,
+                        "Video playback failed: code=${error.errorCodeName}, " +
+                            "cause=${rootCause::class.java.name}: ${rootCause.message.orEmpty()}, " +
+                            "payload=${activePayload?.debugDescription().orEmpty()}",
+                        error,
+                    )
                     playbackError = "视频播放失败：${error.errorCodeName}"
                     publishState()
                 }
@@ -278,11 +289,15 @@ private fun VideoPlaybackPayload.toMediaSource(context: Context) =
         ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
             .createMediaSource(MediaItem.fromUri(Uri.parse(url)))
     } else {
+        val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
+            .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl)))
+        val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
+            .createMediaSource(MediaItem.fromUri(Uri.parse(audioUrl)))
         MergingMediaSource(
-            ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
-                .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl))),
-            ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
-                .createMediaSource(MediaItem.fromUri(Uri.parse(audioUrl))),
+            true,
+            true,
+            videoSource,
+            audioSource,
         )
     }
 
@@ -295,6 +310,34 @@ private fun dataSourceFactory(context: Context, headers: Map<String, String>): D
         .setAllowCrossProtocolRedirects(true)
     return DefaultDataSource.Factory(context, httpFactory)
 }
+
+private fun PlaybackException.rootCause(): Throwable {
+    var current: Throwable = this
+    while (current.cause != null && current.cause !== current) {
+        current = current.cause!!
+    }
+    return current
+}
+
+private fun VideoPlaybackPayload.debugDescription(): String = buildString {
+    append("provider=")
+    append(video.providerId)
+    append(", videoId=")
+    append(video.id)
+    append(", merged=")
+    append(url.isBlank())
+    append(", videoHost=")
+    append(videoUrl.hostForLog())
+    append(", audioHost=")
+    append(audioUrl.hostForLog())
+    append(", mediaHost=")
+    append(url.hostForLog())
+}
+
+private fun String.hostForLog(): String =
+    takeIf { it.isNotBlank() }
+        ?.let { value -> runCatching { Uri.parse(value).host.orEmpty() }.getOrDefault("") }
+        .orEmpty()
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
