@@ -30,7 +30,8 @@ internal class NeteasePlaybackReportingProvider(
             .toLongOrNull()
             ?: return
         val durationMs = report.durationMs?.takeIf { it > 0L }
-        val playedMs = durationMs?.let { report.playedMs.coerceAtMost(it) } ?: report.playedMs
+        val rawPositionMs = report.positionMs?.takeIf { it >= 0L } ?: report.playedMs
+        val positionMs = durationMs?.let { rawPositionMs.coerceAtMost(it) } ?: rawPositionMs
         val request = buildJsonObject {
             put(
                 "playStateSubmitReq",
@@ -39,7 +40,7 @@ internal class NeteasePlaybackReportingProvider(
                         put("id", songId.toString())
                         put("type", "song")
                     })
-                    put("progress", (playedMs.coerceAtLeast(0L) / 1_000L).toInt())
+                    put("progress", (positionMs.coerceAtLeast(0L) / 1_000L).toInt())
                     put("sessionId", md5Hex(report.sessionId).uppercase().take(12))
                     put("playMode", "list_loop")
                 }.toString(),
