@@ -214,21 +214,26 @@ class BilibiliProvider(
         val cid = pageInfo?.long("cid") ?: info.long("cid") ?: return VideoPlaybackPayload(video = video)
         val data = playUrlData(bvid, cid) ?: return VideoPlaybackPayload(video = video)
         val dash = data.obj("dash")
-        val videoStream = dash?.array("video").orEmpty()
-            .mapNotNull { it.asObject().toVideoStream() }
-            .maxByOrNull { it.bandwidth }
+        val videoStreams = orderVideoStreams(
+            dash?.array("video").orEmpty().mapNotNull { it.asObject().toVideoStream() },
+        )
+        val videoStream = videoStreams.firstOrNull()
         val audio = selectAudio(
             qualityPolicy = AudioQualityPolicy.High.policy,
             audio = dash?.array("audio").orEmpty().mapNotNull { it.asObject().toAudioStream() },
             flac = dash?.obj("flac")?.obj("audio")?.toAudioStream(isFlac = true),
         )
         if (videoStream != null && audio != null) {
+            val videoUrls = videoStreams.flatMap { it.urls }.distinct()
+            val audioUrls = audio.stream.urls.distinct()
             return VideoPlaybackPayload(
                 video = video,
                 videoUrl = videoStream.url,
                 audioUrl = audio.stream.url,
                 headers = mediaHeaders(),
                 quality = "video",
+                fallbackVideoUrls = videoUrls.filterNot { it == videoStream.url },
+                fallbackAudioUrls = audioUrls.filterNot { it == audio.stream.url },
             )
         }
         val durl = data.array("durl").firstOrNull()?.asObject()?.stringOrNull("url")
