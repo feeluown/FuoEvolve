@@ -13,6 +13,7 @@ enum class ProviderPlaybackReportKind {
 data class ProviderPlaybackReport(
     val sessionId: String,
     val trackId: String,
+    /** Monotonically accumulated time the user actually listened during this session. */
     val playedMs: Long,
     val durationMs: Long?,
     val startedAtMillis: Long,
@@ -20,6 +21,10 @@ data class ProviderPlaybackReport(
     val endedAtMillis: Long? = null,
     val kind: ProviderPlaybackReportKind,
     val qualified: Boolean = false,
+    /** Current media position; deliberately separate from [playedMs] so seeking is reported correctly. */
+    val positionMs: Long? = null,
+    /** Zero-based active multipart index while keeping [trackId] on the original logical resource. */
+    val currentPartIndex: Int = -1,
 )
 
 /** Optional capability implemented only by providers with a known playback-reporting protocol. */
