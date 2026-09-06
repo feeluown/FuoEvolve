@@ -50,6 +50,37 @@ class ProviderPlaybackReportingSinkTest {
     }
 
     @Test
+    fun livePlaybackPositionAndPartAreSeparateFromAccumulatedListeningTime() = runTest {
+        val remote = RecordingReportingRepository()
+        val sink = ProviderPlaybackReportingSink(
+            delegate = RecordingHistorySink(),
+            reporting = remote,
+            settingsRepository = InMemoryAppSettingsRepository(
+                AppSettings(playbackReportingProviderIds = setOf("bilibili")),
+            ),
+            currentPlaybackState = {
+                PlaybackState(
+                    status = PlayerStatus.Playing,
+                    currentTrack = providerTrack("bilibili", "bilibili:123"),
+                    positionMs = 305_000L,
+                    durationMs = 600_000L,
+                    currentPartIndex = 1,
+                )
+            },
+            scope = backgroundScope,
+        )
+
+        sink.upsert(record(providerId = "bilibili", playedMs = 10_000L))
+        runCurrent()
+
+        val report = remote.reports.single().second
+        assertEquals("bilibili:123", report.trackId)
+        assertEquals(10_000L, report.playedMs)
+        assertEquals(305_000L, report.positionMs)
+        assertEquals(1, report.currentPartIndex)
+    }
+
+    @Test
     fun replacementFromAnotherProviderStillReportsOriginalProviderIdentity() = runTest {
         val remote = RecordingReportingRepository()
         val sink = ProviderPlaybackReportingSink(
@@ -165,6 +196,15 @@ class ProviderPlaybackReportingSinkTest {
 
         assertTrue(remote.reports.isEmpty())
     }
+
+    private fun providerTrack(providerId: String, trackId: String): MusicTrack = MusicTrack(
+        id = trackId,
+        title = "Song",
+        artists = "Artist",
+        album = "Album",
+        source = providerId,
+        sourceType = TrackSourceType.Provider,
+    )
 
     private fun record(
         providerId: String,
