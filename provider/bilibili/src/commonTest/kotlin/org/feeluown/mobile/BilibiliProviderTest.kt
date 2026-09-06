@@ -177,7 +177,7 @@ class BilibiliProviderTest {
     }
 
     @Test
-    fun videoPlaybackUsesSeparateDashVideoAndAudioStreams() = runTest {
+    fun videoPlaybackPrefersAvcAndPreservesDashFallbacks() = runTest {
         val client = ProviderHttpClient(
             HttpClient(MockEngine) {
                 engine {
@@ -193,7 +193,7 @@ class BilibiliProviderTest {
                                 assertEquals("16", request.url.parameters["fnval"])
                                 assertEquals("123", request.url.parameters["cid"])
                                 respond(
-                                    """{"code":0,"data":{"dash":{"video":[{"baseUrl":"https://example.test/video-lq.m4s","bandwidth":500000},{"base_url":"https://example.test/video-hq.m4s","bandwidth":2000000}],"audio":[{"baseUrl":"https://example.test/audio-lq.m4s","bandwidth":96000},{"base_url":"https://example.test/audio-hq.m4s","bandwidth":320000}]}}}""",
+                                    """{"code":0,"data":{"dash":{"video":[{"baseUrl":"https://example.test/video-av1.m4s","backupUrl":["https://backup.test/video-av1.m4s"],"bandwidth":3000000,"codecid":13,"codecs":"av01.0.08M.08"},{"base_url":"https://example.test/video-avc.m4s","backup_url":["https://backup.test/video-avc.m4s"],"bandwidth":1800000,"codecid":7,"codecs":"avc1.640028"},{"baseUrl":"https://example.test/video-hevc.m4s","bandwidth":2500000,"codecid":12,"codecs":"hev1.1.6.L120.90"}],"audio":[{"baseUrl":"https://example.test/audio-lq.m4s","bandwidth":96000},{"base_url":"https://example.test/audio-hq.m4s","backupUrl":["https://backup.test/audio-hq.m4s"],"bandwidth":320000}]}}}""",
                                 )
                             }
                             else -> error("unexpected Bilibili request: ${request.url.encodedPath}")
@@ -213,8 +213,18 @@ class BilibiliProviderTest {
         val payload = provider.videoPlaybackPayload(video)
 
         assertEquals("", payload.url)
-        assertEquals("https://example.test/video-hq.m4s", payload.videoUrl)
+        assertEquals("https://example.test/video-avc.m4s", payload.videoUrl)
         assertEquals("https://example.test/audio-hq.m4s", payload.audioUrl)
+        assertEquals(
+            listOf(
+                "https://backup.test/video-avc.m4s",
+                "https://example.test/video-hevc.m4s",
+                "https://example.test/video-av1.m4s",
+                "https://backup.test/video-av1.m4s",
+            ),
+            payload.fallbackVideoUrls,
+        )
+        assertEquals(listOf("https://backup.test/audio-hq.m4s"), payload.fallbackAudioUrls)
         assertEquals("video", payload.quality)
         client.close()
     }

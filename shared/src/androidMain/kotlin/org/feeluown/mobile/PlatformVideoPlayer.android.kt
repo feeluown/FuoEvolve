@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.net.Uri
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
@@ -42,8 +43,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+private const val VIDEO_PLAYER_TAG = "FuoVideoPlayer"
+private const val MAX_VIDEO_SOURCE_CANDIDATES = 24
+
+private data class VideoSourceCandidate(
+    val url: String = "",
+    val videoUrl: String = "",
+    val audioUrl: String = "",
+) {
+    val isMerged: Boolean
+        get() = url.isBlank()
+}
+
 @OptIn(UnstableApi::class)
 private class AndroidPlatformVideoController(context: Context) : PlatformVideoController {
+    private val appContext = context.applicationContext
     private val _state = MutableStateFlow(PlatformVideoPlaybackState())
     override val state: StateFlow<PlatformVideoPlaybackState> = _state
 
@@ -51,6 +65,8 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
     private var videoWidth: Int = 0
     private var videoHeight: Int = 0
     private var activePayload: VideoPlaybackPayload? = null
+    private var activeCandidates: List<VideoSourceCandidate> = emptyList()
+    private var activeCandidateIndex: Int = -1
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setRenderersFactory(
@@ -62,6 +78,18 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
         .also { exoPlayer ->
             exoPlayer.addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
+                    val rootCause = error.rootCause()
+                    val candidate = activeCandidates.getOrNull(activeCandidateIndex)
+                    Log.e(
+                        VIDEO_PLAYER_TAG,
+                        "Video playback failed: code=${error.errorCodeName}, " +
+                            "cause=${rootCause::class.java.name}: ${rootCause.message.orEmpty()}, " +
+                            "candidate=${activeCandidateIndex + 1}/${activeCandidates.size}, " +
+                            "source=${candidate?.debugDescription().orEmpty()}, " +
+                            "payload=${activePayload?.debugDescription().orEmpty()}",
+                        error,
+                    )
+                    if (retryNextCandidate()) return
                     playbackError = "视频播放失败：${error.errorCodeName}"
                     publishState()
                 }
@@ -83,18 +111,28 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
         }
 
     fun setPayload(context: Context, payload: VideoPlaybackPayload?) {
-        if (payload == null || !payload.isPlayable()) {
+        if (payload == null) {
+            clear()
+            return
+        }
+        val candidates = payload.sourceCandidates()
+        if (candidates.isEmpty()) {
             clear()
             return
         }
         if (payload == activePayload) return
         activePayload = payload
+        activeCandidates = candidates
+        activeCandidateIndex = 0
         playbackError = null
         videoWidth = 0
         videoHeight = 0
-        player.setMediaSource(payload.toMediaSource(context))
-        player.prepare()
-        player.playWhenReady = true
+        prepareCandidate(
+            context = context.applicationContext,
+            index = activeCandidateIndex,
+            positionMs = 0,
+            playWhenReady = true,
+        )
         publishState()
     }
 
@@ -131,6 +169,8 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
         player.stop()
         player.clearMediaItems()
         activePayload = null
+        activeCandidates = emptyList()
+        activeCandidateIndex = -1
         playbackError = null
         videoWidth = 0
         videoHeight = 0
@@ -139,6 +179,42 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
 
     fun release() {
         player.release()
+    }
+
+    private fun retryNextCandidate(): Boolean {
+        val nextIndex = activeCandidateIndex + 1
+        if (nextIndex !in activeCandidates.indices) return false
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        val shouldPlay = player.playWhenReady || player.isPlaying
+        activeCandidateIndex = nextIndex
+        playbackError = null
+        Log.w(
+            VIDEO_PLAYER_TAG,
+            "Retrying video playback with candidate ${nextIndex + 1}/${activeCandidates.size}: " +
+                activeCandidates[nextIndex].debugDescription(),
+        )
+        prepareCandidate(
+            context = appContext,
+            index = nextIndex,
+            positionMs = positionMs,
+            playWhenReady = shouldPlay,
+        )
+        publishState()
+        return true
+    }
+
+    private fun prepareCandidate(
+        context: Context,
+        index: Int,
+        positionMs: Long,
+        playWhenReady: Boolean,
+    ) {
+        val payload = activePayload ?: return
+        val candidate = activeCandidates.getOrNull(index) ?: return
+        player.setMediaSource(candidate.toMediaSource(context, payload.headers))
+        player.prepare()
+        if (positionMs > 0) player.seekTo(positionMs)
+        player.playWhenReady = playWhenReady
     }
 
     private fun publishState() {
@@ -192,7 +268,15 @@ actual fun PlatformVideoPlayer(
         VideoPlaceholder("视频地址不可用", modifier)
         return
     }
-    LaunchedEffect(payload.url, payload.videoUrl, payload.audioUrl, payload.headers) {
+    LaunchedEffect(
+        payload.url,
+        payload.videoUrl,
+        payload.audioUrl,
+        payload.headers,
+        payload.fallbackUrls,
+        payload.fallbackVideoUrls,
+        payload.fallbackAudioUrls,
+    ) {
         androidController.setPayload(context.applicationContext, payload)
     }
     AndroidView(
@@ -269,22 +353,56 @@ private fun VideoPlaceholder(text: String, modifier: Modifier) {
     }
 }
 
-private fun VideoPlaybackPayload.isPlayable(): Boolean =
-    url.isNotBlank() || (videoUrl.isNotBlank() && audioUrl.isNotBlank())
+private fun VideoPlaybackPayload.isPlayable(): Boolean = sourceCandidates().isNotEmpty()
+
+private fun VideoPlaybackPayload.sourceCandidates(): List<VideoSourceCandidate> {
+    val candidates = mutableListOf<VideoSourceCandidate>()
+    (listOf(url) + fallbackUrls)
+        .filter { it.isNotBlank() }
+        .distinct()
+        .forEach { mediaUrl -> candidates += VideoSourceCandidate(url = mediaUrl) }
+
+    if (videoUrl.isNotBlank() && audioUrl.isNotBlank()) {
+        val videos = (listOf(videoUrl) + fallbackVideoUrls).filter { it.isNotBlank() }.distinct()
+        val audios = (listOf(audioUrl) + fallbackAudioUrls).filter { it.isNotBlank() }.distinct()
+        if (videos.isNotEmpty() && audios.isNotEmpty()) {
+            candidates += VideoSourceCandidate(videoUrl = videos.first(), audioUrl = audios.first())
+            videos.drop(1).forEach { fallbackVideo ->
+                candidates += VideoSourceCandidate(videoUrl = fallbackVideo, audioUrl = audios.first())
+            }
+            audios.drop(1).forEach { fallbackAudio ->
+                candidates += VideoSourceCandidate(videoUrl = videos.first(), audioUrl = fallbackAudio)
+            }
+            videos.drop(1).forEach { fallbackVideo ->
+                audios.drop(1).forEach { fallbackAudio ->
+                    candidates += VideoSourceCandidate(videoUrl = fallbackVideo, audioUrl = fallbackAudio)
+                }
+            }
+        }
+    }
+
+    return candidates.distinct().take(MAX_VIDEO_SOURCE_CANDIDATES)
+}
 
 @OptIn(UnstableApi::class)
-private fun VideoPlaybackPayload.toMediaSource(context: Context) =
-    if (url.isNotBlank()) {
-        ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
-            .createMediaSource(MediaItem.fromUri(Uri.parse(url)))
-    } else {
-        MergingMediaSource(
-            ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
-                .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl))),
-            ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
-                .createMediaSource(MediaItem.fromUri(Uri.parse(audioUrl))),
-        )
-    }
+private fun VideoSourceCandidate.toMediaSource(
+    context: Context,
+    headers: Map<String, String>,
+) = if (url.isNotBlank()) {
+    ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
+        .createMediaSource(MediaItem.fromUri(Uri.parse(url)))
+} else {
+    val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
+        .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl)))
+    val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory(context, headers))
+        .createMediaSource(MediaItem.fromUri(Uri.parse(audioUrl)))
+    MergingMediaSource(
+        true,
+        true,
+        videoSource,
+        audioSource,
+    )
+}
 
 @OptIn(UnstableApi::class)
 private fun dataSourceFactory(context: Context, headers: Map<String, String>): DefaultDataSource.Factory {
@@ -295,6 +413,39 @@ private fun dataSourceFactory(context: Context, headers: Map<String, String>): D
         .setAllowCrossProtocolRedirects(true)
     return DefaultDataSource.Factory(context, httpFactory)
 }
+
+private fun PlaybackException.rootCause(): Throwable {
+    var current: Throwable = this
+    while (current.cause != null && current.cause !== current) {
+        current = current.cause!!
+    }
+    return current
+}
+
+private fun VideoPlaybackPayload.debugDescription(): String = buildString {
+    append("provider=")
+    append(video.providerId)
+    append(", videoId=")
+    append(video.id)
+    append(", candidates=")
+    append(sourceCandidates().size)
+}
+
+private fun VideoSourceCandidate.debugDescription(): String = buildString {
+    append("merged=")
+    append(isMerged)
+    append(", videoHost=")
+    append(videoUrl.hostForLog())
+    append(", audioHost=")
+    append(audioUrl.hostForLog())
+    append(", mediaHost=")
+    append(url.hostForLog())
+}
+
+private fun String.hostForLog(): String =
+    takeIf { it.isNotBlank() }
+        ?.let { value -> runCatching { Uri.parse(value).host.orEmpty() }.getOrDefault("") }
+        .orEmpty()
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

@@ -1,8 +1,11 @@
 package org.feeluown.mobile.provider.bilibili
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import org.feeluown.mobile.AudioQualityPolicy
 import org.feeluown.mobile.provider.core.ProviderCredentials
+import org.feeluown.mobile.provider.core.array
 import org.feeluown.mobile.provider.core.long
 import org.feeluown.mobile.provider.core.parseCookies
 import org.feeluown.mobile.provider.core.splitResourceId
@@ -40,10 +43,18 @@ internal fun selectAudio(
     return SelectedAudio(selected, selected.qualityLabel())
 }
 
+internal fun orderVideoStreams(video: List<VideoStream>): List<VideoStream> =
+    video.sortedWith(
+        compareByDescending<VideoStream> { it.codecCompatibilityRank() }
+            .thenByDescending { it.bandwidth },
+    )
+
 internal fun JsonObject.toAudioStream(isFlac: Boolean = false): AudioStream? {
-    val url = stringOrNull("baseUrl") ?: stringOrNull("base_url") ?: return null
+    val urls = mediaUrls()
+    val url = urls.firstOrNull() ?: return null
     return AudioStream(
         url = url,
+        backupUrls = urls.drop(1),
         bandwidth = long("bandwidth") ?: 0L,
         durationMs = long("length"),
         isFlac = isFlac,
@@ -51,10 +62,14 @@ internal fun JsonObject.toAudioStream(isFlac: Boolean = false): AudioStream? {
 }
 
 internal fun JsonObject.toVideoStream(): VideoStream? {
-    val url = stringOrNull("baseUrl") ?: stringOrNull("base_url") ?: return null
+    val urls = mediaUrls()
+    val url = urls.firstOrNull() ?: return null
     return VideoStream(
         url = url,
+        backupUrls = urls.drop(1),
         bandwidth = long("bandwidth") ?: 0L,
+        codecId = long("codecid"),
+        codecs = stringOrNull("codecs"),
     )
 }
 
@@ -121,10 +136,14 @@ internal data class WbiKeys(val mixinKey: String)
 
 internal data class AudioStream(
     val url: String,
+    val backupUrls: List<String> = emptyList(),
     val bandwidth: Long,
     val durationMs: Long?,
     val isFlac: Boolean = false,
-)
+) {
+    val urls: List<String>
+        get() = listOf(url) + backupUrls
+}
 
 internal data class SelectedAudio(
     val stream: AudioStream,
@@ -133,8 +152,34 @@ internal data class SelectedAudio(
 
 internal data class VideoStream(
     val url: String,
+    val backupUrls: List<String> = emptyList(),
     val bandwidth: Long,
-)
+    val codecId: Long? = null,
+    val codecs: String? = null,
+) {
+    val urls: List<String>
+        get() = listOf(url) + backupUrls
+}
+
+private fun JsonObject.mediaUrls(): List<String> = buildList {
+    val baseUrl = stringOrNull("baseUrl") ?: stringOrNull("base_url")
+    if (!baseUrl.isNullOrBlank()) add(baseUrl)
+    array("backupUrl").forEach { element ->
+        element.jsonPrimitive.contentOrNull?.takeIf { it.isNotBlank() }?.let(::add)
+    }
+    array("backup_url").forEach { element ->
+        element.jsonPrimitive.contentOrNull?.takeIf { it.isNotBlank() }?.let(::add)
+    }
+}.distinct()
+
+private fun VideoStream.codecCompatibilityRank(): Int = when {
+    codecId == 7L || codecs.orEmpty().startsWith("avc", ignoreCase = true) -> 3
+    codecId == 12L ||
+        codecs.orEmpty().startsWith("hev", ignoreCase = true) ||
+        codecs.orEmpty().startsWith("hvc", ignoreCase = true) -> 2
+    codecId == 13L || codecs.orEmpty().startsWith("av01", ignoreCase = true) -> 1
+    else -> 0
+}
 
 private fun AudioStream.qualityLabel(): String = when {
     isFlac -> "SHQ"

@@ -148,6 +148,9 @@ data class VideoPlaybackPayload(
     val audioUrl: String = "",
     val headers: Map<String, String> = emptyMap(),
     val quality: String? = null,
+    val fallbackUrls: List<String> = emptyList(),
+    val fallbackVideoUrls: List<String> = emptyList(),
+    val fallbackAudioUrls: List<String> = emptyList(),
 )
 
 const val PROVIDER_PAGE_SIZE = 50
