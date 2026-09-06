@@ -15,6 +15,7 @@ internal class ProviderPlaybackReportingSink(
     private val delegate: ListeningHistorySink,
     private val reporting: ProviderPlaybackReportingRepository,
     private val settingsRepository: AppSettingsRepository,
+    private val currentPlaybackState: () -> PlaybackState? = { null },
     private val onReportingFailure: (String) -> Unit = {},
     private val nowMillis: () -> Long = { 0L },
     scope: CoroutineScope,
@@ -24,7 +25,13 @@ internal class ProviderPlaybackReportingSink(
         val report: ProviderPlaybackReport,
     )
 
+    private data class PlaybackFacts(
+        val positionMs: Long,
+        val currentPartIndex: Int,
+    )
+
     private val pending = Channel<PendingReport>(Channel.UNLIMITED)
+    private val lastPlaybackFactsBySession = mutableMapOf<String, PlaybackFacts>()
     private var lastFailureFeedbackKey: String? = null
     private var lastFailureFeedbackAtMillis = Long.MIN_VALUE
 
@@ -67,11 +74,31 @@ internal class ProviderPlaybackReportingSink(
         runCatching { onReportingFailure(message) }
     }
 
+    private fun playbackFactsFor(
+        sessionKey: String,
+        primary: ListeningResourceSnapshot,
+        completionReason: ListeningCompletionReason?,
+    ): PlaybackFacts? {
+        val state = runCatching(currentPlaybackState).getOrNull()
+        val logicalTrack = state?.currentTrack?.logicalPlaybackTrack()
+        if (state != null && logicalTrack?.id == primary.sourceResourceId) {
+            val facts = PlaybackFacts(
+                positionMs = state.positionMs.coerceAtLeast(0L),
+                currentPartIndex = if (state.resolvedSource?.isReplacement == true) -1 else state.currentPartIndex,
+            )
+            lastPlaybackFactsBySession[sessionKey] = facts
+        }
+        val facts = lastPlaybackFactsBySession[sessionKey]
+        if (completionReason != null) lastPlaybackFactsBySession.remove(sessionKey)
+        return facts
+    }
+
     private fun ListeningHistoryRecord.toPendingReport(): PendingReport? {
         val primary = resources.firstOrNull { it.relation == ListeningResourceRelationType.Primary }?.resource
             ?: return null
         val providerId = primary.sourceId
         if (providerId !in SUPPORTED_PLAYBACK_REPORTING_PROVIDERS) return null
+        val playbackFacts = playbackFactsFor(sessionKey, primary, completionReason)
 
         val reportKind = when (completionReason) {
             ListeningCompletionReason.Ended -> ProviderPlaybackReportKind.Completed
@@ -92,6 +119,8 @@ internal class ProviderPlaybackReportingSink(
                 endedAtMillis = endedAtMillis,
                 kind = reportKind,
                 qualified = qualified,
+                positionMs = playbackFacts?.positionMs,
+                currentPartIndex = playbackFacts?.currentPartIndex ?: -1,
             ),
         )
     }
