@@ -40,7 +40,7 @@ internal class BilibiliPlaybackReportingProvider(
         if (cookieValue(cookie, "SESSDATA").isNullOrBlank()) return
 
         val (bvid, encodedPage) = parseTrackId(report.trackId) ?: return
-        val activePage = report.currentPartIndex.takeIf { it >= 0 }?.plus(1) ?: encodedPage
+        val activePage = resolveBilibiliPlaybackReportPage(encodedPage, report.currentPartIndex)
         val identity = videoIdentity(bvid, activePage) ?: return
         val playedSeconds = (report.playedMs.coerceAtLeast(0L) / 1_000L).toInt()
         val durationMs = report.durationMs?.takeIf { it > 0L }
@@ -145,3 +145,6 @@ internal class BilibiliPlaybackReportingProvider(
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
     }
 }
+
+internal fun resolveBilibiliPlaybackReportPage(encodedPage: Int, currentPartIndex: Int): Int =
+    currentPartIndex.takeIf { it >= 0 }?.plus(1) ?: encodedPage.coerceAtLeast(1)
