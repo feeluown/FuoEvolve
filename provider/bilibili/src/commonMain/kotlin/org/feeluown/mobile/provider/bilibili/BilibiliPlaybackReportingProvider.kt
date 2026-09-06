@@ -39,11 +39,15 @@ internal class BilibiliPlaybackReportingProvider(
         val csrf = cookieValue(cookie, "bili_jct") ?: return
         if (cookieValue(cookie, "SESSDATA").isNullOrBlank()) return
 
-        val (bvid, page) = parseTrackId(report.trackId) ?: return
-        val identity = videoIdentity(bvid, page) ?: return
+        val (bvid, encodedPage) = parseTrackId(report.trackId) ?: return
+        val activePage = report.currentPartIndex.takeIf { it >= 0 }?.plus(1) ?: encodedPage
+        val identity = videoIdentity(bvid, activePage) ?: return
         val playedSeconds = (report.playedMs.coerceAtLeast(0L) / 1_000L).toInt()
-        val durationSeconds = report.durationMs
-            ?.takeIf { it > 0L }
+        val durationMs = report.durationMs?.takeIf { it > 0L }
+        val rawPositionMs = report.positionMs?.takeIf { it >= 0L } ?: report.playedMs
+        val positionMs = durationMs?.let { rawPositionMs.coerceAtMost(it) } ?: rawPositionMs
+        val positionSeconds = (positionMs.coerceAtLeast(0L) / 1_000L).toInt()
+        val durationSeconds = durationMs
             ?.div(1_000L)
             ?.coerceAtLeast(1L)
             ?.toInt()
@@ -55,12 +59,12 @@ internal class BilibiliPlaybackReportingProvider(
                 append("aid", identity.aid.toString())
                 append("bvid", bvid)
                 append("cid", identity.cid.toString())
-                append("played_time", if (finished) "-1" else playedSeconds.toString())
+                append("played_time", if (finished) "-1" else positionSeconds.toString())
                 append("realtime", playedSeconds.toString())
                 append("real_played_time", playedSeconds.toString())
                 durationSeconds?.let { append("video_duration", it.toString()) }
-                append("last_play_progress_time", playedSeconds.toString())
-                append("max_play_progress_time", playedSeconds.toString())
+                append("last_play_progress_time", positionSeconds.toString())
+                append("max_play_progress_time", positionSeconds.toString())
                 append("start_ts", (report.startedAtMillis / 1_000L).toString())
                 append("type", "3")
                 append("dt", "2")
@@ -71,7 +75,7 @@ internal class BilibiliPlaybackReportingProvider(
             },
             headers = mapOf(
                 "Cookie" to cookie,
-                "Referer" to "https://www.bilibili.com/video/$bvid",
+                "Referer" to "https://www.bilibili.com/video/$bvid?p=$activePage",
                 "Origin" to "https://www.bilibili.com",
                 "User-Agent" to USER_AGENT,
             ),
