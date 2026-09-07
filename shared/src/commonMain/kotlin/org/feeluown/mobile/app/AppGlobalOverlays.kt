@@ -52,9 +52,10 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
     PlatformPredictiveBackHandler(
         enabled = predictiveBackPreference.isSupported &&
             predictiveBackPreference.enabled &&
-            playback.isFullPlayerOpen,
+            playback.isFullPlayerOpen &&
+            !playback.navigation.isQueueOpen,
         onProgress = { progress ->
-            predictiveGestureActive = true
+            if (progress > 0f) predictiveGestureActive = true
             predictiveProgress = progress
         },
         onCancelled = {
