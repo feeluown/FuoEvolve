@@ -3,6 +3,8 @@ package org.feeluown.mobile
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -53,6 +55,28 @@ private fun popPageTransition(
     effectsSpec = effectsSpec,
 )
 
+/**
+ * Keep predictive Back visually connected to the gesture without the large 0.7x scale used by
+ * Navigation 3's default transition. The previous route stays close to its final size while the
+ * current route recedes just enough to expose depth. This is intentionally edge-neutral so both
+ * left- and right-edge system gestures behave consistently.
+ */
+private fun predictivePopPageTransition(
+    spatialSpec: FiniteAnimationSpec<Float>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform = (
+    scaleIn(
+        initialScale = 0.985f,
+        animationSpec = spatialSpec,
+    ) + fadeIn(
+        initialAlpha = 0.92f,
+        animationSpec = effectsSpec,
+    )
+    ) togetherWith scaleOut(
+        targetScale = 0.94f,
+        animationSpec = spatialSpec,
+    )
+
 @Composable
 internal fun AppNavHost(
     backStack: List<AppRoute>,
@@ -65,6 +89,8 @@ internal fun AppNavHost(
     val activeRoute = backStack.lastOrNull()
     val pageSpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
     val pageEffectsSpec = FuoMotion.fastEffectsSpec<Float>()
+    val predictiveSpatialSpec = FuoMotion.defaultSpatialSpec<Float>()
+    val predictiveEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
 
     LaunchedEffect(activeRoute, uiGraph.playback.queue) {
         uiGraph.playback.queue.setPlaybackContextHint(activeRoute?.toPlaybackContextSnapshot())
@@ -76,6 +102,9 @@ internal fun AppNavHost(
         onBack = { appViewModel.onBack() },
         transitionSpec = { forwardPageTransition(pageSpatialSpec, pageEffectsSpec) },
         popTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
+        predictivePopTransitionSpec = {
+            predictivePopPageTransition(predictiveSpatialSpec, predictiveEffectsSpec)
+        },
         entryProvider = { route ->
             NavEntry(key = route) {
                 when (route) {
