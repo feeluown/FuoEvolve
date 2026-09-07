@@ -15,3 +15,11 @@ internal actual fun PlatformLegacyBackHandler(
     enabled: Boolean,
     onBack: () -> Unit,
 ) = Unit
+
+@Composable
+internal actual fun PlatformPredictiveBackHandler(
+    enabled: Boolean,
+    onProgress: (PredictiveBackGestureEvent) -> Unit,
+    onCancelled: () -> Unit,
+    onBack: () -> Unit,
+) = Unit

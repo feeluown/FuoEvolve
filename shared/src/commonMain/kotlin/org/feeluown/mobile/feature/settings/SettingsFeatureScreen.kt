@@ -179,7 +179,6 @@ fun SettingsFeatureScreen(
         onBack = ::pop,
         transitionSpec = { settingsForwardPageTransition() },
         popTransitionSpec = { settingsPopPageTransition() },
-        predictivePopTransitionSpec = { settingsPopPageTransition() },
         entryProvider = { route ->
             NavEntry(key = route) {
                 when (route) {
