@@ -62,8 +62,11 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
             predictiveProgress = 0f
         },
         onBack = {
-            predictiveBackCommitted = true
-            predictiveProgress = 1f
+            if (predictiveGestureActive) {
+                predictiveBackCommitted = true
+                predictiveProgress = 1f
+            }
+            predictiveGestureActive = false
             playback.navigation.closeFullPlayer()
         },
     )
@@ -81,8 +84,8 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
         },
     ) {
         val progress = renderedPredictiveProgress.coerceIn(0f, 1f)
-        // Full player keeps its normal overlay motion for explicit controls. During a predictive
-        // system-back gesture it follows the finger, revealing the route underneath before commit.
+        // Full player keeps its normal overlay motion for explicit controls and non-gesture Back.
+        // During a predictive system-back gesture it follows the finger and previews the route below.
         CompositionLocalProvider(LocalAppSharedTransitionScope provides null) {
             Box(
                 modifier = Modifier
