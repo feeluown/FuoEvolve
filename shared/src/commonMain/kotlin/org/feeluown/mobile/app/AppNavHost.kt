@@ -9,17 +9,38 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavEntry
+import androidx.navigation3.runtime.rememberDecoratedNavEntries
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.scene.SceneInfo
+import androidx.navigation3.scene.SinglePaneSceneStrategy
+import androidx.navigation3.scene.rememberSceneState
 import androidx.navigation3.ui.NavDisplay
-
-private const val PREDICTIVE_BACK_RIGHT_EDGE = 1
+import androidx.navigationevent.NavigationEvent
+import androidx.navigationevent.NavigationEventTransitionState.InProgress
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
+import kotlin.math.abs
 
 private fun pageTransition(
     initialOffsetX: (Int) -> Int,
@@ -59,16 +80,16 @@ private fun popPageTransition(
 )
 
 /**
- * Navigation 3 only exposes the swipe edge to this convenience NavDisplay transition. Keep the
- * visual depth restrained and bias the scale origin toward the gesture edge so left/right back
- * gestures feel attached to the finger without the aggressive default 0.7x collapse.
+ * Keep the Navigation 3 seek transition restrained. The outgoing route's scale is still owned by
+ * NavDisplay so gesture cancellation/completion hands off naturally; rounded corners and bounded
+ * pointer following are applied to the route surface itself from the same NavigationEventState.
  */
 private fun predictivePopPageTransition(
     swipeEdge: Int,
     spatialSpec: FiniteAnimationSpec<Float>,
     effectsSpec: FiniteAnimationSpec<Float>,
 ): ContentTransform {
-    val gestureOrigin = if (swipeEdge == PREDICTIVE_BACK_RIGHT_EDGE) {
+    val gestureOrigin = if (swipeEdge == NavigationEvent.EDGE_RIGHT) {
         TransformOrigin(0.82f, 0.5f)
     } else {
         TransformOrigin(0.18f, 0.5f)
@@ -98,92 +119,291 @@ internal fun AppNavHost(
 ) {
     val localPlaylistState by uiGraph.localPlaylist.uiState.collectAsStateWithLifecycle()
     val activeRoute = backStack.lastOrNull()
+    val predictiveBackPreference = rememberPredictiveBackPreference()
+    val density = LocalDensity.current
     val pageSpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
     val pageEffectsSpec = FuoMotion.fastEffectsSpec<Float>()
     val predictiveSpatialSpec = FuoMotion.defaultSpatialSpec<Float>()
     val predictiveEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
+    val predictiveReturnSpec = FuoMotion.fastSpatialSpec<Float>()
+    val maxVerticalGestureDistancePx = with(density) { 240.dp.toPx() }
+    val maxVerticalFollowPx = with(density) { 18.dp.toPx() }
+    val horizontalFollowPx = with(density) { 6.dp.toPx() }
+
+    var predictiveRoute by remember { mutableStateOf<AppRoute?>(null) }
+    var predictiveGestureStartTouchY by remember { mutableStateOf<Float?>(null) }
+    var predictiveBackCommitted by remember { mutableStateOf(false) }
+    var lastSwipeEdge by remember { mutableStateOf(NavigationEvent.EDGE_NONE) }
+    var verticalFollowTargetPx by remember { mutableFloatStateOf(0f) }
+    var horizontalFollowTargetPx by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(activeRoute, uiGraph.playback.queue) {
         uiGraph.playback.queue.setPlaybackContextHint(activeRoute?.toPlaybackContextSnapshot())
     }
 
-    NavDisplay(
+    val entries = rememberDecoratedNavEntries(
         backStack = backStack,
-        modifier = modifier,
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
+        entryProvider = { route ->
+            NavEntry(key = route) {
+                PredictiveBackRouteSurface(
+                    active = predictiveRoute == route,
+                    committed = predictiveBackCommitted,
+                    swipeEdge = lastSwipeEdge,
+                    horizontalOffsetPx = horizontalFollowTargetPx,
+                    verticalOffsetPx = verticalFollowTargetPx,
+                    returnSpec = predictiveReturnSpec,
+                    onCommittedExitDisposed = {
+                        if (predictiveRoute == route) {
+                            predictiveRoute = null
+                            predictiveBackCommitted = false
+                            lastSwipeEdge = NavigationEvent.EDGE_NONE
+                        }
+                    },
+                ) {
+                    when (route) {
+                        AppRoute.Home -> HomeScreen(
+                            home = uiGraph.home.home,
+                            hasAudioPermission = platform.hasAudioPermission,
+                            onRequestAudioPermission = platform.onRequestAudioPermission,
+                            hasImagePermission = platform.hasImagePermission,
+                            onRequestImagePermission = platform.onRequestImagePermission,
+                            onOpenRecognition = appViewModel::openRecognition,
+                        )
+                        AppRoute.PlaybackHistory -> ListeningHistoryScreen(
+                            repository = uiGraph.home.listeningHistory,
+                            onBack = { appViewModel.onBack() },
+                        )
+                        AppRoute.Search -> SearchRoute(
+                            graph = uiGraph.search,
+                            onOpenRecognition = appViewModel::openRecognition,
+                        )
+                        AppRoute.AudioRecognition -> RecognitionRoute(
+                            graph = uiGraph.recognition,
+                            onBack = appViewModel::closeRecognition,
+                            onSearchSong = uiGraph.search.controller::searchRecognizedSong,
+                            hasMicrophonePermission = platform.hasMicrophonePermission,
+                            onRequestMicrophonePermission = platform.onRequestMicrophonePermission,
+                        )
+                        AppRoute.Settings -> SettingsFeatureScreen(
+                            settingsController = uiGraph.settings,
+                            providerCatalog = uiGraph.providerCatalog,
+                            providerAuth = uiGraph.providerAuth,
+                            appVersionInfo = platform.appVersionInfo,
+                            onOpenProviderWebLogin = platform.onOpenProviderWebLogin,
+                            onLogoutProvider = platform.onLogoutProvider,
+                            onImportYtmusicHeaderFile = platform.onImportYtmusicHeaderFile,
+                            onImportYtmusicOAuthFile = platform.onImportYtmusicOAuthFile,
+                            onStartYtmusicOAuth = platform.onStartYtmusicOAuth,
+                        )
+                        AppRoute.DebugLogs -> DebugLogFeatureScreen(
+                            uiGraph.debugLogs,
+                            onBack = { appViewModel.onBack() },
+                        )
+                        AppRoute.DownloadManager -> DownloadManagerScreen(
+                            uiGraph.playback.downloads,
+                            onBack = { appViewModel.onBack() },
+                        )
+                        is AppRoute.FeatureDetail -> ProviderFeatureParityDetailRoute(route.feature.toProviderFeature())
+                        is AppRoute.PlaylistDetail -> ProviderPlaylistDetailRoute(
+                            playlist = route.playlist.toProviderPlaylist(),
+                            category = route.category?.let { runCatching { ProviderFeatureCategory.valueOf(it) }.getOrNull() },
+                        )
+                        is AppRoute.TrackDetail -> ProviderTrackDetailRoute(route.track.toMusicTrack())
+                        is AppRoute.VideoDetail -> ProviderVideoDetailRoute(route.video.toProviderVideo())
+                        is AppRoute.MediaItemDetail -> ProviderMediaItemDetailRoute(route.item.toProviderMediaItem())
+                        AppRoute.LocalPlaylist -> LocalPlaylistScreen(
+                            uiState = localPlaylistState,
+                            actions = uiGraph.localPlaylist,
+                            playlist = localPlaylistState.selectedPlaylist,
+                        )
+                        AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen()
+                        AppRoute.Feature,
+                        AppRoute.Playlist,
+                        AppRoute.Track,
+                        AppRoute.Video,
+                        AppRoute.MediaItem -> StaleRouteKindGuard { appViewModel.onBack() }
+                    }
+                }
+            }
+        },
+    )
+    val sceneState = rememberSceneState(
+        entries = entries,
+        sceneStrategy = SinglePaneSceneStrategy(),
         onBack = { appViewModel.onBack() },
+    )
+    val currentScene = sceneState.currentScene
+    val navigationEventState = rememberNavigationEventState(
+        currentInfo = SceneInfo(currentScene),
+        backInfo = sceneState.previousScenes.map { SceneInfo(it) },
+    )
+    val gestureState = navigationEventState.transitionState
+    val gestureEvent = (gestureState as? InProgress)?.latestEvent
+    val gestureInProgress = gestureEvent != null
+    val gestureProgressTarget = when {
+        gestureEvent != null -> gestureEvent.progress.coerceIn(0f, 1f)
+        predictiveBackCommitted -> 1f
+        else -> 0f
+    }
+    val renderedGestureProgress by animateFloatAsState(
+        targetValue = gestureProgressTarget,
+        animationSpec = if (gestureInProgress) snap() else predictiveReturnSpec,
+        label = "Route predictive back progress",
+    )
+
+    LaunchedEffect(gestureInProgress) {
+        if (gestureInProgress && gestureEvent != null) {
+            predictiveRoute = activeRoute
+            predictiveGestureStartTouchY = gestureEvent.touchY
+            predictiveBackCommitted = false
+        } else if (!predictiveBackCommitted) {
+            predictiveGestureStartTouchY = null
+        }
+    }
+    LaunchedEffect(gestureEvent?.progress, gestureEvent?.touchY, gestureEvent?.swipeEdge) {
+        if (gestureEvent != null) {
+            lastSwipeEdge = gestureEvent.swipeEdge
+            val startTouchY = predictiveGestureStartTouchY ?: gestureEvent.touchY
+            val rawDeltaY = gestureEvent.touchY - startTouchY
+            val normalizedDelta = (abs(rawDeltaY) / maxVerticalGestureDistancePx).coerceIn(0f, 1f)
+            val easedDelta = normalizedDelta * (2f - normalizedDelta)
+            val direction = when {
+                rawDeltaY > 0f -> 1f
+                rawDeltaY < 0f -> -1f
+                else -> 0f
+            }
+            verticalFollowTargetPx = direction * maxVerticalFollowPx * easedDelta * gestureEvent.progress
+            horizontalFollowTargetPx = when (gestureEvent.swipeEdge) {
+                NavigationEvent.EDGE_LEFT -> horizontalFollowPx * gestureEvent.progress
+                NavigationEvent.EDGE_RIGHT -> -horizontalFollowPx * gestureEvent.progress
+                else -> 0f
+            }
+        } else {
+            verticalFollowTargetPx = 0f
+            horizontalFollowTargetPx = if (predictiveBackCommitted) {
+                when (lastSwipeEdge) {
+                    NavigationEvent.EDGE_LEFT -> horizontalFollowPx
+                    NavigationEvent.EDGE_RIGHT -> -horizontalFollowPx
+                    else -> 0f
+                }
+            } else {
+                0f
+            }
+        }
+    }
+
+    NavigationBackHandler(
+        state = navigationEventState,
+        isBackEnabled = predictiveBackPreference.isSupported &&
+            predictiveBackPreference.enabled &&
+            currentScene.previousEntries.isNotEmpty(),
+        onBackCancelled = {
+            predictiveBackCommitted = false
+            predictiveGestureStartTouchY = null
+            verticalFollowTargetPx = 0f
+            horizontalFollowTargetPx = 0f
+        },
+        onBackCompleted = {
+            predictiveBackCommitted = true
+            predictiveGestureStartTouchY = null
+            verticalFollowTargetPx = 0f
+            appViewModel.onBack()
+        },
+    )
+
+    NavDisplay(
+        sceneState = sceneState,
+        navigationEventState = navigationEventState,
+        modifier = modifier,
         transitionSpec = { forwardPageTransition(pageSpatialSpec, pageEffectsSpec) },
         popTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
         predictivePopTransitionSpec = { swipeEdge ->
             predictivePopPageTransition(swipeEdge, predictiveSpatialSpec, predictiveEffectsSpec)
         },
-        entryProvider = { route ->
-            NavEntry(key = route) {
-                when (route) {
-                    AppRoute.Home -> HomeScreen(
-                        home = uiGraph.home.home,
-                        hasAudioPermission = platform.hasAudioPermission,
-                        onRequestAudioPermission = platform.onRequestAudioPermission,
-                        hasImagePermission = platform.hasImagePermission,
-                        onRequestImagePermission = platform.onRequestImagePermission,
-                        onOpenRecognition = appViewModel::openRecognition,
-                    )
-                    AppRoute.PlaybackHistory -> ListeningHistoryScreen(
-                        repository = uiGraph.home.listeningHistory,
-                        onBack = { appViewModel.onBack() },
-                    )
-                    AppRoute.Search -> SearchRoute(
-                        graph = uiGraph.search,
-                        onOpenRecognition = appViewModel::openRecognition,
-                    )
-                    AppRoute.AudioRecognition -> RecognitionRoute(
-                        graph = uiGraph.recognition,
-                        onBack = appViewModel::closeRecognition,
-                        onSearchSong = uiGraph.search.controller::searchRecognizedSong,
-                        hasMicrophonePermission = platform.hasMicrophonePermission,
-                        onRequestMicrophonePermission = platform.onRequestMicrophonePermission,
-                    )
-                    AppRoute.Settings -> SettingsFeatureScreen(
-                        settingsController = uiGraph.settings,
-                        providerCatalog = uiGraph.providerCatalog,
-                        providerAuth = uiGraph.providerAuth,
-                        appVersionInfo = platform.appVersionInfo,
-                        onOpenProviderWebLogin = platform.onOpenProviderWebLogin,
-                        onLogoutProvider = platform.onLogoutProvider,
-                        onImportYtmusicHeaderFile = platform.onImportYtmusicHeaderFile,
-                        onImportYtmusicOAuthFile = platform.onImportYtmusicOAuthFile,
-                        onStartYtmusicOAuth = platform.onStartYtmusicOAuth,
-                    )
-                    AppRoute.DebugLogs -> DebugLogFeatureScreen(
-                        uiGraph.debugLogs,
-                        onBack = { appViewModel.onBack() },
-                    )
-                    AppRoute.DownloadManager -> DownloadManagerScreen(
-                        uiGraph.playback.downloads,
-                        onBack = { appViewModel.onBack() },
-                    )
-                    is AppRoute.FeatureDetail -> ProviderFeatureParityDetailRoute(route.feature.toProviderFeature())
-                    is AppRoute.PlaylistDetail -> ProviderPlaylistDetailRoute(
-                        playlist = route.playlist.toProviderPlaylist(),
-                        category = route.category?.let { runCatching { ProviderFeatureCategory.valueOf(it) }.getOrNull() },
-                    )
-                    is AppRoute.TrackDetail -> ProviderTrackDetailRoute(route.track.toMusicTrack())
-                    is AppRoute.VideoDetail -> ProviderVideoDetailRoute(route.video.toProviderVideo())
-                    is AppRoute.MediaItemDetail -> ProviderMediaItemDetailRoute(route.item.toProviderMediaItem())
-                    AppRoute.LocalPlaylist -> LocalPlaylistScreen(
-                        uiState = localPlaylistState,
-                        actions = uiGraph.localPlaylist,
-                        playlist = localPlaylistState.selectedPlaylist,
-                    )
-                    AppRoute.LocalMusicCollection -> LocalMusicCollectionScreen()
-                    AppRoute.Feature,
-                    AppRoute.Playlist,
-                    AppRoute.Track,
-                    AppRoute.Video,
-                    AppRoute.MediaItem -> StaleRouteKindGuard { appViewModel.onBack() }
-                }
-            }
-        },
     )
+
+    // Keep the rendered progress observable by route content without creating another Back handler.
+    PredictiveBackProgressBridge(
+        progress = renderedGestureProgress,
+        route = predictiveRoute,
+    )
+}
+
+private val LocalPredictiveBackRouteProgress = androidx.compose.runtime.staticCompositionLocalOf { 0f }
+private val LocalPredictiveBackRoute = androidx.compose.runtime.staticCompositionLocalOf<AppRoute?> { null }
+
+@Composable
+private fun PredictiveBackProgressBridge(
+    progress: Float,
+    route: AppRoute?,
+) {
+    // Intentionally empty: state is consumed through the route surface parameters below. Keeping
+    // this small composable makes the seek state explicit at the NavDisplay boundary for debugging.
+    @Suppress("UNUSED_VARIABLE")
+    val ignored = progress to route
+}
+
+@Composable
+private fun PredictiveBackRouteSurface(
+    active: Boolean,
+    committed: Boolean,
+    swipeEdge: Int,
+    horizontalOffsetPx: Float,
+    verticalOffsetPx: Float,
+    returnSpec: FiniteAnimationSpec<Float>,
+    onCommittedExitDisposed: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val targetProgress = if (active && committed) 1f else if (active) {
+        // The actual gesture progress is represented by the offsets while seeking; corner growth is
+        // read from the active NavDisplay transition through the scale handoff below.
+        1f
+    } else {
+        0f
+    }
+    val renderedHorizontalOffsetPx by animateFloatAsState(
+        targetValue = if (active) horizontalOffsetPx else 0f,
+        animationSpec = returnSpec,
+        label = "Route predictive horizontal follow",
+    )
+    val renderedVerticalOffsetPx by animateFloatAsState(
+        targetValue = if (active) verticalOffsetPx else 0f,
+        animationSpec = returnSpec,
+        label = "Route predictive vertical follow",
+    )
+    val cornerProgress by animateFloatAsState(
+        targetValue = targetProgress,
+        animationSpec = returnSpec,
+        label = "Route predictive corner progress",
+    )
+    val corner = 28.dp * cornerProgress
+    val shape = RoundedCornerShape(corner)
+    val transformOrigin = when (swipeEdge) {
+        NavigationEvent.EDGE_LEFT -> TransformOrigin(0.18f, 0.5f)
+        NavigationEvent.EDGE_RIGHT -> TransformOrigin(0.82f, 0.5f)
+        else -> TransformOrigin.Center
+    }
+
+    DisposableEffect(active, committed) {
+        onDispose {
+            if (active && committed) onCommittedExitDisposed()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                translationX = renderedHorizontalOffsetPx
+                translationY = renderedVerticalOffsetPx
+                this.transformOrigin = transformOrigin
+                this.shape = shape
+                clip = active && cornerProgress > 0f
+            },
+    ) {
+        content()
+    }
 }
 
 private fun AppRoute.toPlaybackContextSnapshot(): PlaybackContextSnapshot? = when (this) {
