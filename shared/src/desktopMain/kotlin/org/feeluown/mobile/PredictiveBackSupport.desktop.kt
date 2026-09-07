@@ -21,7 +21,7 @@ internal actual fun PlatformLegacyBackHandler(
 @Composable
 internal actual fun PlatformPredictiveBackHandler(
     enabled: Boolean,
-    onProgress: (Float) -> Unit,
+    onProgress: (PredictiveBackGestureEvent) -> Unit,
     onCancelled: () -> Unit,
     onBack: () -> Unit,
 ) = Unit
