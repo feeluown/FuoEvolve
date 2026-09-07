@@ -85,18 +85,17 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
         },
     ) {
         val progress = renderedPredictiveProgress.coerceIn(0f, 1f)
-        // Full player keeps its normal overlay motion for explicit controls and non-gesture Back.
-        // During a predictive system-back gesture it follows the finger and previews the route below.
+        // Keep the full-player gesture restrained: enough motion to reveal the route underneath,
+        // but not enough to make the player feel detached from the finger or suddenly collapse.
         CompositionLocalProvider(LocalAppSharedTransitionScope provides null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val scale = 1f - (0.04f * progress)
+                        val scale = 1f - (0.018f * progress)
                         scaleX = scale
                         scaleY = scale
-                        translationY = 32.dp.toPx() * progress
-                        alpha = 1f - (0.08f * progress)
+                        translationY = 14.dp.toPx() * progress
                     },
             ) {
                 RuntimeFullPlayer()
