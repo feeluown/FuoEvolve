@@ -132,7 +132,9 @@ internal fun AppNavHost(
 
     var predictiveRoute by remember { mutableStateOf<AppRoute?>(null) }
     var predictiveGestureStartTouchY by remember { mutableStateOf<Float?>(null) }
+    var predictiveGestureActive by remember { mutableStateOf(false) }
     var predictiveBackCommitted by remember { mutableStateOf(false) }
+    var predictiveProgressTarget by remember { mutableFloatStateOf(0f) }
     var lastSwipeEdge by remember { mutableStateOf(NavigationEvent.EDGE_NONE) }
     var verticalFollowTargetPx by remember { mutableFloatStateOf(0f) }
     var horizontalFollowTargetPx by remember { mutableFloatStateOf(0f) }
@@ -148,7 +150,9 @@ internal fun AppNavHost(
             NavEntry(key = route) {
                 PredictiveBackRouteSurface(
                     active = predictiveRoute == route,
+                    gestureActive = predictiveGestureActive,
                     committed = predictiveBackCommitted,
+                    progressTarget = predictiveProgressTarget,
                     swipeEdge = lastSwipeEdge,
                     horizontalOffsetPx = horizontalFollowTargetPx,
                     verticalOffsetPx = verticalFollowTargetPx,
@@ -157,7 +161,10 @@ internal fun AppNavHost(
                         if (predictiveRoute == route) {
                             predictiveRoute = null
                             predictiveBackCommitted = false
+                            predictiveProgressTarget = 0f
                             lastSwipeEdge = NavigationEvent.EDGE_NONE
+                            horizontalFollowTargetPx = 0f
+                            verticalFollowTargetPx = 0f
                         }
                     },
                 ) {
@@ -238,31 +245,23 @@ internal fun AppNavHost(
         currentInfo = SceneInfo(currentScene),
         backInfo = sceneState.previousScenes.map { SceneInfo(it) },
     )
-    val gestureState = navigationEventState.transitionState
-    val gestureEvent = (gestureState as? InProgress)?.latestEvent
+    val gestureEvent = (navigationEventState.transitionState as? InProgress)?.latestEvent
     val gestureInProgress = gestureEvent != null
-    val gestureProgressTarget = when {
-        gestureEvent != null -> gestureEvent.progress.coerceIn(0f, 1f)
-        predictiveBackCommitted -> 1f
-        else -> 0f
-    }
-    val renderedGestureProgress by animateFloatAsState(
-        targetValue = gestureProgressTarget,
-        animationSpec = if (gestureInProgress) snap() else predictiveReturnSpec,
-        label = "Route predictive back progress",
-    )
 
     LaunchedEffect(gestureInProgress) {
         if (gestureInProgress && gestureEvent != null) {
             predictiveRoute = activeRoute
             predictiveGestureStartTouchY = gestureEvent.touchY
+            predictiveGestureActive = true
             predictiveBackCommitted = false
         } else if (!predictiveBackCommitted) {
             predictiveGestureStartTouchY = null
+            predictiveGestureActive = false
         }
     }
     LaunchedEffect(gestureEvent?.progress, gestureEvent?.touchY, gestureEvent?.swipeEdge) {
         if (gestureEvent != null) {
+            predictiveProgressTarget = gestureEvent.progress.coerceIn(0f, 1f)
             lastSwipeEdge = gestureEvent.swipeEdge
             val startTouchY = predictiveGestureStartTouchY ?: gestureEvent.touchY
             val rawDeltaY = gestureEvent.touchY - startTouchY
@@ -279,17 +278,6 @@ internal fun AppNavHost(
                 NavigationEvent.EDGE_RIGHT -> -horizontalFollowPx * gestureEvent.progress
                 else -> 0f
             }
-        } else {
-            verticalFollowTargetPx = 0f
-            horizontalFollowTargetPx = if (predictiveBackCommitted) {
-                when (lastSwipeEdge) {
-                    NavigationEvent.EDGE_LEFT -> horizontalFollowPx
-                    NavigationEvent.EDGE_RIGHT -> -horizontalFollowPx
-                    else -> 0f
-                }
-            } else {
-                0f
-            }
         }
     }
 
@@ -299,15 +287,24 @@ internal fun AppNavHost(
             predictiveBackPreference.enabled &&
             currentScene.previousEntries.isNotEmpty(),
         onBackCancelled = {
+            predictiveGestureActive = false
             predictiveBackCommitted = false
             predictiveGestureStartTouchY = null
+            predictiveProgressTarget = 0f
             verticalFollowTargetPx = 0f
             horizontalFollowTargetPx = 0f
         },
         onBackCompleted = {
+            predictiveGestureActive = false
             predictiveBackCommitted = true
             predictiveGestureStartTouchY = null
+            predictiveProgressTarget = 1f
             verticalFollowTargetPx = 0f
+            horizontalFollowTargetPx = when (lastSwipeEdge) {
+                NavigationEvent.EDGE_LEFT -> horizontalFollowPx
+                NavigationEvent.EDGE_RIGHT -> -horizontalFollowPx
+                else -> 0f
+            }
             appViewModel.onBack()
         },
     )
@@ -322,32 +319,14 @@ internal fun AppNavHost(
             predictivePopPageTransition(swipeEdge, predictiveSpatialSpec, predictiveEffectsSpec)
         },
     )
-
-    // Keep the rendered progress observable by route content without creating another Back handler.
-    PredictiveBackProgressBridge(
-        progress = renderedGestureProgress,
-        route = predictiveRoute,
-    )
-}
-
-private val LocalPredictiveBackRouteProgress = androidx.compose.runtime.staticCompositionLocalOf { 0f }
-private val LocalPredictiveBackRoute = androidx.compose.runtime.staticCompositionLocalOf<AppRoute?> { null }
-
-@Composable
-private fun PredictiveBackProgressBridge(
-    progress: Float,
-    route: AppRoute?,
-) {
-    // Intentionally empty: state is consumed through the route surface parameters below. Keeping
-    // this small composable makes the seek state explicit at the NavDisplay boundary for debugging.
-    @Suppress("UNUSED_VARIABLE")
-    val ignored = progress to route
 }
 
 @Composable
 private fun PredictiveBackRouteSurface(
     active: Boolean,
+    gestureActive: Boolean,
     committed: Boolean,
+    progressTarget: Float,
     swipeEdge: Int,
     horizontalOffsetPx: Float,
     verticalOffsetPx: Float,
@@ -355,30 +334,23 @@ private fun PredictiveBackRouteSurface(
     onCommittedExitDisposed: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val targetProgress = if (active && committed) 1f else if (active) {
-        // The actual gesture progress is represented by the offsets while seeking; corner growth is
-        // read from the active NavDisplay transition through the scale handoff below.
-        1f
-    } else {
-        0f
-    }
+    val renderedProgress by animateFloatAsState(
+        targetValue = if (active) progressTarget.coerceIn(0f, 1f) else 0f,
+        animationSpec = if (active && gestureActive) snap() else returnSpec,
+        label = "Route predictive corner progress",
+    )
     val renderedHorizontalOffsetPx by animateFloatAsState(
         targetValue = if (active) horizontalOffsetPx else 0f,
-        animationSpec = returnSpec,
+        animationSpec = if (active && gestureActive) snap() else returnSpec,
         label = "Route predictive horizontal follow",
     )
     val renderedVerticalOffsetPx by animateFloatAsState(
         targetValue = if (active) verticalOffsetPx else 0f,
-        animationSpec = returnSpec,
+        animationSpec = if (active && gestureActive) snap() else returnSpec,
         label = "Route predictive vertical follow",
     )
-    val cornerProgress by animateFloatAsState(
-        targetValue = targetProgress,
-        animationSpec = returnSpec,
-        label = "Route predictive corner progress",
-    )
-    val corner = 28.dp * cornerProgress
-    val shape = RoundedCornerShape(corner)
+    val cornerProgress = ((renderedProgress - 0.06f) / 0.94f).coerceIn(0f, 1f)
+    val shape = RoundedCornerShape(28.dp * cornerProgress)
     val transformOrigin = when (swipeEdge) {
         NavigationEvent.EDGE_LEFT -> TransformOrigin(0.18f, 0.5f)
         NavigationEvent.EDGE_RIGHT -> TransformOrigin(0.82f, 0.5f)
