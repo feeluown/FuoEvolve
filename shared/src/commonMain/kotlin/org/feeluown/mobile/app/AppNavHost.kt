@@ -13,10 +13,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
+
+private const val PREDICTIVE_BACK_RIGHT_EDGE = 1
 
 private fun pageTransition(
     initialOffsetX: (Int) -> Int,
@@ -56,26 +59,34 @@ private fun popPageTransition(
 )
 
 /**
- * Keep predictive Back visually connected to the gesture without the large 0.7x scale used by
- * Navigation 3's default transition. The previous route stays close to its final size while the
- * current route recedes just enough to expose depth. This is intentionally edge-neutral so both
- * left- and right-edge system gestures behave consistently.
+ * Navigation 3 only exposes the swipe edge to this convenience NavDisplay transition. Keep the
+ * visual depth restrained and bias the scale origin toward the gesture edge so left/right back
+ * gestures feel attached to the finger without the aggressive default 0.7x collapse.
  */
 private fun predictivePopPageTransition(
+    swipeEdge: Int,
     spatialSpec: FiniteAnimationSpec<Float>,
     effectsSpec: FiniteAnimationSpec<Float>,
-): ContentTransform = (
-    scaleIn(
-        initialScale = 0.985f,
+): ContentTransform {
+    val gestureOrigin = if (swipeEdge == PREDICTIVE_BACK_RIGHT_EDGE) {
+        TransformOrigin(0.82f, 0.5f)
+    } else {
+        TransformOrigin(0.18f, 0.5f)
+    }
+    return (
+        scaleIn(
+            initialScale = 0.992f,
+            animationSpec = spatialSpec,
+        ) + fadeIn(
+            initialAlpha = 0.96f,
+            animationSpec = effectsSpec,
+        )
+        ) togetherWith scaleOut(
+        targetScale = 0.965f,
+        transformOrigin = gestureOrigin,
         animationSpec = spatialSpec,
-    ) + fadeIn(
-        initialAlpha = 0.92f,
-        animationSpec = effectsSpec,
     )
-    ) togetherWith scaleOut(
-        targetScale = 0.94f,
-        animationSpec = spatialSpec,
-    )
+}
 
 @Composable
 internal fun AppNavHost(
@@ -102,8 +113,8 @@ internal fun AppNavHost(
         onBack = { appViewModel.onBack() },
         transitionSpec = { forwardPageTransition(pageSpatialSpec, pageEffectsSpec) },
         popTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
-        predictivePopTransitionSpec = {
-            predictivePopPageTransition(predictiveSpatialSpec, predictiveEffectsSpec)
+        predictivePopTransitionSpec = { swipeEdge ->
+            predictivePopPageTransition(swipeEdge, predictiveSpatialSpec, predictiveEffectsSpec)
         },
         entryProvider = { route ->
             NavEntry(key = route) {
