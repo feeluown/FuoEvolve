@@ -237,7 +237,7 @@ internal fun AppNavHost(
     )
     val sceneState = rememberSceneState(
         entries = entries,
-        sceneStrategy = SinglePaneSceneStrategy(),
+        sceneStrategies = listOf(SinglePaneSceneStrategy()),
         onBack = { appViewModel.onBack() },
     )
     val currentScene = sceneState.currentScene
