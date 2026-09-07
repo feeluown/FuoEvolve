@@ -3,12 +3,15 @@ package org.feeluown.mobile
 import android.content.Context
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collect
 
 private const val PLATFORM_SETTINGS_PREFERENCES = "fuo_evolve_platform_settings"
 private const val PREDICTIVE_BACK_ENABLED_KEY = "predictive_back_enabled"
@@ -66,4 +69,24 @@ internal actual fun PlatformLegacyBackHandler(
     onBack: () -> Unit,
 ) {
     BackHandler(enabled = enabled, onBack = onBack)
+}
+
+@Composable
+internal actual fun PlatformPredictiveBackHandler(
+    enabled: Boolean,
+    onProgress: (Float) -> Unit,
+    onCancelled: () -> Unit,
+    onBack: () -> Unit,
+) {
+    PredictiveBackHandler(enabled = enabled && AndroidPredictiveBackPreference.isSupported) { progress ->
+        try {
+            progress.collect { backEvent ->
+                onProgress(backEvent.progress.coerceIn(0f, 1f))
+            }
+            onBack()
+        } catch (cancellation: CancellationException) {
+            onCancelled()
+            throw cancellation
+        }
+    }
 }
