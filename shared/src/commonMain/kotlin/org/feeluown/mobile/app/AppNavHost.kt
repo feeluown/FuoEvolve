@@ -7,7 +7,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,34 +53,6 @@ private fun popPageTransition(
     effectsSpec = effectsSpec,
 )
 
-private fun settingsForwardPageTransition(
-    spatialSpec: FiniteAnimationSpec<IntOffset>,
-    effectsSpec: FiniteAnimationSpec<Float>,
-): ContentTransform = pageTransition(
-    initialOffsetX = { -it },
-    targetOffsetX = { it },
-    spatialSpec = spatialSpec,
-    effectsSpec = effectsSpec,
-)
-
-private fun settingsPopPageTransition(
-    spatialSpec: FiniteAnimationSpec<IntOffset>,
-    effectsSpec: FiniteAnimationSpec<Float>,
-): ContentTransform = pageTransition(
-    initialOffsetX = { it },
-    targetOffsetX = { -it },
-    spatialSpec = spatialSpec,
-    effectsSpec = effectsSpec,
-)
-
-private fun settingsNavigationMetadata(
-    spatialSpec: FiniteAnimationSpec<IntOffset>,
-    effectsSpec: FiniteAnimationSpec<Float>,
-): Map<String, Any> =
-    NavDisplay.transitionSpec { settingsForwardPageTransition(spatialSpec, effectsSpec) } +
-        NavDisplay.popTransitionSpec { settingsPopPageTransition(spatialSpec, effectsSpec) } +
-        NavDisplay.predictivePopTransitionSpec { settingsPopPageTransition(spatialSpec, effectsSpec) }
-
 @Composable
 internal fun AppNavHost(
     backStack: List<AppRoute>,
@@ -105,16 +76,8 @@ internal fun AppNavHost(
         onBack = { appViewModel.onBack() },
         transitionSpec = { forwardPageTransition(pageSpatialSpec, pageEffectsSpec) },
         popTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
-        predictivePopTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
         entryProvider = { route ->
-            NavEntry(
-                key = route,
-                metadata = if (route == AppRoute.Settings) {
-                    settingsNavigationMetadata(pageSpatialSpec, pageEffectsSpec)
-                } else {
-                    emptyMap()
-                },
-            ) {
+            NavEntry(key = route) {
                 when (route) {
                     AppRoute.Home -> HomeScreen(
                         home = uiGraph.home.home,
