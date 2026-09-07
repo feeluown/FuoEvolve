@@ -16,3 +16,11 @@ internal expect fun PlatformLegacyBackHandler(
     enabled: Boolean,
     onBack: () -> Unit,
 )
+
+@Composable
+internal expect fun PlatformPredictiveBackHandler(
+    enabled: Boolean,
+    onProgress: (Float) -> Unit,
+    onCancelled: () -> Unit,
+    onBack: () -> Unit,
+)
