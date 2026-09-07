@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.os.Build
+import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.runtime.Composable
@@ -74,14 +75,25 @@ internal actual fun PlatformLegacyBackHandler(
 @Composable
 internal actual fun PlatformPredictiveBackHandler(
     enabled: Boolean,
-    onProgress: (Float) -> Unit,
+    onProgress: (PredictiveBackGestureEvent) -> Unit,
     onCancelled: () -> Unit,
     onBack: () -> Unit,
 ) {
     PredictiveBackHandler(enabled = enabled && AndroidPredictiveBackPreference.isSupported) { progress ->
         try {
             progress.collect { backEvent ->
-                onProgress(backEvent.progress.coerceIn(0f, 1f))
+                onProgress(
+                    PredictiveBackGestureEvent(
+                        progress = backEvent.progress.coerceIn(0f, 1f),
+                        touchX = backEvent.touchX,
+                        touchY = backEvent.touchY,
+                        swipeEdge = when (backEvent.swipeEdge) {
+                            BackEventCompat.EDGE_LEFT -> PredictiveBackSwipeEdge.Left
+                            BackEventCompat.EDGE_RIGHT -> PredictiveBackSwipeEdge.Right
+                            else -> PredictiveBackSwipeEdge.None
+                        },
+                    ),
+                )
             }
             onBack()
         } catch (cancellation: CancellationException) {
