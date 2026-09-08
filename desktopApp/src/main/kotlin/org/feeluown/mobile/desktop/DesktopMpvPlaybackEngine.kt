@@ -41,6 +41,8 @@ internal class DesktopMpvPlaybackEngine(
     @Volatile
     private var activePlaylistEntryId: Long? = null
     @Volatile
+    private var activeFileLoaded = false
+    @Volatile
     private var activePlaybackConfirmed = false
     @Volatile
     private var lastLoadingPositionMs: Long? = null
@@ -50,6 +52,7 @@ internal class DesktopMpvPlaybackEngine(
         // asynchronous, so anything from the previous item must not be allowed to mutate the new
         // logical playback transaction while resolution is still in progress.
         activePlaylistEntryId = null
+        activeFileLoaded = false
         activePlaybackConfirmed = false
         lastLoadingPositionMs = null
         backend?.runCatching { stop() }
@@ -117,6 +120,7 @@ internal class DesktopMpvPlaybackEngine(
 
     override fun stop() {
         activePlaylistEntryId = null
+        activeFileLoaded = false
         activePlaybackConfirmed = false
         lastLoadingPositionMs = null
         backend?.runCatching { stop() }?.onFailure(::publishBackendFailure)
@@ -126,7 +130,7 @@ internal class DesktopMpvPlaybackEngine(
 
     override fun seekTo(positionMs: Long) {
         val current = mutableState.value
-        if (current.currentTrack == null || activePlaylistEntryId == null) return
+        if (current.currentTrack == null || !hasActiveNativeFile()) return
         val upperBound = current.durationMs.takeIf { it > 0L } ?: Long.MAX_VALUE
         val target = positionMs.coerceIn(0L, upperBound)
         backend?.runCatching { seekTo(target) }?.onFailure(::publishBackendFailure)
@@ -147,6 +151,7 @@ internal class DesktopMpvPlaybackEngine(
 
     override fun close() {
         activePlaylistEntryId = null
+        activeFileLoaded = false
         activePlaybackConfirmed = false
         lastLoadingPositionMs = null
         val activeBackend = backend
@@ -161,6 +166,7 @@ internal class DesktopMpvPlaybackEngine(
     ) {
         paused = false
         activePlaylistEntryId = null
+        activeFileLoaded = false
         activePlaybackConfirmed = false
         lastLoadingPositionMs = null
         mutableState.value = PlaybackState(
@@ -201,13 +207,28 @@ internal class DesktopMpvPlaybackEngine(
                     (current.status == PlayerStatus.Loading || current.status == PlayerStatus.Paused)
                 ) {
                     activePlaylistEntryId = event.playlistEntryId
+                    activeFileLoaded = false
                     activePlaybackConfirmed = false
                     lastLoadingPositionMs = null
                 }
             }
-            DesktopMpvBackendEvent.FileLoaded -> Unit
+            DesktopMpvBackendEvent.FileLoaded -> {
+                val current = mutableState.value
+                if (
+                    current.currentTrack != null &&
+                    current.status != PlayerStatus.Idle &&
+                    current.status != PlayerStatus.Error &&
+                    current.status != PlayerStatus.Ended
+                ) {
+                    // FILE_LOADED belongs to the currently loading file and is guaranteed before
+                    // playback starts. Keep playlist-entry matching when START_FILE is available,
+                    // but do not make that optional event payload a single point of failure for
+                    // status/timeline synchronization across libmpv ABI variants.
+                    activeFileLoaded = true
+                }
+            }
             DesktopMpvBackendEvent.PlaybackRestart -> {
-                if (activePlaylistEntryId == null) return
+                if (!hasActiveNativeFile()) return
                 val current = mutableState.value
                 if (current.currentTrack != null && current.status != PlayerStatus.Error) {
                     activePlaybackConfirmed = true
@@ -219,15 +240,18 @@ internal class DesktopMpvPlaybackEngine(
                 }
             }
             is DesktopMpvBackendEvent.Property -> {
-                if (activePlaylistEntryId != null) handleProperty(event.name, event.value)
+                if (hasActiveNativeFile()) handleProperty(event.name, event.value)
             }
             is DesktopMpvBackendEvent.EndFile -> {
-                if (event.playlistEntryId != activePlaylistEntryId) return
+                val activeEntryId = activePlaylistEntryId
+                if (activeEntryId != null) {
+                    if (event.playlistEntryId != activeEntryId) return
+                } else if (!activeFileLoaded) {
+                    return
+                }
                 when (event.reason) {
                     MPV_END_FILE_REASON_EOF -> {
-                        activePlaylistEntryId = null
-                        activePlaybackConfirmed = false
-                        lastLoadingPositionMs = null
+                        clearActiveNativeFile()
                         val current = mutableState.value
                         if (current.currentTrack != null) {
                             mutableState.value = current.copy(
@@ -237,9 +261,7 @@ internal class DesktopMpvPlaybackEngine(
                         }
                     }
                     MPV_END_FILE_REASON_ERROR -> {
-                        activePlaylistEntryId = null
-                        activePlaybackConfirmed = false
-                        lastLoadingPositionMs = null
+                        clearActiveNativeFile()
                         publishBackendFailure(
                             IllegalStateException(event.errorMessage ?: "libmpv playback failed"),
                         )
@@ -247,15 +269,20 @@ internal class DesktopMpvPlaybackEngine(
                     MPV_END_FILE_REASON_STOP,
                     MPV_END_FILE_REASON_QUIT,
                     MPV_END_FILE_REASON_REDIRECT,
-                    -> {
-                        activePlaylistEntryId = null
-                        activePlaybackConfirmed = false
-                        lastLoadingPositionMs = null
-                    }
+                    -> clearActiveNativeFile()
                 }
             }
             is DesktopMpvBackendEvent.Failure -> publishBackendFailure(event.throwable)
         }
+    }
+
+    private fun hasActiveNativeFile(): Boolean = activePlaylistEntryId != null || activeFileLoaded
+
+    private fun clearActiveNativeFile() {
+        activePlaylistEntryId = null
+        activeFileLoaded = false
+        activePlaybackConfirmed = false
+        lastLoadingPositionMs = null
     }
 
     private fun handleProperty(name: String, value: String?) {
