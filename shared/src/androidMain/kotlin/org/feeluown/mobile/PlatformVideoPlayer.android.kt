@@ -6,7 +6,6 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.net.Uri
-import android.util.Log
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
@@ -80,7 +79,7 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
                 override fun onPlayerError(error: PlaybackException) {
                     val rootCause = error.rootCause()
                     val candidate = activeCandidates.getOrNull(activeCandidateIndex)
-                    Log.e(
+                    AppLogger.e(
                         VIDEO_PLAYER_TAG,
                         "Video playback failed: code=${error.errorCodeName}, " +
                             "cause=${rootCause::class.java.name}: ${rootCause.message.orEmpty()}, " +
@@ -188,7 +187,7 @@ private class AndroidPlatformVideoController(context: Context) : PlatformVideoCo
         val shouldPlay = player.playWhenReady || player.isPlaying
         activeCandidateIndex = nextIndex
         playbackError = null
-        Log.w(
+        AppLogger.w(
             VIDEO_PLAYER_TAG,
             "Retrying video playback with candidate ${nextIndex + 1}/${activeCandidates.size}: " +
                 activeCandidates[nextIndex].debugDescription(),
