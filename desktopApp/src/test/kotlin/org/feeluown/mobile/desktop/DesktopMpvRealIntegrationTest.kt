@@ -1,9 +1,13 @@
 package org.feeluown.mobile.desktop
 
+import com.sun.net.httpserver.HttpServer
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -60,11 +64,12 @@ class DesktopMpvRealIntegrationTest {
     }
 
     @Test
-    fun realLibMpvSwitchesPhysicalSourceWithoutChangingLogicalTrackIdentity() {
+    fun realLibMpvSwitchesPhysicalSourceAndCarriesReplacementHeaders() {
         if (!realLibMpvTestEnabled()) return
 
         val originalWav = createSilentWav(durationMs = 3_000)
         val replacementWav = createSilentWav(durationMs = 2_000)
+        val replacementServer = serveWavWithRequiredHeaders(replacementWav)
         val engine = DesktopMpvPlaybackEngine()
         try {
             val logicalTrack = MusicTrack(
@@ -96,13 +101,17 @@ class DesktopMpvRealIntegrationTest {
                 logicalTrack = logicalTrack,
                 resolveTrack = logicalTrack,
                 payload = PlaybackPayload(
-                    url = replacementWav.toAbsolutePath().toString(),
+                    url = replacementServer.url,
                     title = logicalTrack.title,
                     artists = logicalTrack.artists,
                     album = logicalTrack.album,
-                    source = "qqmusic",
+                    source = "bilibili",
+                    headers = mapOf(
+                        "Referer" to REQUIRED_REFERER,
+                        "User-Agent" to REQUIRED_USER_AGENT,
+                    ),
                     durationMs = 2_000L,
-                    providerName = "QQ Music",
+                    providerName = "Bilibili",
                     isSmartReplacement = true,
                     originalId = logicalTrack.id,
                     originalTitle = logicalTrack.title,
@@ -110,12 +119,12 @@ class DesktopMpvRealIntegrationTest {
                     originalAlbum = logicalTrack.album,
                     originalSource = logicalTrack.source,
                     originalProviderName = logicalTrack.providerName,
-                    replacementId = "qqmusic:physical-track",
+                    replacementId = "bilibili:physical-track",
                     replacementTitle = "Physical replacement",
                     replacementArtists = "Replacement artist",
                     replacementAlbum = "Replacement album",
-                    replacementSource = "qqmusic",
-                    replacementProviderName = "QQ Music",
+                    replacementSource = "bilibili",
+                    replacementProviderName = "Bilibili",
                     replacementStrategy = "user_selected",
                     replacementScore = 1.0,
                 ),
@@ -124,19 +133,21 @@ class DesktopMpvRealIntegrationTest {
             val replacementPlaying = awaitPlaying(engine) { state ->
                 state.currentTrack?.id == logicalTrack.id &&
                     state.resolvedSource?.isReplacement == true &&
-                    state.resolvedSource?.trackId == "qqmusic:physical-track"
+                    state.resolvedSource?.trackId == "bilibili:physical-track"
             }
 
+            assertTrue(replacementServer.sawRequiredHeaders.get())
             assertEquals(logicalTrack.id, replacementPlaying.currentTrack?.id)
             assertEquals("netease", replacementPlaying.currentTrack?.source)
-            assertEquals("qqmusic:physical-track", replacementPlaying.resolvedSource?.trackId)
-            assertEquals("qqmusic", replacementPlaying.resolvedSource?.source)
-            assertEquals(replacementWav.toAbsolutePath().toString(), replacementPlaying.resolvedSource?.url)
+            assertEquals("bilibili:physical-track", replacementPlaying.resolvedSource?.trackId)
+            assertEquals("bilibili", replacementPlaying.resolvedSource?.source)
+            assertEquals(replacementServer.url, replacementPlaying.resolvedSource?.url)
             assertTrue(replacementPlaying.resolvedSource?.isReplacement == true)
             assertTrue(replacementPlaying.positionMs >= 100L)
             assertTrue(replacementPlaying.durationMs in 1_500L..2_500L)
         } finally {
             engine.close()
+            replacementServer.close()
             Files.deleteIfExists(originalWav)
             Files.deleteIfExists(replacementWav)
         }
@@ -160,6 +171,34 @@ class DesktopMpvRealIntegrationTest {
     private fun realLibMpvTestEnabled(): Boolean =
         System.getProperty("os.name").orEmpty().contains("linux", ignoreCase = true) &&
             System.getenv("FUOEVOLVE_REAL_LIBMPV_TEST") == "1"
+
+    private fun serveWavWithRequiredHeaders(wav: Path): HeaderProtectedWavServer {
+        val sawRequiredHeaders = AtomicBoolean(false)
+        val bytes = Files.readAllBytes(wav)
+        val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        server.createContext("/replacement.wav") { exchange ->
+            val validHeaders = exchange.requestHeaders.getFirst("Referer") == REQUIRED_REFERER &&
+                exchange.requestHeaders.getFirst("User-Agent") == REQUIRED_USER_AGENT
+            if (!validHeaders) {
+                exchange.sendResponseHeaders(403, -1L)
+                exchange.close()
+                return@createContext
+            }
+            sawRequiredHeaders.set(true)
+            exchange.responseHeaders.set("Content-Type", "audio/wav")
+            exchange.responseHeaders.set("Accept-Ranges", "bytes")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { output -> output.write(bytes) }
+        }
+        server.start()
+        val address = server.address
+        val host = if (address.address is java.net.Inet6Address) "[${address.address.hostAddress}]" else address.address.hostAddress
+        return HeaderProtectedWavServer(
+            server = server,
+            url = "http://$host:${address.port}/replacement.wav",
+            sawRequiredHeaders = sawRequiredHeaders,
+        )
+    }
 
     private fun createSilentWav(durationMs: Int): Path {
         val sampleRate = 8_000
@@ -197,7 +236,19 @@ class DesktopMpvRealIntegrationTest {
         return path
     }
 
+    private data class HeaderProtectedWavServer(
+        val server: HttpServer,
+        val url: String,
+        val sawRequiredHeaders: AtomicBoolean,
+    ) : AutoCloseable {
+        override fun close() {
+            server.stop(0)
+        }
+    }
+
     private companion object {
         const val WAV_HEADER_SIZE = 44
+        const val REQUIRED_REFERER = "https://www.bilibili.com/"
+        const val REQUIRED_USER_AGENT = "FuoEvolve-libmpv-replacement-test"
     }
 }
