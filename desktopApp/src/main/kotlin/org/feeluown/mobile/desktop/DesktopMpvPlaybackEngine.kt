@@ -472,7 +472,11 @@ private class LibMpvBackend(
                 // therefore require an explicit -1 before the fourth argument.
                 command("loadfile", url, "replace", "-1", perFileOptions)
             }
-            expectedPlaylistEntryId = getPropertyString("playlist/0/id")?.toLongOrNull()
+            getPropertyString("playlist/0/id")?.toLongOrNull()?.let { playlistEntryId ->
+                // START_FILE can race with the synchronous loadfile call. Never erase an entry id
+                // already confirmed by the event thread just because this immediate lookup is empty.
+                expectedPlaylistEntryId = playlistEntryId
+            }
         } catch (throwable: Throwable) {
             expectedPath = null
             expectedPlaylistEntryId = null
@@ -579,7 +583,10 @@ private class LibMpvBackend(
     private fun startFileMatchesCurrentRequest(playlistEntryId: Long): Boolean {
         val expectedEntryId = expectedPlaylistEntryId
         if (expectedEntryId != null) return playlistEntryId == expectedEntryId
-        if (!currentPathMatchesExpected()) return false
+
+        // The path property is not guaranteed to have switched by START_FILE. Correlate the event
+        // with the playlist entry mpv says it is currently loading instead of sampling path here.
+        if (currentPlaylistEntryId() != playlistEntryId) return false
         expectedPlaylistEntryId = playlistEntryId
         return true
     }
@@ -600,14 +607,32 @@ private class LibMpvBackend(
             }
             return true
         }
+
+        val currentEntryId = currentPlaylistEntryId()
+        val expectedEntryId = expectedPlaylistEntryId
+        if (expectedEntryId != null && currentEntryId == expectedEntryId) {
+            // mpv can publish START_FILE / playlist identity before the path property is updated or
+            // can normalize the path it exposes. Entry identity is the authoritative correlation.
+            polledActivePath = requestedPath
+            listener(
+                DesktopMpvBackendEvent.FileLoaded(
+                    path = requestedPath,
+                    playlistEntryId = expectedEntryId,
+                ),
+            )
+            return true
+        }
+
+        // Missing START_FILE metadata remains supported: only then fall back to the path exposed by
+        // mpv, and bind any playlist identity that is available at that point.
         val currentPath = getPropertyString("path") ?: return false
         if (currentPath != requestedPath) return false
-        val playlistEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
+        val playlistEntryId = currentEntryId ?: expectedEntryId
         if (playlistEntryId != null) expectedPlaylistEntryId = playlistEntryId
         polledActivePath = requestedPath
         listener(
             DesktopMpvBackendEvent.FileLoaded(
-                path = currentPath,
+                path = requestedPath,
                 playlistEntryId = playlistEntryId,
             ),
         )
