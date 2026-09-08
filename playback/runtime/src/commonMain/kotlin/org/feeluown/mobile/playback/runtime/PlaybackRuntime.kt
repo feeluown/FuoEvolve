@@ -117,7 +117,19 @@ class DefaultPlaybackRuntime(
     }
 
     override fun pause() {
-        if (state.value.status == PlaybackSessionStatus.Playing) {
+        val current = state.value
+        if (
+            current.currentTrack != null &&
+            (
+                current.status == PlaybackSessionStatus.Loading ||
+                    current.status == PlaybackSessionStatus.Playing ||
+                    current.status == PlaybackSessionStatus.Paused
+            )
+        ) {
+            // Idempotent pause forwarding is intentional. Platform integrations may issue Pause
+            // immediately after a queue transition while the combined session still exposes the
+            // previous Paused snapshot; the engine already knows that the replacement track is
+            // Loading and must retain the pause request through that asynchronous start.
             engine.pause()
         }
     }
