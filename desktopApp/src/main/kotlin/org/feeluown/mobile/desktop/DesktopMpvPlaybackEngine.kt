@@ -39,6 +39,8 @@ internal class DesktopMpvPlaybackEngine(
     @Volatile
     private var volume = 1.0
     @Volatile
+    private var activeRequestedPath: String? = null
+    @Volatile
     private var activePlaylistEntryId: Long? = null
     @Volatile
     private var activeFileLoaded = false
@@ -51,6 +53,7 @@ internal class DesktopMpvPlaybackEngine(
         // Invalidate the previous entry before asking mpv to stop it. END_FILE and property events are
         // asynchronous, so anything from the previous item must not be allowed to mutate the new
         // logical playback transaction while resolution is still in progress.
+        activeRequestedPath = null
         activePlaylistEntryId = null
         activeFileLoaded = false
         activePlaybackConfirmed = false
@@ -119,6 +122,7 @@ internal class DesktopMpvPlaybackEngine(
     }
 
     override fun stop() {
+        activeRequestedPath = null
         activePlaylistEntryId = null
         activeFileLoaded = false
         activePlaybackConfirmed = false
@@ -150,6 +154,7 @@ internal class DesktopMpvPlaybackEngine(
     }
 
     override fun close() {
+        activeRequestedPath = null
         activePlaylistEntryId = null
         activeFileLoaded = false
         activePlaybackConfirmed = false
@@ -165,6 +170,7 @@ internal class DesktopMpvPlaybackEngine(
         resolvedSource: org.feeluown.mobile.ResolvedPlaybackSource,
     ) {
         paused = false
+        activeRequestedPath = payload.url
         activePlaylistEntryId = null
         activeFileLoaded = false
         activePlaybackConfirmed = false
@@ -212,7 +218,8 @@ internal class DesktopMpvPlaybackEngine(
                     lastLoadingPositionMs = null
                 }
             }
-            DesktopMpvBackendEvent.FileLoaded -> {
+            is DesktopMpvBackendEvent.FileLoaded -> {
+                if (event.path != activeRequestedPath) return
                 val current = mutableState.value
                 if (
                     current.currentTrack != null &&
@@ -220,8 +227,6 @@ internal class DesktopMpvPlaybackEngine(
                     current.status != PlayerStatus.Error &&
                     current.status != PlayerStatus.Ended
                 ) {
-                    // The native backend only publishes FILE_LOADED after correlating it with the
-                    // current load request, so it is safe to arm the property/restart fallback here.
                     activeFileLoaded = true
                 }
             }
@@ -277,6 +282,7 @@ internal class DesktopMpvPlaybackEngine(
     private fun hasActiveNativeFile(): Boolean = activePlaylistEntryId != null || activeFileLoaded
 
     private fun clearActiveNativeFile() {
+        activeRequestedPath = null
         activePlaylistEntryId = null
         activeFileLoaded = false
         activePlaybackConfirmed = false
@@ -380,7 +386,7 @@ internal class DesktopMpvPlaybackEngine(
 
 internal sealed interface DesktopMpvBackendEvent {
     data class StartFile(val playlistEntryId: Long) : DesktopMpvBackendEvent
-    data object FileLoaded : DesktopMpvBackendEvent
+    data class FileLoaded(val path: String) : DesktopMpvBackendEvent
     data object PlaybackRestart : DesktopMpvBackendEvent
     data class Property(val name: String, val value: String?) : DesktopMpvBackendEvent
     data class EndFile(
@@ -575,9 +581,10 @@ private class LibMpvBackend(
     private fun activateCurrentRequest(): Boolean {
         val requestedPath = expectedPath ?: return false
         if (polledActivePath == requestedPath) return true
-        if (!currentPathMatchesExpected()) return false
+        val currentPath = getPropertyString("path") ?: return false
+        if (currentPath != requestedPath) return false
         polledActivePath = requestedPath
-        listener(DesktopMpvBackendEvent.FileLoaded)
+        listener(DesktopMpvBackendEvent.FileLoaded(path = currentPath))
         return true
     }
 
