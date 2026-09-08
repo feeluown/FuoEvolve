@@ -19,6 +19,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.Locale
 import javax.swing.SwingUtilities
+import org.feeluown.mobile.AppLogger
 
 internal interface DesktopTrayController : AutoCloseable {
     val isAvailable: Boolean
@@ -103,7 +104,7 @@ private class AwtDesktopTrayController(
             tray.add(icon)
             tray to icon
         }.onFailure { error ->
-            System.err.println("FuoEvolve: desktop tray unavailable: ${error.message.orEmpty()}")
+            AppLogger.w("DesktopTray", "Desktop tray unavailable", error)
         }.getOrNull()
 
         systemTray = initialized?.first
@@ -142,13 +143,13 @@ private class LinuxStatusNotifierTrayController(
                 errorCapacity = ERROR_BUFFER_BYTES.toLong(),
             )
         }.onFailure { failure ->
-            System.err.println("FuoEvolve: Linux StatusNotifier tray unavailable: ${failure.message.orEmpty()}")
+            AppLogger.w("DesktopTray", "Linux StatusNotifier tray unavailable", failure)
         }.getOrNull()
 
         if (handle == null) {
             val message = error.getString(0, Charsets.UTF_8.name()).trim()
             if (message.isNotEmpty()) {
-                System.err.println("FuoEvolve: Linux StatusNotifier tray unavailable: $message")
+                AppLogger.w("DesktopTray", "Linux StatusNotifier tray unavailable: $message")
             }
         }
     }
@@ -162,7 +163,7 @@ private class UnavailableDesktopTrayController(reason: String) : DesktopTrayCont
     override val isAvailable: Boolean = false
 
     init {
-        System.err.println("FuoEvolve: desktop tray unavailable: $reason")
+        AppLogger.w("DesktopTray", "Desktop tray unavailable: $reason")
     }
 
     override fun close() = Unit
