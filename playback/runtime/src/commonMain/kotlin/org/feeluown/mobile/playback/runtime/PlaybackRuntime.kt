@@ -29,6 +29,8 @@ data class PlaybackRuntimeOverlay(
     val lyricsAlignmentOffsetMs: Long = 0L,
     val queueTrackIds: List<String> = emptyList(),
     val queueIndex: Int = -1,
+    val canonicalQueueTracks: List<TrackRef> = emptyList(),
+    val canonicalQueueIndex: Int = -1,
     val canGoNext: Boolean = false,
     val canGoPrevious: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
@@ -164,6 +166,16 @@ private fun composeState(
         currentTrack?.let { listOf(it.id) }.orEmpty()
     }
     val queueIndex = if (overlayMatchesEngine) overlay.queueIndex else currentTrack?.let { 0 } ?: -1
+    val canonicalQueueTracks = if (overlayMatchesEngine) {
+        overlay.canonicalQueueTracks
+    } else {
+        currentTrack?.let(::listOf).orEmpty()
+    }
+    val canonicalQueueIndex = if (overlayMatchesEngine) {
+        overlay.canonicalQueueIndex
+    } else {
+        currentTrack?.let { 0 } ?: -1
+    }
 
     return PlaybackSessionState(
         status = engine.status,
@@ -177,6 +189,8 @@ private fun composeState(
         lyrics = overlay.lyrics.takeIf { overlayMatchesEngine },
         queueTrackIds = queueTrackIds,
         queueIndex = queueIndex,
+        canonicalQueueTracks = canonicalQueueTracks,
+        canonicalQueueIndex = canonicalQueueIndex,
         canGoNext = overlay.canGoNext && overlayMatchesEngine,
         canGoPrevious = overlay.canGoPrevious && overlayMatchesEngine,
         repeatMode = overlay.repeatMode,
