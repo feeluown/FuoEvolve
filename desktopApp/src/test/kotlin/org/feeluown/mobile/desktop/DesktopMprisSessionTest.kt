@@ -22,6 +22,8 @@ class DesktopMprisSessionTest {
                 durationMs = 180_000,
                 queueTrackIds = listOf("track-a", "track-b"),
                 queueIndex = 0,
+                canGoNext = true,
+                canGoPrevious = true,
             ),
         )
         val objectUnderTest = LinuxMprisObject(session) { }
@@ -31,7 +33,7 @@ class DesktopMprisSessionTest {
         assertEquals("Track track-a", objectUnderTest.getMetadata().getValue("xesam:title").value)
         assertEquals(mprisTrackPath("track-a"), objectUnderTest.getMetadata().getValue("mpris:trackid").value)
         assertTrue(objectUnderTest.getCanGoNext())
-        assertFalse(objectUnderTest.getCanGoPrevious())
+        assertTrue(objectUnderTest.getCanGoPrevious())
         assertTrue(objectUnderTest.getCanPlay())
         assertTrue(objectUnderTest.getCanPause())
         assertTrue(objectUnderTest.getCanSeek())
@@ -81,17 +83,42 @@ class DesktopMprisSessionTest {
             durationMs = 100_000,
             queueTrackIds = listOf("track-a", "track-b"),
             queueIndex = 0,
+            canGoNext = true,
+            canGoPrevious = false,
         )
 
         assertTrue(mprisChangedProperties(base, base.copy(positionMs = 20_000)).isEmpty())
 
         val changed = mprisChangedProperties(
             base,
-            base.copy(status = PlaybackSessionStatus.Paused, queueIndex = 1),
+            base.copy(
+                status = PlaybackSessionStatus.Paused,
+                canGoNext = false,
+                canGoPrevious = true,
+            ),
         )
         assertEquals("Paused", changed.getValue("PlaybackStatus").value)
         assertTrue("CanGoNext" in changed)
         assertTrue("CanGoPrevious" in changed)
+        assertTrue("CanPause" in changed)
+    }
+
+    @Test
+    fun pauseAndSeekCapabilitiesFollowActivePlaybackStatus() {
+        val loading = FakePlaybackSession(
+            PlaybackSessionState(
+                status = PlaybackSessionStatus.Loading,
+                currentTrack = track("track-a"),
+                durationMs = 100_000,
+            ),
+        )
+        val loadingObject = LinuxMprisObject(loading) { }
+        assertFalse(loadingObject.getCanPause())
+        assertFalse(loadingObject.getCanSeek())
+
+        loading.state.value = loading.state.value.copy(status = PlaybackSessionStatus.Paused)
+        assertFalse(loadingObject.getCanPause())
+        assertTrue(loadingObject.getCanSeek())
     }
 
     private fun track(id: String) = TrackRef(
