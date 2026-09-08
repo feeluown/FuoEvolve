@@ -227,17 +227,16 @@ impl SmtcWorker {
         self.controls.SetIsStopEnabled(update.has_track)?;
         self.controls.SetIsNextEnabled(update.can_next)?;
         self.controls.SetIsPreviousEnabled(update.can_previous)?;
-        if update.can_change_playback_mode {
-            self.controls.SetAutoRepeatMode(match update.repeat_mode {
-                REPEAT_ONE => MediaPlaybackAutoRepeatMode::Track,
-                REPEAT_ALL => MediaPlaybackAutoRepeatMode::List,
-                _ => MediaPlaybackAutoRepeatMode::None,
-            })?;
-            self.controls.SetShuffleEnabled(update.shuffle_enabled)?;
-        } else {
-            self.controls.SetAutoRepeatMode(MediaPlaybackAutoRepeatMode::None)?;
-            self.controls.SetShuffleEnabled(false)?;
-        }
+
+        // SMTC has no separate enable/disable flag for repeat or shuffle. Always publish the real
+        // playback mode; requests are rejected by the Kotlin PlaybackSession when policy locks them.
+        let _ = update.can_change_playback_mode;
+        self.controls.SetAutoRepeatMode(match update.repeat_mode {
+            REPEAT_ONE => MediaPlaybackAutoRepeatMode::Track,
+            REPEAT_ALL => MediaPlaybackAutoRepeatMode::List,
+            _ => MediaPlaybackAutoRepeatMode::None,
+        })?;
+        self.controls.SetShuffleEnabled(update.shuffle_enabled)?;
 
         let duration_ms = update.duration_ms.max(0);
         let position_ms = update.position_ms.clamp(0, duration_ms.max(update.position_ms.max(0)));
