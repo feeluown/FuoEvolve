@@ -15,14 +15,18 @@ internal object YtMusicProviderDefinition {
     const val DATA_API_BASE = "https://www.googleapis.com/youtube/v3"
     const val YOUTUBE_API_BASE = "https://www.youtube.com/youtubei/v1"
     const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+    const val VISIONOS_CLIENT_NAME = "101"
+    const val VISIONOS_CLIENT_VERSION = "1.02"
+    const val VISIONOS_USER_AGENT =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
     const val ANDROID_VR_CLIENT_NAME = "28"
     const val ANDROID_VR_CLIENT_VERSION = "1.65.10"
     const val ANDROID_VR_USER_AGENT =
         "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
     const val ANDROID_CLIENT_NAME = "3"
-    const val ANDROID_CLIENT_VERSION = "20.10.38"
+    const val ANDROID_CLIENT_VERSION = "21.26.364"
     const val ANDROID_USER_AGENT =
-        "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip"
+        "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"
 
     val info = ProviderInfo(
         providerId = ID,
