@@ -19,6 +19,8 @@ class DesktopMacNowPlayingSessionTest {
                 durationMs = 180_000,
                 queueTrackIds = listOf("a", "b"),
                 queueIndex = 0,
+                canGoNext = true,
+                canGoPrevious = true,
             ),
         )
 
@@ -31,7 +33,7 @@ class DesktopMacNowPlayingSessionTest {
         assertTrue(projected.canPlay)
         assertTrue(projected.canPause)
         assertTrue(projected.canNext)
-        assertFalse(projected.canPrevious)
+        assertTrue(projected.canPrevious)
         assertEquals("a", projected.metadata?.trackId)
         assertEquals("Track a", projected.metadata?.title)
         assertEquals("Artist", projected.metadata?.artist)
@@ -49,6 +51,7 @@ class DesktopMacNowPlayingSessionTest {
         )
         assertEquals(90_000, paused.durationMs)
         assertEquals(MacNowPlayingNative.STATUS_PAUSED, paused.status)
+        assertFalse(paused.canPause)
 
         val idle = macNowPlayingProjection(
             PlaybackSessionState(
@@ -73,6 +76,7 @@ class DesktopMacNowPlayingSessionTest {
             ),
         )
         assertEquals(MacNowPlayingNative.STATUS_LOADING, projected.status)
+        assertFalse(projected.canPause)
     }
 
     private fun track(id: String, durationMs: Long = 180_000) = TrackRef(
