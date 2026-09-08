@@ -19,6 +19,8 @@ class DesktopWindowsSmtcSessionTest {
                 durationMs = 180_000,
                 queueTrackIds = listOf("a", "b"),
                 queueIndex = 0,
+                canGoNext = true,
+                canGoPrevious = true,
             ),
         )
 
@@ -29,7 +31,7 @@ class DesktopWindowsSmtcSessionTest {
         assertTrue(projected.canPlay)
         assertTrue(projected.canPause)
         assertTrue(projected.canNext)
-        assertFalse(projected.canPrevious)
+        assertTrue(projected.canPrevious)
         assertEquals("a", projected.metadata?.trackId)
         assertEquals("Track a", projected.metadata?.title)
     }
@@ -45,6 +47,7 @@ class DesktopWindowsSmtcSessionTest {
         )
         assertEquals(90_000, withTrackDuration.durationMs)
         assertEquals(WindowsSmtcNative.STATUS_PAUSED, withTrackDuration.status)
+        assertFalse(withTrackDuration.canPause)
 
         val idle = windowsSmtcProjection(
             PlaybackSessionState(
@@ -69,6 +72,7 @@ class DesktopWindowsSmtcSessionTest {
             ),
         )
         assertEquals(WindowsSmtcNative.STATUS_CHANGING, projected.status)
+        assertFalse(projected.canPause)
     }
 
     private fun track(id: String, durationMs: Long = 180_000) = TrackRef(
