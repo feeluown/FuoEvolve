@@ -1,7 +1,6 @@
 package org.feeluown.mobile
 
 import android.Manifest
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
@@ -490,11 +489,9 @@ internal class AndroidAppUpdateController(
                     message = "请允许 FuoEvolve 安装未知来源应用，然后返回继续安装",
                 )
             }
-            val intent = Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:${appContext.packageName}"),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            appContext.startActivity(intent)
+            if (!openInstallPermissionSettings()) {
+                throw IOException("无法打开安装权限设置，请在系统设置中手动允许 FuoEvolve 安装未知来源应用")
+            }
             return
         }
 
@@ -506,8 +503,8 @@ internal class AndroidAppUpdateController(
         var lastLaunchError: Throwable? = null
         androidInstallerIntentActions(Build.VERSION.SDK_INT).forEach { action ->
             val intent = buildInstallerIntent(action, uri)
-            grantInstallerUriPermission(intent, uri)
             try {
+                grantInstallerUriPermission(intent, uri)
                 appContext.startActivity(intent)
                 mutableUiState.update {
                     it.copy(
@@ -517,13 +514,30 @@ internal class AndroidAppUpdateController(
                     )
                 }
                 return
-            } catch (error: ActivityNotFoundException) {
-                lastLaunchError = error
-            } catch (error: SecurityException) {
+            } catch (error: RuntimeException) {
                 lastLaunchError = error
             }
         }
         throw IOException("无法打开系统安装器", lastLaunchError)
+    }
+
+    private fun openInstallPermissionSettings(): Boolean {
+        val packageUri = Uri.parse("package:${appContext.packageName}")
+        val intents = listOf(
+            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri),
+            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),
+            Intent(Settings.ACTION_SECURITY_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
+        )
+        return intents.any(::tryStartSettingsActivity)
+    }
+
+    private fun tryStartSettingsActivity(intent: Intent): Boolean = try {
+        appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: RuntimeException) {
+        false
     }
 
     @Suppress("DEPRECATION")
