@@ -31,13 +31,29 @@ fun createSharedPlaybackRuntimeSession(
     scope: CoroutineScope,
     resumePlayback: () -> Unit,
 ): PlaybackSession {
-    val overlay = playbackState
-        .map(PlaybackState::toPlaybackRuntimeOverlay)
+    val queueStateFlow = transportCoordinator.queueStateFlow
+    val overlayFlow = if (queueStateFlow != null) {
+        combine(playbackState, queueStateFlow) { state, queueState ->
+            state.toPlaybackRuntimeOverlay(
+                canGoNext = playbackRuntimeCanGoNext(state, queueState),
+                canGoPrevious = playbackRuntimeCanGoPrevious(state, queueState),
+            )
+        }
+    } else {
+        playbackState.map(PlaybackState::toPlaybackRuntimeOverlay)
+    }
+    val initialQueueState = queueStateFlow?.value
+    val overlay = overlayFlow
         .distinctUntilChanged()
         .stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,
-            initialValue = playbackState.value.toPlaybackRuntimeOverlay(),
+            initialValue = playbackState.value.toPlaybackRuntimeOverlay(
+                canGoNext = initialQueueState?.let { playbackRuntimeCanGoNext(playbackState.value, it) }
+                    ?: fallbackCanGoNext(playbackState.value),
+                canGoPrevious = initialQueueState?.let { playbackRuntimeCanGoPrevious(playbackState.value, it) }
+                    ?: fallbackCanGoPrevious(playbackState.value),
+            ),
         )
 
     return DefaultPlaybackRuntime(
@@ -110,14 +126,58 @@ internal fun mergePlaybackStartFailure(
     )
 }
 
-private fun PlaybackState.toPlaybackRuntimeOverlay(): PlaybackRuntimeOverlay =
+internal fun playbackRuntimeCanGoNext(
+    playbackState: PlaybackState,
+    queueState: PlaybackQueueState,
+): Boolean {
+    if (queueState.currentTrack() == null && playbackState.currentTrack == null) return false
+    if (queueState.repeatMode == RepeatMode.SINGLE) return true
+
+    val parts = playbackState.playbackParts
+    val partIndex = playbackState.currentPartIndex
+    if (partIndex in parts.indices && partIndex < parts.lastIndex) return true
+    if (queueState.upNextQueue.isNotEmpty()) return true
+    if (queueState.mainQueue.isEmpty()) return false
+    if (queueState.queueFeature != null && queueState.mainQueueIndex >= queueState.mainQueue.lastIndex) return true
+
+    val nextMainIndex = queueState.mainQueueIndex + 1
+    return nextMainIndex < queueState.mainQueue.size || queueState.repeatMode == RepeatMode.QUEUE
+}
+
+internal fun playbackRuntimeCanGoPrevious(
+    playbackState: PlaybackState,
+    queueState: PlaybackQueueState,
+): Boolean {
+    if (queueState.currentTrack() == null && playbackState.currentTrack == null) return false
+    if (queueState.repeatMode == RepeatMode.SINGLE) return true
+
+    val parts = playbackState.playbackParts
+    val partIndex = playbackState.currentPartIndex
+    if (partIndex in parts.indices && partIndex > 0) return true
+    if (queueState.currentIsUpNext) return queueState.mainQueue.isNotEmpty()
+    if (queueState.mainQueue.isEmpty()) return false
+
+    return queueState.mainQueueIndex > 0 || queueState.repeatMode == RepeatMode.QUEUE
+}
+
+private fun PlaybackState.toPlaybackRuntimeOverlay(
+    canGoNext: Boolean = fallbackCanGoNext(this),
+    canGoPrevious: Boolean = fallbackCanGoPrevious(this),
+): PlaybackRuntimeOverlay =
     PlaybackRuntimeOverlay(
         currentTrack = currentTrack?.toTrackRef(),
         lyrics = lyrics,
         lyricsAlignmentOffsetMs = lyricsAlignmentOffsetMs,
         queueTrackIds = queue.map(MusicTrack::id),
         queueIndex = queueIndex,
+        canGoNext = canGoNext,
+        canGoPrevious = canGoPrevious,
     )
+
+private fun fallbackCanGoNext(state: PlaybackState): Boolean =
+    state.queueIndex >= 0 && state.queueIndex < state.queue.lastIndex
+
+private fun fallbackCanGoPrevious(state: PlaybackState): Boolean = state.queueIndex > 0
 
 private fun PlayerStatus.toPlaybackSessionStatus(): PlaybackSessionStatus = when (this) {
     PlayerStatus.Idle -> PlaybackSessionStatus.Idle
