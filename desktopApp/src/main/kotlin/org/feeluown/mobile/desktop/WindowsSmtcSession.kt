@@ -142,9 +142,9 @@ internal fun windowsSmtcProjection(state: PlaybackSessionState): WindowsSmtcProj
         durationMs = durationMs,
         hasTrack = track != null,
         canPlay = track != null || state.queueTrackIds.isNotEmpty(),
-        canPause = track != null,
-        canNext = state.queueIndex >= 0 && state.queueIndex < state.queueTrackIds.lastIndex,
-        canPrevious = state.queueIndex > 0,
+        canPause = state.status == PlaybackSessionStatus.Playing,
+        canNext = state.canGoNext,
+        canPrevious = state.canGoPrevious,
         metadata = track?.toWindowsSmtcMetadata(),
     )
 }
