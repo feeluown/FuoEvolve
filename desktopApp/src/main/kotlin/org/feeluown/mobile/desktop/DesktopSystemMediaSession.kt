@@ -328,7 +328,9 @@ internal fun mprisChangedProperties(
 private fun mprisCanGoNext(state: PlaybackSessionState): Boolean = state.canGoNext
 private fun mprisCanGoPrevious(state: PlaybackSessionState): Boolean = state.canGoPrevious
 private fun mprisCanPlay(state: PlaybackSessionState): Boolean = state.currentTrack != null || state.queueTrackIds.isNotEmpty()
-private fun mprisCanPause(state: PlaybackSessionState): Boolean = state.status == PlaybackSessionStatus.Playing
+private fun mprisCanPause(state: PlaybackSessionState): Boolean =
+    state.currentTrack != null &&
+        (state.status == PlaybackSessionStatus.Playing || state.status == PlaybackSessionStatus.Paused)
 private fun mprisCanSeek(state: PlaybackSessionState): Boolean =
     state.currentTrack != null &&
         state.durationMs > 0L &&
