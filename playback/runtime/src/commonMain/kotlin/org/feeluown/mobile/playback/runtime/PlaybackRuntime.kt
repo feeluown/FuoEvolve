@@ -27,6 +27,8 @@ data class PlaybackRuntimeOverlay(
     val lyricsAlignmentOffsetMs: Long = 0L,
     val queueTrackIds: List<String> = emptyList(),
     val queueIndex: Int = -1,
+    val canGoNext: Boolean = false,
+    val canGoPrevious: Boolean = false,
 )
 
 /** Minimal engine surface required by the app-scoped playback runtime. */
@@ -151,6 +153,8 @@ private fun composeState(
         lyrics = overlay.lyrics.takeIf { overlayMatchesEngine },
         queueTrackIds = queueTrackIds,
         queueIndex = queueIndex,
+        canGoNext = overlay.canGoNext && overlayMatchesEngine,
+        canGoPrevious = overlay.canGoPrevious && overlayMatchesEngine,
         errorMessage = engine.errorMessage,
     )
 }
