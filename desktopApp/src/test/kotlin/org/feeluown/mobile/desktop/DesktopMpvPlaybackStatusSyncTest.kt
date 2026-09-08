@@ -9,7 +9,7 @@ import org.feeluown.mobile.TrackSourceType
 
 class DesktopMpvPlaybackStatusSyncTest {
     @Test
-    fun pausePropertyConfirmsPlayingWithoutPlaybackRestart() {
+    fun pausePropertyDoesNotConfirmPlaybackWhileLoading() {
         lateinit var backend: StatusSyncFakeDesktopMpvBackend
         val engine = DesktopMpvPlaybackEngine { listener ->
             StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
@@ -23,7 +23,7 @@ class DesktopMpvPlaybackStatusSyncTest {
 
         backend.emit(DesktopMpvBackendEvent.Property("pause", "no"))
 
-        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
     }
 
     @Test
@@ -47,6 +47,42 @@ class DesktopMpvPlaybackStatusSyncTest {
     }
 
     @Test
+    fun firstPositiveTimelineSampleDoesNotConfirmPlayback() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val track = track("youtube:status")
+
+        engine.play(track, payload(track))
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 103L))
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "10.0"))
+
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+        assertEquals(10_000L, engine.state.value.positionMs)
+
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "10.25"))
+
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+        assertEquals(10_250L, engine.state.value.positionMs)
+    }
+
+    @Test
+    fun playbackRestartConfirmsPlayingImmediately() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val track = track("bilibili:status")
+
+        engine.play(track, payload(track))
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 104L))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+    }
+
+    @Test
     fun pausePropertyCanConfirmPausedWhileLoading() {
         lateinit var backend: StatusSyncFakeDesktopMpvBackend
         val engine = DesktopMpvPlaybackEngine { listener ->
@@ -55,10 +91,28 @@ class DesktopMpvPlaybackStatusSyncTest {
         val track = track("local:status", TrackSourceType.LocalMediaStore)
 
         engine.play(track, payload(track))
-        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 103L))
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 105L))
         backend.emit(DesktopMpvBackendEvent.Property("pause", "yes"))
 
         assertEquals(PlayerStatus.Paused, engine.state.value.status)
+    }
+
+    @Test
+    fun resumingUnconfirmedPausedLoadReturnsToLoading() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val track = track("netease:resume")
+
+        engine.play(track, payload(track))
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 106L))
+        engine.pause()
+        assertEquals(PlayerStatus.Paused, engine.state.value.status)
+
+        engine.resume()
+
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
     }
 
     private fun payload(track: MusicTrack) = PlaybackPayload(
