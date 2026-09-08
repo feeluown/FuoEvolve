@@ -37,6 +37,8 @@ internal class DesktopMpvPlaybackEngine(
     @Volatile
     private var paused = false
     @Volatile
+    private var volume = 1.0
+    @Volatile
     private var activePlaylistEntryId: Long? = null
 
     override fun prepareLoading(track: MusicTrack) {
@@ -50,6 +52,7 @@ internal class DesktopMpvPlaybackEngine(
             status = PlayerStatus.Loading,
             currentTrack = logicalTrack,
             durationMs = logicalTrack.durationMs ?: 0L,
+            volume = volume,
         )
     }
 
@@ -106,7 +109,7 @@ internal class DesktopMpvPlaybackEngine(
         activePlaylistEntryId = null
         backend?.runCatching { stop() }?.onFailure(::publishBackendFailure)
         paused = false
-        mutableState.value = PlaybackState()
+        mutableState.value = PlaybackState(volume = volume)
     }
 
     override fun seekTo(positionMs: Long) {
@@ -116,6 +119,18 @@ internal class DesktopMpvPlaybackEngine(
         val target = positionMs.coerceIn(0L, upperBound)
         backend?.runCatching { seekTo(target) }?.onFailure(::publishBackendFailure)
         mutableState.value = mutableState.value.copy(positionMs = target)
+    }
+
+    override fun setVolume(volume: Double) {
+        if (!volume.isFinite()) return
+        val normalized = volume.coerceIn(0.0, 1.0)
+        val activeBackend = ensureBackend() ?: return
+        runCatching { activeBackend.setVolume(normalized) }
+            .onSuccess {
+                this.volume = normalized
+                mutableState.value = mutableState.value.copy(volume = normalized)
+            }
+            .onFailure(::publishBackendFailure)
     }
 
     override fun close() {
@@ -137,6 +152,7 @@ internal class DesktopMpvPlaybackEngine(
             currentTrack = logicalTrack,
             resolvedSource = resolvedSource,
             durationMs = payload.durationMs ?: logicalTrack.durationMs ?: 0L,
+            volume = volume,
             lyrics = payload.lyrics ?: logicalTrack.lyrics,
             audioQuality = payload.audioQuality,
             playbackParts = payload.parts,
@@ -256,6 +272,11 @@ internal class DesktopMpvPlaybackEngine(
                     bufferedMs = if (duration > 0L) bufferedMs.coerceIn(0L, duration) else bufferedMs.coerceAtLeast(0L),
                 )
             }
+            "volume" -> value?.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { mpvVolume ->
+                val normalized = (mpvVolume / MPV_VOLUME_SCALE).coerceIn(0.0, 1.0)
+                volume = normalized
+                mutableState.value = mutableState.value.copy(volume = normalized)
+            }
             "file-format" -> updateAudioFormat { it.copy(format = value?.takeIf(String::isNotBlank)) }
             "audio-codec-name" -> {
                 val codec = value?.takeIf(String::isNotBlank)
@@ -308,6 +329,7 @@ internal sealed interface DesktopMpvBackendEvent {
 internal interface DesktopMpvBackend : AutoCloseable {
     fun load(url: String, headers: Map<String, String>)
     fun setPaused(paused: Boolean)
+    fun setVolume(volume: Double) = Unit
     fun stop()
     fun seekTo(positionMs: Long)
 }
@@ -366,6 +388,11 @@ private class LibMpvBackend(
     override fun setPaused(paused: Boolean) {
         ensureOpen()
         setProperty("pause", if (paused) "yes" else "no")
+    }
+
+    override fun setVolume(volume: Double) {
+        ensureOpen()
+        setProperty("volume", (volume.coerceIn(0.0, 1.0) * MPV_VOLUME_SCALE).toString())
     }
 
     override fun stop() {
@@ -632,12 +659,14 @@ private const val MPV_END_FILE_REASON_STOP = 2
 private const val MPV_END_FILE_REASON_QUIT = 3
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val MPV_END_FILE_REASON_REDIRECT = 5
+private const val MPV_VOLUME_SCALE = 100.0
 
 private val OBSERVED_PROPERTIES = listOf(
     "pause",
     "time-pos",
     "duration",
     "demuxer-cache-time",
+    "volume",
     "file-format",
     "audio-codec-name",
     "audio-bitrate",
