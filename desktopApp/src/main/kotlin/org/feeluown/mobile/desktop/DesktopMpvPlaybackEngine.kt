@@ -196,7 +196,10 @@ internal class DesktopMpvPlaybackEngine(
         when (event) {
             is DesktopMpvBackendEvent.StartFile -> {
                 val current = mutableState.value
-                if (current.currentTrack != null && current.status == PlayerStatus.Loading) {
+                if (
+                    current.currentTrack != null &&
+                    (current.status == PlayerStatus.Loading || current.status == PlayerStatus.Paused)
+                ) {
                     activePlaylistEntryId = event.playlistEntryId
                     activePlaybackConfirmed = false
                     lastLoadingPositionMs = null
