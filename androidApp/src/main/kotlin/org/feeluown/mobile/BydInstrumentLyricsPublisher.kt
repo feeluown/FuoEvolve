@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.os.SystemClock
-import android.util.Log
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import kotlinx.coroutines.CoroutineScope
@@ -198,11 +197,11 @@ internal class BydInstrumentLyricsPublisher(
         bridgeInitializationAttempted = true
         return BydInstrumentLyricsBridge.create(appContext)
             .onFailure { throwable ->
-                Log.w(TAG, "Unable to initialize BYD instrument lyrics; playback is unaffected", throwable)
+                AppLogger.w(TAG, "Unable to initialize BYD instrument lyrics; playback is unaffected", throwable)
             }
             .getOrNull()
             ?.also { createdBridge ->
-                Log.i(TAG, "Using BYD instrument lyrics transport=${createdBridge.transportName}")
+                AppLogger.i(TAG, "Using BYD instrument lyrics transport=${createdBridge.transportName}")
                 bridge = createdBridge
             }
     }
@@ -287,7 +286,7 @@ private class BydInstrumentLyricsBridge(
             }
             if (musicNameMethod == null) return false
             useMusicNameTransport = true
-            Log.w(TAG, "Falling back to BYD sendMusicName after three-line lyrics publishing failed")
+            AppLogger.w(TAG, "Falling back to BYD sendMusicName after three-line lyrics publishing failed")
         }
 
         val nameMethod = musicNameMethod ?: return false
@@ -362,19 +361,19 @@ private class BydInstrumentLyricsBridge(
         val result = method.invoke(device, *args)
         commandSucceeded(result)
     }.onFailure { throwable ->
-        Log.w(TAG, "Failed to publish lyrics through ${method.name}", unwrapInvocationException(throwable))
+        AppLogger.w(TAG, "Failed to publish lyrics through ${method.name}", unwrapInvocationException(throwable))
     }.getOrDefault(false)
 
     private fun invokeOptional(method: Method, vararg args: Any): Boolean = runCatching {
         val result = method.invoke(device, *args)
         commandSucceeded(result)
     }.onFailure { throwable ->
-        Log.d(TAG, "Optional BYD instrument call ${method.name} failed", unwrapInvocationException(throwable))
+        AppLogger.d(TAG, "Optional BYD instrument call ${method.name} failed", unwrapInvocationException(throwable))
     }.getOrDefault(false)
 
     private fun commandSucceeded(result: Any?): Boolean {
         val success = (result as? Number)?.toInt()?.let { it == 0 } ?: true
-        if (!success) Log.w(TAG, "BYD instrument command returned $result")
+        if (!success) AppLogger.w(TAG, "BYD instrument command returned $result")
         return success
     }
 
