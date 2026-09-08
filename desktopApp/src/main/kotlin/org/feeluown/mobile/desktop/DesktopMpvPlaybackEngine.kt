@@ -408,6 +408,10 @@ private class LibMpvBackend(
     private val closed = AtomicBoolean(false)
     private val handle: Pointer
     private val eventThread: Thread
+    @Volatile
+    private var expectedPath: String? = null
+    @Volatile
+    private var polledActivePath: String? = null
 
     init {
         handle = library.mpv_create()
@@ -418,6 +422,10 @@ private class LibMpvBackend(
             setOption("input-default-bindings", "no")
             setOption("vid", "no")
             setOption("ytdl", "no")
+            val audioOutput = System.getProperty("fuoevolve.libmpv.ao")
+                ?.takeIf(String::isNotBlank)
+                ?: System.getenv("FUOEVOLVE_LIBMPV_AO")?.takeIf(String::isNotBlank)
+            audioOutput?.let { setOption("ao", it) }
             checkMpv(library.mpv_initialize(handle), "mpv_initialize")
             OBSERVED_PROPERTIES.forEach { property ->
                 checkMpv(
@@ -442,13 +450,21 @@ private class LibMpvBackend(
 
     override fun load(url: String, headers: Map<String, String>) {
         ensureOpen()
+        expectedPath = url
+        polledActivePath = null
         val perFileOptions = encodeMpvLoadfileOptions(headers)
-        if (perFileOptions.isEmpty()) {
-            command("loadfile", url, "replace")
-        } else {
-            // Since mpv 0.38 the insertion index is the third loadfile argument; per-file options
-            // therefore require an explicit -1 before the fourth argument.
-            command("loadfile", url, "replace", "-1", perFileOptions)
+        try {
+            if (perFileOptions.isEmpty()) {
+                command("loadfile", url, "replace")
+            } else {
+                // Since mpv 0.38 the insertion index is the third loadfile argument; per-file options
+                // therefore require an explicit -1 before the fourth argument.
+                command("loadfile", url, "replace", "-1", perFileOptions)
+            }
+        } catch (throwable: Throwable) {
+            expectedPath = null
+            polledActivePath = null
+            throw throwable
         }
     }
 
@@ -464,6 +480,8 @@ private class LibMpvBackend(
 
     override fun stop() {
         ensureOpen()
+        expectedPath = null
+        polledActivePath = null
         command("stop")
     }
 
@@ -474,6 +492,8 @@ private class LibMpvBackend(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        expectedPath = null
+        polledActivePath = null
         library.mpv_wakeup(handle)
         if (Thread.currentThread() !== eventThread) {
             runCatching { eventThread.join() }
@@ -483,46 +503,86 @@ private class LibMpvBackend(
 
     private fun eventLoop() {
         try {
+            var nextPollAtNanos = System.nanoTime()
             while (!closed.get()) {
-                val eventPointer = library.mpv_wait_event(handle, -1.0)
+                val eventPointer = library.mpv_wait_event(handle, MPV_STATE_POLL_INTERVAL_SECONDS)
                 val event = MpvNativeEvent(eventPointer)
                 when (event.eventId) {
                     MPV_EVENT_NONE -> Unit
                     MPV_EVENT_SHUTDOWN -> break
                     MPV_EVENT_START_FILE -> {
-                        val data = event.data ?: continue
-                        val startFile = MpvNativeStartFile(data)
-                        listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
+                        event.data?.let { data ->
+                            val startFile = MpvNativeStartFile(data)
+                            listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
+                        }
                     }
-                    MPV_EVENT_FILE_LOADED -> listener(DesktopMpvBackendEvent.FileLoaded)
+                    MPV_EVENT_FILE_LOADED -> {
+                        expectedPath?.let { polledActivePath = it }
+                        listener(DesktopMpvBackendEvent.FileLoaded)
+                    }
                     MPV_EVENT_PLAYBACK_RESTART -> listener(DesktopMpvBackendEvent.PlaybackRestart)
                     MPV_EVENT_PROPERTY_CHANGE -> {
-                        val data = event.data ?: continue
-                        val property = MpvNativeEventProperty(data)
-                        listener(
-                            DesktopMpvBackendEvent.Property(
-                                name = property.name?.getString(0, StandardCharsets.UTF_8.name()).orEmpty(),
-                                value = property.stringValue(),
-                            ),
-                        )
+                        event.data?.let { data ->
+                            val property = MpvNativeEventProperty(data)
+                            listener(
+                                DesktopMpvBackendEvent.Property(
+                                    name = property.name?.getString(0, StandardCharsets.UTF_8.name()).orEmpty(),
+                                    value = property.stringValue(),
+                                ),
+                            )
+                        }
                     }
                     MPV_EVENT_END_FILE -> {
-                        val data = event.data ?: continue
-                        val endFile = MpvNativeEndFile(data)
-                        listener(
-                            DesktopMpvBackendEvent.EndFile(
-                                playlistEntryId = endFile.playlistEntryId,
-                                reason = endFile.reason,
-                                errorMessage = endFile.error
-                                    .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
-                                    ?.let(library::mpv_error_string),
-                            ),
-                        )
+                        event.data?.let { data ->
+                            val endFile = MpvNativeEndFile(data)
+                            listener(
+                                DesktopMpvBackendEvent.EndFile(
+                                    playlistEntryId = endFile.playlistEntryId,
+                                    reason = endFile.reason,
+                                    errorMessage = endFile.error
+                                        .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
+                                        ?.let(library::mpv_error_string),
+                                ),
+                            )
+                        }
                     }
+                }
+
+                val nowNanos = System.nanoTime()
+                if (nowNanos >= nextPollAtNanos) {
+                    publishPolledState()
+                    nextPollAtNanos = nowNanos + MPV_STATE_POLL_INTERVAL_NANOS
                 }
             }
         } catch (throwable: Throwable) {
             if (!closed.get()) listener(DesktopMpvBackendEvent.Failure(throwable))
+        }
+    }
+
+    private fun publishPolledState() {
+        val requestedPath = expectedPath ?: return
+        if (polledActivePath != requestedPath) {
+            val currentPath = getPropertyString("path")
+            if (currentPath == requestedPath) {
+                polledActivePath = requestedPath
+                listener(DesktopMpvBackendEvent.FileLoaded)
+            }
+        }
+        if (polledActivePath != requestedPath) return
+
+        POLLED_PROPERTIES.forEach { property ->
+            getPropertyString(property)?.let { value ->
+                listener(DesktopMpvBackendEvent.Property(property, value))
+            }
+        }
+    }
+
+    private fun getPropertyString(name: String): String? {
+        val value = library.mpv_get_property_string(handle, name) ?: return null
+        return try {
+            value.getString(0, StandardCharsets.UTF_8.name())
+        } finally {
+            library.mpv_free(value)
         }
     }
 
@@ -556,6 +616,8 @@ internal interface MpvNative : Library {
     fun mpv_terminate_destroy(ctx: Pointer)
     fun mpv_set_option_string(ctx: Pointer, name: String, data: String): Int
     fun mpv_set_property_string(ctx: Pointer, name: String, data: String): Int
+    fun mpv_get_property_string(ctx: Pointer, name: String): Pointer?
+    fun mpv_free(data: Pointer?)
     fun mpv_command(ctx: Pointer, args: Pointer): Int
     fun mpv_observe_property(ctx: Pointer, replyUserdata: Long, name: String, format: Int): Int
     fun mpv_wait_event(ctx: Pointer, timeout: Double): Pointer
@@ -727,6 +789,8 @@ private const val MPV_END_FILE_REASON_QUIT = 3
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val MPV_END_FILE_REASON_REDIRECT = 5
 private const val MPV_VOLUME_SCALE = 100.0
+private const val MPV_STATE_POLL_INTERVAL_SECONDS = 0.25
+private const val MPV_STATE_POLL_INTERVAL_NANOS = 250_000_000L
 
 private val OBSERVED_PROPERTIES = listOf(
     "pause",
@@ -737,4 +801,12 @@ private val OBSERVED_PROPERTIES = listOf(
     "file-format",
     "audio-codec-name",
     "audio-bitrate",
+)
+
+private val POLLED_PROPERTIES = listOf(
+    "pause",
+    "time-pos",
+    "duration",
+    "demuxer-cache-time",
+    "volume",
 )
