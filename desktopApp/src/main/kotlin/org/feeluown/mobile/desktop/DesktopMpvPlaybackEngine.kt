@@ -227,6 +227,7 @@ internal class DesktopMpvPlaybackEngine(
                     current.status != PlayerStatus.Error &&
                     current.status != PlayerStatus.Ended
                 ) {
+                    event.playlistEntryId?.let { activePlaylistEntryId = it }
                     activeFileLoaded = true
                 }
             }
@@ -386,7 +387,10 @@ internal class DesktopMpvPlaybackEngine(
 
 internal sealed interface DesktopMpvBackendEvent {
     data class StartFile(val playlistEntryId: Long) : DesktopMpvBackendEvent
-    data class FileLoaded(val path: String) : DesktopMpvBackendEvent
+    data class FileLoaded(
+        val path: String,
+        val playlistEntryId: Long? = null,
+    ) : DesktopMpvBackendEvent
     data object PlaybackRestart : DesktopMpvBackendEvent
     data class Property(val name: String, val value: String?) : DesktopMpvBackendEvent
     data class EndFile(
@@ -545,8 +549,9 @@ private class LibMpvBackend(
                     MPV_EVENT_END_FILE -> {
                         event.data?.let { data ->
                             val endFile = MpvNativeEndFile(data)
-                            val expectedEntryId = expectedPlaylistEntryId
-                            if (expectedEntryId == null || endFile.playlistEntryId == expectedEntryId) {
+                            val expectedEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
+                            if (expectedEntryId != null && endFile.playlistEntryId == expectedEntryId) {
+                                expectedPlaylistEntryId = expectedEntryId
                                 listener(
                                     DesktopMpvBackendEvent.EndFile(
                                         playlistEntryId = endFile.playlistEntryId,
@@ -575,17 +580,47 @@ private class LibMpvBackend(
     private fun startFileMatchesCurrentRequest(playlistEntryId: Long): Boolean {
         val expectedEntryId = expectedPlaylistEntryId
         if (expectedEntryId != null) return playlistEntryId == expectedEntryId
-        return currentPathMatchesExpected()
+        if (!currentPathMatchesExpected()) return false
+        expectedPlaylistEntryId = playlistEntryId
+        return true
     }
 
     private fun activateCurrentRequest(): Boolean {
         val requestedPath = expectedPath ?: return false
-        if (polledActivePath == requestedPath) return true
+        if (polledActivePath == requestedPath) {
+            if (expectedPlaylistEntryId == null) {
+                currentPlaylistEntryId()?.let { playlistEntryId ->
+                    expectedPlaylistEntryId = playlistEntryId
+                    listener(
+                        DesktopMpvBackendEvent.FileLoaded(
+                            path = requestedPath,
+                            playlistEntryId = playlistEntryId,
+                        ),
+                    )
+                }
+            }
+            return true
+        }
         val currentPath = getPropertyString("path") ?: return false
         if (currentPath != requestedPath) return false
+        val playlistEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
+        if (playlistEntryId != null) expectedPlaylistEntryId = playlistEntryId
         polledActivePath = requestedPath
-        listener(DesktopMpvBackendEvent.FileLoaded(path = currentPath))
+        listener(
+            DesktopMpvBackendEvent.FileLoaded(
+                path = currentPath,
+                playlistEntryId = playlistEntryId,
+            ),
+        )
         return true
+    }
+
+    private fun currentPlaylistEntryId(): Long? {
+        val playingPosition = getPropertyString("playlist-playing-pos")
+            ?.toIntOrNull()
+            ?.takeIf { it >= 0 }
+            ?: return null
+        return getPropertyString("playlist/$playingPosition/id")?.toLongOrNull()
     }
 
     private fun currentPathMatchesExpected(): Boolean {
