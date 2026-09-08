@@ -141,6 +141,10 @@ internal class PersistentDesktopPlaybackEngine(
         }
     }
 
+    override fun setVolume(volume: Double) {
+        delegate.setVolume(volume)
+    }
+
     override fun setStopAfterCurrentTrack(enabled: Boolean) {
         delegate.setStopAfterCurrentTrack(enabled)
     }
