@@ -1,7 +1,7 @@
 package org.feeluown.mobile
 
+import java.io.File
 import java.io.OutputStream
-import java.io.PrintStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -10,54 +10,20 @@ import java.nio.file.StandardOpenOption
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import javax.swing.JFileChooser
+import javax.swing.filechooser.FileNameExtensionFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private const val MAX_DEBUG_LOG_LINES = 2_000
-private const val MAX_DEBUG_LOG_BYTES = 4L * 1024L * 1024L
-
-/** Install as early as possible so native/platform startup diagnostics are available in Settings. */
-fun installDesktopDebugLogCapture() {
-    DesktopDebugLogCapture.install()
-}
+private const val MAX_DIAGNOSTIC_LOG_LINES = 2_000
 
 internal fun createDesktopDebugLogRepository(): DebugLogRepository = DesktopDebugLogRepository()
 
-private object DesktopDebugLogCapture {
-    private val logDirectory
-        get() = DesktopAppDirectories.state().resolve("logs")
-    val logFile
-        get() = logDirectory.resolve("application.log")
-
-    private var installed = false
-
-    @Synchronized
-    fun install() {
-        if (installed) return
-        runCatching {
-            Files.createDirectories(logDirectory)
-            val sink = RollingFileOutputStream(
-                activeFile = logFile,
-                previousFile = logDirectory.resolve("application.previous.log"),
-                maxBytes = MAX_DEBUG_LOG_BYTES,
-            )
-            val originalOut = System.out
-            val originalErr = System.err
-            System.setOut(PrintStream(TeeOutputStream(originalOut, sink), true, StandardCharsets.UTF_8))
-            System.setErr(PrintStream(TeeOutputStream(originalErr, sink), true, StandardCharsets.UTF_8))
-            installed = true
-            System.err.println("FuoEvolve: desktop debug log capture enabled at $logFile")
-        }.onFailure { throwable ->
-            System.err.println("FuoEvolve: unable to enable desktop debug log capture: ${throwable.message}")
-        }
-    }
-}
-
 /**
- * A small platform filesystem primitive used by desktop log capture.
- *
- * Rotation happens at write time, so a long-running process cannot grow the active log without
- * bound. Both stdout and stderr share the same instance, making rotation and file writes serialized.
+ * Small desktop filesystem primitive shared by AppLogger and diagnostics export.
+ * Rotation happens at write time and keeps only the active and immediately previous file.
  */
 internal class RollingFileOutputStream(
     private val activeFile: Path,
@@ -129,55 +95,82 @@ internal class RollingFileOutputStream(
     )
 }
 
-private class TeeOutputStream(
-    private val console: OutputStream,
-    private val file: OutputStream,
-) : OutputStream() {
-    @Synchronized
-    override fun write(value: Int) {
-        console.write(value)
-        file.write(value)
-    }
-
-    @Synchronized
-    override fun write(buffer: ByteArray, offset: Int, length: Int) {
-        console.write(buffer, offset, length)
-        file.write(buffer, offset, length)
-    }
-
-    @Synchronized
-    override fun flush() {
-        console.flush()
-        file.flush()
-    }
-}
-
 private class DesktopDebugLogRepository : DebugLogRepository {
     override val isAvailable: Boolean = true
 
+    private val logDirectory: Path
+        get() = DesktopAppDirectories.state().resolve("logs")
+    private val activeLog: Path
+        get() = logDirectory.resolve("application.log")
+    private val previousLog: Path
+        get() = logDirectory.resolve("application.previous.log")
+
     override suspend fun logLines(): List<String> = withContext(Dispatchers.IO) {
-        val file = DesktopDebugLogCapture.logFile
-        if (!Files.isRegularFile(file)) return@withContext emptyList()
-        Files.readAllLines(file, StandardCharsets.UTF_8)
+        listOf(previousLog, activeLog)
+            .filter(Files::isRegularFile)
+            .flatMap { file -> Files.readAllLines(file, StandardCharsets.UTF_8) }
             .map(String::trimEnd)
             .filter(String::isNotBlank)
-            .takeLast(MAX_DEBUG_LOG_LINES)
+            .takeLast(MAX_DIAGNOSTIC_LOG_LINES)
     }
 
     override suspend fun exportLogFile(lines: List<String>): String {
-        if (lines.isEmpty()) return "没有可导出的日志"
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val fileName = "fuo-evolve-log-$timestamp.txt"
-        // The common feature invokes export from its UI scope. Keep JFileChooser on that thread;
-        // only log reading itself belongs on Dispatchers.IO.
-        val saved = saveDesktopTextFile(
-            dialogTitle = "导出应用日志",
-            suggestedFileName = fileName,
-            filterDescription = "文本日志 (*.txt)",
-            extensions = listOf("txt"),
-            content = lines.joinToString("\n"),
-            onFeedback = {},
-        )
-        return if (saved) "日志已导出：$fileName" else "已取消导出日志"
+        val fileName = "FuoEvolve-Diagnostics-$timestamp.zip"
+        val tempFile = withContext(Dispatchers.IO) { createDiagnosticsArchive() }
+        return try {
+            val chooser = JFileChooser().apply {
+                dialogTitle = "导出诊断信息"
+                selectedFile = File(fileName)
+                fileFilter = FileNameExtensionFilter("FuoEvolve 诊断文件 (*.zip)", "zip")
+            }
+            if (chooser.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) {
+                "已取消导出诊断信息"
+            } else {
+                val selected = chooser.selectedFile
+                val destination = if (selected.name.endsWith(".zip", ignoreCase = true)) {
+                    selected.toPath()
+                } else {
+                    selected.toPath().resolveSibling("${selected.name}.zip")
+                }
+                withContext(Dispatchers.IO) {
+                    destination.parent?.let(Files::createDirectories)
+                    Files.copy(tempFile, destination, StandardCopyOption.REPLACE_EXISTING)
+                }
+                "诊断信息已导出：${destination.fileName}"
+            }
+        } finally {
+            withContext(Dispatchers.IO) { Files.deleteIfExists(tempFile) }
+        }
+    }
+
+    private fun createDiagnosticsArchive(): Path {
+        val tempFile = Files.createTempFile("FuoEvolve-Diagnostics-", ".zip")
+        ZipOutputStream(Files.newOutputStream(tempFile)).use { zip ->
+            zip.putNextEntry(ZipEntry("diagnostics.txt"))
+            zip.write(diagnosticsSummary().toByteArray(StandardCharsets.UTF_8))
+            zip.closeEntry()
+
+            listOf(activeLog, previousLog)
+                .filter(Files::isRegularFile)
+                .forEach { logFile ->
+                    zip.putNextEntry(ZipEntry(logFile.fileName.toString()))
+                    Files.newInputStream(logFile).use { input -> input.copyTo(zip) }
+                    zip.closeEntry()
+                }
+        }
+        return tempFile
+    }
+
+    private fun diagnosticsSummary(): String = buildString {
+        appendLine("FuoEvolve diagnostics")
+        appendLine("generatedAt=${SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())}")
+        appendLine("platform=Desktop")
+        appendLine("osName=${System.getProperty("os.name").orEmpty()}")
+        appendLine("osVersion=${System.getProperty("os.version").orEmpty()}")
+        appendLine("osArch=${System.getProperty("os.arch").orEmpty()}")
+        appendLine("javaVersion=${System.getProperty("java.version").orEmpty()}")
+        appendLine()
+        appendLine("Logs are redacted by AppLogger before persistence. Credentials and app databases are not included.")
     }
 }
