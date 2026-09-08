@@ -79,6 +79,46 @@ class DesktopMpvPlaybackStatusSyncTest {
     }
 
     @Test
+    fun staleEndFileIsIgnoredAfterFileLoadedFallbackRestoresPlaylistEntryId() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val firstTrack = track("netease:first")
+        val replacementTrack = track("qqmusic:file-loaded-end-file")
+
+        engine.play(firstTrack, payload(firstTrack))
+        backend.emit(DesktopMpvBackendEvent.StartFile(playlistEntryId = 101L))
+        backend.emit(DesktopMpvBackendEvent.FileLoaded(path = STATUS_URL, playlistEntryId = 101L))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+
+        // The replacement reaches FILE_LOADED without usable START_FILE data. The FILE_LOADED
+        // correlation must carry its playlist entry id so the delayed END_FILE from the first item
+        // cannot terminate the replacement playback transaction.
+        engine.play(replacementTrack, payload(replacementTrack))
+        backend.emit(DesktopMpvBackendEvent.FileLoaded(path = STATUS_URL, playlistEntryId = 202L))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+
+        backend.emit(
+            DesktopMpvBackendEvent.EndFile(
+                playlistEntryId = 101L,
+                reason = END_FILE_REASON_STOP,
+            ),
+        )
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+
+        backend.emit(
+            DesktopMpvBackendEvent.EndFile(
+                playlistEntryId = 202L,
+                reason = END_FILE_REASON_EOF,
+            ),
+        )
+        assertEquals(PlayerStatus.Ended, engine.state.value.status)
+    }
+
+    @Test
     fun fileLoadedAllowsPlaybackRestartWhenStartFileDataIsMissing() {
         lateinit var backend: StatusSyncFakeDesktopMpvBackend
         val engine = DesktopMpvPlaybackEngine { listener ->
@@ -188,6 +228,8 @@ class DesktopMpvPlaybackStatusSyncTest {
 
     private companion object {
         const val STATUS_URL = "https://example.test/status.mp3"
+        const val END_FILE_REASON_EOF = 0
+        const val END_FILE_REASON_STOP = 2
     }
 }
 
