@@ -36,9 +36,13 @@ kotlin {
 }
 
 // quickjs-kt's Android artifact contains native Android libraries and cannot be
-// loaded by the JVM used for Android host tests. Mirror quickjs-kt's documented
-// setup and substitute the JVM artifact for local/CI host test runtimes.
-configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+// loaded by the desktop JVM used for Android host tests. The Android KMP library
+// plugin names that runtime `androidHostTestRuntimeClasspath` rather than the
+// legacy `*UnitTestRuntimeClasspath`, so cover both forms here.
+configurations.matching {
+    it.name.endsWith("UnitTestRuntimeClasspath") ||
+        it.name.endsWith("AndroidHostTestRuntimeClasspath", ignoreCase = true)
+}.configureEach {
     resolutionStrategy.dependencySubstitution {
         substitute(module("io.github.dokar3:quickjs-kt-android"))
             .using(module("io.github.dokar3:quickjs-kt-jvm:${libs.versions.quickJsKt.get()}"))
