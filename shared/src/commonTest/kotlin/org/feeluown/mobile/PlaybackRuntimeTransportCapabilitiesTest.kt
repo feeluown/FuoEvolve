@@ -124,6 +124,7 @@ class PlaybackRuntimeTransportCapabilitiesTest {
         artists = "Artist",
         album = "Album",
         source = "test",
+        sourceType = TrackSourceType.Provider,
         durationMs = 100_000L,
         providerId = id,
         providerName = "test",
