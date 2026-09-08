@@ -4,6 +4,12 @@ use std::ffi::{c_char, CStr};
 use std::ptr;
 use std::time::Duration;
 
+use objc2::runtime::AnyObject;
+use objc2_foundation::{NSMutableDictionary, NSNumber, NSString};
+use objc2_media_player::{
+    MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyPlaybackQueueCount,
+    MPNowPlayingInfoPropertyPlaybackQueueIndex,
+};
 use playwire::{
     Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, Repeat, Track,
 };
@@ -78,8 +84,8 @@ impl Bridge {
         repeat_mode: i32,
         shuffle_enabled: bool,
         can_change_playback_mode: bool,
-        _queue_index: i64,
-        _queue_count: i64,
+        queue_index: i64,
+        queue_count: i64,
         track_id: String,
         title: String,
         artist: String,
@@ -117,11 +123,33 @@ impl Bridge {
                 can_seek: has_track && duration_ms > 0,
             },
         };
-        self.controls.set_state(&state)
+        self.controls.set_state(&state)?;
+        publish_queue_info(queue_index, queue_count);
+        Ok(())
     }
 
     fn clear(&mut self) -> playwire::Result<()> {
         self.controls.set_state(&PlaybackState::default())
+    }
+}
+
+fn publish_queue_info(queue_index: i64, queue_count: i64) {
+    if queue_index < 0 || queue_count <= 0 || queue_index >= queue_count {
+        return;
+    }
+    unsafe {
+        let center = MPNowPlayingInfoCenter::defaultCenter();
+        let Some(info) = center.nowPlayingInfo() else {
+            return;
+        };
+        let mutable = NSMutableDictionary::<NSString, AnyObject>::dictionaryWithDictionary(&info);
+        let index = NSNumber::new_i64(queue_index);
+        let count = NSNumber::new_i64(queue_count);
+        let index_object: &AnyObject = (&*index).as_ref();
+        let count_object: &AnyObject = (&*count).as_ref();
+        mutable.insert(MPNowPlayingInfoPropertyPlaybackQueueIndex, index_object);
+        mutable.insert(MPNowPlayingInfoPropertyPlaybackQueueCount, count_object);
+        center.setNowPlayingInfo(Some(&mutable));
     }
 }
 
