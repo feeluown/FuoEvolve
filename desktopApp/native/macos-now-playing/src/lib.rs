@@ -17,9 +17,15 @@ const ACTION_NEXT: i32 = 4;
 const ACTION_PREVIOUS: i32 = 5;
 const ACTION_SEEK_TO: i32 = 6;
 const ACTION_TOGGLE: i32 = 7;
+const ACTION_SET_SHUFFLE: i32 = 8;
+const ACTION_SET_REPEAT: i32 = 9;
 
 const STATUS_STOPPED: i32 = 0;
 const STATUS_PLAYING: i32 = 1;
+
+const REPEAT_OFF: i32 = 0;
+const REPEAT_ONE: i32 = 1;
+const REPEAT_ALL: i32 = 2;
 
 struct Bridge {
     controls: MediaControls,
@@ -39,6 +45,18 @@ impl Bridge {
                     ACTION_SEEK_TO,
                     position.as_millis().min(i64::MAX as u128) as i64,
                 ),
+                Event::SetShuffle(enabled) => (
+                    ACTION_SET_SHUFFLE,
+                    if enabled { 1 } else { 0 },
+                ),
+                Event::SetRepeat(repeat) => (
+                    ACTION_SET_REPEAT,
+                    match repeat {
+                        Repeat::Off => REPEAT_OFF,
+                        Repeat::One => REPEAT_ONE,
+                        Repeat::All => REPEAT_ALL,
+                    } as i64,
+                ),
                 _ => return,
             };
             callback(action, value);
@@ -57,29 +75,42 @@ impl Bridge {
         _can_pause: bool,
         can_next: bool,
         can_previous: bool,
+        repeat_mode: i32,
+        shuffle_enabled: bool,
+        can_change_playback_mode: bool,
         _queue_index: i64,
         _queue_count: i64,
         track_id: String,
         title: String,
         artist: String,
         album: String,
+        artwork_url: String,
     ) -> playwire::Result<()> {
         let duration = (duration_ms > 0).then(|| Duration::from_millis(duration_ms as u64));
+        let repeat = if can_change_playback_mode {
+            match repeat_mode {
+                REPEAT_ONE => Repeat::One,
+                REPEAT_ALL => Repeat::All,
+                _ => Repeat::Off,
+            }
+        } else {
+            Repeat::Off
+        };
         let state = PlaybackState {
             track: has_track.then(|| Track {
                 id: track_id,
                 title,
                 artists: if artist.is_empty() { Vec::new() } else { vec![artist] },
                 album,
-                artwork_url: String::new(),
+                artwork_url,
                 url: String::new(),
             }),
             playing: status == STATUS_PLAYING,
             position: Duration::from_millis(position_ms.max(0) as u64),
             duration,
             volume: 1.0,
-            repeat: Repeat::Off,
-            shuffle: false,
+            repeat,
+            shuffle: can_change_playback_mode && shuffle_enabled,
             capabilities: Capabilities {
                 can_go_next: can_next,
                 can_go_previous: can_previous,
@@ -125,12 +156,16 @@ pub unsafe extern "C" fn fuo_now_playing_update(
     can_pause: i32,
     can_next: i32,
     can_previous: i32,
+    repeat_mode: i32,
+    shuffle_enabled: i32,
+    can_change_playback_mode: i32,
     queue_index: i64,
     queue_count: i64,
     track_id: *const c_char,
     title: *const c_char,
     artist: *const c_char,
     album: *const c_char,
+    artwork_url: *const c_char,
 ) {
     let Some(bridge) = bridge.as_mut() else { return };
     if let Err(error) = bridge.update(
@@ -142,12 +177,16 @@ pub unsafe extern "C" fn fuo_now_playing_update(
         can_pause != 0,
         can_next != 0,
         can_previous != 0,
+        repeat_mode,
+        shuffle_enabled != 0,
+        can_change_playback_mode != 0,
         queue_index,
         queue_count,
         read_utf8(track_id),
         read_utf8(title),
         read_utf8(artist),
         read_utf8(album),
+        read_utf8(artwork_url),
     ) {
         eprintln!("FuoEvolve Now Playing update failed: {error}");
     }
