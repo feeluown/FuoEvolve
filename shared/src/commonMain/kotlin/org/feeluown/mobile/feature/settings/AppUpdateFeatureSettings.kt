@@ -209,11 +209,24 @@ internal fun AppUpdateFeatureSettings(
                 ) {
                     Text("正在下载…")
                 }
+                AppUpdatePhase.Error -> {
+                    val retryUpdate = update.remoteVersionCode?.let { it > update.installedVersionCode } == true
+                    OutlinedButton(
+                        onClick = if (retryUpdate) {
+                            controller::downloadAndInstallAppUpdate
+                        } else {
+                            controller::checkAppUpdates
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (retryUpdate) "重试更新" else "重试")
+                    }
+                }
                 else -> OutlinedButton(
                     onClick = controller::checkAppUpdates,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (update.phase == AppUpdatePhase.Error) "重试" else "检查更新")
+                    Text("检查更新")
                 }
             }
         }
@@ -330,5 +343,5 @@ private fun appUpdateStatusText(update: AppUpdateUiState): String = when (update
     AppUpdatePhase.InstallPermissionRequired -> "需要允许安装更新"
     AppUpdatePhase.Installing -> "请在系统界面完成安装"
     AppUpdatePhase.WaitingForStable -> "当前版本已经较新"
-    AppUpdatePhase.Error -> "更新失败，请稍后重试"
+    AppUpdatePhase.Error -> update.message?.takeIf { it.isNotBlank() } ?: "更新失败，请稍后重试"
 }
