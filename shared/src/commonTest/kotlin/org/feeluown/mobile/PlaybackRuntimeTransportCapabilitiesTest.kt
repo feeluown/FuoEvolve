@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -24,6 +25,46 @@ class PlaybackRuntimeTransportCapabilitiesTest {
 
         assertTrue(playbackRuntimeCanGoPrevious(playbackState, queueState))
         assertTrue(playbackRuntimeCanGoNext(playbackState, queueState))
+    }
+
+    @Test
+    fun canonicalQueueKeepsPastCurrentUpNextAndFutureOrder() {
+        val first = track("first")
+        val current = track("current")
+        val next = track("next")
+        val upNextA = track("up-next-a")
+        val upNextB = track("up-next-b")
+        val queue = playbackRuntimeCanonicalQueue(
+            PlaybackQueueState(
+                mainQueue = listOf(first, current, next),
+                mainQueueIndex = 1,
+                upNextQueue = listOf(upNextA, upNextB),
+            ),
+        )
+
+        assertEquals(listOf("first", "current", "up-next-a", "up-next-b", "next"), queue.tracks.map { it.id })
+        assertEquals(1, queue.index)
+    }
+
+    @Test
+    fun canonicalQueuePlacesActiveUpNextAtItsRealPosition() {
+        val first = track("first")
+        val current = track("current")
+        val next = track("next")
+        val activeUpNext = track("active-up-next")
+        val pendingUpNext = track("pending-up-next")
+        val queue = playbackRuntimeCanonicalQueue(
+            PlaybackQueueState(
+                mainQueue = listOf(first, current, next),
+                mainQueueIndex = 1,
+                currentUpNextTrack = activeUpNext,
+                currentIsUpNext = true,
+                upNextQueue = listOf(pendingUpNext),
+            ),
+        )
+
+        assertEquals(listOf("first", "current", "active-up-next", "pending-up-next", "next"), queue.tracks.map { it.id })
+        assertEquals(2, queue.index)
     }
 
     @Test
