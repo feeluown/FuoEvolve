@@ -20,6 +20,11 @@ object YtMusicProviderFactory : KotlinProviderFactory {
     override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
         val base = YtMusicProvider(dependencies.http, dependencies.credentials)
         val content = YtMusicContentProvider(base, dependencies.http, dependencies.credentials)
+        val playback = YtMusicPlaybackProvider(
+            delegate = content,
+            http = dependencies.http,
+            credentials = dependencies.credentials,
+        )
         val provider = CapabilityDelegatingProvider(
             base = base,
             presentation = content,
@@ -27,7 +32,7 @@ object YtMusicProviderFactory : KotlinProviderFactory {
             discovery = content,
             content = content,
             library = content,
-            playback = content,
+            playback = playback,
         )
         val reportingProvider = YtMusicPlaybackReportingProvider(
             delegate = provider,
