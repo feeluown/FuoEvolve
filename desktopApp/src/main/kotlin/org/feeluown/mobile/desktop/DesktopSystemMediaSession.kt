@@ -210,12 +210,29 @@ internal class LinuxMprisObject(
     override fun getSupportedUriSchemes(): Array<String> = emptyArray()
     override fun getSupportedMimeTypes(): Array<String> = emptyArray()
 
-    override fun Next() = playbackSession.next()
-    override fun Previous() = playbackSession.previous()
-    override fun Pause() = playbackSession.pause()
+    override fun Next() {
+        val before = playbackSession.state.value
+        if (!mprisCanGoNext(before)) return
+        playbackSession.next()
+        preserveNonPlayingStatusAfterSkip(before.status)
+    }
+
+    override fun Previous() {
+        val before = playbackSession.state.value
+        if (!mprisCanGoPrevious(before)) return
+        playbackSession.previous()
+        preserveNonPlayingStatusAfterSkip(before.status)
+    }
+
+    override fun Pause() {
+        if (mprisCanPause(playbackSession.state.value)) playbackSession.pause()
+    }
+
     override fun PlayPause() = playbackSession.toggle()
     override fun Stop() = playbackSession.stop()
-    override fun Play() = playbackSession.play()
+    override fun Play() {
+        if (mprisCanPlay(playbackSession.state.value)) playbackSession.play()
+    }
 
     override fun Seek(offset: Long) {
         val state = playbackSession.state.value
@@ -224,7 +241,7 @@ internal class LinuxMprisObject(
         val targetUs = currentUs + offset
         val durationUs = state.durationMs * MICROSECONDS_PER_MILLISECOND
         if (durationUs > 0L && targetUs > durationUs) {
-            playbackSession.next()
+            Next()
             return
         }
         val boundedUs = targetUs.coerceAtLeast(0L)
@@ -274,6 +291,17 @@ internal class LinuxMprisObject(
     override fun getCanPause(): Boolean = mprisCanPause(playbackSession.state.value)
     override fun getCanSeek(): Boolean = mprisCanSeek(playbackSession.state.value)
     override fun getCanControl(): Boolean = true
+
+    private fun preserveNonPlayingStatusAfterSkip(status: PlaybackSessionStatus) {
+        when (status) {
+            PlaybackSessionStatus.Paused -> playbackSession.pause()
+            PlaybackSessionStatus.Idle,
+            PlaybackSessionStatus.Loading,
+            PlaybackSessionStatus.Error,
+            PlaybackSessionStatus.Ended -> playbackSession.stop()
+            PlaybackSessionStatus.Playing -> Unit
+        }
+    }
 }
 
 internal fun mprisPlaybackStatus(status: PlaybackSessionStatus): String = when (status) {
