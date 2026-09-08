@@ -2,6 +2,8 @@ package org.feeluown.mobile
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class AppUpdatePolicyTest {
     @Test
@@ -62,5 +64,22 @@ class AppUpdatePolicyTest {
                 remoteVersionCode = 100,
             ),
         )
+    }
+
+    @Test
+    fun knownNewerBuildRetriesUpdateOperation() {
+        assertTrue(
+            shouldRetryKnownAppUpdate(
+                installedVersionCode = 100,
+                remoteVersionCode = 101,
+            ),
+        )
+    }
+
+    @Test
+    fun missingOrNonNewerBuildRetriesUpdateCheck() {
+        assertFalse(shouldRetryKnownAppUpdate(installedVersionCode = 100, remoteVersionCode = null))
+        assertFalse(shouldRetryKnownAppUpdate(installedVersionCode = 100, remoteVersionCode = 100))
+        assertFalse(shouldRetryKnownAppUpdate(installedVersionCode = 100, remoteVersionCode = 99))
     }
 }
