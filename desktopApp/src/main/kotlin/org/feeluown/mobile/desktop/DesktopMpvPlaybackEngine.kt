@@ -214,16 +214,38 @@ internal class DesktopMpvPlaybackEngine(
     private fun handleProperty(name: String, value: String?) {
         when (name) {
             "pause" -> {
-                paused = value == "yes" || value == "true"
+                val observedPaused = when (value) {
+                    "yes", "true" -> true
+                    "no", "false" -> false
+                    else -> return
+                }
+                paused = observedPaused
                 val current = mutableState.value
-                if (current.status == PlayerStatus.Playing || current.status == PlayerStatus.Paused) {
+                if (
+                    current.status == PlayerStatus.Loading ||
+                    current.status == PlayerStatus.Playing ||
+                    current.status == PlayerStatus.Paused
+                ) {
                     mutableState.value = current.copy(
                         status = if (paused) PlayerStatus.Paused else PlayerStatus.Playing,
                     )
                 }
             }
             "time-pos" -> value.secondsToMsOrNull()?.let { positionMs ->
-                mutableState.value = mutableState.value.copy(positionMs = positionMs.coerceAtLeast(0L))
+                val current = mutableState.value
+                val normalizedPositionMs = positionMs.coerceAtLeast(0L)
+                mutableState.value = current.copy(
+                    status = if (
+                        current.status == PlayerStatus.Loading &&
+                        normalizedPositionMs > 0L &&
+                        !paused
+                    ) {
+                        PlayerStatus.Playing
+                    } else {
+                        current.status
+                    },
+                    positionMs = normalizedPositionMs,
+                )
             }
             "duration" -> value.secondsToMsOrNull()?.let { durationMs ->
                 mutableState.value = mutableState.value.copy(durationMs = durationMs.coerceAtLeast(0L))
