@@ -1,6 +1,7 @@
 package org.feeluown.mobile.playback.api
 
 import kotlinx.coroutines.flow.StateFlow
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 
 enum class PlaybackSessionStatus {
@@ -25,6 +26,9 @@ data class PlaybackSessionState(
     val queueIndex: Int = -1,
     val canGoNext: Boolean = false,
     val canGoPrevious: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.QUEUE,
+    val shuffleEnabled: Boolean = false,
+    val canChangePlaybackMode: Boolean = true,
     val errorMessage: String? = null,
 )
 
@@ -45,4 +49,6 @@ interface PlaybackSession {
     fun previous()
     fun next()
     fun seekTo(positionMs: Long) = Unit
+    fun setRepeatMode(mode: RepeatMode) = Unit
+    fun setShuffleEnabled(enabled: Boolean) = Unit
 }
