@@ -30,6 +30,43 @@ class AppLoggerTest {
     }
 
     @Test
+    fun redactsStructuredCredentials() {
+        val redacted = AppLogger.redact(
+            """payload={"access_token":"json-secret","refresh_token":"json-refresh","password":"json-password"}""",
+        )
+
+        assertFalse(redacted.contains("json-secret"))
+        assertFalse(redacted.contains("json-refresh"))
+        assertFalse(redacted.contains("json-password"))
+        assertTrue(redacted.contains("<redacted>"))
+    }
+
+    @Test
+    fun redactsEntireCookieHeader() {
+        val redacted = AppLogger.redact(
+            "Cookie: first=value; SESSDATA=cookie-secret; MUSIC_U=music-secret\nrequestId=123",
+        )
+
+        assertFalse(redacted.contains("first=value"))
+        assertFalse(redacted.contains("cookie-secret"))
+        assertFalse(redacted.contains("music-secret"))
+        assertTrue(redacted.contains("Cookie=<redacted>"))
+        assertTrue(redacted.contains("requestId=123"))
+    }
+
+    @Test
+    fun redactsSensitiveUrlParameters() {
+        val redacted = AppLogger.redact(
+            "url=https://x.test?a=1&access_token=url-secret&signature=signed-value requestId=123",
+        )
+
+        assertFalse(redacted.contains("url-secret"))
+        assertFalse(redacted.contains("signed-value"))
+        assertTrue(redacted.contains("a=1"))
+        assertTrue(redacted.contains("requestId=123"))
+    }
+
+    @Test
     fun keepsNonSensitiveContext() {
         assertEquals(
             "playback trackId=123 provider=netease",
