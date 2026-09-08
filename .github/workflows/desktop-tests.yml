@@ -55,6 +55,7 @@ jobs:
 
       - name: Test Linux desktop foundation
         env:
+          LC_NUMERIC: C
           FUOEVOLVE_REAL_LIBMPV_TEST: "1"
           FUOEVOLVE_LIBMPV_AO: "null"
         run: ./gradlew --no-configuration-cache --warning-mode all ciDesktopTest
