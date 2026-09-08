@@ -211,9 +211,9 @@ internal fun AppUpdateFeatureSettings(
                 }
                 AppUpdatePhase.Error -> {
                     val retryUpdate = shouldRetryKnownAppUpdate(
-              installedVersionCode = update.installedVersionCode,
-              remoteVersionCode = update.remoteVersionCode,
-          )
+                        installedVersionCode = update.installedVersionCode,
+                        remoteVersionCode = update.remoteVersionCode,
+                    )
                     OutlinedButton(
                         onClick = if (retryUpdate) {
                             controller::downloadAndInstallAppUpdate
