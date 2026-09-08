@@ -90,6 +90,15 @@ internal interface MprisMediaPlayer2 : DBusInterface {
     @DBusBoundProperty(access = Access.READ, name = "CanQuit")
     fun getCanQuit(): Boolean
 
+    @DBusBoundProperty(access = Access.READ, name = "Fullscreen")
+    fun getFullscreen(): Boolean
+
+    @DBusBoundProperty(access = Access.WRITE, name = "Fullscreen")
+    fun setFullscreen(value: Boolean)
+
+    @DBusBoundProperty(access = Access.READ, name = "CanSetFullscreen")
+    fun getCanSetFullscreen(): Boolean
+
     @DBusBoundProperty(access = Access.READ, name = "CanRaise")
     fun getCanRaise(): Boolean
 
@@ -191,6 +200,9 @@ internal class LinuxMprisObject(
     override fun Raise() = Unit
     override fun Quit() = Unit
     override fun getCanQuit(): Boolean = false
+    override fun getFullscreen(): Boolean = false
+    override fun setFullscreen(value: Boolean) = Unit
+    override fun getCanSetFullscreen(): Boolean = false
     override fun getCanRaise(): Boolean = false
     override fun getHasTrackList(): Boolean = false
     override fun getIdentity(): String = "FuoEvolve"
