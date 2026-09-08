@@ -2,7 +2,10 @@ package org.feeluown.mobile
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestData
+import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
@@ -138,13 +141,13 @@ class YtMusicPlaybackProviderTest {
 
     private fun http(
         requests: MutableList<CapturedRequest>,
-        handler: suspend (io.ktor.client.request.HttpRequestData) -> io.ktor.client.request.HttpResponseData,
+        handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ): ProviderHttpClient = ProviderHttpClient(
         httpClient = HttpClient(MockEngine) {
             engine {
                 addHandler { request ->
                     requests += capture(request)
-                    handler(request)
+                    handler.invoke(this, request)
                 }
             }
         },
@@ -172,7 +175,7 @@ class YtMusicPlaybackProviderTest {
         val body: String,
     )
 
-    private fun capture(request: io.ktor.client.request.HttpRequestData): CapturedRequest = CapturedRequest(
+    private fun capture(request: HttpRequestData): CapturedRequest = CapturedRequest(
         method = request.method,
         url = request.url.toString(),
         headers = request.headers.entries().associate { it.key to it.value.joinToString(",") },
