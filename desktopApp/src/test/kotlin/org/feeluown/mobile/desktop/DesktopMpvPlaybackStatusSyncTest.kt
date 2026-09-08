@@ -62,9 +62,15 @@ class DesktopMpvPlaybackStatusSyncTest {
         assertEquals(PlayerStatus.Loading, engine.state.value.status)
         assertEquals(0L, engine.state.value.positionMs)
 
+        // Even FILE_LOADED itself can be stale because loadfile/stop processing is asynchronous.
+        backend.emit(DesktopMpvBackendEvent.FileLoaded(path = "https://example.test/stale.mp3"))
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "16.0"))
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+        assertEquals(0L, engine.state.value.positionMs)
+
         // Some libmpv/ABI combinations can fail to expose START_FILE data while still delivering
-        // FILE_LOADED and property-change events. FILE_LOADED must be sufficient to unlock sync.
-        backend.emit(DesktopMpvBackendEvent.FileLoaded)
+        // FILE_LOADED and property-change events. A correlated FILE_LOADED must unlock sync.
+        backend.emit(DesktopMpvBackendEvent.FileLoaded(path = STATUS_URL))
         backend.emit(DesktopMpvBackendEvent.Property("time-pos", "0"))
         backend.emit(DesktopMpvBackendEvent.Property("time-pos", "0.25"))
 
@@ -81,7 +87,7 @@ class DesktopMpvPlaybackStatusSyncTest {
         val track = track("qqmusic:file-loaded-restart")
 
         engine.play(track, payload(track))
-        backend.emit(DesktopMpvBackendEvent.FileLoaded)
+        backend.emit(DesktopMpvBackendEvent.FileLoaded(path = STATUS_URL))
         backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
 
         assertEquals(PlayerStatus.Playing, engine.state.value.status)
@@ -157,7 +163,7 @@ class DesktopMpvPlaybackStatusSyncTest {
     }
 
     private fun payload(track: MusicTrack) = PlaybackPayload(
-        url = "https://example.test/status.mp3",
+        url = STATUS_URL,
         title = track.title,
         artists = track.artists,
         album = track.album,
@@ -179,6 +185,10 @@ class DesktopMpvPlaybackStatusSyncTest {
         providerId = id,
         providerName = id.substringBefore(':'),
     )
+
+    private companion object {
+        const val STATUS_URL = "https://example.test/status.mp3"
+    }
 }
 
 private class StatusSyncFakeDesktopMpvBackend(
