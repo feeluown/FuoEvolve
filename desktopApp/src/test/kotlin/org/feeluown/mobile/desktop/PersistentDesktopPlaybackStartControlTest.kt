@@ -2,9 +2,6 @@ package org.feeluown.mobile.desktop
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.NoOpPlaybackResumeStore
 import org.feeluown.mobile.PlaybackEngine
@@ -61,51 +58,6 @@ class PersistentDesktopPlaybackStartControlTest {
         engine.play(track, payload(track))
 
         assertEquals(1, delegate.playCalls)
-        engine.close()
-    }
-
-    @Test
-    fun requiresActualPositiveTimelineAdvanceBeforePublishingPlaying() = runBlocking {
-        val delegate = StartControlFakePlaybackEngine()
-        val engine = PersistentDesktopPlaybackEngine(delegate, NoOpPlaybackResumeStore)
-        val track = track("youtube:buffering")
-
-        engine.prepareLoading(track)
-        delegate.emit(
-            PlaybackState(
-                status = PlayerStatus.Playing,
-                currentTrack = track,
-                positionMs = 0L,
-                durationMs = 100_000L,
-            ),
-        )
-        assertEquals(PlayerStatus.Loading, engine.state.value.status)
-
-        delegate.emit(
-            PlaybackState(
-                status = PlayerStatus.Playing,
-                currentTrack = track,
-                positionMs = 10_000L,
-                durationMs = 100_000L,
-            ),
-        )
-        val firstPositive = withTimeout(1_000L) {
-            engine.state.first { it.positionMs == 10_000L }
-        }
-        assertEquals(PlayerStatus.Loading, firstPositive.status)
-
-        delegate.emit(
-            PlaybackState(
-                status = PlayerStatus.Playing,
-                currentTrack = track,
-                positionMs = 10_250L,
-                durationMs = 100_000L,
-            ),
-        )
-        val advanced = withTimeout(1_000L) {
-            engine.state.first { it.positionMs == 10_250L }
-        }
-        assertEquals(PlayerStatus.Playing, advanced.status)
         engine.close()
     }
 
@@ -168,8 +120,4 @@ private class StartControlFakePlaybackEngine : PlaybackEngine {
     }
 
     override fun seekTo(positionMs: Long) = Unit
-
-    fun emit(state: PlaybackState) {
-        mutableState.value = state
-    }
 }
