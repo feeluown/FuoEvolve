@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.os.SystemClock
-import android.util.Log
 import io.github.proify.lyricon.lyric.model.LyricWord as LyriconLyricWord
 import io.github.proify.lyricon.lyric.model.RichLyricLine as LyriconRichLyricLine
 import io.github.proify.lyricon.lyric.model.Song as LyriconSong
@@ -52,21 +51,21 @@ internal class LyriconLyricsPublisher(
 
     private val connectionListener = object : ConnectionListener {
         override fun onConnected(provider: LyriconProvider) {
-            Log.d(TAG, "Lyricon connected")
+            AppLogger.d(TAG, "Lyricon connected")
             syncManualPlaybackState(provider)
         }
 
         override fun onReconnected(provider: LyriconProvider) {
-            Log.d(TAG, "Lyricon reconnected")
+            AppLogger.d(TAG, "Lyricon reconnected")
             syncManualPlaybackState(provider)
         }
 
         override fun onDisconnected(provider: LyriconProvider) {
-            Log.w(TAG, "Lyricon disconnected")
+            AppLogger.w(TAG, "Lyricon disconnected")
         }
 
         override fun onConnectTimeout(provider: LyriconProvider) {
-            Log.w(TAG, "Lyricon connection timed out; playback continues normally")
+            AppLogger.w(TAG, "Lyricon connection timed out; playback continues normally")
         }
     }
 
@@ -175,7 +174,7 @@ internal class LyriconLyricsPublisher(
             }
             lastPublishedStatus = snapshot.status
         }.onFailure { throwable ->
-            Log.w(TAG, "Failed to publish Lyricon state; playback is unaffected", throwable)
+            AppLogger.w(TAG, "Failed to publish Lyricon state; playback is unaffected", throwable)
         }
 
         if (snapshot.status == PlaybackSessionStatus.Playing) {
@@ -234,7 +233,7 @@ internal class LyriconLyricsPublisher(
                 ensurePositionSyncLoop()
             }
         }.onFailure { throwable ->
-            Log.w(TAG, "Unable to resync Lyricon playback state", throwable)
+            AppLogger.w(TAG, "Unable to resync Lyricon playback state", throwable)
         }
     }
 
@@ -253,7 +252,7 @@ internal class LyriconLyricsPublisher(
     private fun ensureProvider(): LyriconProvider? {
         provider?.let { return it }
         if (!isLyriconInstalled(appContext)) {
-            Log.d(TAG, "Lyricon is not installed; skip status bar lyrics")
+            AppLogger.d(TAG, "Lyricon is not installed; skip status bar lyrics")
             return null
         }
         return runCatching {
@@ -263,12 +262,12 @@ internal class LyriconLyricsPublisher(
                 created.player.setDisplayRoma(true)
                 created.service.addConnectionListener(connectionListener)
                 if (!created.register()) {
-                    Log.w(TAG, "Lyricon provider registration was not started; playback is unaffected")
+                    AppLogger.w(TAG, "Lyricon provider registration was not started; playback is unaffected")
                 }
                 provider = created
             }
         }.onFailure { throwable ->
-            Log.w(TAG, "Unable to initialize Lyricon; playback is unaffected", throwable)
+            AppLogger.w(TAG, "Unable to initialize Lyricon; playback is unaffected", throwable)
         }.getOrNull()
     }
 
@@ -280,15 +279,15 @@ internal class LyriconLyricsPublisher(
             activeProvider.player.setPlaybackState(false)
             activeProvider.player.setSong(null)
         }.onFailure { throwable ->
-            Log.w(TAG, "Unable to clear Lyricon song", throwable)
+            AppLogger.w(TAG, "Unable to clear Lyricon song", throwable)
         }
         runCatching { activeProvider.unregister() }
-            .onFailure { throwable -> Log.w(TAG, "Unable to unregister Lyricon", throwable) }
+            .onFailure { throwable -> AppLogger.w(TAG, "Unable to unregister Lyricon", throwable) }
         runCatching {
             activeProvider.service.removeConnectionListener(connectionListener)
             activeProvider.destroy()
         }.onFailure { throwable ->
-            Log.w(TAG, "Unable to destroy Lyricon provider", throwable)
+            AppLogger.w(TAG, "Unable to destroy Lyricon provider", throwable)
         }
         provider = null
         lastTrackKey = null
