@@ -249,8 +249,10 @@ internal class LinuxMprisObject(
         }
     }
     override fun getMetadata(): Map<String, Variant<*>> = mprisMetadata(playbackSession.state.value)
-    override fun getVolume(): Double = 1.0
-    override fun setVolume(value: Double) = Unit
+    override fun getVolume(): Double = playbackSession.state.value.volume
+    override fun setVolume(value: Double) {
+        if (value.isFinite()) playbackSession.setVolume(value.coerceIn(0.0, 1.0))
+    }
     override fun getPosition(): Long = playbackSession.state.value.positionMs * MICROSECONDS_PER_MILLISECOND
     override fun getMinimumRate(): Double = 1.0
     override fun getMaximumRate(): Double = 1.0
@@ -315,6 +317,7 @@ internal fun mprisChangedProperties(
     }
     if (previous.repeatMode != current.repeatMode) put("LoopStatus", Variant(mprisLoopStatus(current.repeatMode)))
     if (previous.shuffleEnabled != current.shuffleEnabled) put("Shuffle", Variant(current.shuffleEnabled))
+    if (previous.volume != current.volume) put("Volume", Variant(current.volume))
     if (mprisCanGoNext(previous) != mprisCanGoNext(current)) put("CanGoNext", Variant(mprisCanGoNext(current)))
     if (mprisCanGoPrevious(previous) != mprisCanGoPrevious(current)) put("CanGoPrevious", Variant(mprisCanGoPrevious(current)))
     if (mprisCanPlay(previous) != mprisCanPlay(current)) put("CanPlay", Variant(mprisCanPlay(current)))
