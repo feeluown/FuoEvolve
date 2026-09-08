@@ -1,5 +1,6 @@
 package org.feeluown.mobile.desktop
 
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSessionState
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
@@ -10,7 +11,7 @@ import kotlin.test.assertTrue
 
 class DesktopMacNowPlayingSessionTest {
     @Test
-    fun projectsPlaybackMetadataProgressAndQueue() {
+    fun projectsPlaybackMetadataProgressQueueAndModes() {
         val projected = macNowPlayingProjection(
             PlaybackSessionState(
                 status = PlaybackSessionStatus.Playing,
@@ -21,6 +22,8 @@ class DesktopMacNowPlayingSessionTest {
                 queueIndex = 0,
                 canGoNext = true,
                 canGoPrevious = true,
+                repeatMode = RepeatMode.QUEUE,
+                shuffleEnabled = true,
             ),
         )
 
@@ -34,10 +37,14 @@ class DesktopMacNowPlayingSessionTest {
         assertTrue(projected.canPause)
         assertTrue(projected.canNext)
         assertTrue(projected.canPrevious)
+        assertEquals(MacNowPlayingNative.REPEAT_ALL, projected.repeatMode)
+        assertTrue(projected.shuffleEnabled)
+        assertTrue(projected.canChangePlaybackMode)
         assertEquals("a", projected.metadata?.trackId)
         assertEquals("Track a", projected.metadata?.title)
         assertEquals("Artist", projected.metadata?.artist)
         assertEquals("Album", projected.metadata?.album)
+        assertEquals("https://example.com/a.jpg", projected.metadata?.artworkUrl)
     }
 
     @Test
@@ -47,11 +54,15 @@ class DesktopMacNowPlayingSessionTest {
                 status = PlaybackSessionStatus.Paused,
                 currentTrack = track("a", durationMs = 90_000),
                 durationMs = 0,
+                repeatMode = RepeatMode.SINGLE,
+                canChangePlaybackMode = false,
             ),
         )
         assertEquals(90_000, paused.durationMs)
         assertEquals(MacNowPlayingNative.STATUS_PAUSED, paused.status)
+        assertEquals(MacNowPlayingNative.REPEAT_ONE, paused.repeatMode)
         assertFalse(paused.canPause)
+        assertFalse(paused.canChangePlaybackMode)
 
         val idle = macNowPlayingProjection(
             PlaybackSessionState(
@@ -85,6 +96,7 @@ class DesktopMacNowPlayingSessionTest {
         artists = "Artist",
         album = "Album",
         source = "test",
+        coverUrl = "https://example.com/$id.jpg",
         durationMs = durationMs,
     )
 }
