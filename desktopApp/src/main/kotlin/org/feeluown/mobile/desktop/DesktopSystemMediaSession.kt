@@ -299,13 +299,14 @@ internal fun mprisChangedProperties(
     if (mprisCanSeek(previous) != mprisCanSeek(current)) put("CanSeek", Variant(mprisCanSeek(current)))
 }
 
-private fun mprisCanGoNext(state: PlaybackSessionState): Boolean =
-    state.queueIndex >= 0 && state.queueIndex < state.queueTrackIds.lastIndex
-
-private fun mprisCanGoPrevious(state: PlaybackSessionState): Boolean = state.queueIndex > 0
+private fun mprisCanGoNext(state: PlaybackSessionState): Boolean = state.canGoNext
+private fun mprisCanGoPrevious(state: PlaybackSessionState): Boolean = state.canGoPrevious
 private fun mprisCanPlay(state: PlaybackSessionState): Boolean = state.currentTrack != null || state.queueTrackIds.isNotEmpty()
-private fun mprisCanPause(state: PlaybackSessionState): Boolean = state.currentTrack != null
-private fun mprisCanSeek(state: PlaybackSessionState): Boolean = state.currentTrack != null && state.durationMs > 0L
+private fun mprisCanPause(state: PlaybackSessionState): Boolean = state.status == PlaybackSessionStatus.Playing
+private fun mprisCanSeek(state: PlaybackSessionState): Boolean =
+    state.currentTrack != null &&
+        state.durationMs > 0L &&
+        (state.status == PlaybackSessionStatus.Playing || state.status == PlaybackSessionStatus.Paused)
 
 private const val MPRIS_BUS_NAME = "org.mpris.MediaPlayer2.FuoEvolve"
 private const val MPRIS_OBJECT_PATH = "/org/mpris/MediaPlayer2"
