@@ -191,16 +191,9 @@ class YtMusicProvider(
     )
 
     private suspend fun playablePlayer(videoId: String): PlayedStream? {
-        ensureYoutubeVisitorId()
-        if (!visitorId.isNullOrBlank()) {
-            val androidVr = runCatching { androidVrPlayer(videoId) }.getOrNull()
-            if (androidVr != null && hasPlayableAudio(androidVr, requireDirectUrl = true)) {
-                return PlayedStream(root = androidVr, playbackHeaders = emptyMap())
-            }
-        }
-        val android = runCatching { androidPlayer(videoId) }.getOrNull()
-        if (android != null && hasPlayableAudio(android, requireDirectUrl = true)) {
-            return PlayedStream(root = android, playbackHeaders = emptyMap())
+        val visionOs = runCatching { visionOsPlayer(videoId) }.getOrNull()
+        if (visionOs != null && hasPlayableAudio(visionOs, requireDirectUrl = true)) {
+            return PlayedStream(root = visionOs, playbackHeaders = emptyMap())
         }
         val web = runCatching { player(videoId) }.getOrNull()
         if (web != null && hasPlayableAudio(web, requireDirectUrl = false)) {
@@ -212,6 +205,10 @@ class YtMusicProvider(
                     "User-Agent" to YtMusicOAuth.USER_AGENT,
                 ),
             )
+        }
+        val android = runCatching { androidPlayer(videoId) }.getOrNull()
+        if (android != null && hasPlayableAudio(android, requireDirectUrl = true)) {
+            return PlayedStream(root = android, playbackHeaders = emptyMap())
         }
         return null
     }
@@ -248,47 +245,42 @@ class YtMusicProvider(
         )
     }
 
-    private suspend fun androidVrPlayer(videoId: String): kotlinx.serialization.json.JsonObject {
+    private suspend fun visionOsPlayer(videoId: String): kotlinx.serialization.json.JsonObject {
         ensureConfig()
-        ensureYoutubeVisitorId()
-        val visitor = visitorId?.takeIf { it.isNotBlank() }
-            ?: error("ANDROID_VR player requires X-Goog-Visitor-Id")
-        val sts = ensureSignatureTimestamp()
         val body =
             "{" +
                 "\"context\":{\"client\":{" +
-                "\"clientName\":\"ANDROID_VR\"," +
-                "\"clientVersion\":\"$ANDROID_VR_CLIENT_VERSION\"," +
-                "\"deviceMake\":\"Oculus\"," +
-                "\"deviceModel\":\"Quest 3\"," +
-                "\"androidSdkVersion\":32," +
-                "\"userAgent\":${quote(ANDROID_VR_USER_AGENT)}," +
-                "\"osName\":\"Android\"," +
-                "\"osVersion\":\"12L\"," +
+                "\"clientName\":\"VISIONOS\"," +
+                "\"clientVersion\":\"$VISIONOS_CLIENT_VERSION\"," +
+                "\"deviceMake\":\"Apple\"," +
+                "\"deviceModel\":\"RealityDevice17,1\"," +
+                "\"userAgent\":${quote(VISIONOS_USER_AGENT)}," +
+                "\"osName\":\"visionOS\"," +
+                "\"osVersion\":\"26.5.23O471\"," +
                 "\"hl\":\"en\"," +
                 "\"timeZone\":\"UTC\"," +
                 "\"utcOffsetMinutes\":0" +
                 "},\"user\":{}}," +
                 "\"videoId\":${quote(videoId)}," +
                 "\"playbackContext\":{\"contentPlaybackContext\":{" +
-                "\"html5Preference\":\"HTML5_PREF_WANTS\"," +
-                "\"signatureTimestamp\":$sts" +
+                "\"html5Preference\":\"HTML5_PREF_WANTS\"" +
                 "}}," +
                 "\"contentCheckOk\":true," +
                 "\"racyCheckOk\":true" +
                 "}"
+        val headers = buildMap {
+            put("Content-Type", "application/json")
+            put("User-Agent", VISIONOS_USER_AGENT)
+            put("Origin", "https://www.youtube.com")
+            put("X-Youtube-Client-Name", VISIONOS_CLIENT_NAME)
+            put("X-Youtube-Client-Version", VISIONOS_CLIENT_VERSION)
+            visitorId?.takeIf { it.isNotBlank() }?.let { put("X-Goog-Visitor-Id", it) }
+        }
         return http.postJson(
             providerId = ID,
             url = "$YOUTUBE_API_BASE/player?prettyPrint=false",
             json = body,
-            headers = mapOf(
-                "Content-Type" to "application/json",
-                "User-Agent" to ANDROID_VR_USER_AGENT,
-                "Origin" to "https://www.youtube.com",
-                "X-Youtube-Client-Name" to ANDROID_VR_CLIENT_NAME,
-                "X-Youtube-Client-Version" to ANDROID_VR_CLIENT_VERSION,
-                "X-Goog-Visitor-Id" to visitor,
-            ),
+            headers = headers,
         ).value.let { providerJson.parseToJsonElement(it).asObject() }
     }
 
@@ -300,6 +292,9 @@ class YtMusicProvider(
                 "\"clientName\":\"ANDROID\"," +
                 "\"clientVersion\":\"$ANDROID_CLIENT_VERSION\"," +
                 "\"androidSdkVersion\":30," +
+                "\"userAgent\":${quote(ANDROID_USER_AGENT)}," +
+                "\"osName\":\"Android\"," +
+                "\"osVersion\":\"11\"," +
                 "\"hl\":\"zh_CN\"" +
                 "},\"user\":{}}," +
                 "\"videoId\":${quote(videoId)}," +
@@ -892,6 +887,9 @@ class YtMusicProvider(
         const val DATA_API_BASE = YtMusicProviderDefinition.DATA_API_BASE
         const val YOUTUBE_API_BASE = YtMusicProviderDefinition.YOUTUBE_API_BASE
         const val FALLBACK_API_KEY = YtMusicProviderDefinition.FALLBACK_API_KEY
+        const val VISIONOS_CLIENT_NAME = YtMusicProviderDefinition.VISIONOS_CLIENT_NAME
+        const val VISIONOS_CLIENT_VERSION = YtMusicProviderDefinition.VISIONOS_CLIENT_VERSION
+        const val VISIONOS_USER_AGENT = YtMusicProviderDefinition.VISIONOS_USER_AGENT
         const val ANDROID_VR_CLIENT_NAME = YtMusicProviderDefinition.ANDROID_VR_CLIENT_NAME
         const val ANDROID_VR_CLIENT_VERSION = YtMusicProviderDefinition.ANDROID_VR_CLIENT_VERSION
         const val ANDROID_VR_USER_AGENT = YtMusicProviderDefinition.ANDROID_VR_USER_AGENT
