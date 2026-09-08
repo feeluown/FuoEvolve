@@ -49,12 +49,14 @@ class DesktopMprisSessionTest {
     fun routesTransportSeekAndPlaybackModesThroughPlaybackSession() {
         val session = FakePlaybackSession(
             PlaybackSessionState(
-                status = PlaybackSessionStatus.Paused,
+                status = PlaybackSessionStatus.Playing,
                 currentTrack = track("track-a"),
                 positionMs = 10_000,
                 durationMs = 100_000,
                 queueTrackIds = listOf("track-a", "track-b"),
                 queueIndex = 0,
+                canGoNext = true,
+                canGoPrevious = true,
                 repeatMode = RepeatMode.OFF,
             ),
         )
