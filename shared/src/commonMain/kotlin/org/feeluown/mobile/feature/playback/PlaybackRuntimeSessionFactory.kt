@@ -40,7 +40,7 @@ fun createSharedPlaybackRuntimeSession(
             )
         }
     } else {
-        playbackState.map(PlaybackState::toPlaybackRuntimeOverlay)
+        playbackState.map { it.toPlaybackRuntimeOverlay() }
     }
     val initialQueueState = queueStateFlow?.value
     val overlay = overlayFlow
