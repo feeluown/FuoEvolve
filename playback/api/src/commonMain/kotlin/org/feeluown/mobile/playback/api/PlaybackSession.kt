@@ -25,6 +25,8 @@ data class PlaybackSessionState(
     val lyrics: String? = null,
     val queueTrackIds: List<String> = emptyList(),
     val queueIndex: Int = -1,
+    val canonicalQueueTracks: List<TrackRef> = emptyList(),
+    val canonicalQueueIndex: Int = -1,
     val canGoNext: Boolean = false,
     val canGoPrevious: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.QUEUE,
