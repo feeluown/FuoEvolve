@@ -69,6 +69,47 @@ class PlaybackRuntimeTransportCapabilitiesTest {
     }
 
     @Test
+    fun queuedButIdlePlaybackCanStartWithNext() {
+        val first = track("first")
+        val queueState = PlaybackQueueState(
+            mainQueue = listOf(first),
+            mainQueueIndex = -1,
+            repeatMode = RepeatMode.OFF,
+        )
+
+        assertTrue(playbackRuntimeCanGoNext(PlaybackState(), queueState))
+        assertFalse(playbackRuntimeCanGoPrevious(PlaybackState(), queueState))
+    }
+
+    @Test
+    fun multipartTrackExposesPartNavigation() {
+        val current = track("multipart")
+        val queueState = PlaybackQueueState(
+            mainQueue = listOf(current),
+            mainQueueIndex = 0,
+            repeatMode = RepeatMode.OFF,
+        )
+        val parts = listOf(
+            PlaybackPart(id = "p1", title = "Part 1"),
+            PlaybackPart(id = "p2", title = "Part 2"),
+            PlaybackPart(id = "p3", title = "Part 3"),
+        )
+
+        val firstPart = PlaybackState(
+            status = PlayerStatus.Playing,
+            currentTrack = current,
+            playbackParts = parts,
+            currentPartIndex = 0,
+        )
+        assertTrue(playbackRuntimeCanGoNext(firstPart, queueState))
+        assertFalse(playbackRuntimeCanGoPrevious(firstPart, queueState))
+
+        val middlePart = firstPart.copy(currentPartIndex = 1)
+        assertTrue(playbackRuntimeCanGoNext(middlePart, queueState))
+        assertTrue(playbackRuntimeCanGoPrevious(middlePart, queueState))
+    }
+
+    @Test
     fun emptyPlaybackHasNoQueueTransport() {
         val playbackState = PlaybackState()
         val queueState = PlaybackQueueState(repeatMode = RepeatMode.QUEUE)
