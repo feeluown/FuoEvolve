@@ -22,113 +22,70 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           path = Path('androidApp/src/main/kotlin/org/feeluown/mobile/update/AndroidAppUpdateController.kt')
           text = path.read_text()
           text = text.replace('import android.content.ActivityNotFoundException\n', '')
-
-          old_permission = '''        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-              mutableUiState.update {
-                  it.copy(
-                      phase = AppUpdatePhase.InstallPermissionRequired,
-                      downloadProgress = null,
-                      message = "请允许 FuoEvolve 安装未知来源应用，然后返回继续安装",
-                  )
-              }
-              val intent = Intent(
-                  Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                  Uri.parse("package:${appContext.packageName}"),
-              ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-              appContext.startActivity(intent)
-              return
-          }
-          '''
-          new_permission = '''        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-              mutableUiState.update {
-                  it.copy(
-                      phase = AppUpdatePhase.InstallPermissionRequired,
-                      downloadProgress = null,
-                      message = "请允许 FuoEvolve 安装未知来源应用，然后返回继续安装",
-                  )
-              }
-              if (!openInstallPermissionSettings()) {
-                  throw IOException("无法打开安装权限设置，请在系统设置中手动允许 FuoEvolve 安装未知来源应用")
-              }
-              return
-          }
-          '''
-          if old_permission not in text:
-              raise SystemExit('install permission block not found')
-          text = text.replace(old_permission, new_permission, 1)
-
-          old_installer = '''        androidInstallerIntentActions(Build.VERSION.SDK_INT).forEach { action ->
-              val intent = buildInstallerIntent(action, uri)
-              grantInstallerUriPermission(intent, uri)
-              try {
-                  appContext.startActivity(intent)
-                  mutableUiState.update {
-                      it.copy(
-                          phase = AppUpdatePhase.Installing,
-                          downloadProgress = null,
-                          message = "已打开系统安装器",
-                      )
-                  }
-                  return
-              } catch (error: ActivityNotFoundException) {
-                  lastLaunchError = error
-              } catch (error: SecurityException) {
-                  lastLaunchError = error
-              }
-          }
-          throw IOException("无法打开系统安装器", lastLaunchError)
-      }
-
-      @Suppress("DEPRECATION")
-      private fun buildInstallerIntent'''
-          new_installer = '''        androidInstallerIntentActions(Build.VERSION.SDK_INT).forEach { action ->
-              val intent = buildInstallerIntent(action, uri)
-              try {
-                  grantInstallerUriPermission(intent, uri)
-                  appContext.startActivity(intent)
-                  mutableUiState.update {
-                      it.copy(
-                          phase = AppUpdatePhase.Installing,
-                          downloadProgress = null,
-                          message = "已打开系统安装器",
-                      )
-                  }
-                  return
-              } catch (error: RuntimeException) {
-                  lastLaunchError = error
-              }
-          }
-          throw IOException("无法打开系统安装器", lastLaunchError)
-      }
-
-      private fun openInstallPermissionSettings(): Boolean {
-          val packageUri = Uri.parse("package:${appContext.packageName}")
-          val intents = listOf(
-              Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri),
-              Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES),
-              Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),
-              Intent(Settings.ACTION_SECURITY_SETTINGS),
-              Intent(Settings.ACTION_SETTINGS),
-          )
-          return intents.any(::tryStartSettingsActivity)
-      }
-
-      private fun tryStartSettingsActivity(intent: Intent): Boolean = try {
-          appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-          true
-      } catch (_: RuntimeException) {
-          false
-      }
-
-      @Suppress("DEPRECATION")
-      private fun buildInstallerIntent'''
-          if old_installer not in text:
-              raise SystemExit('installer launch block not found')
-          text = text.replace(old_installer, new_installer, 1)
+          permission_start = text.index('        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {')
+          permission_end = text.index('\n\n        val uri = FileProvider.getUriForFile(', permission_start)
+          permission_block = '\n'.join([
+              '        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {',
+              '            mutableUiState.update {',
+              '                it.copy(',
+              '                    phase = AppUpdatePhase.InstallPermissionRequired,',
+              '                    downloadProgress = null,',
+              '                    message = "请允许 FuoEvolve 安装未知来源应用，然后返回继续安装",',
+              '                )',
+              '            }',
+              '            if (!openInstallPermissionSettings()) {',
+              '                throw IOException("无法打开安装权限设置，请在系统设置中手动允许 FuoEvolve 安装未知来源应用")',
+              '            }',
+              '            return',
+              '        }',
+          ])
+          text = text[:permission_start] + permission_block + text[permission_end:]
+          installer_start = text.index('        androidInstallerIntentActions(Build.VERSION.SDK_INT).forEach { action ->')
+          installer_end = text.index('\n\n    @Suppress("DEPRECATION")\n    private fun buildInstallerIntent', installer_start)
+          installer_block = '\n'.join([
+              '        androidInstallerIntentActions(Build.VERSION.SDK_INT).forEach { action ->',
+              '            val intent = buildInstallerIntent(action, uri)',
+              '            try {',
+              '                grantInstallerUriPermission(intent, uri)',
+              '                appContext.startActivity(intent)',
+              '                mutableUiState.update {',
+              '                    it.copy(',
+              '                        phase = AppUpdatePhase.Installing,',
+              '                        downloadProgress = null,',
+              '                        message = "已打开系统安装器",',
+              '                    )',
+              '                }',
+              '                return',
+              '            } catch (error: RuntimeException) {',
+              '                lastLaunchError = error',
+              '            }',
+              '        }',
+              '        throw IOException("无法打开系统安装器", lastLaunchError)',
+              '    }',
+              '',
+              '    private fun openInstallPermissionSettings(): Boolean {',
+              '        val packageUri = Uri.parse("package:${appContext.packageName}")',
+              '        val intents = listOf(',
+              '            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri),',
+              '            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES),',
+              '            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),',
+              '            Intent(Settings.ACTION_SECURITY_SETTINGS),',
+              '            Intent(Settings.ACTION_SETTINGS),',
+              '        )',
+              '        return intents.any(::tryStartSettingsActivity)',
+              '    }',
+              '',
+              '    private fun tryStartSettingsActivity(intent: Intent): Boolean = try {',
+              '        appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))',
+              '        true',
+              '    } catch (_: RuntimeException) {',
+              '        false',
+              '    }',
+          ])
+          text = text[:installer_start] + installer_block + text[installer_end:]
           path.write_text(text)
           PY
 
