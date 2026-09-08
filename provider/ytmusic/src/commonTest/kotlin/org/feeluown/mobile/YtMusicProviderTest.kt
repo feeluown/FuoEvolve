@@ -386,7 +386,7 @@ class YtMusicProviderTest {
     }
 
     @Test
-    fun resolveUsesAndroidVrPlayerLikeYtDlp() = runTest {
+    fun resolveUsesVisionOsPlayerLikeYtDlp() = runTest {
         val requests = mutableListOf<CapturedRequest>()
         val store = InMemoryProviderCredentialStore()
         val providerHttp = ProviderHttpClient(
@@ -400,10 +400,7 @@ class YtMusicProviderTest {
                             request.method == HttpMethod.Get && url.contains("music.youtube.com") && !url.contains("/s/player") -> respond(
                                 """<html>ytcfg.set({"INNERTUBE_API_KEY":"AIzaSyTestKey","INNERTUBE_CLIENT_VERSION":"1.20260807.01.00","VISITOR_DATA":"visitor-token"});</html>""",
                             )
-                            request.method == HttpMethod.Get && (url.contains("/s/player") || url.contains("youtube.com/watch")) -> respond(
-                                """{"VISITOR_DATA":"visitor-token"} var signatureTimestamp=20668;""",
-                            )
-                            body.contains("ANDROID_VR") -> respond(
+                            body.contains("VISIONOS") -> respond(
                                 """{"playabilityStatus":{"status":"OK"},"streamingData":{"adaptiveFormats":[{"mimeType":"audio/webm; codecs=\"opus\"","bitrate":140000,"url":"https://cdn.example/a.webm","approxDurationMs":"10000"},{"mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","bitrate":130000,"url":"https://cdn.example/a.m4a","approxDurationMs":"10000","audioQuality":"AUDIO_QUALITY_MEDIUM"}]}}""",
                             )
                             else -> respond("""{"playabilityStatus":{"status":"UNPLAYABLE"}}""")
@@ -427,18 +424,18 @@ class YtMusicProviderTest {
 
         val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
 
-        // Prefer m4a like FeelUOwn ytdl format m4a/bestaudio/best
         assertEquals("https://cdn.example/a.m4a", payload?.url)
         assertTrue(payload?.headers.isNullOrEmpty(), "yt-dlp/FeelUOwn path uses empty playback headers")
-        val vr = requests.first { it.body.contains("ANDROID_VR") }
-        assertTrue(vr.url.contains("www.youtube.com/youtubei/v1/player"), vr.url)
-        assertEquals(YtMusicProvider.ANDROID_VR_USER_AGENT, vr.headers["User-Agent"])
-        assertEquals(YtMusicProvider.ANDROID_VR_CLIENT_NAME, vr.headers["X-Youtube-Client-Name"])
+        val visionOs = requests.first { it.body.contains("VISIONOS") }
+        assertTrue(visionOs.url.contains("www.youtube.com/youtubei/v1/player"), visionOs.url)
+        assertEquals(YtMusicProvider.VISIONOS_USER_AGENT, visionOs.headers["User-Agent"])
+        assertEquals(YtMusicProvider.VISIONOS_CLIENT_NAME, visionOs.headers["X-Youtube-Client-Name"])
+        assertTrue(requests.none { it.body.contains("ANDROID_VR") }, "ANDROID_VR 1.65.10 must not be used")
         providerHttp.close()
     }
 
     @Test
-    fun resolveFallsBackToWebRemixWhenAndroidVrUnplayable() = runTest {
+    fun resolveFallsBackToWebRemixWhenVisionOsUnplayable() = runTest {
         val requests = mutableListOf<CapturedRequest>()
         val store = InMemoryProviderCredentialStore()
         val providerHttp = ProviderHttpClient(
@@ -455,11 +452,10 @@ class YtMusicProviderTest {
                             request.method == HttpMethod.Get && (url.contains("/s/player") || url.contains("youtube.com/watch")) -> respond(
                                 """var signatureTimestamp=20668;""",
                             )
-                            body.contains("ANDROID_VR") -> respond(
+                            body.contains("VISIONOS") -> respond(
                                 """{"playabilityStatus":{"status":"LOGIN_REQUIRED"}}""",
                             )
                             body.contains("signatureTimestamp") && body.contains("WEB_REMIX").not() && url.contains("music.youtube.com") -> respond(
-                                // innerTube wraps WEB_REMIX context around payload
                                 """{"playabilityStatus":{"status":"OK"},"streamingData":{"adaptiveFormats":[{"mimeType":"audio/mp4","bitrate":128000,"url":"https://cdn.example/web.m4a","approxDurationMs":"10000"}]}}""",
                             )
                             url.contains("music.youtube.com/youtubei/v1/player") -> respond(
@@ -487,13 +483,14 @@ class YtMusicProviderTest {
         val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
 
         assertEquals("https://cdn.example/web.m4a", payload?.url)
-        assertTrue(requests.any { it.body.contains("ANDROID_VR") })
+        assertTrue(requests.any { it.body.contains("VISIONOS") })
+        assertTrue(requests.none { it.body.contains("ANDROID_VR") })
         assertTrue(requests.any { it.url.contains("music.youtube.com/youtubei/v1/player") })
         providerHttp.close()
     }
 
     @Test
-    fun resolveFallsBackToAndroidWhenVisitorMissing() = runTest {
+    fun resolveFallsBackToAndroidWhenVisionOsAndWebAreUnplayable() = runTest {
         val requests = mutableListOf<CapturedRequest>()
         val store = InMemoryProviderCredentialStore()
         val providerHttp = ProviderHttpClient(
@@ -504,16 +501,14 @@ class YtMusicProviderTest {
                         val url = request.url.toString()
                         val body = (request.body as? TextContent)?.text.orEmpty()
                         when {
-                            // music landing stub: no visitor
                             request.method == HttpMethod.Get && url.contains("music.youtube.com") -> respond(
                                 """<html>YouTube Music is not available in your area</html>""",
                             )
-                            // youtube watch also fails to expose visitor (consent stub)
                             request.method == HttpMethod.Get && url.contains("youtube.com/watch") -> respond(
                                 """<html><title>Before you continue</title></html>""",
                             )
-                            body.contains("ANDROID_VR") -> respond(
-                                """{"playabilityStatus":{"status":"LOGIN_REQUIRED"}}""",
+                            body.contains("VISIONOS") -> respond(
+                                """{"playabilityStatus":{"status":"UNPLAYABLE"}}""",
                             )
                             body.contains("\"clientName\":\"ANDROID\"") -> respond(
                                 """{"playabilityStatus":{"status":"OK"},"streamingData":{"adaptiveFormats":[{"mimeType":"audio/mp4","bitrate":130000,"url":"https://cdn.example/android.m4a","approxDurationMs":"10000"}]}}""",
@@ -540,7 +535,8 @@ class YtMusicProviderTest {
         val payload = provider.resolve(track, AudioQualityPolicy.High.policy)
 
         assertEquals("https://cdn.example/android.m4a", payload?.url)
-        assertTrue(requests.none { it.body.contains("ANDROID_VR") }, "skip ANDROID_VR without visitor")
+        assertTrue(requests.any { it.body.contains("VISIONOS") })
+        assertTrue(requests.none { it.body.contains("ANDROID_VR") }, "deprecated ANDROID_VR must never be requested")
         assertTrue(requests.any { it.body.contains("\"clientName\":\"ANDROID\"") })
         assertTrue(payload?.headers.isNullOrEmpty())
         providerHttp.close()
