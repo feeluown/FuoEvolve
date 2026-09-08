@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
@@ -232,14 +233,21 @@ internal class LinuxMprisObject(
     override fun OpenUri(uri: String) = Unit
 
     override fun getPlaybackStatus(): String = mprisPlaybackStatus(playbackSession.state.value.status)
-    override fun getLoopStatus(): String = "None"
-    override fun setLoopStatus(value: String) = Unit
+    override fun getLoopStatus(): String = mprisLoopStatus(playbackSession.state.value.repeatMode)
+    override fun setLoopStatus(value: String) {
+        if (!playbackSession.state.value.canChangePlaybackMode) return
+        mprisRepeatMode(value)?.let(playbackSession::setRepeatMode)
+    }
     override fun getRate(): Double = 1.0
     override fun setRate(value: Double) {
         if (value == 0.0) playbackSession.pause()
     }
-    override fun getShuffle(): Boolean = false
-    override fun setShuffle(value: Boolean) = Unit
+    override fun getShuffle(): Boolean = playbackSession.state.value.shuffleEnabled
+    override fun setShuffle(value: Boolean) {
+        if (playbackSession.state.value.canChangePlaybackMode) {
+            playbackSession.setShuffleEnabled(value)
+        }
+    }
     override fun getMetadata(): Map<String, Variant<*>> = mprisMetadata(playbackSession.state.value)
     override fun getVolume(): Double = 1.0
     override fun setVolume(value: Double) = Unit
@@ -261,6 +269,19 @@ internal fun mprisPlaybackStatus(status: PlaybackSessionStatus): String = when (
     PlaybackSessionStatus.Loading,
     PlaybackSessionStatus.Error,
     PlaybackSessionStatus.Ended -> "Stopped"
+}
+
+internal fun mprisLoopStatus(repeatMode: RepeatMode): String = when (repeatMode) {
+    RepeatMode.OFF -> "None"
+    RepeatMode.SINGLE -> "Track"
+    RepeatMode.QUEUE -> "Playlist"
+}
+
+internal fun mprisRepeatMode(loopStatus: String): RepeatMode? = when (loopStatus) {
+    "None" -> RepeatMode.OFF
+    "Track" -> RepeatMode.SINGLE
+    "Playlist" -> RepeatMode.QUEUE
+    else -> null
 }
 
 internal fun mprisTrackPath(trackId: String): DBusPath {
@@ -292,6 +313,8 @@ internal fun mprisChangedProperties(
     if (previous.currentTrack != current.currentTrack || previous.durationMs != current.durationMs) {
         put("Metadata", Variant(mprisMetadata(current), "a{sv}"))
     }
+    if (previous.repeatMode != current.repeatMode) put("LoopStatus", Variant(mprisLoopStatus(current.repeatMode)))
+    if (previous.shuffleEnabled != current.shuffleEnabled) put("Shuffle", Variant(current.shuffleEnabled))
     if (mprisCanGoNext(previous) != mprisCanGoNext(current)) put("CanGoNext", Variant(mprisCanGoNext(current)))
     if (mprisCanGoPrevious(previous) != mprisCanGoPrevious(current)) put("CanGoPrevious", Variant(mprisCanGoPrevious(current)))
     if (mprisCanPlay(previous) != mprisCanPlay(current)) put("CanPlay", Variant(mprisCanPlay(current)))
