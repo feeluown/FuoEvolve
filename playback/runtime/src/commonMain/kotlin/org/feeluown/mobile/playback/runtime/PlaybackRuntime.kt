@@ -18,6 +18,7 @@ data class PlaybackRuntimeEngineState(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val bufferedMs: Long = 0L,
+    val volume: Double = 1.0,
     val errorMessage: String? = null,
 )
 
@@ -43,6 +44,7 @@ interface PlaybackRuntimeEngine {
     fun resume()
     fun stop() = pause()
     fun seekTo(positionMs: Long) = Unit
+    fun setVolume(volume: Double) = Unit
 }
 
 /**
@@ -132,6 +134,11 @@ class DefaultPlaybackRuntime(
         )
     }
 
+    override fun setVolume(volume: Double) {
+        if (!volume.isFinite()) return
+        engine.setVolume(volume.coerceIn(0.0, 1.0))
+    }
+
     override fun setRepeatMode(mode: RepeatMode) {
         if (!state.value.canChangePlaybackMode || state.value.repeatMode == mode) return
         queueActions.setRepeatMode(mode)
@@ -166,6 +173,7 @@ private fun composeState(
         lyricsAlignmentOffsetMs = lyricsAlignmentOffsetMs,
         durationMs = engine.durationMs,
         bufferedMs = engine.bufferedMs,
+        volume = engine.volume.coerceIn(0.0, 1.0),
         lyrics = overlay.lyrics.takeIf { overlayMatchesEngine },
         queueTrackIds = queueTrackIds,
         queueIndex = queueIndex,
