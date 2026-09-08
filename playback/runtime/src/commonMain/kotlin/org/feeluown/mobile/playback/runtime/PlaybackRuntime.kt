@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
@@ -29,6 +30,9 @@ data class PlaybackRuntimeOverlay(
     val queueIndex: Int = -1,
     val canGoNext: Boolean = false,
     val canGoPrevious: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.QUEUE,
+    val shuffleEnabled: Boolean = false,
+    val canChangePlaybackMode: Boolean = true,
 )
 
 /** Minimal engine surface required by the app-scoped playback runtime. */
@@ -43,13 +47,15 @@ interface PlaybackRuntimeEngine {
 
 /**
  * Temporary queue bridge while queue selection/resource-resolution policy still lives in the
- * legacy playback coordinator. The runtime owns session state and transport policy; these three
- * callbacks are the remaining queue-transition seam to remove in the next migration slice.
+ * legacy playback coordinator. The runtime owns session state and transport policy; these callbacks
+ * are the remaining queue-transition seam to remove in the next migration slice.
  */
 interface PlaybackRuntimeQueueActions {
     fun startCurrent()
     fun previous()
     fun next()
+    fun setRepeatMode(mode: RepeatMode)
+    fun setShuffleEnabled(enabled: Boolean)
 }
 
 /**
@@ -125,6 +131,16 @@ class DefaultPlaybackRuntime(
             if (duration > 0L) positionMs.coerceIn(0L, duration) else positionMs.coerceAtLeast(0L),
         )
     }
+
+    override fun setRepeatMode(mode: RepeatMode) {
+        if (!state.value.canChangePlaybackMode || state.value.repeatMode == mode) return
+        queueActions.setRepeatMode(mode)
+    }
+
+    override fun setShuffleEnabled(enabled: Boolean) {
+        if (!state.value.canChangePlaybackMode || state.value.shuffleEnabled == enabled) return
+        queueActions.setShuffleEnabled(enabled)
+    }
 }
 
 private fun composeState(
@@ -155,6 +171,9 @@ private fun composeState(
         queueIndex = queueIndex,
         canGoNext = overlay.canGoNext && overlayMatchesEngine,
         canGoPrevious = overlay.canGoPrevious && overlayMatchesEngine,
+        repeatMode = overlay.repeatMode,
+        shuffleEnabled = overlay.shuffleEnabled,
+        canChangePlaybackMode = overlay.canChangePlaybackMode,
         errorMessage = engine.errorMessage,
     )
 }
