@@ -94,4 +94,9 @@ fun evaluateAppUpdate(
     else -> AppUpdateDecision.UpToDate
 }
 
+fun shouldRetryKnownAppUpdate(
+    installedVersionCode: Long,
+    remoteVersionCode: Long?,
+): Boolean = remoteVersionCode != null && remoteVersionCode > installedVersionCode
+
 fun AppUpdateChannel.manifestValue(): String = name.lowercase()
