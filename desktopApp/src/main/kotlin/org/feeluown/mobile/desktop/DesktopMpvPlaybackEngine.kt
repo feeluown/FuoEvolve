@@ -220,10 +220,8 @@ internal class DesktopMpvPlaybackEngine(
                     current.status != PlayerStatus.Error &&
                     current.status != PlayerStatus.Ended
                 ) {
-                    // FILE_LOADED belongs to the currently loading file and is guaranteed before
-                    // playback starts. Keep playlist-entry matching when START_FILE is available,
-                    // but do not make that optional event payload a single point of failure for
-                    // status/timeline synchronization across libmpv ABI variants.
+                    // The native backend only publishes FILE_LOADED after correlating it with the
+                    // current load request, so it is safe to arm the property/restart fallback here.
                     activeFileLoaded = true
                 }
             }
@@ -411,6 +409,8 @@ private class LibMpvBackend(
     @Volatile
     private var expectedPath: String? = null
     @Volatile
+    private var expectedPlaylistEntryId: Long? = null
+    @Volatile
     private var polledActivePath: String? = null
 
     init {
@@ -451,6 +451,7 @@ private class LibMpvBackend(
     override fun load(url: String, headers: Map<String, String>) {
         ensureOpen()
         expectedPath = url
+        expectedPlaylistEntryId = null
         polledActivePath = null
         val perFileOptions = encodeMpvLoadfileOptions(headers)
         try {
@@ -461,8 +462,10 @@ private class LibMpvBackend(
                 // therefore require an explicit -1 before the fourth argument.
                 command("loadfile", url, "replace", "-1", perFileOptions)
             }
+            expectedPlaylistEntryId = getPropertyString("playlist/0/id")?.toLongOrNull()
         } catch (throwable: Throwable) {
             expectedPath = null
+            expectedPlaylistEntryId = null
             polledActivePath = null
             throw throwable
         }
@@ -481,6 +484,7 @@ private class LibMpvBackend(
     override fun stop() {
         ensureOpen()
         expectedPath = null
+        expectedPlaylistEntryId = null
         polledActivePath = null
         command("stop")
     }
@@ -493,6 +497,7 @@ private class LibMpvBackend(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         expectedPath = null
+        expectedPlaylistEntryId = null
         polledActivePath = null
         library.mpv_wakeup(handle)
         if (Thread.currentThread() !== eventThread) {
@@ -513,13 +518,12 @@ private class LibMpvBackend(
                     MPV_EVENT_START_FILE -> {
                         event.data?.let { data ->
                             val startFile = MpvNativeStartFile(data)
-                            listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
+                            if (startFileMatchesCurrentRequest(startFile.playlistEntryId)) {
+                                listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
+                            }
                         }
                     }
-                    MPV_EVENT_FILE_LOADED -> {
-                        expectedPath?.let { polledActivePath = it }
-                        listener(DesktopMpvBackendEvent.FileLoaded)
-                    }
+                    MPV_EVENT_FILE_LOADED -> activateCurrentRequest()
                     MPV_EVENT_PLAYBACK_RESTART -> listener(DesktopMpvBackendEvent.PlaybackRestart)
                     MPV_EVENT_PROPERTY_CHANGE -> {
                         event.data?.let { data ->
@@ -535,15 +539,18 @@ private class LibMpvBackend(
                     MPV_EVENT_END_FILE -> {
                         event.data?.let { data ->
                             val endFile = MpvNativeEndFile(data)
-                            listener(
-                                DesktopMpvBackendEvent.EndFile(
-                                    playlistEntryId = endFile.playlistEntryId,
-                                    reason = endFile.reason,
-                                    errorMessage = endFile.error
-                                        .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
-                                        ?.let(library::mpv_error_string),
-                                ),
-                            )
+                            val expectedEntryId = expectedPlaylistEntryId
+                            if (expectedEntryId == null || endFile.playlistEntryId == expectedEntryId) {
+                                listener(
+                                    DesktopMpvBackendEvent.EndFile(
+                                        playlistEntryId = endFile.playlistEntryId,
+                                        reason = endFile.reason,
+                                        errorMessage = endFile.error
+                                            .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
+                                            ?.let(library::mpv_error_string),
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
@@ -559,17 +566,28 @@ private class LibMpvBackend(
         }
     }
 
-    private fun publishPolledState() {
-        val requestedPath = expectedPath ?: return
-        if (polledActivePath != requestedPath) {
-            val currentPath = getPropertyString("path")
-            if (currentPath == requestedPath) {
-                polledActivePath = requestedPath
-                listener(DesktopMpvBackendEvent.FileLoaded)
-            }
-        }
-        if (polledActivePath != requestedPath) return
+    private fun startFileMatchesCurrentRequest(playlistEntryId: Long): Boolean {
+        val expectedEntryId = expectedPlaylistEntryId
+        if (expectedEntryId != null) return playlistEntryId == expectedEntryId
+        return currentPathMatchesExpected()
+    }
 
+    private fun activateCurrentRequest(): Boolean {
+        val requestedPath = expectedPath ?: return false
+        if (polledActivePath == requestedPath) return true
+        if (!currentPathMatchesExpected()) return false
+        polledActivePath = requestedPath
+        listener(DesktopMpvBackendEvent.FileLoaded)
+        return true
+    }
+
+    private fun currentPathMatchesExpected(): Boolean {
+        val requestedPath = expectedPath ?: return false
+        return getPropertyString("path") == requestedPath
+    }
+
+    private fun publishPolledState() {
+        if (!activateCurrentRequest()) return
         POLLED_PROPERTIES.forEach { property ->
             getPropertyString(property)?.let { value ->
                 listener(DesktopMpvBackendEvent.Property(property, value))
