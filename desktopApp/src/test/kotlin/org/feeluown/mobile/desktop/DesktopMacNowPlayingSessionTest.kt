@@ -18,8 +18,10 @@ class DesktopMacNowPlayingSessionTest {
                 currentTrack = track("a"),
                 positionMs = 12_000,
                 durationMs = 180_000,
-                queueTrackIds = listOf("a", "b"),
+                queueTrackIds = listOf("a", "future"),
                 queueIndex = 0,
+                canonicalQueueTracks = listOf(track("past"), track("a"), track("up-next"), track("future")),
+                canonicalQueueIndex = 1,
                 canGoNext = true,
                 canGoPrevious = true,
                 repeatMode = RepeatMode.QUEUE,
@@ -30,8 +32,8 @@ class DesktopMacNowPlayingSessionTest {
         assertEquals(MacNowPlayingNative.STATUS_PLAYING, projected.status)
         assertEquals(12_000, projected.positionMs)
         assertEquals(180_000, projected.durationMs)
-        assertEquals(0, projected.queueIndex)
-        assertEquals(2, projected.queueCount)
+        assertEquals(1, projected.queueIndex)
+        assertEquals(4, projected.queueCount)
         assertTrue(projected.hasTrack)
         assertTrue(projected.canPlay)
         assertTrue(projected.canPause)
