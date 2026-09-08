@@ -134,6 +134,28 @@ class DesktopMpvPlaybackStatusSyncTest {
     }
 
     @Test
+    fun playbackRestartBeforeFileLoadedIsAppliedAfterActivation() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val track = track("youtube:restart-before-file-loaded")
+
+        engine.play(track, payload(track))
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+
+        // PLAYBACK_RESTART can be observed before FILE_LOADED is processed. Do not publish Playing
+        // until the requested file is correlated, but also do not lose that confirmation forever.
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+
+        backend.emit(DesktopMpvBackendEvent.FileLoaded(path = STATUS_URL, playlistEntryId = 201L))
+
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "0.25"))
+        assertEquals(250L, engine.state.value.positionMs)
+    }
+
+    @Test
     fun firstPositiveTimelineSampleDoesNotConfirmPlayback() {
         lateinit var backend: StatusSyncFakeDesktopMpvBackend
         val engine = DesktopMpvPlaybackEngine { listener ->
