@@ -11,6 +11,11 @@ import android.app.Application
 class FuoEvolveApplication : Application() {
     private var containerHolder: AndroidAppContainer? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        installAndroidAppLogger(this)
+    }
+
     private fun container(): AndroidAppContainer =
         containerHolder ?: AndroidAppContainer(this).also { containerHolder = it }
 
