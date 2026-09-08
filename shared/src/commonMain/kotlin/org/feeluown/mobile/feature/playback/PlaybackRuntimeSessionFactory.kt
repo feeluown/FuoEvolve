@@ -108,6 +108,8 @@ private class PlaybackRuntimeEngineAdapter(
     override fun stop() = playbackEngine.stop()
 
     override fun seekTo(positionMs: Long) = playbackEngine.seekTo(positionMs)
+
+    override fun setVolume(volume: Double) = playbackEngine.setVolume(volume)
 }
 
 private class PlaybackCoordinatorQueueActions(
@@ -147,6 +149,7 @@ internal fun mergePlaybackStartFailure(
         positionMs = engineState.positionMs,
         durationMs = engineState.durationMs,
         bufferedMs = engineState.bufferedMs,
+        volume = engineState.volume,
         errorMessage = activeFailure?.message ?: engineState.errorMessage,
     )
 }
