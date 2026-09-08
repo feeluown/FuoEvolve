@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import org.feeluown.mobile.AppLogger
 
 /** Runtime registration is needed on Windows/Linux; macOS receives the URL scheme from Info.plist. */
 internal fun registerDesktopFuoProtocolHandler() {
@@ -14,7 +15,7 @@ internal fun registerDesktopFuoProtocolHandler() {
             isLinux() -> registerLinuxProtocol(launcher)
         }
     }.onFailure { throwable ->
-        System.err.println("FuoEvolve: unable to register fuo:// protocol: ${throwable.message}")
+        AppLogger.w("DesktopProtocol", "Unable to register fuo:// protocol", throwable)
     }
 }
 
