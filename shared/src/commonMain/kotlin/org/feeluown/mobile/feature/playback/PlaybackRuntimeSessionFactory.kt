@@ -37,10 +37,19 @@ fun createSharedPlaybackRuntimeSession(
             state.toPlaybackRuntimeOverlay(
                 canGoNext = playbackRuntimeCanGoNext(state, queueState),
                 canGoPrevious = playbackRuntimeCanGoPrevious(state, queueState),
+                repeatMode = queueState.repeatMode,
+                shuffleEnabled = queueState.shuffleEnabled,
+                canChangePlaybackMode = !queueState.isFmQueue,
             )
         }
     } else {
-        playbackState.map { it.toPlaybackRuntimeOverlay() }
+        playbackState.map {
+            it.toPlaybackRuntimeOverlay(
+                repeatMode = transportCoordinator.repeatMode,
+                shuffleEnabled = transportCoordinator.isShuffleEnabled,
+                canChangePlaybackMode = !transportCoordinator.isFmQueueActive,
+            )
+        }
     }
     val initialQueueState = queueStateFlow?.value
     val overlay = overlayFlow
@@ -53,6 +62,9 @@ fun createSharedPlaybackRuntimeSession(
                     ?: fallbackCanGoNext(playbackState.value),
                 canGoPrevious = initialQueueState?.let { playbackRuntimeCanGoPrevious(playbackState.value, it) }
                     ?: fallbackCanGoPrevious(playbackState.value),
+                repeatMode = initialQueueState?.repeatMode ?: transportCoordinator.repeatMode,
+                shuffleEnabled = initialQueueState?.shuffleEnabled ?: transportCoordinator.isShuffleEnabled,
+                canChangePlaybackMode = !(initialQueueState?.isFmQueue ?: transportCoordinator.isFmQueueActive),
             ),
         )
 
@@ -106,6 +118,19 @@ private class PlaybackCoordinatorQueueActions(
     override fun previous() = coordinator.previous()
 
     override fun next() = coordinator.next()
+
+    override fun setRepeatMode(mode: RepeatMode) {
+        if (coordinator.isFmQueueActive || coordinator.repeatMode == mode) return
+        repeat(RepeatMode.entries.size) {
+            coordinator.toggleRepeat()
+            if (coordinator.repeatMode == mode) return
+        }
+    }
+
+    override fun setShuffleEnabled(enabled: Boolean) {
+        if (coordinator.isFmQueueActive || coordinator.isShuffleEnabled == enabled) return
+        coordinator.toggleShuffle()
+    }
 }
 
 /** Pre-engine resource failures are published by PlaybackStartCoordinator. */
@@ -168,6 +193,9 @@ internal fun playbackRuntimeCanGoPrevious(
 private fun PlaybackState.toPlaybackRuntimeOverlay(
     canGoNext: Boolean = fallbackCanGoNext(this),
     canGoPrevious: Boolean = fallbackCanGoPrevious(this),
+    repeatMode: RepeatMode = RepeatMode.QUEUE,
+    shuffleEnabled: Boolean = false,
+    canChangePlaybackMode: Boolean = true,
 ): PlaybackRuntimeOverlay =
     PlaybackRuntimeOverlay(
         currentTrack = currentTrack?.toTrackRef(),
@@ -177,6 +205,9 @@ private fun PlaybackState.toPlaybackRuntimeOverlay(
         queueIndex = queueIndex,
         canGoNext = canGoNext,
         canGoPrevious = canGoPrevious,
+        repeatMode = repeatMode,
+        shuffleEnabled = shuffleEnabled,
+        canChangePlaybackMode = canChangePlaybackMode,
     )
 
 private fun fallbackCanGoNext(state: PlaybackState): Boolean =
