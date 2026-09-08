@@ -117,7 +117,7 @@ class DesktopMprisSessionTest {
         assertEquals(true, changed.getValue("Shuffle").value)
         assertTrue("CanGoNext" in changed)
         assertTrue("CanGoPrevious" in changed)
-        assertTrue("CanPause" in changed)
+        assertFalse("CanPause" in changed)
     }
 
     @Test
@@ -139,7 +139,7 @@ class DesktopMprisSessionTest {
     }
 
     @Test
-    fun pauseAndSeekCapabilitiesFollowActivePlaybackStatus() {
+    fun pauseCapabilityDescribesTrackCapabilityWhileSeekRequiresActiveState() {
         val loading = FakePlaybackSession(
             PlaybackSessionState(
                 status = PlaybackSessionStatus.Loading,
@@ -152,7 +152,7 @@ class DesktopMprisSessionTest {
         assertFalse(loadingObject.getCanSeek())
 
         loading.state.value = loading.state.value.copy(status = PlaybackSessionStatus.Paused)
-        assertFalse(loadingObject.getCanPause())
+        assertTrue(loadingObject.getCanPause())
         assertTrue(loadingObject.getCanSeek())
     }
 
