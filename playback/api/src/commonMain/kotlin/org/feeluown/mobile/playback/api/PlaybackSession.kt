@@ -21,6 +21,7 @@ data class PlaybackSessionState(
     val lyricsAlignmentOffsetMs: Long = 0L,
     val durationMs: Long = 0L,
     val bufferedMs: Long = 0L,
+    val volume: Double = 1.0,
     val lyrics: String? = null,
     val queueTrackIds: List<String> = emptyList(),
     val queueIndex: Int = -1,
@@ -49,6 +50,7 @@ interface PlaybackSession {
     fun previous()
     fun next()
     fun seekTo(positionMs: Long) = Unit
+    fun setVolume(volume: Double) = Unit
     fun setRepeatMode(mode: RepeatMode) = Unit
     fun setShuffleEnabled(enabled: Boolean) = Unit
 }
