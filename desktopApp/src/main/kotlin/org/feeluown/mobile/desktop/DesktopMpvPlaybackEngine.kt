@@ -549,9 +549,8 @@ private class LibMpvBackend(
                     MPV_EVENT_END_FILE -> {
                         event.data?.let { data ->
                             val endFile = MpvNativeEndFile(data)
-                            val expectedEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
-                            if (expectedEntryId != null && endFile.playlistEntryId == expectedEntryId) {
-                                expectedPlaylistEntryId = expectedEntryId
+                            val expectedEntryId = expectedPlaylistEntryId
+                            if (expectedEntryId == null || endFile.playlistEntryId == expectedEntryId) {
                                 listener(
                                     DesktopMpvBackendEvent.EndFile(
                                         playlistEntryId = endFile.playlistEntryId,
