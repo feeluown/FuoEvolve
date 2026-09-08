@@ -40,13 +40,13 @@ object AppLogger {
         log(AppLogLevel.Error, tag, message, throwable)
 
     fun redact(value: String): String {
-        var redacted = value
+        var redacted = AUTHORIZATION_PATTERN.replace(value, "Authorization=<redacted>")
+        redacted = BEARER_PATTERN.replace(redacted, "Bearer <redacted>")
         SECRET_ASSIGNMENT_PATTERNS.forEach { pattern ->
             redacted = pattern.replace(redacted) { match ->
                 "${match.groupValues[1]}=<redacted>"
             }
         }
-        redacted = BEARER_PATTERN.replace(redacted, "Bearer <redacted>")
         redacted = URL_SECRET_PATTERN.replace(redacted) { match ->
             "${match.groupValues[1]}${match.groupValues[2]}=<redacted>"
         }
@@ -59,9 +59,12 @@ object AppLogger {
         sink.write(level, tag, safeMessage, safeThrowable)
     }
 
+    private val AUTHORIZATION_PATTERN = Regex(
+        pattern = "(?i)\\bauthorization\\s*[:=]\\s*(?:(?:bearer|basic|digest)\\s+)?[^\\s,;]+",
+    )
     private val SECRET_ASSIGNMENT_PATTERNS = listOf(
         Regex(
-            pattern = "(?i)\\b(authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|password|passwd|secret|api[_-]?key)\\s*[:=]\\s*[^\\s,;]+",
+            pattern = "(?i)\\b(cookie|set-cookie|access[_-]?token|refresh[_-]?token|password|passwd|secret|api[_-]?key)\\s*[:=]\\s*[^\\s,;]+",
         ),
     )
     private val BEARER_PATTERN = Regex("(?i)\\bBearer\\s+[^\\s,;]+")
