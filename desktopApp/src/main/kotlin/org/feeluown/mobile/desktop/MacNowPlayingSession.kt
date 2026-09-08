@@ -42,6 +42,9 @@ internal class MacNowPlayingSession(
                     MacNowPlayingNative.ACTION_SET_SHUFFLE -> playbackSession.setShuffleEnabled(value != 0L)
                     MacNowPlayingNative.ACTION_SET_REPEAT -> macRepeatMode(value.toInt())
                         ?.let(playbackSession::setRepeatMode)
+                    MacNowPlayingNative.ACTION_SET_VOLUME -> playbackSession.setVolume(
+                        (value.toDouble() / MacNowPlayingNative.VOLUME_EVENT_SCALE).coerceIn(0.0, 1.0),
+                    )
                 }
             }
         }
@@ -71,6 +74,7 @@ internal class MacNowPlayingSession(
             status = projection.status,
             positionMs = projection.positionMs,
             durationMs = projection.durationMs,
+            volume = projection.volume,
             hasTrack = projection.hasTrack.asNativeFlag(),
             canPlay = projection.canPlay.asNativeFlag(),
             canPause = projection.canPause.asNativeFlag(),
@@ -101,6 +105,7 @@ internal data class MacNowPlayingProjection(
     val status: Int,
     val positionMs: Long,
     val durationMs: Long,
+    val volume: Double,
     val hasTrack: Boolean,
     val canPlay: Boolean,
     val canPause: Boolean,
@@ -138,6 +143,7 @@ internal fun macNowPlayingProjection(state: PlaybackSessionState): MacNowPlaying
         },
         positionMs = state.positionMs.coerceAtLeast(0L),
         durationMs = durationMs,
+        volume = state.volume.coerceIn(0.0, 1.0),
         hasTrack = track != null,
         canPlay = track != null || state.queueTrackIds.isNotEmpty(),
         canPause = state.status == PlaybackSessionStatus.Playing,
@@ -191,6 +197,7 @@ internal interface MacNowPlayingNative : Library {
         status: Int,
         positionMs: Long,
         durationMs: Long,
+        volume: Double,
         hasTrack: Int,
         canPlay: Int,
         canPause: Int,
@@ -221,6 +228,7 @@ internal interface MacNowPlayingNative : Library {
         const val ACTION_TOGGLE = 7
         const val ACTION_SET_SHUFFLE = 8
         const val ACTION_SET_REPEAT = 9
+        const val ACTION_SET_VOLUME = 10
 
         const val STATUS_STOPPED = 0
         const val STATUS_PLAYING = 1
@@ -230,6 +238,7 @@ internal interface MacNowPlayingNative : Library {
         const val REPEAT_OFF = 0
         const val REPEAT_ONE = 1
         const val REPEAT_ALL = 2
+        const val VOLUME_EVENT_SCALE = 1_000_000.0
     }
 }
 
