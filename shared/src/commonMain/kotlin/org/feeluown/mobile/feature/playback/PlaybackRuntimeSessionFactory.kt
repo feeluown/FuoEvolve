@@ -34,12 +34,15 @@ fun createSharedPlaybackRuntimeSession(
     val queueStateFlow = transportCoordinator.queueStateFlow
     val overlayFlow = if (queueStateFlow != null) {
         combine(playbackState, queueStateFlow) { state, queueState ->
+            val canonicalQueue = playbackRuntimeCanonicalQueue(queueState)
             state.toPlaybackRuntimeOverlay(
                 canGoNext = playbackRuntimeCanGoNext(state, queueState),
                 canGoPrevious = playbackRuntimeCanGoPrevious(state, queueState),
                 repeatMode = queueState.repeatMode,
                 shuffleEnabled = queueState.shuffleEnabled,
                 canChangePlaybackMode = !queueState.isFmQueue,
+                canonicalQueueTracks = canonicalQueue.tracks,
+                canonicalQueueIndex = canonicalQueue.index,
             )
         }
     } else {
@@ -48,10 +51,13 @@ fun createSharedPlaybackRuntimeSession(
                 repeatMode = transportCoordinator.repeatMode,
                 shuffleEnabled = transportCoordinator.isShuffleEnabled,
                 canChangePlaybackMode = !transportCoordinator.isFmQueueActive,
+                canonicalQueueTracks = it.queue,
+                canonicalQueueIndex = it.queueIndex,
             )
         }
     }
     val initialQueueState = queueStateFlow?.value
+    val initialCanonicalQueue = initialQueueState?.let(::playbackRuntimeCanonicalQueue)
     val overlay = overlayFlow
         .distinctUntilChanged()
         .stateIn(
@@ -65,6 +71,8 @@ fun createSharedPlaybackRuntimeSession(
                 repeatMode = initialQueueState?.repeatMode ?: transportCoordinator.repeatMode,
                 shuffleEnabled = initialQueueState?.shuffleEnabled ?: transportCoordinator.isShuffleEnabled,
                 canChangePlaybackMode = !(initialQueueState?.isFmQueue ?: transportCoordinator.isFmQueueActive),
+                canonicalQueueTracks = initialCanonicalQueue?.tracks ?: playbackState.value.queue,
+                canonicalQueueIndex = initialCanonicalQueue?.index ?: playbackState.value.queueIndex,
             ),
         )
 
@@ -193,12 +201,52 @@ internal fun playbackRuntimeCanGoPrevious(
     return previousMainIndex >= 0 || queueState.repeatMode == RepeatMode.QUEUE
 }
 
+internal data class PlaybackRuntimeCanonicalQueue(
+    val tracks: List<MusicTrack>,
+    val index: Int,
+)
+
+internal fun playbackRuntimeCanonicalQueue(queueState: PlaybackQueueState): PlaybackRuntimeCanonicalQueue {
+    val currentUpNextTrack = queueState.currentUpNextTrack
+    if (queueState.currentIsUpNext && currentUpNextTrack != null) {
+        val insertionIndex = (queueState.mainQueueIndex + 1).coerceIn(0, queueState.mainQueue.size)
+        return PlaybackRuntimeCanonicalQueue(
+            tracks = buildList {
+                addAll(queueState.mainQueue.take(insertionIndex))
+                add(currentUpNextTrack)
+                addAll(queueState.upNextQueue)
+                addAll(queueState.mainQueue.drop(insertionIndex))
+            },
+            index = insertionIndex,
+        )
+    }
+
+    if (queueState.mainQueueIndex in queueState.mainQueue.indices) {
+        val insertionIndex = queueState.mainQueueIndex + 1
+        return PlaybackRuntimeCanonicalQueue(
+            tracks = buildList {
+                addAll(queueState.mainQueue.take(insertionIndex))
+                addAll(queueState.upNextQueue)
+                addAll(queueState.mainQueue.drop(insertionIndex))
+            },
+            index = queueState.mainQueueIndex,
+        )
+    }
+
+    return PlaybackRuntimeCanonicalQueue(
+        tracks = queueState.upNextQueue + queueState.mainQueue,
+        index = -1,
+    )
+}
+
 private fun PlaybackState.toPlaybackRuntimeOverlay(
     canGoNext: Boolean = fallbackCanGoNext(this),
     canGoPrevious: Boolean = fallbackCanGoPrevious(this),
     repeatMode: RepeatMode = RepeatMode.QUEUE,
     shuffleEnabled: Boolean = false,
     canChangePlaybackMode: Boolean = true,
+    canonicalQueueTracks: List<MusicTrack> = queue,
+    canonicalQueueIndex: Int = queueIndex,
 ): PlaybackRuntimeOverlay =
     PlaybackRuntimeOverlay(
         currentTrack = currentTrack?.toTrackRef(),
@@ -206,6 +254,8 @@ private fun PlaybackState.toPlaybackRuntimeOverlay(
         lyricsAlignmentOffsetMs = lyricsAlignmentOffsetMs,
         queueTrackIds = queue.map(MusicTrack::id),
         queueIndex = queueIndex,
+        canonicalQueueTracks = canonicalQueueTracks.map(MusicTrack::toTrackRef),
+        canonicalQueueIndex = canonicalQueueIndex,
         canGoNext = canGoNext,
         canGoPrevious = canGoPrevious,
         repeatMode = repeatMode,
