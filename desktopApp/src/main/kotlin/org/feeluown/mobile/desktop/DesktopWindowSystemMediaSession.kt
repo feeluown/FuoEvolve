@@ -2,6 +2,7 @@ package org.feeluown.mobile.desktop
 
 import java.awt.Window
 import java.util.Locale
+import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.playback.api.PlaybackSession
 
 internal fun createDesktopSystemMediaSessionForWindow(
@@ -12,13 +13,13 @@ internal fun createDesktopSystemMediaSessionForWindow(
     return when {
         os.contains("windows") -> runCatching { WindowsSmtcSession(playbackSession, window) }
             .getOrElse { error ->
-                System.err.println("FuoEvolve: Windows SMTC unavailable: ${error.message.orEmpty()}")
+                AppLogger.w("SystemMediaSession", "Windows SMTC unavailable", error)
                 AutoCloseable { }
             }
 
         os.contains("mac") || os.contains("darwin") -> runCatching { MacNowPlayingSession(playbackSession) }
             .getOrElse { error ->
-                System.err.println("FuoEvolve: macOS Now Playing unavailable: ${error.message.orEmpty()}")
+                AppLogger.w("SystemMediaSession", "macOS Now Playing unavailable", error)
                 AutoCloseable { }
             }
 
