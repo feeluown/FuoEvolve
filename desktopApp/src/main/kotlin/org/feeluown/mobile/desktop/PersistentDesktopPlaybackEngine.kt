@@ -47,7 +47,6 @@ internal class PersistentDesktopPlaybackEngine(
     private var pendingPauseAfterStart = false
     @Volatile
     private var pendingStartCancelled = false
-    private var activePlaybackPositionCandidateMs: Long? = null
     private var lastPersistedIdentity: String? = null
     private var lastPersistedPositionMs: Long = restoredSession?.positionMs ?: 0L
 
@@ -62,10 +61,9 @@ internal class PersistentDesktopPlaybackEngine(
                     return@collect
                 }
                 exposeRestoredState = false
-                val verified = verifyActivePlayback(next)
-                mutableState.value = verified
-                if (applyPendingResumeSeek(verified)) return@collect
-                persist(verified)
+                mutableState.value = next
+                if (applyPendingResumeSeek(next)) return@collect
+                persist(next)
             }
         }
     }
@@ -77,7 +75,6 @@ internal class PersistentDesktopPlaybackEngine(
     override fun prepareLoading(track: MusicTrack, reason: PlaybackStartReason) {
         pendingPauseAfterStart = false
         pendingStartCancelled = false
-        activePlaybackPositionCandidateMs = null
         val restored = if (reason.mayResumePausedSession) {
             resumeStore.load()?.also { restoredSession = it }
         } else {
@@ -167,7 +164,6 @@ internal class PersistentDesktopPlaybackEngine(
             pendingStartCancelled = true
         }
         pendingPauseAfterStart = false
-        activePlaybackPositionCandidateMs = null
         pendingResumePositionMs = null
         restoredSession = null
         exposeRestoredState = false
@@ -230,35 +226,6 @@ internal class PersistentDesktopPlaybackEngine(
             yield()
             if (pendingStartCancelled) mutableState.value = cancelledState
         }
-    }
-
-    private fun verifyActivePlayback(next: PlaybackState): PlaybackState {
-        val current = mutableState.value
-        val sameLoadingTrack = current.status == PlayerStatus.Loading &&
-            current.currentTrack?.id == next.currentTrack?.id
-        if (!sameLoadingTrack) {
-            activePlaybackPositionCandidateMs = null
-            return next
-        }
-
-        if (next.status != PlayerStatus.Playing) {
-            if (next.status != PlayerStatus.Loading) activePlaybackPositionCandidateMs = null
-            return next
-        }
-
-        val positionMs = next.positionMs
-        if (positionMs <= 0L) {
-            return next.copy(status = PlayerStatus.Loading)
-        }
-
-        val previousCandidate = activePlaybackPositionCandidateMs
-        if (previousCandidate == null || positionMs <= previousCandidate) {
-            activePlaybackPositionCandidateMs = positionMs
-            return next.copy(status = PlayerStatus.Loading)
-        }
-
-        activePlaybackPositionCandidateMs = null
-        return next
     }
 
     private fun applyPendingResumeSeek(state: PlaybackState): Boolean {
