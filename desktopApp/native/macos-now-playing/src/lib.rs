@@ -83,7 +83,7 @@ impl Bridge {
         can_previous: bool,
         repeat_mode: i32,
         shuffle_enabled: bool,
-        can_change_playback_mode: bool,
+        _can_change_playback_mode: bool,
         queue_index: i64,
         queue_count: i64,
         track_id: String,
@@ -93,14 +93,10 @@ impl Bridge {
         artwork_url: String,
     ) -> playwire::Result<()> {
         let duration = (duration_ms > 0).then(|| Duration::from_millis(duration_ms as u64));
-        let repeat = if can_change_playback_mode {
-            match repeat_mode {
-                REPEAT_ONE => Repeat::One,
-                REPEAT_ALL => Repeat::All,
-                _ => Repeat::Off,
-            }
-        } else {
-            Repeat::Off
+        let repeat = match repeat_mode {
+            REPEAT_ONE => Repeat::One,
+            REPEAT_ALL => Repeat::All,
+            _ => Repeat::Off,
         };
         let state = PlaybackState {
             track: has_track.then(|| Track {
@@ -116,7 +112,7 @@ impl Bridge {
             duration,
             volume: 1.0,
             repeat,
-            shuffle: can_change_playback_mode && shuffle_enabled,
+            shuffle: shuffle_enabled,
             capabilities: Capabilities {
                 can_go_next: can_next,
                 can_go_previous: can_previous,
