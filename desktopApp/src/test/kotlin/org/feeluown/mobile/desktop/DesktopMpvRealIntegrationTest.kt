@@ -85,7 +85,7 @@ class DesktopMpvRealIntegrationTest {
                 put("WAVE".encodeToByteArray())
                 put("fmt ".encodeToByteArray())
                 putInt(16)
-                putShort(1)
+                putShort(1.toShort())
                 putShort(channels.toShort())
                 putInt(sampleRate)
                 putInt(byteRate)
