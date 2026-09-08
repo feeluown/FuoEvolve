@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
@@ -29,7 +30,7 @@ internal fun createDesktopSystemMediaSession(playbackSession: PlaybackSession): 
     if (!os.contains("linux")) return AutoCloseable { }
     return runCatching { LinuxMprisSession(playbackSession) }
         .getOrElse { error ->
-            System.err.println("FuoEvolve: MPRIS unavailable: ${error.message.orEmpty()}")
+            AppLogger.w("SystemMediaSession", "MPRIS unavailable", error)
             AutoCloseable { }
         }
 }
