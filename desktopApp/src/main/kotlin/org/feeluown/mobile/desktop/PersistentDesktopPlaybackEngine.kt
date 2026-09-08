@@ -61,9 +61,18 @@ internal class PersistentDesktopPlaybackEngine(
                     return@collect
                 }
                 exposeRestoredState = false
-                mutableState.value = next
-                if (applyPendingResumeSeek(next)) return@collect
-                persist(next)
+                val published = if (
+                    pendingPauseAfterStart &&
+                    next.currentTrack != null &&
+                    next.status == PlayerStatus.Loading
+                ) {
+                    next.copy(status = PlayerStatus.Paused)
+                } else {
+                    next
+                }
+                mutableState.value = published
+                if (applyPendingResumeSeek(published)) return@collect
+                persist(published)
             }
         }
     }
@@ -143,6 +152,10 @@ internal class PersistentDesktopPlaybackEngine(
             mutableState.value.status == PlayerStatus.Loading
         ) {
             pendingPauseAfterStart = true
+            val current = mutableState.value
+            if (current.currentTrack != null) {
+                mutableState.value = current.copy(status = PlayerStatus.Paused)
+            }
         }
         delegate.pause()
         delegate.state.value.takeIf { it.status.isDurablePlaybackResumeStatus() }?.let {
