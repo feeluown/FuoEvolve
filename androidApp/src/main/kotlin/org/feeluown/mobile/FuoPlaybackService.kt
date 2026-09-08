@@ -6,7 +6,6 @@ import android.media.MediaCodecList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -141,7 +140,7 @@ class FuoPlaybackService : MediaSessionService() {
 
                     override fun onPlayerError(error: PlaybackException) {
                         val item = player.currentMediaItem
-                        Log.e(
+                        AppLogger.e(
                             TAG,
                             "exo playback error trackId=${item?.mediaId.orEmpty()} " +
                                 "source=${item?.mediaMetadata?.extras?.getString("source").orEmpty()} " +
@@ -205,7 +204,7 @@ class FuoPlaybackService : MediaSessionService() {
                 val rawPlan = intent.getStringExtra(EXTRA_PLAN) ?: error("Missing playback plan")
                 playPlan(rawPlan.toPlaybackPlan())
             }.onFailure { throwable ->
-                Log.e(TAG, "play plan failed", throwable)
+                AppLogger.e(TAG, "play plan failed", throwable)
                 player?.stop()
                 mutablePlaybackState.value = PlaybackState(
                     status = PlayerStatus.Error,
@@ -309,7 +308,7 @@ class FuoPlaybackService : MediaSessionService() {
                 throw cancelled
             } catch (throwable: Throwable) {
                 if (activeGeneration != plan.generation) return@launch
-                Log.e(TAG, "resolve failed trackId=${first.track.id} generation=${plan.generation}", throwable)
+                AppLogger.e(TAG, "resolve failed trackId=${first.track.id} generation=${plan.generation}", throwable)
                 mutablePlaybackState.value = PlaybackState(
                     status = PlayerStatus.Error,
                     currentTrack = first.track,
@@ -347,13 +346,13 @@ class FuoPlaybackService : MediaSessionService() {
                             play()
                         }
                     }
-                    Log.i(TAG, "preloaded trackId=${prepared.track.id} generation=$generation")
+                    AppLogger.i(TAG, "preloaded trackId=${prepared.track.id} generation=$generation")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (throwable: Throwable) {
                 if (activeGeneration == generation) {
-                    Log.w(TAG, "preload failed trackId=${request.track.id}", throwable)
+                    AppLogger.w(TAG, "preload failed trackId=${request.track.id}", throwable)
                     if (
                         request.unavailablePolicy == UnavailablePlaybackPolicy.Skip ||
                         (
@@ -575,7 +574,7 @@ class FuoPlaybackService : MediaSessionService() {
 
     private fun createMediaSource(mediaItem: MediaItem, headers: Map<String, String>): ProgressiveMediaSource {
         val url = mediaItem.localConfiguration?.uri?.toString().orEmpty()
-        Log.i(
+        AppLogger.i(
             TAG,
             "play source trackId=${mediaItem.mediaId} " +
                 "source=${mediaItem.mediaMetadata.extras?.getString("source").orEmpty()} url=${mediaItem.localConfiguration?.uri.toString().summarizePlaybackUrl()} " +
