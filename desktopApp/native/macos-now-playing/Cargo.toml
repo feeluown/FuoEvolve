@@ -13,3 +13,6 @@ crate-type = ["cdylib"]
 # Keep the JVM boundary as C ABI + JNA so Apple framework types never leak into shared code.
 [target.'cfg(target_os = "macos")'.dependencies]
 playwire = "=1.0.0"
+objc2 = "=0.6.4"
+objc2-foundation = { version = "=0.3.2", features = ["NSDictionary", "NSObject", "NSString", "NSValue"] }
+objc2-media-player = { version = "=0.3.2", features = ["MPNowPlayingInfoCenter"] }

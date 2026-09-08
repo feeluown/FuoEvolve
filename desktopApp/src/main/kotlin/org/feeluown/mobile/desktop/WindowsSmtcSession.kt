@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
@@ -39,6 +40,9 @@ internal class WindowsSmtcSession(
                     WindowsSmtcNative.ACTION_NEXT -> playbackSession.next()
                     WindowsSmtcNative.ACTION_PREVIOUS -> playbackSession.previous()
                     WindowsSmtcNative.ACTION_SEEK_TO -> playbackSession.seekTo(value.coerceAtLeast(0L))
+                    WindowsSmtcNative.ACTION_SET_SHUFFLE -> playbackSession.setShuffleEnabled(value != 0L)
+                    WindowsSmtcNative.ACTION_SET_REPEAT -> windowsRepeatMode(value.toInt())
+                        ?.let(playbackSession::setRepeatMode)
                 }
             }
         }
@@ -81,6 +85,9 @@ internal class WindowsSmtcSession(
             canPause = current.canPause.asNativeFlag(),
             canNext = current.canNext.asNativeFlag(),
             canPrevious = current.canPrevious.asNativeFlag(),
+            repeatMode = current.repeatMode,
+            shuffleEnabled = current.shuffleEnabled.asNativeFlag(),
+            canChangePlaybackMode = current.canChangePlaybackMode.asNativeFlag(),
         )
         if (current.metadata != previous?.metadata) {
             val metadata = current.metadata
@@ -93,6 +100,7 @@ internal class WindowsSmtcSession(
                     title = metadata.title,
                     artist = metadata.artist,
                     album = metadata.album,
+                    artworkUrl = metadata.artworkUrl,
                 )
             }
         }
@@ -114,6 +122,9 @@ internal data class WindowsSmtcProjection(
     val canPause: Boolean,
     val canNext: Boolean,
     val canPrevious: Boolean,
+    val repeatMode: Int,
+    val shuffleEnabled: Boolean,
+    val canChangePlaybackMode: Boolean,
     val metadata: WindowsSmtcMetadata?,
 )
 
@@ -122,6 +133,7 @@ internal data class WindowsSmtcMetadata(
     val title: String,
     val artist: String,
     val album: String,
+    val artworkUrl: String,
 )
 
 internal fun windowsSmtcProjection(state: PlaybackSessionState): WindowsSmtcProjection {
@@ -142,11 +154,27 @@ internal fun windowsSmtcProjection(state: PlaybackSessionState): WindowsSmtcProj
         durationMs = durationMs,
         hasTrack = track != null,
         canPlay = track != null || state.queueTrackIds.isNotEmpty(),
-        canPause = track != null,
-        canNext = state.queueIndex >= 0 && state.queueIndex < state.queueTrackIds.lastIndex,
-        canPrevious = state.queueIndex > 0,
+        canPause = state.status == PlaybackSessionStatus.Playing,
+        canNext = state.canGoNext,
+        canPrevious = state.canGoPrevious,
+        repeatMode = state.repeatMode.toWindowsRepeatMode(),
+        shuffleEnabled = state.shuffleEnabled,
+        canChangePlaybackMode = state.canChangePlaybackMode,
         metadata = track?.toWindowsSmtcMetadata(),
     )
+}
+
+private fun RepeatMode.toWindowsRepeatMode(): Int = when (this) {
+    RepeatMode.OFF -> WindowsSmtcNative.REPEAT_OFF
+    RepeatMode.SINGLE -> WindowsSmtcNative.REPEAT_ONE
+    RepeatMode.QUEUE -> WindowsSmtcNative.REPEAT_ALL
+}
+
+private fun windowsRepeatMode(value: Int): RepeatMode? = when (value) {
+    WindowsSmtcNative.REPEAT_OFF -> RepeatMode.OFF
+    WindowsSmtcNative.REPEAT_ONE -> RepeatMode.SINGLE
+    WindowsSmtcNative.REPEAT_ALL -> RepeatMode.QUEUE
+    else -> null
 }
 
 private fun TrackRef.toWindowsSmtcMetadata() = WindowsSmtcMetadata(
@@ -154,6 +182,7 @@ private fun TrackRef.toWindowsSmtcMetadata() = WindowsSmtcMetadata(
     title = title,
     artist = artists,
     album = album,
+    artworkUrl = coverUrl.orEmpty(),
 )
 
 private fun Boolean.asNativeFlag(): Int = if (this) 1 else 0
@@ -180,6 +209,9 @@ internal interface WindowsSmtcNative : Library {
         canPause: Int,
         canNext: Int,
         canPrevious: Int,
+        repeatMode: Int,
+        shuffleEnabled: Int,
+        canChangePlaybackMode: Int,
     )
 
     fun fuo_smtc_update_metadata(
@@ -188,6 +220,7 @@ internal interface WindowsSmtcNative : Library {
         title: String,
         artist: String,
         album: String,
+        artworkUrl: String,
     )
 
     fun fuo_smtc_clear_metadata(bridge: Pointer)
@@ -200,11 +233,17 @@ internal interface WindowsSmtcNative : Library {
         const val ACTION_NEXT = 4
         const val ACTION_PREVIOUS = 5
         const val ACTION_SEEK_TO = 6
+        const val ACTION_SET_SHUFFLE = 7
+        const val ACTION_SET_REPEAT = 8
 
         const val STATUS_STOPPED = 0
         const val STATUS_PLAYING = 1
         const val STATUS_PAUSED = 2
         const val STATUS_CHANGING = 3
+
+        const val REPEAT_OFF = 0
+        const val REPEAT_ONE = 1
+        const val REPEAT_ALL = 2
     }
 }
 

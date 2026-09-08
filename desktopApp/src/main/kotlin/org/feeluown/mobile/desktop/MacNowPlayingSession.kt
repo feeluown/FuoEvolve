@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
@@ -38,6 +39,9 @@ internal class MacNowPlayingSession(
                     MacNowPlayingNative.ACTION_PREVIOUS -> playbackSession.previous()
                     MacNowPlayingNative.ACTION_SEEK_TO -> playbackSession.seekTo(value.coerceAtLeast(0L))
                     MacNowPlayingNative.ACTION_TOGGLE -> playbackSession.toggle()
+                    MacNowPlayingNative.ACTION_SET_SHUFFLE -> playbackSession.setShuffleEnabled(value != 0L)
+                    MacNowPlayingNative.ACTION_SET_REPEAT -> macRepeatMode(value.toInt())
+                        ?.let(playbackSession::setRepeatMode)
                 }
             }
         }
@@ -72,12 +76,16 @@ internal class MacNowPlayingSession(
             canPause = projection.canPause.asNativeFlag(),
             canNext = projection.canNext.asNativeFlag(),
             canPrevious = projection.canPrevious.asNativeFlag(),
+            repeatMode = projection.repeatMode,
+            shuffleEnabled = projection.shuffleEnabled.asNativeFlag(),
+            canChangePlaybackMode = projection.canChangePlaybackMode.asNativeFlag(),
             queueIndex = projection.queueIndex.toLong(),
             queueCount = projection.queueCount.toLong(),
             trackId = metadata?.trackId.orEmpty(),
             title = metadata?.title.orEmpty(),
             artist = metadata?.artist.orEmpty(),
             album = metadata?.album.orEmpty(),
+            artworkUrl = metadata?.artworkUrl.orEmpty(),
         )
     }
 
@@ -98,6 +106,9 @@ internal data class MacNowPlayingProjection(
     val canPause: Boolean,
     val canNext: Boolean,
     val canPrevious: Boolean,
+    val repeatMode: Int,
+    val shuffleEnabled: Boolean,
+    val canChangePlaybackMode: Boolean,
     val queueIndex: Int,
     val queueCount: Int,
     val metadata: MacNowPlayingMetadata?,
@@ -108,6 +119,7 @@ internal data class MacNowPlayingMetadata(
     val title: String,
     val artist: String,
     val album: String,
+    val artworkUrl: String,
 )
 
 internal fun macNowPlayingProjection(state: PlaybackSessionState): MacNowPlayingProjection {
@@ -128,13 +140,29 @@ internal fun macNowPlayingProjection(state: PlaybackSessionState): MacNowPlaying
         durationMs = durationMs,
         hasTrack = track != null,
         canPlay = track != null || state.queueTrackIds.isNotEmpty(),
-        canPause = track != null,
-        canNext = state.queueIndex >= 0 && state.queueIndex < state.queueTrackIds.lastIndex,
-        canPrevious = state.queueIndex > 0,
-        queueIndex = state.queueIndex,
-        queueCount = state.queueTrackIds.size,
+        canPause = state.status == PlaybackSessionStatus.Playing,
+        canNext = state.canGoNext,
+        canPrevious = state.canGoPrevious,
+        repeatMode = state.repeatMode.toMacRepeatMode(),
+        shuffleEnabled = state.shuffleEnabled,
+        canChangePlaybackMode = state.canChangePlaybackMode,
+        queueIndex = state.canonicalQueueIndex,
+        queueCount = state.canonicalQueueTracks.size,
         metadata = track?.toMacNowPlayingMetadata(),
     )
+}
+
+private fun RepeatMode.toMacRepeatMode(): Int = when (this) {
+    RepeatMode.OFF -> MacNowPlayingNative.REPEAT_OFF
+    RepeatMode.SINGLE -> MacNowPlayingNative.REPEAT_ONE
+    RepeatMode.QUEUE -> MacNowPlayingNative.REPEAT_ALL
+}
+
+private fun macRepeatMode(value: Int): RepeatMode? = when (value) {
+    MacNowPlayingNative.REPEAT_OFF -> RepeatMode.OFF
+    MacNowPlayingNative.REPEAT_ONE -> RepeatMode.SINGLE
+    MacNowPlayingNative.REPEAT_ALL -> RepeatMode.QUEUE
+    else -> null
 }
 
 private fun TrackRef.toMacNowPlayingMetadata() = MacNowPlayingMetadata(
@@ -142,6 +170,7 @@ private fun TrackRef.toMacNowPlayingMetadata() = MacNowPlayingMetadata(
     title = title,
     artist = artists,
     album = album,
+    artworkUrl = coverUrl.orEmpty(),
 )
 
 private fun Boolean.asNativeFlag(): Int = if (this) 1 else 0
@@ -167,12 +196,16 @@ internal interface MacNowPlayingNative : Library {
         canPause: Int,
         canNext: Int,
         canPrevious: Int,
+        repeatMode: Int,
+        shuffleEnabled: Int,
+        canChangePlaybackMode: Int,
         queueIndex: Long,
         queueCount: Long,
         trackId: String,
         title: String,
         artist: String,
         album: String,
+        artworkUrl: String,
     )
 
     fun fuo_now_playing_clear(bridge: Pointer)
@@ -186,11 +219,17 @@ internal interface MacNowPlayingNative : Library {
         const val ACTION_PREVIOUS = 5
         const val ACTION_SEEK_TO = 6
         const val ACTION_TOGGLE = 7
+        const val ACTION_SET_SHUFFLE = 8
+        const val ACTION_SET_REPEAT = 9
 
         const val STATUS_STOPPED = 0
         const val STATUS_PLAYING = 1
         const val STATUS_PAUSED = 2
         const val STATUS_LOADING = 3
+
+        const val REPEAT_OFF = 0
+        const val REPEAT_ONE = 1
+        const val REPEAT_ALL = 2
     }
 }
 

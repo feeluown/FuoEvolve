@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
@@ -17,6 +18,7 @@ data class PlaybackRuntimeEngineState(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val bufferedMs: Long = 0L,
+    val volume: Double = 1.0,
     val errorMessage: String? = null,
 )
 
@@ -27,6 +29,13 @@ data class PlaybackRuntimeOverlay(
     val lyricsAlignmentOffsetMs: Long = 0L,
     val queueTrackIds: List<String> = emptyList(),
     val queueIndex: Int = -1,
+    val canonicalQueueTracks: List<TrackRef> = emptyList(),
+    val canonicalQueueIndex: Int = -1,
+    val canGoNext: Boolean = false,
+    val canGoPrevious: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.QUEUE,
+    val shuffleEnabled: Boolean = false,
+    val canChangePlaybackMode: Boolean = true,
 )
 
 /** Minimal engine surface required by the app-scoped playback runtime. */
@@ -37,17 +46,20 @@ interface PlaybackRuntimeEngine {
     fun resume()
     fun stop() = pause()
     fun seekTo(positionMs: Long) = Unit
+    fun setVolume(volume: Double) = Unit
 }
 
 /**
  * Temporary queue bridge while queue selection/resource-resolution policy still lives in the
- * legacy playback coordinator. The runtime owns session state and transport policy; these three
- * callbacks are the remaining queue-transition seam to remove in the next migration slice.
+ * legacy playback coordinator. The runtime owns session state and transport policy; these callbacks
+ * are the remaining queue-transition seam to remove in the next migration slice.
  */
 interface PlaybackRuntimeQueueActions {
     fun startCurrent()
     fun previous()
     fun next()
+    fun setRepeatMode(mode: RepeatMode) = Unit
+    fun setShuffleEnabled(enabled: Boolean) = Unit
 }
 
 /**
@@ -105,7 +117,19 @@ class DefaultPlaybackRuntime(
     }
 
     override fun pause() {
-        if (state.value.status == PlaybackSessionStatus.Playing) {
+        val current = state.value
+        if (
+            current.currentTrack != null &&
+            (
+                current.status == PlaybackSessionStatus.Loading ||
+                    current.status == PlaybackSessionStatus.Playing ||
+                    current.status == PlaybackSessionStatus.Paused
+            )
+        ) {
+            // Idempotent pause forwarding is intentional. Platform integrations may issue Pause
+            // immediately after a queue transition while the combined session still exposes the
+            // previous Paused snapshot; the engine already knows that the replacement track is
+            // Loading and must retain the pause request through that asynchronous start.
             engine.pause()
         }
     }
@@ -123,6 +147,21 @@ class DefaultPlaybackRuntime(
             if (duration > 0L) positionMs.coerceIn(0L, duration) else positionMs.coerceAtLeast(0L),
         )
     }
+
+    override fun setVolume(volume: Double) {
+        if (!volume.isFinite()) return
+        engine.setVolume(volume.coerceIn(0.0, 1.0))
+    }
+
+    override fun setRepeatMode(mode: RepeatMode) {
+        if (!state.value.canChangePlaybackMode || state.value.repeatMode == mode) return
+        queueActions.setRepeatMode(mode)
+    }
+
+    override fun setShuffleEnabled(enabled: Boolean) {
+        if (!state.value.canChangePlaybackMode || state.value.shuffleEnabled == enabled) return
+        queueActions.setShuffleEnabled(enabled)
+    }
 }
 
 private fun composeState(
@@ -139,6 +178,16 @@ private fun composeState(
         currentTrack?.let { listOf(it.id) }.orEmpty()
     }
     val queueIndex = if (overlayMatchesEngine) overlay.queueIndex else currentTrack?.let { 0 } ?: -1
+    val canonicalQueueTracks = if (overlayMatchesEngine) {
+        overlay.canonicalQueueTracks
+    } else {
+        currentTrack?.let(::listOf).orEmpty()
+    }
+    val canonicalQueueIndex = if (overlayMatchesEngine) {
+        overlay.canonicalQueueIndex
+    } else {
+        currentTrack?.let { 0 } ?: -1
+    }
 
     return PlaybackSessionState(
         status = engine.status,
@@ -148,9 +197,17 @@ private fun composeState(
         lyricsAlignmentOffsetMs = lyricsAlignmentOffsetMs,
         durationMs = engine.durationMs,
         bufferedMs = engine.bufferedMs,
+        volume = engine.volume.coerceIn(0.0, 1.0),
         lyrics = overlay.lyrics.takeIf { overlayMatchesEngine },
         queueTrackIds = queueTrackIds,
         queueIndex = queueIndex,
+        canonicalQueueTracks = canonicalQueueTracks,
+        canonicalQueueIndex = canonicalQueueIndex,
+        canGoNext = overlay.canGoNext && overlayMatchesEngine,
+        canGoPrevious = overlay.canGoPrevious && overlayMatchesEngine,
+        repeatMode = overlay.repeatMode,
+        shuffleEnabled = overlay.shuffleEnabled,
+        canChangePlaybackMode = overlay.canChangePlaybackMode,
         errorMessage = engine.errorMessage,
     )
 }

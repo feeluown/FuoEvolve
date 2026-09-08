@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSession
 import org.feeluown.mobile.playback.api.PlaybackSessionState
@@ -88,6 +89,15 @@ internal interface MprisMediaPlayer2 : DBusInterface {
 
     @DBusBoundProperty(access = Access.READ, name = "CanQuit")
     fun getCanQuit(): Boolean
+
+    @DBusBoundProperty(access = Access.READ, name = "Fullscreen")
+    fun getFullscreen(): Boolean
+
+    @DBusBoundProperty(access = Access.WRITE, name = "Fullscreen")
+    fun setFullscreen(value: Boolean)
+
+    @DBusBoundProperty(access = Access.READ, name = "CanSetFullscreen")
+    fun getCanSetFullscreen(): Boolean
 
     @DBusBoundProperty(access = Access.READ, name = "CanRaise")
     fun getCanRaise(): Boolean
@@ -190,6 +200,9 @@ internal class LinuxMprisObject(
     override fun Raise() = Unit
     override fun Quit() = Unit
     override fun getCanQuit(): Boolean = false
+    override fun getFullscreen(): Boolean = false
+    override fun setFullscreen(value: Boolean) = Unit
+    override fun getCanSetFullscreen(): Boolean = false
     override fun getCanRaise(): Boolean = false
     override fun getHasTrackList(): Boolean = false
     override fun getIdentity(): String = "FuoEvolve"
@@ -197,12 +210,29 @@ internal class LinuxMprisObject(
     override fun getSupportedUriSchemes(): Array<String> = emptyArray()
     override fun getSupportedMimeTypes(): Array<String> = emptyArray()
 
-    override fun Next() = playbackSession.next()
-    override fun Previous() = playbackSession.previous()
-    override fun Pause() = playbackSession.pause()
+    override fun Next() {
+        val before = playbackSession.state.value
+        if (!mprisCanGoNext(before)) return
+        playbackSession.next()
+        preserveNonPlayingStatusAfterSkip(before.status)
+    }
+
+    override fun Previous() {
+        val before = playbackSession.state.value
+        if (!mprisCanGoPrevious(before)) return
+        playbackSession.previous()
+        preserveNonPlayingStatusAfterSkip(before.status)
+    }
+
+    override fun Pause() {
+        if (mprisCanPause(playbackSession.state.value)) playbackSession.pause()
+    }
+
     override fun PlayPause() = playbackSession.toggle()
     override fun Stop() = playbackSession.stop()
-    override fun Play() = playbackSession.play()
+    override fun Play() {
+        if (mprisCanPlay(playbackSession.state.value)) playbackSession.play()
+    }
 
     override fun Seek(offset: Long) {
         val state = playbackSession.state.value
@@ -211,7 +241,7 @@ internal class LinuxMprisObject(
         val targetUs = currentUs + offset
         val durationUs = state.durationMs * MICROSECONDS_PER_MILLISECOND
         if (durationUs > 0L && targetUs > durationUs) {
-            playbackSession.next()
+            Next()
             return
         }
         val boundedUs = targetUs.coerceAtLeast(0L)
@@ -232,17 +262,26 @@ internal class LinuxMprisObject(
     override fun OpenUri(uri: String) = Unit
 
     override fun getPlaybackStatus(): String = mprisPlaybackStatus(playbackSession.state.value.status)
-    override fun getLoopStatus(): String = "None"
-    override fun setLoopStatus(value: String) = Unit
+    override fun getLoopStatus(): String = mprisLoopStatus(playbackSession.state.value.repeatMode)
+    override fun setLoopStatus(value: String) {
+        if (!playbackSession.state.value.canChangePlaybackMode) return
+        mprisRepeatMode(value)?.let(playbackSession::setRepeatMode)
+    }
     override fun getRate(): Double = 1.0
     override fun setRate(value: Double) {
         if (value == 0.0) playbackSession.pause()
     }
-    override fun getShuffle(): Boolean = false
-    override fun setShuffle(value: Boolean) = Unit
+    override fun getShuffle(): Boolean = playbackSession.state.value.shuffleEnabled
+    override fun setShuffle(value: Boolean) {
+        if (playbackSession.state.value.canChangePlaybackMode) {
+            playbackSession.setShuffleEnabled(value)
+        }
+    }
     override fun getMetadata(): Map<String, Variant<*>> = mprisMetadata(playbackSession.state.value)
-    override fun getVolume(): Double = 1.0
-    override fun setVolume(value: Double) = Unit
+    override fun getVolume(): Double = playbackSession.state.value.volume
+    override fun setVolume(value: Double) {
+        if (value.isFinite()) playbackSession.setVolume(value.coerceIn(0.0, 1.0))
+    }
     override fun getPosition(): Long = playbackSession.state.value.positionMs * MICROSECONDS_PER_MILLISECOND
     override fun getMinimumRate(): Double = 1.0
     override fun getMaximumRate(): Double = 1.0
@@ -252,6 +291,17 @@ internal class LinuxMprisObject(
     override fun getCanPause(): Boolean = mprisCanPause(playbackSession.state.value)
     override fun getCanSeek(): Boolean = mprisCanSeek(playbackSession.state.value)
     override fun getCanControl(): Boolean = true
+
+    private fun preserveNonPlayingStatusAfterSkip(status: PlaybackSessionStatus) {
+        when (status) {
+            PlaybackSessionStatus.Paused -> playbackSession.pause()
+            PlaybackSessionStatus.Idle,
+            PlaybackSessionStatus.Loading,
+            PlaybackSessionStatus.Error,
+            PlaybackSessionStatus.Ended -> playbackSession.stop()
+            PlaybackSessionStatus.Playing -> Unit
+        }
+    }
 }
 
 internal fun mprisPlaybackStatus(status: PlaybackSessionStatus): String = when (status) {
@@ -261,6 +311,19 @@ internal fun mprisPlaybackStatus(status: PlaybackSessionStatus): String = when (
     PlaybackSessionStatus.Loading,
     PlaybackSessionStatus.Error,
     PlaybackSessionStatus.Ended -> "Stopped"
+}
+
+internal fun mprisLoopStatus(repeatMode: RepeatMode): String = when (repeatMode) {
+    RepeatMode.OFF -> "None"
+    RepeatMode.SINGLE -> "Track"
+    RepeatMode.QUEUE -> "Playlist"
+}
+
+internal fun mprisRepeatMode(loopStatus: String): RepeatMode? = when (loopStatus) {
+    "None" -> RepeatMode.OFF
+    "Track" -> RepeatMode.SINGLE
+    "Playlist" -> RepeatMode.QUEUE
+    else -> null
 }
 
 internal fun mprisTrackPath(trackId: String): DBusPath {
@@ -292,6 +355,9 @@ internal fun mprisChangedProperties(
     if (previous.currentTrack != current.currentTrack || previous.durationMs != current.durationMs) {
         put("Metadata", Variant(mprisMetadata(current), "a{sv}"))
     }
+    if (previous.repeatMode != current.repeatMode) put("LoopStatus", Variant(mprisLoopStatus(current.repeatMode)))
+    if (previous.shuffleEnabled != current.shuffleEnabled) put("Shuffle", Variant(current.shuffleEnabled))
+    if (previous.volume != current.volume) put("Volume", Variant(current.volume))
     if (mprisCanGoNext(previous) != mprisCanGoNext(current)) put("CanGoNext", Variant(mprisCanGoNext(current)))
     if (mprisCanGoPrevious(previous) != mprisCanGoPrevious(current)) put("CanGoPrevious", Variant(mprisCanGoPrevious(current)))
     if (mprisCanPlay(previous) != mprisCanPlay(current)) put("CanPlay", Variant(mprisCanPlay(current)))
@@ -299,13 +365,16 @@ internal fun mprisChangedProperties(
     if (mprisCanSeek(previous) != mprisCanSeek(current)) put("CanSeek", Variant(mprisCanSeek(current)))
 }
 
-private fun mprisCanGoNext(state: PlaybackSessionState): Boolean =
-    state.queueIndex >= 0 && state.queueIndex < state.queueTrackIds.lastIndex
-
-private fun mprisCanGoPrevious(state: PlaybackSessionState): Boolean = state.queueIndex > 0
+private fun mprisCanGoNext(state: PlaybackSessionState): Boolean = state.canGoNext
+private fun mprisCanGoPrevious(state: PlaybackSessionState): Boolean = state.canGoPrevious
 private fun mprisCanPlay(state: PlaybackSessionState): Boolean = state.currentTrack != null || state.queueTrackIds.isNotEmpty()
-private fun mprisCanPause(state: PlaybackSessionState): Boolean = state.currentTrack != null
-private fun mprisCanSeek(state: PlaybackSessionState): Boolean = state.currentTrack != null && state.durationMs > 0L
+private fun mprisCanPause(state: PlaybackSessionState): Boolean =
+    state.currentTrack != null &&
+        (state.status == PlaybackSessionStatus.Playing || state.status == PlaybackSessionStatus.Paused)
+private fun mprisCanSeek(state: PlaybackSessionState): Boolean =
+    state.currentTrack != null &&
+        state.durationMs > 0L &&
+        (state.status == PlaybackSessionStatus.Playing || state.status == PlaybackSessionStatus.Paused)
 
 private const val MPRIS_BUS_NAME = "org.mpris.MediaPlayer2.FuoEvolve"
 private const val MPRIS_OBJECT_PATH = "/org/mpris/MediaPlayer2"

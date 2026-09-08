@@ -37,19 +37,28 @@ internal class DesktopMpvPlaybackEngine(
     @Volatile
     private var paused = false
     @Volatile
+    private var volume = 1.0
+    @Volatile
     private var activePlaylistEntryId: Long? = null
+    @Volatile
+    private var activePlaybackConfirmed = false
+    @Volatile
+    private var lastLoadingPositionMs: Long? = null
 
     override fun prepareLoading(track: MusicTrack) {
         // Invalidate the previous entry before asking mpv to stop it. END_FILE and property events are
         // asynchronous, so anything from the previous item must not be allowed to mutate the new
         // logical playback transaction while resolution is still in progress.
         activePlaylistEntryId = null
+        activePlaybackConfirmed = false
+        lastLoadingPositionMs = null
         backend?.runCatching { stop() }
         val logicalTrack = track.logicalPlaybackTrack()
         mutableState.value = PlaybackState(
             status = PlayerStatus.Loading,
             currentTrack = logicalTrack,
             durationMs = logicalTrack.durationMs ?: 0L,
+            volume = volume,
         )
     }
 
@@ -83,8 +92,9 @@ internal class DesktopMpvPlaybackEngine(
         runCatching { activeBackend.setPaused(true) }
             .onSuccess {
                 paused = true
-                if (mutableState.value.status == PlayerStatus.Playing) {
-                    mutableState.value = mutableState.value.copy(status = PlayerStatus.Paused)
+                val current = mutableState.value
+                if (current.status == PlayerStatus.Playing || current.status == PlayerStatus.Loading) {
+                    mutableState.value = current.copy(status = PlayerStatus.Paused)
                 }
             }
             .onFailure(::publishBackendFailure)
@@ -95,8 +105,11 @@ internal class DesktopMpvPlaybackEngine(
         runCatching { activeBackend.setPaused(false) }
             .onSuccess {
                 paused = false
-                if (mutableState.value.status == PlayerStatus.Paused) {
-                    mutableState.value = mutableState.value.copy(status = PlayerStatus.Playing)
+                val current = mutableState.value
+                if (current.status == PlayerStatus.Paused) {
+                    mutableState.value = current.copy(
+                        status = if (activePlaybackConfirmed) PlayerStatus.Playing else PlayerStatus.Loading,
+                    )
                 }
             }
             .onFailure(::publishBackendFailure)
@@ -104,9 +117,11 @@ internal class DesktopMpvPlaybackEngine(
 
     override fun stop() {
         activePlaylistEntryId = null
+        activePlaybackConfirmed = false
+        lastLoadingPositionMs = null
         backend?.runCatching { stop() }?.onFailure(::publishBackendFailure)
         paused = false
-        mutableState.value = PlaybackState()
+        mutableState.value = PlaybackState(volume = volume)
     }
 
     override fun seekTo(positionMs: Long) {
@@ -118,8 +133,22 @@ internal class DesktopMpvPlaybackEngine(
         mutableState.value = mutableState.value.copy(positionMs = target)
     }
 
+    override fun setVolume(volume: Double) {
+        if (!volume.isFinite()) return
+        val normalized = volume.coerceIn(0.0, 1.0)
+        val activeBackend = ensureBackend() ?: return
+        runCatching { activeBackend.setVolume(normalized) }
+            .onSuccess {
+                this.volume = normalized
+                mutableState.value = mutableState.value.copy(volume = normalized)
+            }
+            .onFailure(::publishBackendFailure)
+    }
+
     override fun close() {
         activePlaylistEntryId = null
+        activePlaybackConfirmed = false
+        lastLoadingPositionMs = null
         val activeBackend = backend
         backend = null
         runCatching { activeBackend?.close() }
@@ -132,11 +161,14 @@ internal class DesktopMpvPlaybackEngine(
     ) {
         paused = false
         activePlaylistEntryId = null
+        activePlaybackConfirmed = false
+        lastLoadingPositionMs = null
         mutableState.value = PlaybackState(
             status = PlayerStatus.Loading,
             currentTrack = logicalTrack,
             resolvedSource = resolvedSource,
             durationMs = payload.durationMs ?: logicalTrack.durationMs ?: 0L,
+            volume = volume,
             lyrics = payload.lyrics ?: logicalTrack.lyrics,
             audioQuality = payload.audioQuality,
             playbackParts = payload.parts,
@@ -164,8 +196,13 @@ internal class DesktopMpvPlaybackEngine(
         when (event) {
             is DesktopMpvBackendEvent.StartFile -> {
                 val current = mutableState.value
-                if (current.currentTrack != null && current.status == PlayerStatus.Loading) {
+                if (
+                    current.currentTrack != null &&
+                    (current.status == PlayerStatus.Loading || current.status == PlayerStatus.Paused)
+                ) {
                     activePlaylistEntryId = event.playlistEntryId
+                    activePlaybackConfirmed = false
+                    lastLoadingPositionMs = null
                 }
             }
             DesktopMpvBackendEvent.FileLoaded -> Unit
@@ -173,6 +210,8 @@ internal class DesktopMpvPlaybackEngine(
                 if (activePlaylistEntryId == null) return
                 val current = mutableState.value
                 if (current.currentTrack != null && current.status != PlayerStatus.Error) {
+                    activePlaybackConfirmed = true
+                    lastLoadingPositionMs = null
                     mutableState.value = current.copy(
                         status = if (paused) PlayerStatus.Paused else PlayerStatus.Playing,
                         errorMessage = null,
@@ -187,6 +226,8 @@ internal class DesktopMpvPlaybackEngine(
                 when (event.reason) {
                     MPV_END_FILE_REASON_EOF -> {
                         activePlaylistEntryId = null
+                        activePlaybackConfirmed = false
+                        lastLoadingPositionMs = null
                         val current = mutableState.value
                         if (current.currentTrack != null) {
                             mutableState.value = current.copy(
@@ -197,6 +238,8 @@ internal class DesktopMpvPlaybackEngine(
                     }
                     MPV_END_FILE_REASON_ERROR -> {
                         activePlaylistEntryId = null
+                        activePlaybackConfirmed = false
+                        lastLoadingPositionMs = null
                         publishBackendFailure(
                             IllegalStateException(event.errorMessage ?: "libmpv playback failed"),
                         )
@@ -204,7 +247,11 @@ internal class DesktopMpvPlaybackEngine(
                     MPV_END_FILE_REASON_STOP,
                     MPV_END_FILE_REASON_QUIT,
                     MPV_END_FILE_REASON_REDIRECT,
-                    -> activePlaylistEntryId = null
+                    -> {
+                        activePlaylistEntryId = null
+                        activePlaybackConfirmed = false
+                        lastLoadingPositionMs = null
+                    }
                 }
             }
             is DesktopMpvBackendEvent.Failure -> publishBackendFailure(event.throwable)
@@ -214,16 +261,45 @@ internal class DesktopMpvPlaybackEngine(
     private fun handleProperty(name: String, value: String?) {
         when (name) {
             "pause" -> {
-                paused = value == "yes" || value == "true"
+                val observedPaused = when (value) {
+                    "yes", "true" -> true
+                    "no", "false" -> false
+                    else -> return
+                }
+                paused = observedPaused
                 val current = mutableState.value
-                if (current.status == PlayerStatus.Playing || current.status == PlayerStatus.Paused) {
-                    mutableState.value = current.copy(
-                        status = if (paused) PlayerStatus.Paused else PlayerStatus.Playing,
-                    )
+                val nextStatus = when {
+                    observedPaused && (
+                        current.status == PlayerStatus.Loading ||
+                            current.status == PlayerStatus.Playing ||
+                            current.status == PlayerStatus.Paused
+                    ) -> PlayerStatus.Paused
+                    !observedPaused && activePlaybackConfirmed && current.status == PlayerStatus.Paused ->
+                        PlayerStatus.Playing
+                    else -> current.status
+                }
+                if (nextStatus != current.status) {
+                    mutableState.value = current.copy(status = nextStatus)
                 }
             }
             "time-pos" -> value.secondsToMsOrNull()?.let { positionMs ->
-                mutableState.value = mutableState.value.copy(positionMs = positionMs.coerceAtLeast(0L))
+                val current = mutableState.value
+                val normalizedPositionMs = positionMs.coerceAtLeast(0L)
+                val previousLoadingPositionMs = lastLoadingPositionMs
+                val confirmsPlayback = current.status == PlayerStatus.Loading &&
+                    !paused &&
+                    previousLoadingPositionMs != null &&
+                    normalizedPositionMs > previousLoadingPositionMs
+                if (current.status == PlayerStatus.Loading) {
+                    lastLoadingPositionMs = normalizedPositionMs
+                } else {
+                    lastLoadingPositionMs = null
+                }
+                if (confirmsPlayback) activePlaybackConfirmed = true
+                mutableState.value = current.copy(
+                    status = if (confirmsPlayback) PlayerStatus.Playing else current.status,
+                    positionMs = normalizedPositionMs,
+                )
             }
             "duration" -> value.secondsToMsOrNull()?.let { durationMs ->
                 mutableState.value = mutableState.value.copy(durationMs = durationMs.coerceAtLeast(0L))
@@ -233,6 +309,11 @@ internal class DesktopMpvPlaybackEngine(
                 mutableState.value = mutableState.value.copy(
                     bufferedMs = if (duration > 0L) bufferedMs.coerceIn(0L, duration) else bufferedMs.coerceAtLeast(0L),
                 )
+            }
+            "volume" -> value?.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { mpvVolume ->
+                val normalized = (mpvVolume / MPV_VOLUME_SCALE).coerceIn(0.0, 1.0)
+                volume = normalized
+                mutableState.value = mutableState.value.copy(volume = normalized)
             }
             "file-format" -> updateAudioFormat { it.copy(format = value?.takeIf(String::isNotBlank)) }
             "audio-codec-name" -> {
@@ -262,6 +343,8 @@ internal class DesktopMpvPlaybackEngine(
     }
 
     private fun publishBackendFailure(throwable: Throwable) {
+        activePlaybackConfirmed = false
+        lastLoadingPositionMs = null
         val current = mutableState.value
         mutableState.value = current.copy(
             status = PlayerStatus.Error,
@@ -286,6 +369,7 @@ internal sealed interface DesktopMpvBackendEvent {
 internal interface DesktopMpvBackend : AutoCloseable {
     fun load(url: String, headers: Map<String, String>)
     fun setPaused(paused: Boolean)
+    fun setVolume(volume: Double) = Unit
     fun stop()
     fun seekTo(positionMs: Long)
 }
@@ -344,6 +428,11 @@ private class LibMpvBackend(
     override fun setPaused(paused: Boolean) {
         ensureOpen()
         setProperty("pause", if (paused) "yes" else "no")
+    }
+
+    override fun setVolume(volume: Double) {
+        ensureOpen()
+        setProperty("volume", (volume.coerceIn(0.0, 1.0) * MPV_VOLUME_SCALE).toString())
     }
 
     override fun stop() {
@@ -610,12 +699,14 @@ private const val MPV_END_FILE_REASON_STOP = 2
 private const val MPV_END_FILE_REASON_QUIT = 3
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val MPV_END_FILE_REASON_REDIRECT = 5
+private const val MPV_VOLUME_SCALE = 100.0
 
 private val OBSERVED_PROPERTIES = listOf(
     "pause",
     "time-pos",
     "duration",
     "demuxer-cache-time",
+    "volume",
     "file-format",
     "audio-codec-name",
     "audio-bitrate",

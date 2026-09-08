@@ -1,5 +1,6 @@
 package org.feeluown.mobile.desktop
 
+import org.feeluown.mobile.RepeatMode
 import org.feeluown.mobile.core.model.TrackRef
 import org.feeluown.mobile.playback.api.PlaybackSessionState
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
@@ -19,6 +20,10 @@ class DesktopWindowsSmtcSessionTest {
                 durationMs = 180_000,
                 queueTrackIds = listOf("a", "b"),
                 queueIndex = 0,
+                canGoNext = true,
+                canGoPrevious = true,
+                repeatMode = RepeatMode.SINGLE,
+                shuffleEnabled = true,
             ),
         )
 
@@ -29,9 +34,13 @@ class DesktopWindowsSmtcSessionTest {
         assertTrue(projected.canPlay)
         assertTrue(projected.canPause)
         assertTrue(projected.canNext)
-        assertFalse(projected.canPrevious)
+        assertTrue(projected.canPrevious)
+        assertEquals(WindowsSmtcNative.REPEAT_ONE, projected.repeatMode)
+        assertTrue(projected.shuffleEnabled)
+        assertTrue(projected.canChangePlaybackMode)
         assertEquals("a", projected.metadata?.trackId)
         assertEquals("Track a", projected.metadata?.title)
+        assertEquals("https://example.com/a.jpg", projected.metadata?.artworkUrl)
     }
 
     @Test
@@ -41,10 +50,15 @@ class DesktopWindowsSmtcSessionTest {
                 status = PlaybackSessionStatus.Paused,
                 currentTrack = track("a", durationMs = 90_000),
                 durationMs = 0,
+                repeatMode = RepeatMode.OFF,
+                canChangePlaybackMode = false,
             ),
         )
         assertEquals(90_000, withTrackDuration.durationMs)
         assertEquals(WindowsSmtcNative.STATUS_PAUSED, withTrackDuration.status)
+        assertEquals(WindowsSmtcNative.REPEAT_OFF, withTrackDuration.repeatMode)
+        assertFalse(withTrackDuration.canPause)
+        assertFalse(withTrackDuration.canChangePlaybackMode)
 
         val idle = windowsSmtcProjection(
             PlaybackSessionState(
@@ -69,6 +83,7 @@ class DesktopWindowsSmtcSessionTest {
             ),
         )
         assertEquals(WindowsSmtcNative.STATUS_CHANGING, projected.status)
+        assertFalse(projected.canPause)
     }
 
     private fun track(id: String, durationMs: Long = 180_000) = TrackRef(
@@ -77,6 +92,7 @@ class DesktopWindowsSmtcSessionTest {
         artists = "Artist",
         album = "Album",
         source = "test",
+        coverUrl = "https://example.com/$id.jpg",
         durationMs = durationMs,
     )
 }
