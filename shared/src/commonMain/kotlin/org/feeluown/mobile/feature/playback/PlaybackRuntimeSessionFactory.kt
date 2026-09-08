@@ -130,12 +130,14 @@ internal fun playbackRuntimeCanGoNext(
     playbackState: PlaybackState,
     queueState: PlaybackQueueState,
 ): Boolean {
-    if (queueState.currentTrack() == null && playbackState.currentTrack == null) return false
-    if (queueState.repeatMode == RepeatMode.SINGLE) return true
+    val queueTrack = queueState.currentTrack()
+    if (queueState.repeatMode == RepeatMode.SINGLE) {
+        return queueTrack != null || playbackState.currentTrack != null
+    }
 
     val parts = playbackState.playbackParts
     val partIndex = playbackState.currentPartIndex
-    if (partIndex in parts.indices && partIndex < parts.lastIndex) return true
+    if (queueTrack != null && partIndex in parts.indices && partIndex < parts.lastIndex) return true
     if (queueState.upNextQueue.isNotEmpty()) return true
     if (queueState.mainQueue.isEmpty()) return false
     if (queueState.queueFeature != null && queueState.mainQueueIndex >= queueState.mainQueue.lastIndex) return true
@@ -148,16 +150,19 @@ internal fun playbackRuntimeCanGoPrevious(
     playbackState: PlaybackState,
     queueState: PlaybackQueueState,
 ): Boolean {
-    if (queueState.currentTrack() == null && playbackState.currentTrack == null) return false
-    if (queueState.repeatMode == RepeatMode.SINGLE) return true
+    val queueTrack = queueState.currentTrack()
+    if (queueState.repeatMode == RepeatMode.SINGLE) {
+        return queueTrack != null || playbackState.currentTrack != null
+    }
 
     val parts = playbackState.playbackParts
     val partIndex = playbackState.currentPartIndex
-    if (partIndex in parts.indices && partIndex > 0) return true
+    if (queueTrack != null && partIndex in parts.indices && partIndex > 0) return true
     if (queueState.currentIsUpNext) return queueState.mainQueue.isNotEmpty()
     if (queueState.mainQueue.isEmpty()) return false
 
-    return queueState.mainQueueIndex > 0 || queueState.repeatMode == RepeatMode.QUEUE
+    val previousMainIndex = queueState.mainQueueIndex - 1
+    return previousMainIndex >= 0 || queueState.repeatMode == RepeatMode.QUEUE
 }
 
 private fun PlaybackState.toPlaybackRuntimeOverlay(
