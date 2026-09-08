@@ -47,6 +47,47 @@ class DesktopMpvPlaybackStatusSyncTest {
     }
 
     @Test
+    fun fileLoadedKeepsTimelineSyncWorkingWhenStartFileDataIsMissing() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val track = track("netease:file-loaded-fallback")
+
+        engine.play(track, payload(track))
+
+        // A property event before the new file is known to be loaded can still belong to the
+        // previous item and must not leak into the new logical playback transaction.
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "15.0"))
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+        assertEquals(0L, engine.state.value.positionMs)
+
+        // Some libmpv/ABI combinations can fail to expose START_FILE data while still delivering
+        // FILE_LOADED and property-change events. FILE_LOADED must be sufficient to unlock sync.
+        backend.emit(DesktopMpvBackendEvent.FileLoaded)
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "0"))
+        backend.emit(DesktopMpvBackendEvent.Property("time-pos", "0.25"))
+
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+        assertEquals(250L, engine.state.value.positionMs)
+    }
+
+    @Test
+    fun fileLoadedAllowsPlaybackRestartWhenStartFileDataIsMissing() {
+        lateinit var backend: StatusSyncFakeDesktopMpvBackend
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            StatusSyncFakeDesktopMpvBackend(listener).also { backend = it }
+        }
+        val track = track("qqmusic:file-loaded-restart")
+
+        engine.play(track, payload(track))
+        backend.emit(DesktopMpvBackendEvent.FileLoaded)
+        backend.emit(DesktopMpvBackendEvent.PlaybackRestart)
+
+        assertEquals(PlayerStatus.Playing, engine.state.value.status)
+    }
+
+    @Test
     fun firstPositiveTimelineSampleDoesNotConfirmPlayback() {
         lateinit var backend: StatusSyncFakeDesktopMpvBackend
         val engine = DesktopMpvPlaybackEngine { listener ->
