@@ -54,8 +54,8 @@ interface PlaybackRuntimeQueueActions {
     fun startCurrent()
     fun previous()
     fun next()
-    fun setRepeatMode(mode: RepeatMode)
-    fun setShuffleEnabled(enabled: Boolean)
+    fun setRepeatMode(mode: RepeatMode) = Unit
+    fun setShuffleEnabled(enabled: Boolean) = Unit
 }
 
 /**
