@@ -94,7 +94,7 @@ fun evaluateAppUpdate(
     else -> AppUpdateDecision.UpToDate
 }
 
-fun shouldRetryKnownAppUpdate(
+internal fun shouldRetryKnownAppUpdate(
     installedVersionCode: Long,
     remoteVersionCode: Long?,
 ): Boolean = remoteVersionCode != null && remoteVersionCode > installedVersionCode
