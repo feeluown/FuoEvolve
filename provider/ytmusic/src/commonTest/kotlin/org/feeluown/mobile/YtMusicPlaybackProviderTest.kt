@@ -138,7 +138,7 @@ class YtMusicPlaybackProviderTest {
 
     private fun http(
         requests: MutableList<CapturedRequest>,
-        handler: suspend (io.ktor.client.request.HttpRequestData) -> io.ktor.client.engine.mock.HttpResponseData,
+        handler: suspend (io.ktor.client.request.HttpRequestData) -> io.ktor.client.request.HttpResponseData,
     ): ProviderHttpClient = ProviderHttpClient(
         httpClient = HttpClient(MockEngine) {
             engine {
