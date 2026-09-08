@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import android.content.ComponentName
 import android.content.Context
 import android.os.Bundle
-import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -68,7 +67,7 @@ class AndroidNativeAudioEngine(
                     )
                 ) {
                     PlaybackServiceStateAction.Ignore -> {
-                        Log.d(
+                        AppLogger.d(
                             TAG,
                             "ignoring stale service state phase=${startupState.phase} " +
                                 "serviceTrackId=${serviceTrackId.orEmpty()} " +
@@ -155,7 +154,7 @@ class AndroidNativeAudioEngine(
             restoredSession = resumedSession
             activePlan = resumedSession.plan
             connectController()
-            Log.d(TAG, "prepared restored resume trackId=${track.id} reason=$reason")
+            AppLogger.d(TAG, "prepared restored resume trackId=${track.id} reason=$reason")
             return
         }
 
@@ -240,7 +239,7 @@ class AndroidNativeAudioEngine(
             .onFailure { throwable ->
                 startupState.markIdle()
                 activePlan = null
-                Log.e(TAG, "start playback service failed trackId=${first.track.id}", throwable)
+                AppLogger.e(TAG, "start playback service failed trackId=${first.track.id}", throwable)
                 mutableState.value = mutableState.value.copy(
                     status = PlayerStatus.Error,
                     errorMessage = throwable.message ?: "无法启动播放器服务",
@@ -274,7 +273,7 @@ class AndroidNativeAudioEngine(
                 activePlan = session.plan
                 pendingResumePositionMs = null
                 playbackResumeStore.saveSession(session.plan, session.toPlaybackState())
-                Log.e(TAG, "restore playback service failed trackId=${session.currentTrack.id}", throwable)
+                AppLogger.e(TAG, "restore playback service failed trackId=${session.currentTrack.id}", throwable)
                 mutableState.value = session.toPlaybackState().copy(
                     status = PlayerStatus.Error,
                     errorMessage = throwable.message ?: "无法恢复播放进度",
@@ -388,9 +387,9 @@ class AndroidNativeAudioEngine(
                 controller.stop()
             }
         }.onSuccess {
-            Log.d(TAG, "discarded paused Media3 session before active selection trackId=$nextTrackId")
+            AppLogger.d(TAG, "discarded paused Media3 session before active selection trackId=$nextTrackId")
         }.onFailure { throwable ->
-            Log.w(TAG, "failed to discard paused Media3 session before trackId=$nextTrackId", throwable)
+            AppLogger.w(TAG, "failed to discard paused Media3 session before trackId=$nextTrackId", throwable)
         }
     }
 
@@ -409,7 +408,7 @@ class AndroidNativeAudioEngine(
                         applyPendingLockScreenLyrics()
                     }
                     .onFailure { throwable ->
-                        Log.e(TAG, "connect media controller failed", throwable)
+                        AppLogger.e(TAG, "connect media controller failed", throwable)
                         mutableState.value = mutableState.value.copy(
                             status = PlayerStatus.Error,
                             errorMessage = throwable.message ?: "无法连接播放器服务",
@@ -494,7 +493,7 @@ class AndroidNativeAudioEngine(
         val track = mutableState.value.currentTrack ?: return
         if (track.id != pending.trackId) return
         if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
-            Log.w(TAG, "media session does not allow metadata replacement for ColorOS lyrics")
+            AppLogger.w(TAG, "media session does not allow metadata replacement for ColorOS lyrics")
             return
         }
         val currentItem = controller.currentMediaItem ?: return
@@ -519,10 +518,10 @@ class AndroidNativeAudioEngine(
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
             .onSuccess {
                 pendingLockScreenLyrics = null
-                Log.d(TAG, "published ColorOS lock-screen lyrics trackId=${track.id}")
+                AppLogger.d(TAG, "published ColorOS lock-screen lyrics trackId=${track.id}")
             }
             .onFailure { throwable ->
-                Log.w(TAG, "failed to publish ColorOS lock-screen lyrics trackId=${track.id}", throwable)
+                AppLogger.w(TAG, "failed to publish ColorOS lock-screen lyrics trackId=${track.id}", throwable)
             }
     }
 
@@ -540,7 +539,7 @@ class AndroidNativeAudioEngine(
         }
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
             .onFailure { throwable ->
-                Log.w(TAG, "failed to clear ColorOS lock-screen lyrics", throwable)
+                AppLogger.w(TAG, "failed to clear ColorOS lock-screen lyrics", throwable)
             }
     }
 
