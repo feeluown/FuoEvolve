@@ -3,6 +3,7 @@ package org.feeluown.mobile.desktop
 import androidx.compose.ui.platform.UriHandler
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import org.feeluown.mobile.AppLogger
 
 /**
  * Desktop URI launching may synchronously wait for the OS browser launcher (notably xdg-open on
@@ -17,8 +18,10 @@ internal class DesktopNonBlockingUriHandler(
         executor.execute {
             runCatching { delegate.openUri(uri) }
                 .onFailure { error ->
-                    System.err.println(
-                        "FuoEvolve: failed to open external URI: ${error.message ?: error::class.simpleName}",
+                    AppLogger.e(
+                        "DesktopUri",
+                        "Failed to open external URI",
+                        error,
                     )
                 }
         }

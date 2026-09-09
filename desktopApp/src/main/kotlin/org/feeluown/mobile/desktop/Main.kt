@@ -18,10 +18,11 @@ import com.sun.jna.Native
 import com.sun.jna.Platform
 import java.awt.Window as AwtWindow
 import javax.swing.SwingUtilities
+import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopAppHost
 import org.feeluown.mobile.DesktopExternalActivationSession
 import org.feeluown.mobile.createDesktopPlaybackResumeStore
-import org.feeluown.mobile.installDesktopDebugLogCapture
+import org.feeluown.mobile.installDesktopAppLogger
 import org.feeluown.mobile.installDesktopListeningHistorySinkFactory
 import org.feeluown.mobile.installDesktopLocalMusicRepositoryFactory
 import org.feeluown.mobile.installDesktopPlatformVideoControllerFactory
@@ -52,7 +53,7 @@ private fun configureLibMpvNumericLocale() {
 }
 
 fun main(args: Array<String>) {
-    installDesktopDebugLogCapture()
+    installDesktopAppLogger()
     val activation = DesktopExternalActivationSession.open(args.toList()) ?: return
     registerDesktopFuoProtocolHandler()
     installDesktopListeningHistorySinkFactory { databasePath ->
@@ -111,8 +112,9 @@ fun main(args: Array<String>) {
                 onCloseRequest = {
                     when (desktopCloseBehavior(trayController?.isAvailable == true)) {
                         DesktopCloseBehavior.HideToTray -> windowVisible = false
-                        DesktopCloseBehavior.KeepVisible -> System.err.println(
-                            "FuoEvolve: close-to-tray ignored because no usable tray integration is available",
+                        DesktopCloseBehavior.KeepVisible -> AppLogger.w(
+                            "DesktopWindow",
+                            "Close-to-tray ignored because no usable tray integration is available",
                         )
                     }
                 },

@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -249,7 +248,7 @@ class AndroidDownloadRepository(
             // pause() has already persisted the paused state and intentionally retains the partial file.
         } catch (throwable: Throwable) {
             target?.let { finishTarget(it, success = false) }
-            Log.e(TAG, "download failed taskId=$taskId", throwable)
+            AppLogger.e(TAG, "download failed taskId=$taskId", throwable)
             taskMutex.withLock {
                 taskRecords[taskId]?.let { updateTask(it.copy(
                     status = DownloadTaskStatus.Failed,
@@ -457,7 +456,7 @@ class AndroidDownloadRepository(
             if (!directory.exists()) directory.mkdirs()
             target.writeText(lyrics, Charsets.UTF_8)
         }.onFailure { throwable ->
-            Log.w(TAG, "save lyrics failed fileName=$fileName", throwable)
+            AppLogger.w(TAG, "save lyrics failed fileName=$fileName", throwable)
         }
     }
 
@@ -549,7 +548,7 @@ class AndroidDownloadRepository(
                 )
             }
         }.onFailure { throwable ->
-            Log.w(TAG, "load download resume metadata failed", throwable)
+            AppLogger.w(TAG, "load download resume metadata failed", throwable)
         }
     }
 
@@ -787,7 +786,7 @@ class AndroidDownloadRepository(
         runCatching {
             insertM4aMetadata(file, title, artists, album, coverImage)
         }.onFailure { throwable ->
-            Log.w(TAG, "failed to write m4a metadata file=${file.name}", throwable)
+            AppLogger.w(TAG, "failed to write m4a metadata file=${file.name}", throwable)
         }
     }
 

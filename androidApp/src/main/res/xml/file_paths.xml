@@ -4,6 +4,9 @@
         name="debug_logs"
         path="debug-logs/" />
     <cache-path
+        name="diagnostics"
+        path="diagnostics/" />
+    <cache-path
         name="local_playlists"
         path="local-playlists/" />
     <cache-path
