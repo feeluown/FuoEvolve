@@ -401,11 +401,12 @@ internal fun resolveBluetoothMediaRouteActive(
     mediaRouterBluetooth: Boolean,
     legacyBluetoothRoute: Boolean,
     connectedBluetoothOutput: Boolean,
+    connectedOutputFallbackAllowed: Boolean,
 ): Boolean =
     routedBluetooth ||
         mediaRouterBluetooth ||
         legacyBluetoothRoute ||
-        (!routedDeviceQueryAvailable && connectedBluetoothOutput)
+        (connectedOutputFallbackAllowed && !routedDeviceQueryAvailable && connectedBluetoothOutput)
 
 @Suppress("DEPRECATION")
 internal fun isBluetoothMediaOutputActive(
@@ -456,6 +457,7 @@ internal fun bluetoothMediaRouteDecision(
         mediaRouterBluetooth = mediaRouterBluetooth,
         legacyBluetoothRoute = legacyA2dpOn || legacyScoOn,
         connectedBluetoothOutput = connectedBluetoothOutputTypes.isNotEmpty(),
+        connectedOutputFallbackAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
     )
     return BluetoothMediaRouteDecision(
         active = active,
