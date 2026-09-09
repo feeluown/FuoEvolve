@@ -9,6 +9,7 @@ import com.microsoft.credentialstorage.model.StoredToken
 import com.microsoft.credentialstorage.model.StoredTokenType
 import com.sun.jna.NativeLibrary
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -48,7 +49,7 @@ internal class DesktopSecureProviderCredentialStore(
             val previous = readManifest(store, providerId)
             val serialized = json.encodeToString(ProviderCredentials.serializer(), credentials)
             val generation = generationProvider()
-            val chunks = serialized.chunked(SECRET_CHUNK_CHAR_LIMIT).ifEmpty { listOf("") }
+            val chunks = chunkCredentialPayload(serialized).ifEmpty { listOf("") }
             val writtenKeys = mutableListOf<String>()
 
             try {
@@ -145,6 +146,39 @@ private class MicrosoftDesktopSecretStore(
     override fun delete(key: String): Boolean = delegate.delete(key)
 }
 
+/**
+ * credential-secure-storage writes macOS Keychain values through `security -i` and surrounds each
+ * argument with quotes, but it does not escape quotes/newlines inside the password itself. Provider
+ * credentials are JSON, so passing them through unchanged can make `security add-generic-password`
+ * parse the command incorrectly. Encode only the macOS payload before handing it to the library.
+ *
+ * Prefixing the encoded form lets us continue reading any values that were successfully stored by
+ * older builds without encoding.
+ */
+internal class MacOsSafeDesktopSecretStore(
+    private val delegate: DesktopSecretStore,
+) : DesktopSecretStore {
+    override fun get(key: String): CharArray? {
+        val stored = delegate.get(key) ?: return null
+        return try {
+            decodeMacOsSecret(stored)
+        } finally {
+            stored.fill('\u0000')
+        }
+    }
+
+    override fun put(key: String, value: CharArray): Boolean {
+        val encoded = encodeMacOsSecret(value)
+        return try {
+            delegate.put(key, encoded)
+        } finally {
+            encoded.fill('\u0000')
+        }
+    }
+
+    override fun delete(key: String): Boolean = delegate.delete(key)
+}
+
 private fun createMicrosoftSecretStore(): DesktopSecretStore? =
     if (System.getProperty("os.name") == "Linux") {
         createLinuxLibSecretStore()
@@ -152,7 +186,13 @@ private fun createMicrosoftSecretStore(): DesktopSecretStore? =
         StorageProvider.getTokenStorage(true, SecureOption.REQUIRED)
             ?.takeIf { it.isSecure }
             ?.let(::MicrosoftDesktopSecretStore)
+            ?.let { store ->
+                if (isMacOs()) MacOsSafeDesktopSecretStore(store) else store
+            }
     }
+
+private fun isMacOs(): Boolean =
+    System.getProperty("os.name").orEmpty().contains("mac", ignoreCase = true)
 
 private fun createLinuxLibSecretStore(): DesktopSecretStore {
     // AppImage ships a compatibility libsecret closure, but an installed package and a portable
@@ -258,6 +298,30 @@ private data class DesktopCredentialManifest(
     }
 }
 
+internal fun chunkCredentialPayload(
+    value: String,
+    maxChars: Int = SECRET_CHUNK_CHAR_LIMIT,
+): List<String> {
+    require(maxChars >= 2) { "credential chunk size must leave room for a surrogate pair" }
+    if (value.isEmpty()) return emptyList()
+
+    val chunks = mutableListOf<String>()
+    var start = 0
+    while (start < value.length) {
+        var end = minOf(start + maxChars, value.length)
+        if (
+            end < value.length &&
+            Character.isHighSurrogate(value[end - 1]) &&
+            Character.isLowSurrogate(value[end])
+        ) {
+            end--
+        }
+        chunks += value.substring(start, end)
+        start = end
+    }
+    return chunks
+}
+
 private fun readSecret(store: DesktopSecretStore, key: String): String? {
     val chars = store.get(key) ?: return null
     return try {
@@ -273,6 +337,34 @@ private fun writeSecret(store: DesktopSecretStore, key: String, value: String): 
         store.put(key, chars)
     } finally {
         chars.fill('\u0000')
+    }
+}
+
+private fun encodeMacOsSecret(value: CharArray): CharArray {
+    val bytes = value.concatToString().encodeToByteArray()
+    return try {
+        val encoded = Base64.getEncoder().encodeToString(bytes)
+        "$MACOS_SECRET_ENCODING_PREFIX$encoded".toCharArray()
+    } finally {
+        bytes.fill(0)
+    }
+}
+
+private fun decodeMacOsSecret(value: CharArray): CharArray {
+    val stored = value.concatToString()
+    if (!stored.startsWith(MACOS_SECRET_ENCODING_PREFIX)) return value.copyOf()
+
+    val encoded = stored.removePrefix(MACOS_SECRET_ENCODING_PREFIX)
+    return runCatching {
+        val bytes = Base64.getDecoder().decode(encoded)
+        try {
+            bytes.toString(Charsets.UTF_8).toCharArray()
+        } finally {
+            bytes.fill(0)
+        }
+    }.getOrElse {
+        // Be tolerant of an unlikely legacy value that happens to use the prefix.
+        value.copyOf()
     }
 }
 
@@ -299,6 +391,7 @@ private val BUNDLED_LIBSECRET_JNA_NAMES = listOf(
     "gobject-2.0",
     "gio-2.0",
 )
+private const val MACOS_SECRET_ENCODING_PREFIX = "fuoevolve-b64-v1:"
 private const val SECRET_KEY_PREFIX = "org.feeluown.mobile.provider.credentials.v1"
 private const val MANIFEST_VERSION = "v1"
 private const val SECRET_CHUNK_CHAR_LIMIT = 768

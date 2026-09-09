@@ -26,6 +26,27 @@ class DesktopSecureProviderCredentialStoreTest {
     }
 
     @Test
+    fun credentialChunkingPreservesSupplementaryUnicodeAtBoundary() {
+        val original = "a".repeat(767) + "🎵" + "tail"
+        val chunks = chunkCredentialPayload(original, maxChars = 768)
+
+        assertEquals(original, chunks.joinToString(""))
+        assertEquals(767, chunks.first().length)
+        assertTrue(chunks.none { chunk -> chunk.isNotEmpty() && Character.isHighSurrogate(chunk.last()) })
+        assertTrue(chunks.drop(1).none { chunk -> chunk.isNotEmpty() && Character.isLowSurrogate(chunk.first()) })
+
+        val backend = FakeDesktopSecretStore()
+        val macOsStore = MacOsSafeDesktopSecretStore(backend)
+        chunks.forEachIndexed { index, chunk ->
+            assertTrue(macOsStore.put("chunk-$index", chunk.toCharArray()))
+        }
+        val roundTripped = chunks.indices.joinToString("") { index ->
+            macOsStore.get("chunk-$index")!!.concatToString()
+        }
+        assertEquals(original, roundTripped)
+    }
+
+    @Test
     fun successfulOverwriteSwitchesGenerationAndRemovesOldChunks() = runBlocking {
         val backend = FakeDesktopSecretStore()
         val generations = ArrayDeque(listOf("generation1", "generation2"))
@@ -127,6 +148,30 @@ class DesktopSecureProviderCredentialStoreTest {
 
         assertTrue(error.message.orEmpty().contains("写入失败"))
         assertTrue(error.message.orEmpty().contains("凭证数据"))
+    }
+
+    @Test
+    fun macOsSafeStoreEncodesInteractiveSecurityPayloadAndRoundTrips() {
+        val backend = FakeDesktopSecretStore()
+        val store = MacOsSafeDesktopSecretStore(backend)
+        val original = "{\"cookie\":\"uin=123; p_skey=quote\\\"value\",\n\"unicode\":\"中文\"}"
+
+        assertTrue(store.put("qqmusic", original.toCharArray()))
+
+        val persisted = backend.values.getValue("qqmusic").concatToString()
+        assertTrue('"' !in persisted, "encoded Keychain payload must not contain quotes")
+        assertTrue('\n' !in persisted, "encoded Keychain payload must stay on one security -i command line")
+        assertEquals(original, store.get("qqmusic")?.concatToString())
+    }
+
+    @Test
+    fun macOsSafeStoreReadsLegacyUnencodedValues() {
+        val backend = FakeDesktopSecretStore()
+        val legacy = "v1:generation1:3"
+        backend.values["manifest"] = legacy.toCharArray()
+        val store = MacOsSafeDesktopSecretStore(backend)
+
+        assertEquals(legacy, store.get("manifest")?.concatToString())
     }
 
     private fun largeCredentials(cookiePrefix: String = "cookie"): ProviderCredentials = ProviderCredentials(
