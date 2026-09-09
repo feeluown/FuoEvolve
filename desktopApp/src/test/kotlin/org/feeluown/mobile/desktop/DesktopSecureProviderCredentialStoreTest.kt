@@ -26,6 +26,27 @@ class DesktopSecureProviderCredentialStoreTest {
     }
 
     @Test
+    fun credentialChunkingPreservesSupplementaryUnicodeAtBoundary() {
+        val original = "a".repeat(767) + "🎵" + "tail"
+        val chunks = chunkCredentialPayload(original, maxChars = 768)
+
+        assertEquals(original, chunks.joinToString(""))
+        assertEquals(767, chunks.first().length)
+        assertTrue(chunks.none { chunk -> chunk.isNotEmpty() && Character.isHighSurrogate(chunk.last()) })
+        assertTrue(chunks.drop(1).none { chunk -> chunk.isNotEmpty() && Character.isLowSurrogate(chunk.first()) })
+
+        val backend = FakeDesktopSecretStore()
+        val macOsStore = MacOsSafeDesktopSecretStore(backend)
+        chunks.forEachIndexed { index, chunk ->
+            assertTrue(macOsStore.put("chunk-$index", chunk.toCharArray()))
+        }
+        val roundTripped = chunks.indices.joinToString("") { index ->
+            macOsStore.get("chunk-$index")!!.concatToString()
+        }
+        assertEquals(original, roundTripped)
+    }
+
+    @Test
     fun successfulOverwriteSwitchesGenerationAndRemovesOldChunks() = runBlocking {
         val backend = FakeDesktopSecretStore()
         val generations = ArrayDeque(listOf("generation1", "generation2"))
