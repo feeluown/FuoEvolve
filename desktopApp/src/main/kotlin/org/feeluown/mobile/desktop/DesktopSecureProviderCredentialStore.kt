@@ -7,11 +7,13 @@ import com.microsoft.credentialstorage.implementation.posix.libsecret.LibSecretB
 import com.microsoft.credentialstorage.implementation.posix.libsecret.LibSecretLibrary
 import com.microsoft.credentialstorage.model.StoredToken
 import com.microsoft.credentialstorage.model.StoredTokenType
+import com.sun.jna.NativeLibrary
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.ProviderCredentials
 
@@ -81,6 +83,13 @@ internal class DesktopSecureProviderCredentialStore(
             val result = runCatching(secretStoreProvider)
             secretStore = result.getOrNull()
             secretStoreFailure = result.exceptionOrNull()
+            secretStoreFailure?.let { failure ->
+                AppLogger.e(
+                    DESKTOP_CREDENTIAL_LOG_TAG,
+                    "Failed to initialize desktop secure credential storage",
+                    failure,
+                )
+            }
             secretStoreResolved = true
         }
         return secretStore
@@ -146,12 +155,46 @@ private fun createMicrosoftSecretStore(): DesktopSecretStore? =
     }
 
 private fun createLinuxLibSecretStore(): DesktopSecretStore {
+    // AppImage ships a compatibility libsecret closure, but an installed package and a portable
+    // image must see the same host Secret Service/keyring. Prefer the host client library and only
+    // add the bundled directory to JNA's search path when the host libsecret cannot be loaded.
+    configureLinuxLibSecretRuntime()
+
     // StorageProvider performs a preflight that rejects a locked default collection before
     // normal libsecret interaction can display the system unlock prompt. Use its underlying
     // libsecret store directly on Linux instead: reads request SECRET_SEARCH_UNLOCK and writes
     // use libsecret's default collection, so the Secret Service can handle user interaction.
     LibSecretLibrary.INSTANCE
     return MicrosoftDesktopSecretStore(LibSecretBackedTokenStore())
+}
+
+@Volatile
+private var hostLibSecretHandle: NativeLibrary? = null
+
+private fun configureLinuxLibSecretRuntime() {
+    val hostAvailable = runCatching {
+        NativeLibrary.getInstance(LIBSECRET_JNA_NAME).also { library ->
+            REQUIRED_LIBSECRET_SYMBOLS.forEach(library::getFunction)
+            hostLibSecretHandle = library
+        }
+    }.isSuccess
+    if (hostAvailable) return
+
+    val bundledLibraryDir = System.getProperty("fuoevolve.libsecret.dir")
+        ?.takeIf(String::isNotBlank)
+        ?: System.getenv("FUOEVOLVE_LIBSECRET_DIR")?.takeIf(String::isNotBlank)
+        ?: return
+    registerBundledLinuxLibSecretSearchPaths(bundledLibraryDir, NativeLibrary::addSearchPath)
+}
+
+internal fun registerBundledLinuxLibSecretSearchPaths(
+    bundledLibraryDir: String,
+    addSearchPath: (String, String) -> Unit,
+) {
+    if (bundledLibraryDir.isBlank()) return
+    BUNDLED_LIBSECRET_JNA_NAMES.forEach { libraryName ->
+        addSearchPath(libraryName, bundledLibraryDir)
+    }
 }
 
 private fun secretStoreUnavailableMessage(failure: Throwable?): String {
@@ -243,6 +286,19 @@ private fun providerKey(providerId: String): String {
     return digest.take(16).joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }
 
+private const val DESKTOP_CREDENTIAL_LOG_TAG = "DesktopCredentials"
+private const val LIBSECRET_JNA_NAME = "secret-1"
+private val REQUIRED_LIBSECRET_SYMBOLS = listOf(
+    "secret_service_search_sync",
+    "secret_password_store_sync",
+    "secret_password_clear_sync",
+)
+private val BUNDLED_LIBSECRET_JNA_NAMES = listOf(
+    "secret-1",
+    "glib-2.0",
+    "gobject-2.0",
+    "gio-2.0",
+)
 private const val SECRET_KEY_PREFIX = "org.feeluown.mobile.provider.credentials.v1"
 private const val MANIFEST_VERSION = "v1"
 private const val SECRET_CHUNK_CHAR_LIMIT = 768
