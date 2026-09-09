@@ -8,7 +8,6 @@ import android.media.AudioManager
 import android.media.MediaRouter
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -157,7 +156,7 @@ internal class BluetoothLyricsPublisher(
             return
         }
         if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
-            Log.w(TAG, "media session does not allow Bluetooth lyrics metadata replacement")
+            AppLogger.w(TAG, "media session does not allow Bluetooth lyrics metadata replacement")
             return
         }
 
@@ -212,7 +211,7 @@ internal class BluetoothLyricsPublisher(
         runCatching { controller.replaceMediaItem(currentIndex, updatedItem) }
             .onSuccess { lastApplied = desired }
             .onFailure { throwable ->
-                Log.w(TAG, "failed to publish Bluetooth lyrics trackId=${track.id}", throwable)
+                AppLogger.w(TAG, "failed to publish Bluetooth lyrics trackId=${track.id}", throwable)
             }
     }
 
@@ -249,7 +248,7 @@ internal class BluetoothLyricsPublisher(
                     true
                 },
                 onFailure = { throwable ->
-                    Log.w(TAG, "failed to restore original media metadata mediaId=${applied.mediaId}", throwable)
+                    AppLogger.w(TAG, "failed to restore original media metadata mediaId=${applied.mediaId}", throwable)
                     false
                 },
             )
@@ -299,7 +298,7 @@ internal class BluetoothLyricsPublisher(
                         }
                     }
                     .onFailure { throwable ->
-                        Log.w(TAG, "unable to connect Bluetooth lyrics media controller", throwable)
+                        AppLogger.w(TAG, "unable to connect Bluetooth lyrics media controller", throwable)
                     }
             },
             ContextCompat.getMainExecutor(appContext),
