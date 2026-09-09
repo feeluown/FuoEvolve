@@ -1088,6 +1088,16 @@ private fun AppearanceFeatureSettings(
                 onCheckedChange = controller::setStatusBarLyricsEnabled,
             )
         }
+        if (state.bluetoothLyricsAvailable) {
+            SettingsDivider(startPadding = FuoSpacing.lg)
+            SettingsToggleRow(
+                title = "蓝牙车载歌词",
+                supportingText = "蓝牙输出时通过媒体标题显示当前歌词；兼容模式可能影响其他系统媒体控制器",
+                checked = settings.bluetoothLyricsEnabled,
+                enabled = enabled,
+                onCheckedChange = controller::setBluetoothLyricsEnabled,
+            )
+        }
         if (state.bydInstrumentLyricsAvailable) {
             SettingsDivider(startPadding = FuoSpacing.lg)
             SettingsToggleRow(
