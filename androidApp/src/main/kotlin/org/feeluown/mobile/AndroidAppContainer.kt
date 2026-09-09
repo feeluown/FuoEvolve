@@ -12,6 +12,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import org.feeluown.mobile.persistence.listening.AndroidListeningHistoryDriverFactory
 import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
 import org.feeluown.mobile.playback.api.PlaybackSession
@@ -24,6 +25,17 @@ internal class AndroidAppContainer(
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lyriconLyricsPublisher: LyriconLyricsPublisher? = null
     private var bydInstrumentLyricsPublisher: BydInstrumentLyricsPublisher? = null
+    private var bluetoothLyricsPublisher: BluetoothLyricsPublisher? = null
+
+    init {
+        // MediaSessionService can be the process entry point after process recreation. When the
+        // compatibility feature was already enabled, restore the process-scoped playback runtime
+        // after the current service/activity initialization stack has completed.
+        appScope.launch {
+            yield()
+            if (settingsRepository.awaitSettings().bluetoothLyricsEnabled) playbackSession
+        }
+    }
 
     private val providerCredentialStore: AndroidProviderCredentialStore by lazy {
         AndroidProviderCredentialStore(context)
@@ -400,6 +412,7 @@ internal class AndroidAppContainer(
             scope = appScope,
         )
         settingsFeatureController.setStatusBarLyricsAvailability(isLyriconInstalled(context))
+        settingsFeatureController.setBluetoothLyricsAvailability(true)
         lyriconLyricsPublisher = LyriconLyricsPublisher(
             context = context,
             playbackSession = session,
@@ -408,6 +421,13 @@ internal class AndroidAppContainer(
                 .distinctUntilChanged(),
             scope = appScope,
         ).also(LyriconLyricsPublisher::start)
+        bluetoothLyricsPublisher = BluetoothLyricsPublisher(
+            context = context,
+            playbackSession = session,
+            enabled = settingsRepository.state
+                .map { state -> state.settings.bluetoothLyricsEnabled }
+                .distinctUntilChanged(),
+        ).also(BluetoothLyricsPublisher::start)
         if (isBydInstrumentLyricsAvailable()) {
             bydInstrumentLyricsPublisher = BydInstrumentLyricsPublisher(
                 context = context,
@@ -453,6 +473,8 @@ internal class AndroidAppContainer(
 
     override fun close() {
         FuoPlaybackService.transportControls = null
+        bluetoothLyricsPublisher?.close()
+        bluetoothLyricsPublisher = null
         bydInstrumentLyricsPublisher?.close()
         bydInstrumentLyricsPublisher = null
         lyriconLyricsPublisher?.close()

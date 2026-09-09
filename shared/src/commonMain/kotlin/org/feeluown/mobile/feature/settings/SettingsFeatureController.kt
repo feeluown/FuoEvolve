@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -28,6 +29,7 @@ data class SettingsFeatureUiState(
     val appUpdate: AppUpdateUiState = AppUpdateUiState(),
     val statusBarLyricsAvailable: Boolean = false,
     val bydInstrumentLyricsAvailable: Boolean = false,
+    val bluetoothLyricsAvailable: Boolean = false,
     val debugLogViewerAvailable: Boolean = false,
     val isBusy: Boolean = false,
     val feedback: String? = null,
@@ -61,6 +63,8 @@ interface SettingsFeatureController {
     fun setStatusBarLyricsAvailability(available: Boolean)
     fun setStatusBarLyricsEnabled(enabled: Boolean)
     fun setBydInstrumentLyricsEnabled(enabled: Boolean)
+    fun setBluetoothLyricsAvailability(available: Boolean) = Unit
+    fun setBluetoothLyricsEnabled(enabled: Boolean) = Unit
     fun setProviderPlaybackReportingEnabled(providerId: String, enabled: Boolean)
     fun setAppUpdateChannel(channel: AppUpdateChannel) = Unit
     fun setAutoCheckAppUpdates(enabled: Boolean) = Unit
@@ -112,16 +116,24 @@ private class BoundSettingsFeatureController(
     private val scope: CoroutineScope,
     private val bydInstrumentLyricsAvailable: Boolean,
 ) : SettingsFeatureController {
+    private val bluetoothLyricsAvailable = MutableStateFlow(false)
+
     override val uiState: StateFlow<SettingsFeatureUiState> = combine(
         owner.state,
         settingsRepository.state,
         appUpdateController.uiState,
-    ) { state, settingsState, appUpdateState ->
-        toUiState(state, settingsState.settings, appUpdateState)
+        bluetoothLyricsAvailable,
+    ) { state, settingsState, appUpdateState, bluetoothAvailable ->
+        toUiState(state, settingsState.settings, appUpdateState, bluetoothAvailable)
     }.stateIn(
         scope,
         SharingStarted.Eagerly,
-        toUiState(owner.state.value, settingsRepository.state.value.settings, appUpdateController.uiState.value),
+        toUiState(
+            owner.state.value,
+            settingsRepository.state.value.settings,
+            appUpdateController.uiState.value,
+            bluetoothLyricsAvailable.value,
+        ),
     )
 
     override fun close() = owner.close()
@@ -170,6 +182,12 @@ private class BoundSettingsFeatureController(
     override fun setBydInstrumentLyricsEnabled(enabled: Boolean) {
         scope.launch { settingsRepository.update { settings -> settings.copy(bydInstrumentLyricsEnabled = enabled) } }
     }
+    override fun setBluetoothLyricsAvailability(available: Boolean) {
+        bluetoothLyricsAvailable.value = available
+    }
+    override fun setBluetoothLyricsEnabled(enabled: Boolean) {
+        scope.launch { settingsRepository.update { settings -> settings.copy(bluetoothLyricsEnabled = enabled) } }
+    }
     override fun setProviderPlaybackReportingEnabled(providerId: String, enabled: Boolean) {
         scope.launch {
             settingsRepository.update { settings ->
@@ -191,6 +209,7 @@ private class BoundSettingsFeatureController(
         state: BoundCoreState,
         appSettings: AppSettings,
         appUpdateState: AppUpdateUiState,
+        bluetoothAvailable: Boolean,
     ) = SettingsFeatureUiState(
         settings = appSettings,
         cacheUsage = state.cacheUsage,
@@ -199,6 +218,7 @@ private class BoundSettingsFeatureController(
         appUpdate = appUpdateState,
         statusBarLyricsAvailable = state.statusBarLyricsAvailable,
         bydInstrumentLyricsAvailable = bydInstrumentLyricsAvailable,
+        bluetoothLyricsAvailable = bluetoothAvailable,
         debugLogViewerAvailable = state.debugLogViewerAvailable,
         isBusy = state.isBusy,
         feedback = state.feedback,
