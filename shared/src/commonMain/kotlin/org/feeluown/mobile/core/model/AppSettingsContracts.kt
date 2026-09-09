@@ -96,6 +96,7 @@ data class AppSettings(
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
     val statusBarLyricsEnabled: Boolean = false,
     val bydInstrumentLyricsEnabled: Boolean = false,
+    val bluetoothLyricsEnabled: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.System,
     val themeColorScheme: ThemeColorScheme = ThemeColorScheme.Dynamic,
     val themePaletteStyle: ThemePaletteStyle = ThemePaletteStyle.Expressive,
