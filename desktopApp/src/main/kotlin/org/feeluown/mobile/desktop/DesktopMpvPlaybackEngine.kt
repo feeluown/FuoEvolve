@@ -648,9 +648,22 @@ private class LibMpvBackend(
             return true
         }
 
-        val currentPath = getPropertyString("path") ?: return false
-        if (currentPath != requestedPath) return false
-        val playlistEntryId = currentPlaylistEntryId() ?: expectedPlaylistEntryId
+        val currentPlaylistEntryId = currentPlaylistEntryId()
+        val currentPath = getPropertyString("path")
+        val currentPlaylistFilename = currentPlaylistEntryFilename()
+        if (
+            !desktopMpvSourceMatchesRequest(
+                requestedPath = requestedPath,
+                expectedPlaylistEntryId = expectedPlaylistEntryId,
+                currentPlaylistEntryId = currentPlaylistEntryId,
+                currentPath = currentPath,
+                currentPlaylistFilename = currentPlaylistFilename,
+            )
+        ) {
+            return false
+        }
+
+        val playlistEntryId = currentPlaylistEntryId ?: expectedPlaylistEntryId
         if (playlistEntryId != null) expectedPlaylistEntryId = playlistEntryId
         polledActivePath = requestedPath
         listener(
@@ -663,12 +676,18 @@ private class LibMpvBackend(
     }
 
     private fun currentPlaylistEntryId(): Long? {
-        val playingPosition = getPropertyString("playlist-playing-pos")
-            ?.toIntOrNull()
-            ?.takeIf { it >= 0 }
-            ?: return null
+        val playingPosition = currentPlaylistPlayingPosition() ?: return null
         return getPropertyString("playlist/$playingPosition/id")?.toLongOrNull()
     }
+
+    private fun currentPlaylistEntryFilename(): String? {
+        val playingPosition = currentPlaylistPlayingPosition() ?: return null
+        return getPropertyString("playlist/$playingPosition/filename")
+    }
+
+    private fun currentPlaylistPlayingPosition(): Int? = getPropertyString("playlist-playing-pos")
+        ?.toIntOrNull()
+        ?.takeIf { it >= 0 }
 
     private fun publishPolledState() {
         if (!activateCurrentRequestFromPolling()) return
@@ -710,6 +729,19 @@ private class LibMpvBackend(
     private fun ensureOpen() {
         check(!closed.get()) { "libmpv backend is closed" }
     }
+}
+
+internal fun desktopMpvSourceMatchesRequest(
+    requestedPath: String,
+    expectedPlaylistEntryId: Long?,
+    currentPlaylistEntryId: Long?,
+    currentPath: String?,
+    currentPlaylistFilename: String?,
+): Boolean {
+    if (expectedPlaylistEntryId != null && currentPlaylistEntryId != null) {
+        return expectedPlaylistEntryId == currentPlaylistEntryId
+    }
+    return currentPath == requestedPath || currentPlaylistFilename == requestedPath
 }
 
 internal interface MpvNative : Library {

@@ -70,11 +70,12 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 APPDIR="$WORK_DIR/FuoEvolve.AppDir"
 BUNDLED_APP="$APPDIR/usr/lib/fuoevolve"
 NATIVE_LIB_DIR="$BUNDLED_APP/resources/native/mpv"
+LIBSECRET_LIB_DIR="$BUNDLED_APP/resources/native/libsecret"
 WEBVIEW_ROOT="$BUNDLED_APP/resources/native/webview"
 WEBVIEW_LIB_DIR="$WEBVIEW_ROOT/lib"
 WEBKIT_RUNTIME_DIR="$WEBVIEW_ROOT/webkit2gtk-4.1"
 GIO_MODULE_DIR="$WEBVIEW_ROOT/gio/modules"
-mkdir -p "$NATIVE_LIB_DIR" "$WEBVIEW_LIB_DIR" "$WEBKIT_RUNTIME_DIR" "$GIO_MODULE_DIR"
+mkdir -p "$NATIVE_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" "$WEBKIT_RUNTIME_DIR" "$GIO_MODULE_DIR"
 # Copy the contents of the Compose app image into the runtime root. Copying the source directory
 # itself into the already-created BUNDLED_APP directory would add an unintended FuoEvolve/ layer.
 cp -a "$APP_IMAGE/." "$BUNDLED_APP/"
@@ -138,15 +139,16 @@ copy_elf_closure() {
   done < <(lddtree -l "$root" | awk '!seen[$0]++')
 }
 
-# libmpv contributes codecs/audio clients; libsecret is bundled as a client library while the
-# Secret Service D-Bus daemon itself remains a host service.
-for root_library in "$LIBMPV" "$LIBSECRET"; do
-  copy_library_to "$root_library" "$NATIVE_LIB_DIR"
-  copy_elf_closure "$root_library" "$NATIVE_LIB_DIR"
-done
+# Keep libmpv and the compatibility libsecret closure physically separate. Compose adds the mpv
+# resource directory to jna.library.path, so placing libsecret there would make the AppImage shadow
+# the host libsecret before the credential layer gets a chance to prefer the host Secret Service.
+copy_library_to "$LIBMPV" "$NATIVE_LIB_DIR"
+copy_elf_closure "$LIBMPV" "$NATIVE_LIB_DIR"
+copy_library_to "$LIBSECRET" "$LIBSECRET_LIB_DIR"
+copy_elf_closure "$LIBSECRET" "$LIBSECRET_LIB_DIR"
 
 BUNDLED_LIBMPV="$(find "$NATIVE_LIB_DIR" -maxdepth 1 -type f -name 'libmpv.so.*' -print -quit)"
-BUNDLED_LIBSECRET="$(find "$NATIVE_LIB_DIR" -maxdepth 1 -type f -name 'libsecret-1.so.0*' -print -quit)"
+BUNDLED_LIBSECRET="$(find "$LIBSECRET_LIB_DIR" -maxdepth 1 -type f -name 'libsecret-1.so.0*' -print -quit)"
 if [[ -z "$BUNDLED_LIBMPV" ]]; then
   echo "libmpv was not copied into the AppImage dependency closure" >&2
   exit 1
@@ -156,6 +158,7 @@ if [[ -z "$BUNDLED_LIBSECRET" ]]; then
   exit 1
 fi
 ln -sfn "$(basename "$BUNDLED_LIBMPV")" "$NATIVE_LIB_DIR/libmpv.so"
+ln -sfn "$(basename "$BUNDLED_LIBSECRET")" "$LIBSECRET_LIB_DIR/libsecret-1.so"
 
 # wry links to WebKitGTK on Linux. Bundle both the helper's ELF closure and WebKit's separately
 # executed subprocesses; the latter are not visible from the helper's normal DT_NEEDED graph.
@@ -184,7 +187,7 @@ cp -L "$SYSTEM_INJECTED_BUNDLE" "$WEBKIT_RUNTIME_DIR/injected-bundle/libwebkit2g
 copy_elf_closure "$SYSTEM_INJECTED_BUNDLE" "$WEBVIEW_LIB_DIR"
 
 # HTTPS support is dynamically discovered by GIO and therefore is not part of WebKit's direct ELF
-# closure. Bundle the GLib TLS module and make it discoverable through GIO_EXTRA_MODULES.
+# closure. Bundle the GLib TLS module and make it discoverable only to the WebView helper process.
 SYSTEM_GIO_TLS_MODULE="$(find /usr/lib /lib -type f -path '*/gio/modules/libgiognutls.so' -print -quit 2>/dev/null || true)"
 if [[ -z "$SYSTEM_GIO_TLS_MODULE" || ! -f "$SYSTEM_GIO_TLS_MODULE" ]]; then
   echo "GLib GnuTLS module was not found; install glib-networking" >&2
@@ -195,7 +198,7 @@ copy_elf_closure "$SYSTEM_GIO_TLS_MODULE" "$WEBVIEW_LIB_DIR"
 
 while IFS= read -r library; do
   patchelf --set-rpath '$ORIGIN' "$library" 2>/dev/null || true
-done < <(find "$NATIVE_LIB_DIR" "$WEBVIEW_LIB_DIR" -maxdepth 1 -type f -print)
+done < <(find "$NATIVE_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" -maxdepth 1 -type f -print)
 while IFS= read -r executable; do
   patchelf --set-rpath '$ORIGIN/../lib:$ORIGIN/../../lib' "$executable" 2>/dev/null || true
 done < <(find "$WEBKIT_RUNTIME_DIR" -maxdepth 1 -type f -perm -u+x -print)
@@ -208,12 +211,18 @@ set -e
 APPDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 APP_ROOT="$APPDIR/usr/lib/fuoevolve"
 NATIVE_LIB_DIR="$APP_ROOT/resources/native/mpv"
+LIBSECRET_LIB_DIR="$APP_ROOT/resources/native/libsecret"
 WEBVIEW_ROOT="$APP_ROOT/resources/native/webview"
 WEBVIEW_LIB_DIR="$WEBVIEW_ROOT/lib"
-export LD_LIBRARY_PATH="$NATIVE_LIB_DIR:$WEBVIEW_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export WEBKIT_EXEC_PATH="$WEBVIEW_ROOT/webkit2gtk-4.1"
-export WEBKIT_INJECTED_BUNDLE_PATH="$WEBVIEW_ROOT/webkit2gtk-4.1/injected-bundle"
-export GIO_EXTRA_MODULES="$WEBVIEW_ROOT/gio/modules${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"
+# Keep portable native libraries scoped to the components that need them. In particular, do not
+# globally override a host libsecret/GLib stack: installed and AppImage builds must use the same
+# Secret Service/keyring when the host client library is available.
+export FUOEVOLVE_LIBMPV_PATH="$NATIVE_LIB_DIR/libmpv.so"
+export FUOEVOLVE_LIBSECRET_DIR="$LIBSECRET_LIB_DIR"
+export FUOEVOLVE_WEBVIEW_LIB_DIR="$WEBVIEW_LIB_DIR"
+export FUOEVOLVE_WEBKIT_EXEC_PATH="$WEBVIEW_ROOT/webkit2gtk-4.1"
+export FUOEVOLVE_WEBKIT_INJECTED_BUNDLE_PATH="$WEBVIEW_ROOT/webkit2gtk-4.1/injected-bundle"
+export FUOEVOLVE_GIO_EXTRA_MODULES="$WEBVIEW_ROOT/gio/modules${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"
 exec "$APP_ROOT/bin/FuoEvolve" "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"
@@ -267,10 +276,22 @@ chmod +x "$OUTPUT_FILE"
     echo "Packaged AppImage is missing the bundled libmpv loader alias" >&2
     exit 1
   }
-  find squashfs-root/usr/lib/fuoevolve/resources/native/mpv -name 'libsecret-1.so.0*' -print -quit | grep -q . || {
-    echo "Packaged AppImage is missing bundled libsecret" >&2
+  test -e squashfs-root/usr/lib/fuoevolve/resources/native/libsecret/libsecret-1.so || {
+    echo "Packaged AppImage is missing the bundled libsecret fallback alias" >&2
     exit 1
   }
+  if find squashfs-root/usr/lib/fuoevolve/resources/native/mpv -maxdepth 1 -name 'libsecret-1.so*' -print -quit | grep -q .; then
+    echo "Bundled libsecret must stay outside the Compose JNA mpv search path" >&2
+    exit 1
+  fi
+  grep -q 'FUOEVOLVE_LIBMPV_PATH=' squashfs-root/AppRun || {
+    echo "AppImage launcher does not explicitly scope bundled libmpv" >&2
+    exit 1
+  }
+  if grep -q '^export LD_LIBRARY_PATH=' squashfs-root/AppRun; then
+    echo "AppImage launcher must not globally override host native libraries" >&2
+    exit 1
+  fi
   find squashfs-root/usr/lib/fuoevolve -type f -name fuoevolve-web-login -perm -u+x -print -quit | grep -q . || {
     echo "Packaged AppImage is missing the WebView login helper" >&2
     exit 1
