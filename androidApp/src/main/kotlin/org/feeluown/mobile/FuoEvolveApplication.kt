@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
 import android.app.Application
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * Thin Android process host.
@@ -10,6 +12,7 @@ import android.app.Application
  */
 class FuoEvolveApplication : Application() {
     private var containerHolder: AndroidAppContainer? = null
+    private var bluetoothLyricsPublisher: BluetoothLyricsPublisher? = null
 
     private fun container(): AndroidAppContainer =
         containerHolder ?: AndroidAppContainer(this).also { containerHolder = it }
@@ -25,12 +28,28 @@ class FuoEvolveApplication : Application() {
         get() = container().settingsRepository
 
     internal val appUiGraph: AppUiGraph
-        get() = container().appUiGraph
+        get() {
+            val holder = container()
+            val graph = holder.appUiGraph
+            graph.settings.setBluetoothLyricsAvailability(true)
+            if (bluetoothLyricsPublisher == null) {
+                bluetoothLyricsPublisher = BluetoothLyricsPublisher(
+                    context = this,
+                    playbackSession = graph.playbackSession,
+                    enabled = holder.settingsRepository.state
+                        .map { state -> state.settings.bluetoothLyricsEnabled }
+                        .distinctUntilChanged(),
+                ).also(BluetoothLyricsPublisher::start)
+            }
+            return graph
+        }
 
     val appViewModel: FuoAppViewModel
         get() = container().appViewModel
 
     override fun onTerminate() {
+        bluetoothLyricsPublisher?.close()
+        bluetoothLyricsPublisher = null
         containerHolder?.close()
         containerHolder = null
         super.onTerminate()
