@@ -2,7 +2,9 @@ package org.feeluown.mobile
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class BluetoothLyricsPublisherTest {
     @Test
@@ -41,5 +43,53 @@ class BluetoothLyricsPublisherTest {
         )
 
         assertEquals("原文", bluetoothLyricLine(lyrics, 0L))
+    }
+
+    @Test
+    fun bluetoothRouteAcceptsMediaRouterFallbackWhenPrimaryRouteMissesCar() {
+        assertTrue(
+            resolveBluetoothMediaRouteActive(
+                routedBluetooth = false,
+                routedDeviceQueryAvailable = true,
+                mediaRouterBluetooth = true,
+                legacyBluetoothRoute = false,
+                connectedBluetoothOutput = false,
+            ),
+        )
+    }
+
+    @Test
+    fun bluetoothRouteAcceptsLegacyActiveRouteFallback() {
+        assertTrue(
+            resolveBluetoothMediaRouteActive(
+                routedBluetooth = false,
+                routedDeviceQueryAvailable = true,
+                mediaRouterBluetooth = false,
+                legacyBluetoothRoute = true,
+                connectedBluetoothOutput = false,
+            ),
+        )
+    }
+
+    @Test
+    fun bluetoothRouteUsesConnectedOutputOnlyWhenPrimaryRouteIsUnavailable() {
+        assertTrue(
+            resolveBluetoothMediaRouteActive(
+                routedBluetooth = false,
+                routedDeviceQueryAvailable = false,
+                mediaRouterBluetooth = false,
+                legacyBluetoothRoute = false,
+                connectedBluetoothOutput = true,
+            ),
+        )
+        assertFalse(
+            resolveBluetoothMediaRouteActive(
+                routedBluetooth = false,
+                routedDeviceQueryAvailable = true,
+                mediaRouterBluetooth = false,
+                legacyBluetoothRoute = false,
+                connectedBluetoothOutput = true,
+            ),
+        )
     }
 }
