@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaRouter
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
@@ -46,6 +47,8 @@ internal class BluetoothLyricsPublisher(
 ) : AutoCloseable {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
+    @Suppress("DEPRECATION")
+    private val mediaRouter = appContext.getSystemService(Context.MEDIA_ROUTER_SERVICE) as? MediaRouter
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var collectJob: Job? = null
@@ -135,7 +138,7 @@ internal class BluetoothLyricsPublisher(
 
     private fun applyForPosition(snapshot: Snapshot, positionMs: Long) {
         val track = snapshot.track ?: return
-        if (!isBluetoothMediaOutputActive(audioManager)) {
+        if (!isBluetoothMediaOutputActive(audioManager, mediaRouter)) {
             restoreOriginalMetadata()
             return
         }
@@ -372,10 +375,14 @@ internal fun bluetoothLyricsDisplay(
     )
 }
 
-internal fun isBluetoothMediaOutputActive(audioManager: AudioManager?): Boolean {
-    if (audioManager == null) return false
-    val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        runCatching {
+@Suppress("DEPRECATION")
+internal fun isBluetoothMediaOutputActive(
+    audioManager: AudioManager?,
+    mediaRouter: MediaRouter?,
+): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (audioManager == null) return false
+        val devices = runCatching {
             audioManager.getAudioDevicesForAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -383,10 +390,13 @@ internal fun isBluetoothMediaOutputActive(audioManager: AudioManager?): Boolean 
                     .build(),
             )
         }.getOrElse { emptyList() }
-    } else {
-        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        return devices.any(::isBluetoothMediaDevice)
     }
-    return devices.any(::isBluetoothMediaDevice)
+
+    val selectedRoute = runCatching {
+        mediaRouter?.getSelectedRoute(MediaRouter.ROUTE_TYPE_LIVE_AUDIO)
+    }.getOrNull() ?: return false
+    return selectedRoute.deviceType == MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH
 }
 
 private fun isBluetoothMediaDevice(device: AudioDeviceInfo): Boolean = when (device.type) {
