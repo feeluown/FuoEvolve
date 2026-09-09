@@ -58,7 +58,9 @@ internal class DesktopWebLoginLauncher : AutoCloseable {
                 userAgent = loginUserAgent(provider.providerId),
             )
             runCatching {
-                val process = ProcessBuilder(helper.absolutePath).start()
+                val processBuilder = ProcessBuilder(helper.absolutePath)
+                configureDesktopWebLoginProcessEnvironment(processBuilder.environment())
+                val process = processBuilder.start()
                 activeProcesses += process
                 coroutineScope {
                     val diagnosticsDeferred = async(Dispatchers.IO) {
@@ -123,4 +125,50 @@ internal class DesktopWebLoginLauncher : AutoCloseable {
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     }
+}
+
+internal fun configureDesktopWebLoginProcessEnvironment(
+    environment: MutableMap<String, String>,
+    sourceEnvironment: Map<String, String> = System.getenv(),
+) {
+    sourceEnvironment["FUOEVOLVE_WEBVIEW_LIB_DIR"]
+        ?.takeIf(String::isNotBlank)
+        ?.let { bundledLibraryDir ->
+            val inherited = environment["LD_LIBRARY_PATH"]?.takeIf(String::isNotBlank)
+            environment["LD_LIBRARY_PATH"] = if (inherited == null) {
+                bundledLibraryDir
+            } else {
+                "$bundledLibraryDir:$inherited"
+            }
+        }
+
+    copyDesktopWebLoginEnvironment(
+        sourceEnvironment = sourceEnvironment,
+        sourceName = "FUOEVOLVE_WEBKIT_EXEC_PATH",
+        targetEnvironment = environment,
+        targetName = "WEBKIT_EXEC_PATH",
+    )
+    copyDesktopWebLoginEnvironment(
+        sourceEnvironment = sourceEnvironment,
+        sourceName = "FUOEVOLVE_WEBKIT_INJECTED_BUNDLE_PATH",
+        targetEnvironment = environment,
+        targetName = "WEBKIT_INJECTED_BUNDLE_PATH",
+    )
+    copyDesktopWebLoginEnvironment(
+        sourceEnvironment = sourceEnvironment,
+        sourceName = "FUOEVOLVE_GIO_EXTRA_MODULES",
+        targetEnvironment = environment,
+        targetName = "GIO_EXTRA_MODULES",
+    )
+}
+
+private fun copyDesktopWebLoginEnvironment(
+    sourceEnvironment: Map<String, String>,
+    sourceName: String,
+    targetEnvironment: MutableMap<String, String>,
+    targetName: String,
+) {
+    sourceEnvironment[sourceName]
+        ?.takeIf(String::isNotBlank)
+        ?.let { targetEnvironment[targetName] = it }
 }
