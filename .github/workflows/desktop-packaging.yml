@@ -307,7 +307,7 @@ jobs:
           if-no-files-found: error
 
   linux-system:
-    name: Package Linux DEB RPM and Arch
+    name: Package Linux DEB RPM and Arch variants
     runs-on: ubuntu-24.04
     timeout-minutes: 75
 
@@ -417,7 +417,7 @@ jobs:
           bash desktopApp/packaging/linux/package-system.sh deb "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
           bash desktopApp/packaging/linux/package-system.sh rpm "${{ steps.app.outputs.app_image }}" "${{ steps.app.outputs.version }}" build/desktop-packages/system
 
-      - name: Build Arch Linux package
+      - name: Build Arch Linux JVM variants
         run: >-
           bash desktopApp/packaging/linux/package-arch.sh
           "${{ steps.app.outputs.app_image }}"
@@ -428,16 +428,33 @@ jobs:
         run: |
           DEB="$(find build/desktop-packages/system -name '*.deb' -print -quit)"
           RPM="$(find build/desktop-packages/system -name '*.rpm' -print -quit)"
-          ARCH="$(find build/desktop-packages/system -name '*.pkg.tar.zst' -print -quit)"
-          test -n "$DEB" && test -n "$RPM" && test -n "$ARCH"
+          ARCH_BUNDLED="$(find build/desktop-packages/system -name 'fuoevolve-*.pkg.tar.zst' ! -name 'fuoevolve-system-jvm-*' -print -quit)"
+          ARCH_SYSTEM="$(find build/desktop-packages/system -name 'fuoevolve-system-jvm-*.pkg.tar.zst' -print -quit)"
+          test -n "$DEB" && test -n "$RPM" && test -n "$ARCH_BUNDLED" && test -n "$ARCH_SYSTEM"
           dpkg-deb -I "$DEB" | tee build/desktop-packages/system/deb-info.txt
           grep -q 'libmpv2' build/desktop-packages/system/deb-info.txt
           grep -q 'libwebkit2gtk-4.1-0' build/desktop-packages/system/deb-info.txt
           rpm -qp --requires "$RPM" | tee build/desktop-packages/system/rpm-requires.txt
           grep -q 'libmpv.so.2' build/desktop-packages/system/rpm-requires.txt
           grep -q 'libwebkit2gtk-4.1.so.0' build/desktop-packages/system/rpm-requires.txt
-          tar -tf "$ARCH" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
-          tar -xOf "$ARCH" .PKGINFO | grep -q 'depend = webkit2gtk-4.1'
+
+          tar -tf "$ARCH_BUNDLED" | grep 'opt/fuoevolve/bin/FuoEvolve' >/dev/null
+          tar -tf "$ARCH_BUNDLED" | grep 'opt/fuoevolve/runtime/' >/dev/null
+          tar -xOf "$ARCH_BUNDLED" .PKGINFO | tee build/desktop-packages/system/arch-bundled-pkginfo.txt
+          grep -q 'depend = webkit2gtk-4.1' build/desktop-packages/system/arch-bundled-pkginfo.txt
+          grep -q 'conflict = fuoevolve-system-jvm' build/desktop-packages/system/arch-bundled-pkginfo.txt
+
+          tar -tf "$ARCH_SYSTEM" | grep 'usr/bin/fuoevolve' >/dev/null
+          tar -tf "$ARCH_SYSTEM" | grep 'usr/lib/fuoevolve/lib/app/' >/dev/null
+          if tar -tf "$ARCH_SYSTEM" | grep '/runtime/' >/dev/null; then
+            echo "System-JVM Arch package unexpectedly contains a bundled JVM runtime" >&2
+            exit 1
+          fi
+          tar -xOf "$ARCH_SYSTEM" .PKGINFO | tee build/desktop-packages/system/arch-system-jvm-pkginfo.txt
+          grep -q 'depend = java-runtime>=21' build/desktop-packages/system/arch-system-jvm-pkginfo.txt
+          grep -q 'depend = webkit2gtk-4.1' build/desktop-packages/system/arch-system-jvm-pkginfo.txt
+          grep -q 'provides = fuoevolve=' build/desktop-packages/system/arch-system-jvm-pkginfo.txt
+          grep -q 'conflict = fuoevolve' build/desktop-packages/system/arch-system-jvm-pkginfo.txt
 
       - name: Report Linux package sizes
         run: du -h build/desktop-packages/system/*.deb build/desktop-packages/system/*.rpm build/desktop-packages/system/*.pkg.tar.zst
@@ -460,11 +477,20 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: Upload Arch Linux package
+      - name: Upload Arch Linux bundled-JVM package
         uses: actions/upload-artifact@v7
         with:
-          name: fuoevolve-linux-x64.pkg.tar.zst
-          path: build/desktop-packages/system/*.pkg.tar.zst
+          path: |
+            build/desktop-packages/system/fuoevolve-*.pkg.tar.zst
+            !build/desktop-packages/system/fuoevolve-system-jvm-*.pkg.tar.zst
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload Arch Linux system-JVM package
+        uses: actions/upload-artifact@v7
+        with:
+          path: build/desktop-packages/system/fuoevolve-system-jvm-*.pkg.tar.zst
           archive: false
           retention-days: 14
           if-no-files-found: error
