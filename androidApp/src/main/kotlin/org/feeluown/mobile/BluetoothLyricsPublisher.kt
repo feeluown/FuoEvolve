@@ -57,6 +57,8 @@ internal class BluetoothLyricsPublisher(
     private var anchorLyricsPositionMs = 0L
     private var anchorRealtimeMs = 0L
     private var anchorPlaying = false
+    private var cachedLyricsRaw: String? = null
+    private var cachedTimedLines: List<LyricLine> = emptyList()
     private var lastApplied: AppliedMetadata? = null
 
     fun start() {
@@ -95,6 +97,7 @@ internal class BluetoothLyricsPublisher(
         anchorLyricsPositionMs = snapshot.lyricsPositionMs.coerceAtLeast(0L)
         anchorRealtimeMs = SystemClock.elapsedRealtime()
         anchorPlaying = snapshot.status == PlaybackSessionStatus.Playing
+        updateLyricsTimeline(snapshot.lyrics)
 
         if (!snapshot.shouldPublishLyrics()) {
             tickJob?.cancel()
@@ -105,6 +108,12 @@ internal class BluetoothLyricsPublisher(
 
         applyForPosition(snapshot, anchorLyricsPositionMs)
         ensureTickLoop()
+    }
+
+    private fun updateLyricsTimeline(rawLyrics: String?) {
+        if (rawLyrics == cachedLyricsRaw) return
+        cachedLyricsRaw = rawLyrics
+        cachedTimedLines = parseLyrics(rawLyrics).takeWhile { it.timeMs != Long.MAX_VALUE }
     }
 
     private fun ensureTickLoop() {
@@ -119,7 +128,7 @@ internal class BluetoothLyricsPublisher(
                     anchorLyricsPositionMs
                 }
                 applyForPosition(snapshot, positionMs)
-                delay(PUBLISH_INTERVAL_MS)
+                delay(if (anchorPlaying) PLAYING_POLL_INTERVAL_MS else PAUSED_POLL_INTERVAL_MS)
             }
         }
     }
@@ -130,7 +139,7 @@ internal class BluetoothLyricsPublisher(
             restoreOriginalMetadata()
             return
         }
-        val lyricLine = bluetoothLyricLine(snapshot.lyrics, positionMs)
+        val lyricLine = bluetoothLyricLine(cachedTimedLines, positionMs)
         if (lyricLine == null) {
             restoreOriginalMetadata()
             return
@@ -323,7 +332,8 @@ internal class BluetoothLyricsPublisher(
 
     private companion object {
         const val TAG = "BluetoothLyrics"
-        const val PUBLISH_INTERVAL_MS = 250L
+        const val PLAYING_POLL_INTERVAL_MS = 250L
+        const val PAUSED_POLL_INTERVAL_MS = 1_000L
     }
 }
 
@@ -332,8 +342,13 @@ internal data class BluetoothLyricsDisplay(
     val artist: String,
 )
 
-internal fun bluetoothLyricLine(rawLyrics: String?, positionMs: Long): String? {
-    val timedLines = parseLyrics(rawLyrics).takeWhile { it.timeMs != Long.MAX_VALUE }
+internal fun bluetoothLyricLine(rawLyrics: String?, positionMs: Long): String? =
+    bluetoothLyricLine(
+        timedLines = parseLyrics(rawLyrics).takeWhile { it.timeMs != Long.MAX_VALUE },
+        positionMs = positionMs,
+    )
+
+private fun bluetoothLyricLine(timedLines: List<LyricLine>, positionMs: Long): String? {
     if (timedLines.isEmpty()) return null
     val normalizedPosition = positionMs.coerceAtLeast(0L)
     if (normalizedPosition < timedLines.first().timeMs) return null
