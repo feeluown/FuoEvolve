@@ -62,6 +62,7 @@ internal class BluetoothLyricsPublisher(
     private var cachedLyricsRaw: String? = null
     private var cachedTimedLines: List<LyricLine> = emptyList()
     private var lastApplied: AppliedMetadata? = null
+    private var lastRouteDecision: BluetoothMediaRouteDecision? = null
 
     fun start() {
         if (collectJob != null || closed) return
@@ -137,7 +138,12 @@ internal class BluetoothLyricsPublisher(
 
     private fun applyForPosition(snapshot: Snapshot, positionMs: Long) {
         val track = snapshot.track ?: return
-        if (!isBluetoothMediaOutputActive(audioManager, mediaRouter)) {
+        val routeDecision = bluetoothMediaRouteDecision(audioManager, mediaRouter)
+        if (routeDecision != lastRouteDecision) {
+            lastRouteDecision = routeDecision
+            AppLogger.i(TAG, "Bluetooth media route ${routeDecision.toDiagnosticString()}")
+        }
+        if (!routeDecision.active) {
             restoreOriginalMetadata()
             return
         }
@@ -374,36 +380,102 @@ internal fun bluetoothLyricsDisplay(
     )
 }
 
+internal data class BluetoothMediaRouteDecision(
+    val active: Boolean,
+    val routedDeviceTypes: List<Int>,
+    val routedDeviceQueryAvailable: Boolean,
+    val mediaRouterBluetooth: Boolean,
+    val legacyA2dpOn: Boolean,
+    val legacyScoOn: Boolean,
+    val connectedBluetoothOutputTypes: List<Int>,
+) {
+    fun toDiagnosticString(): String =
+        "active=$active routedTypes=$routedDeviceTypes routedQueryAvailable=$routedDeviceQueryAvailable " +
+            "mediaRouterBluetooth=$mediaRouterBluetooth a2dpOn=$legacyA2dpOn scoOn=$legacyScoOn " +
+            "connectedBluetoothTypes=$connectedBluetoothOutputTypes"
+}
+
+internal fun resolveBluetoothMediaRouteActive(
+    routedBluetooth: Boolean,
+    routedDeviceQueryAvailable: Boolean,
+    mediaRouterBluetooth: Boolean,
+    legacyBluetoothRoute: Boolean,
+    connectedBluetoothOutput: Boolean,
+    connectedOutputFallbackAllowed: Boolean,
+): Boolean =
+    routedBluetooth ||
+        mediaRouterBluetooth ||
+        legacyBluetoothRoute ||
+        (connectedOutputFallbackAllowed && !routedDeviceQueryAvailable && connectedBluetoothOutput)
+
 @Suppress("DEPRECATION")
 internal fun isBluetoothMediaOutputActive(
     audioManager: AudioManager?,
     mediaRouter: MediaRouter?,
-): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        if (audioManager == null) return false
-        val devices = runCatching {
+): Boolean = bluetoothMediaRouteDecision(audioManager, mediaRouter).active
+
+@Suppress("DEPRECATION")
+internal fun bluetoothMediaRouteDecision(
+    audioManager: AudioManager?,
+    mediaRouter: MediaRouter?,
+): BluetoothMediaRouteDecision {
+    val routedDeviceResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && audioManager != null) {
+        runCatching {
             audioManager.getAudioDevicesForAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build(),
-            )
-        }.getOrElse { emptyList() }
-        return devices.any { device ->
-            when (device.type) {
-                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                AudioDeviceInfo.TYPE_HEARING_AID,
-                AudioDeviceInfo.TYPE_BLE_HEADSET,
-                AudioDeviceInfo.TYPE_BLE_SPEAKER,
-                -> true
-                else -> Build.VERSION.SDK_INT >= 37 && device.type == AudioDeviceInfo.TYPE_BLE_HEARING_AID
-            }
+            ).map(AudioDeviceInfo::getType)
         }
+    } else {
+        null
     }
+    val routedDeviceTypes = routedDeviceResult?.getOrNull().orEmpty()
+    val routedDeviceQueryAvailable = routedDeviceResult?.isSuccess == true && routedDeviceTypes.isNotEmpty()
+    val routedBluetooth = routedDeviceTypes.any(::isBluetoothAudioDeviceType)
 
     val selectedRoute = runCatching {
         mediaRouter?.getSelectedRoute(MediaRouter.ROUTE_TYPE_LIVE_AUDIO)
-    }.getOrNull() ?: return false
-    return selectedRoute.deviceType == MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH
+    }.getOrNull()
+    val mediaRouterBluetooth = selectedRoute?.deviceType == MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH
+
+    val legacyA2dpOn = runCatching { audioManager?.isBluetoothA2dpOn == true }.getOrDefault(false)
+    val legacyScoOn = runCatching { audioManager?.isBluetoothScoOn == true }.getOrDefault(false)
+    val connectedBluetoothOutputTypes = runCatching {
+        audioManager
+            ?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .orEmpty()
+            .map(AudioDeviceInfo::getType)
+            .filter(::isBluetoothAudioDeviceType)
+            .distinct()
+    }.getOrElse { emptyList() }
+
+    val active = resolveBluetoothMediaRouteActive(
+        routedBluetooth = routedBluetooth,
+        routedDeviceQueryAvailable = routedDeviceQueryAvailable,
+        mediaRouterBluetooth = mediaRouterBluetooth,
+        legacyBluetoothRoute = legacyA2dpOn || legacyScoOn,
+        connectedBluetoothOutput = connectedBluetoothOutputTypes.isNotEmpty(),
+        connectedOutputFallbackAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+    )
+    return BluetoothMediaRouteDecision(
+        active = active,
+        routedDeviceTypes = routedDeviceTypes,
+        routedDeviceQueryAvailable = routedDeviceQueryAvailable,
+        mediaRouterBluetooth = mediaRouterBluetooth,
+        legacyA2dpOn = legacyA2dpOn,
+        legacyScoOn = legacyScoOn,
+        connectedBluetoothOutputTypes = connectedBluetoothOutputTypes,
+    )
+}
+
+private fun isBluetoothAudioDeviceType(type: Int): Boolean = when (type) {
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+    AudioDeviceInfo.TYPE_HEARING_AID,
+    AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_BLE_SPEAKER,
+    -> true
+    else -> Build.VERSION.SDK_INT >= 37 && type == AudioDeviceInfo.TYPE_BLE_HEARING_AID
 }
