@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -83,7 +84,7 @@ internal class BluetoothLyricsPublisher(
         collectJob = null
         tickJob?.cancel()
         tickJob = null
-        restoreCanonicalMetadata(latestSnapshot?.track)
+        restoreOriginalMetadata()
         mediaController?.release()
         mediaController = null
         scope.cancel()
@@ -98,7 +99,7 @@ internal class BluetoothLyricsPublisher(
         if (!snapshot.shouldPublishLyrics()) {
             tickJob?.cancel()
             tickJob = null
-            restoreCanonicalMetadata(snapshot.track)
+            restoreOriginalMetadata()
             return
         }
 
@@ -126,12 +127,12 @@ internal class BluetoothLyricsPublisher(
     private fun applyForPosition(snapshot: Snapshot, positionMs: Long) {
         val track = snapshot.track ?: return
         if (!isBluetoothMediaOutputActive(audioManager)) {
-            restoreCanonicalMetadata(track)
+            restoreOriginalMetadata()
             return
         }
         val lyricLine = bluetoothLyricLine(snapshot.lyrics, positionMs)
         if (lyricLine == null) {
-            restoreCanonicalMetadata(track)
+            restoreOriginalMetadata()
             return
         }
         val display = bluetoothLyricsDisplay(track.title, track.artists, lyricLine)
@@ -147,15 +148,26 @@ internal class BluetoothLyricsPublisher(
             Log.w(TAG, "media session does not allow Bluetooth lyrics metadata replacement")
             return
         }
-        val currentItem = controller.currentMediaItem ?: return
+
+        var currentItem = controller.currentMediaItem ?: return
         if (!currentItem.mediaId.endsWith(":${track.id}")) return
+
+        val previousApplied = lastApplied
+        if (previousApplied != null && previousApplied.mediaId != currentItem.mediaId) {
+            restoreOriginalMetadata()
+            currentItem = controller.currentMediaItem ?: return
+            if (!currentItem.mediaId.endsWith(":${track.id}")) return
+        }
+
         val currentIndex = controller.currentMediaItemIndex
         if (currentIndex < 0) return
+        val appliedForCurrentItem = lastApplied?.takeIf { it.mediaId == currentItem.mediaId }
         val desired = AppliedMetadata(
             mediaId = currentItem.mediaId,
+            originalTitle = appliedForCurrentItem?.originalTitle ?: currentItem.mediaMetadata.title?.toString(),
+            originalArtist = appliedForCurrentItem?.originalArtist ?: currentItem.mediaMetadata.artist?.toString(),
             title = display.title,
             artist = display.artist,
-            decorated = true,
         )
         if (
             lastApplied == desired &&
@@ -164,6 +176,7 @@ internal class BluetoothLyricsPublisher(
         ) {
             return
         }
+
         val updatedItem = currentItem.buildUpon()
             .setMediaMetadata(
                 currentItem.mediaMetadata.buildUpon()
@@ -179,38 +192,53 @@ internal class BluetoothLyricsPublisher(
             }
     }
 
-    private fun restoreCanonicalMetadata(track: TrackRef?) {
-        val applied = lastApplied?.takeIf { it.decorated } ?: return
-        val canonicalTrack = track ?: return
+    private fun restoreOriginalMetadata() {
+        val applied = lastApplied ?: return
         val controller = mediaController ?: return
         if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
-        val currentItem = controller.currentMediaItem ?: return
-        if (currentItem.mediaId != applied.mediaId || !currentItem.mediaId.endsWith(":${canonicalTrack.id}")) {
+
+        val target = findMediaItem(controller, applied.mediaId) ?: run {
             lastApplied = null
             return
         }
-        val currentIndex = controller.currentMediaItemIndex
-        if (currentIndex < 0) return
         if (
-            currentItem.mediaMetadata.title?.toString() == canonicalTrack.title &&
-            currentItem.mediaMetadata.artist?.toString() == canonicalTrack.artists
+            target.item.mediaMetadata.title?.toString() == applied.originalTitle &&
+            target.item.mediaMetadata.artist?.toString() == applied.originalArtist
         ) {
             lastApplied = null
             return
         }
-        val updatedItem = currentItem.buildUpon()
+
+        val updatedItem = target.item.buildUpon()
             .setMediaMetadata(
-                currentItem.mediaMetadata.buildUpon()
-                    .setTitle(canonicalTrack.title)
-                    .setArtist(canonicalTrack.artists)
+                target.item.mediaMetadata.buildUpon()
+                    .setTitle(applied.originalTitle)
+                    .setArtist(applied.originalArtist)
                     .build(),
             )
             .build()
-        runCatching { controller.replaceMediaItem(currentIndex, updatedItem) }
+        runCatching { controller.replaceMediaItem(target.index, updatedItem) }
             .onSuccess { lastApplied = null }
             .onFailure { throwable ->
-                Log.w(TAG, "failed to restore canonical media metadata trackId=${canonicalTrack.id}", throwable)
+                Log.w(TAG, "failed to restore original media metadata mediaId=${applied.mediaId}", throwable)
             }
+    }
+
+    private fun findMediaItem(controller: MediaController, mediaId: String): IndexedMediaItem? {
+        if (controller.isCommandAvailable(Player.COMMAND_GET_TIMELINE)) {
+            for (index in 0 until controller.mediaItemCount) {
+                val item = controller.getMediaItemAt(index)
+                if (item.mediaId == mediaId) return IndexedMediaItem(index, item)
+            }
+            return null
+        }
+        val currentItem = controller.currentMediaItem ?: return null
+        val currentIndex = controller.currentMediaItemIndex
+        return if (currentIndex >= 0 && currentItem.mediaId == mediaId) {
+            IndexedMediaItem(currentIndex, currentItem)
+        } else {
+            null
+        }
     }
 
     private fun connectController() {
@@ -263,9 +291,15 @@ internal class BluetoothLyricsPublisher(
 
     private data class AppliedMetadata(
         val mediaId: String,
+        val originalTitle: String?,
+        val originalArtist: String?,
         val title: String,
         val artist: String,
-        val decorated: Boolean,
+    )
+
+    private data class IndexedMediaItem(
+        val index: Int,
+        val item: MediaItem,
     )
 
     private companion object {
