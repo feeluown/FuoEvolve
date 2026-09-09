@@ -153,19 +153,31 @@ internal class BluetoothLyricsPublisher(
         if (!currentItem.mediaId.endsWith(":${track.id}")) return
 
         val previousApplied = lastApplied
-        if (previousApplied != null && previousApplied.mediaId != currentItem.mediaId) {
-            restoreOriginalMetadata()
-            currentItem = controller.currentMediaItem ?: return
-            if (!currentItem.mediaId.endsWith(":${track.id}")) return
+        if (
+            previousApplied != null &&
+            previousApplied.mediaId != currentItem.mediaId &&
+            !restoreOriginalMetadata()
+        ) {
+            return
         }
+        currentItem = controller.currentMediaItem ?: return
+        if (!currentItem.mediaId.endsWith(":${track.id}")) return
 
         val currentIndex = controller.currentMediaItemIndex
         if (currentIndex < 0) return
         val appliedForCurrentItem = lastApplied?.takeIf { it.mediaId == currentItem.mediaId }
         val desired = AppliedMetadata(
             mediaId = currentItem.mediaId,
-            originalTitle = appliedForCurrentItem?.originalTitle ?: currentItem.mediaMetadata.title?.toString(),
-            originalArtist = appliedForCurrentItem?.originalArtist ?: currentItem.mediaMetadata.artist?.toString(),
+            originalTitle = if (appliedForCurrentItem != null) {
+                appliedForCurrentItem.originalTitle
+            } else {
+                currentItem.mediaMetadata.title?.toString()
+            },
+            originalArtist = if (appliedForCurrentItem != null) {
+                appliedForCurrentItem.originalArtist
+            } else {
+                currentItem.mediaMetadata.artist?.toString()
+            },
             title = display.title,
             artist = display.artist,
         )
@@ -192,21 +204,22 @@ internal class BluetoothLyricsPublisher(
             }
     }
 
-    private fun restoreOriginalMetadata() {
-        val applied = lastApplied ?: return
-        val controller = mediaController ?: return
-        if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
+    /** Returns true when there is no decorated item left to restore. */
+    private fun restoreOriginalMetadata(): Boolean {
+        val applied = lastApplied ?: return true
+        val controller = mediaController ?: return false
+        if (!controller.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
 
         val target = findMediaItem(controller, applied.mediaId) ?: run {
             lastApplied = null
-            return
+            return true
         }
         if (
             target.item.mediaMetadata.title?.toString() == applied.originalTitle &&
             target.item.mediaMetadata.artist?.toString() == applied.originalArtist
         ) {
             lastApplied = null
-            return
+            return true
         }
 
         val updatedItem = target.item.buildUpon()
@@ -217,11 +230,17 @@ internal class BluetoothLyricsPublisher(
                     .build(),
             )
             .build()
-        runCatching { controller.replaceMediaItem(target.index, updatedItem) }
-            .onSuccess { lastApplied = null }
-            .onFailure { throwable ->
-                Log.w(TAG, "failed to restore original media metadata mediaId=${applied.mediaId}", throwable)
-            }
+        return runCatching { controller.replaceMediaItem(target.index, updatedItem) }
+            .fold(
+                onSuccess = {
+                    lastApplied = null
+                    true
+                },
+                onFailure = { throwable ->
+                    Log.w(TAG, "failed to restore original media metadata mediaId=${applied.mediaId}", throwable)
+                    false
+                },
+            )
     }
 
     private fun findMediaItem(controller: MediaController, mediaId: String): IndexedMediaItem? {
