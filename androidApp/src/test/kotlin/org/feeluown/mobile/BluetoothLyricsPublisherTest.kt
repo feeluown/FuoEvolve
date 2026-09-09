@@ -54,6 +54,7 @@ class BluetoothLyricsPublisherTest {
                 mediaRouterBluetooth = true,
                 legacyBluetoothRoute = false,
                 connectedBluetoothOutput = false,
+                connectedOutputFallbackAllowed = true,
             ),
         )
     }
@@ -67,12 +68,13 @@ class BluetoothLyricsPublisherTest {
                 mediaRouterBluetooth = false,
                 legacyBluetoothRoute = true,
                 connectedBluetoothOutput = false,
+                connectedOutputFallbackAllowed = true,
             ),
         )
     }
 
     @Test
-    fun bluetoothRouteUsesConnectedOutputOnlyWhenPrimaryRouteIsUnavailable() {
+    fun bluetoothRouteUsesConnectedOutputOnlyWhenPrimaryRouteIsUnavailableOnSupportedVersions() {
         assertTrue(
             resolveBluetoothMediaRouteActive(
                 routedBluetooth = false,
@@ -80,6 +82,7 @@ class BluetoothLyricsPublisherTest {
                 mediaRouterBluetooth = false,
                 legacyBluetoothRoute = false,
                 connectedBluetoothOutput = true,
+                connectedOutputFallbackAllowed = true,
             ),
         )
         assertFalse(
@@ -89,6 +92,21 @@ class BluetoothLyricsPublisherTest {
                 mediaRouterBluetooth = false,
                 legacyBluetoothRoute = false,
                 connectedBluetoothOutput = true,
+                connectedOutputFallbackAllowed = true,
+            ),
+        )
+    }
+
+    @Test
+    fun bluetoothRouteDoesNotTreatConnectedOutputAsActiveOnPreAndroid13() {
+        assertFalse(
+            resolveBluetoothMediaRouteActive(
+                routedBluetooth = false,
+                routedDeviceQueryAvailable = false,
+                mediaRouterBluetooth = false,
+                legacyBluetoothRoute = false,
+                connectedBluetoothOutput = true,
+                connectedOutputFallbackAllowed = false,
             ),
         )
     }
