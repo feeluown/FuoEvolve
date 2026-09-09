@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalIconButton
@@ -167,6 +168,13 @@ fun HomeScreen(
                 hasImagePermission = hasImagePermission,
                 onRequestImagePermission = onRequestImagePermission,
                 onOpenRecognition = onOpenRecognition,
+                onRefresh = {
+                    when (state.homeSection) {
+                        HomeSection.Mine -> home.refreshMine()
+                        HomeSection.Recommend,
+                        HomeSection.Music -> home.refreshHome(state.homeSection)
+                    }
+                },
                 onSectionClick = selectSection,
                 modifier = Modifier
                     .weight(1f)
@@ -411,6 +419,7 @@ fun HomeSectionPager(
     hasImagePermission: Boolean,
     onRequestImagePermission: () -> Unit,
     onOpenRecognition: () -> Unit,
+    onRefresh: () -> Unit,
     onSectionClick: (Int, HomeSection) -> Unit,
     modifier: Modifier,
     contentHorizontalPadding: Dp,
@@ -424,6 +433,7 @@ fun HomeSectionPager(
                 sections = sections,
                 selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
                 onSettings = home::openSettings,
+                onRefresh = onRefresh,
                 onSearch = home::openSearch,
                 onRecognition = onOpenRecognition,
                 onClick = onSectionClick,
@@ -490,6 +500,7 @@ fun HomeSectionRail(
     sections: List<Pair<HomeSection, String>>,
     selectedIndex: Int,
     onSettings: () -> Unit,
+    onRefresh: () -> Unit,
     onSearch: () -> Unit,
     onRecognition: () -> Unit,
     onClick: (Int, HomeSection) -> Unit,
@@ -510,6 +521,17 @@ fun HomeSectionRail(
                 IconButton(onClick = onSettings) {
                     Icon(Icons.Filled.Settings, contentDescription = "设置")
                 }
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                }
+                if (policy.showRecognition) {
+                    IconButton(onClick = onRecognition) {
+                        Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
+                    }
+                }
+                IconButton(onClick = onSearch) {
+                    Icon(Icons.Filled.Search, contentDescription = "搜索")
+                }
                 Spacer(Modifier.weight(1f))
                 sections.forEachIndexed { index, (section, label) ->
                     HomeSectionRailItem(
@@ -521,14 +543,6 @@ fun HomeSectionRail(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                if (policy.showRecognition) {
-                    IconButton(onClick = onRecognition) {
-                        Icon(Icons.Filled.Mic, contentDescription = "听歌识曲")
-                    }
-                }
-                IconButton(onClick = onSearch) {
-                    Icon(Icons.Filled.Search, contentDescription = "搜索")
-                }
             }
         }
     }
