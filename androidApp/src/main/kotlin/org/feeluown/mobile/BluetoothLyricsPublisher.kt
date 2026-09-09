@@ -390,22 +390,21 @@ internal fun isBluetoothMediaOutputActive(
                     .build(),
             )
         }.getOrElse { emptyList() }
-        return devices.any(::isBluetoothMediaDevice)
+        return devices.any { device ->
+            when (device.type) {
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                AudioDeviceInfo.TYPE_HEARING_AID,
+                AudioDeviceInfo.TYPE_BLE_HEADSET,
+                AudioDeviceInfo.TYPE_BLE_SPEAKER,
+                -> true
+                else -> Build.VERSION.SDK_INT >= 37 && device.type == AudioDeviceInfo.TYPE_BLE_HEARING_AID
+            }
+        }
     }
 
     val selectedRoute = runCatching {
         mediaRouter?.getSelectedRoute(MediaRouter.ROUTE_TYPE_LIVE_AUDIO)
     }.getOrNull() ?: return false
     return selectedRoute.deviceType == MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH
-}
-
-private fun isBluetoothMediaDevice(device: AudioDeviceInfo): Boolean = when (device.type) {
-    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-    AudioDeviceInfo.TYPE_HEARING_AID,
-    -> true
-    else -> Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && (
-        device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-            device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
-        )
 }
