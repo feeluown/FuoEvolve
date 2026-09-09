@@ -93,7 +93,6 @@ internal class PersistentDesktopPlaybackEngine(
             ?.takeIf { session -> session.currentTrack.id == track.id }
             ?.positionMs
             ?.coerceAtLeast(0L)
-
         if (reason.clearsDurablePlaybackResume) {
             restoredSession = null
             pendingResumePositionMs = null
@@ -243,7 +242,8 @@ internal class PersistentDesktopPlaybackEngine(
 
     private fun applyPendingResumeSeek(state: PlaybackState): Boolean {
         val position = pendingResumePositionMs ?: return false
-        if (state.currentTrack == null || state.status != PlayerStatus.Playing) return false
+        if (state.currentTrack == null) return false
+        if (state.status != PlayerStatus.Playing) return false
         pendingResumePositionMs = null
         delegate.seekTo(position)
         return true

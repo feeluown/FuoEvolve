@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.feeluown.mobile.AudioDecoderInfo
 import org.feeluown.mobile.AudioDecoderType
 import org.feeluown.mobile.AudioFormatInfo
+import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.PlaybackEngine
 import org.feeluown.mobile.PlaybackPayload
@@ -225,9 +226,9 @@ internal class DesktopMpvPlaybackEngine(
                 }
             }
             is DesktopMpvBackendEvent.FileLoaded -> {
-                if (event.path != activeRequestedPath) return
                 val current = mutableState.value
                 if (
+                    event.path == activeRequestedPath &&
                     current.currentTrack != null &&
                     current.status != PlayerStatus.Idle &&
                     current.status != PlayerStatus.Error &&
@@ -257,13 +258,16 @@ internal class DesktopMpvPlaybackEngine(
                 confirmPlaybackRestart()
             }
             is DesktopMpvBackendEvent.Property -> {
-                if (hasActiveNativeFile()) handleProperty(event.name, event.value)
+                if (!hasActiveNativeFile()) return
+                handleProperty(event.name, event.value)
             }
             is DesktopMpvBackendEvent.EndFile -> {
                 val activeEntryId = activePlaylistEntryId
-                if (activeEntryId != null) {
-                    if (event.playlistEntryId != activeEntryId) return
-                } else if (!activeFileLoaded) {
+                val matchesActiveEntry = when {
+                    activeEntryId != null -> event.playlistEntryId == activeEntryId
+                    else -> activeFileLoaded
+                }
+                if (!matchesActiveEntry) {
                     return
                 }
                 when (event.reason) {
@@ -289,7 +293,17 @@ internal class DesktopMpvPlaybackEngine(
                     -> clearActiveNativeFile()
                 }
             }
-            is DesktopMpvBackendEvent.Failure -> publishBackendFailure(event.throwable)
+            is DesktopMpvBackendEvent.Failure -> {
+                val failedBackend = backend
+                backend = null
+                try {
+                    failedBackend?.close()
+                } catch (closeFailure: Exception) {
+                    AppLogger.e(DESKTOP_MPV_LOG_TAG, "backend cleanup failed", closeFailure)
+                }
+                AppLogger.e(DESKTOP_MPV_LOG_TAG, "backend failure", event.throwable)
+                publishBackendFailure(event.throwable)
+            }
         }
     }
 
@@ -298,8 +312,9 @@ internal class DesktopMpvPlaybackEngine(
         if (current.currentTrack != null && current.status != PlayerStatus.Error) {
             activePlaybackConfirmed = true
             lastLoadingPositionMs = null
+            val nextStatus = if (paused) PlayerStatus.Paused else PlayerStatus.Playing
             mutableState.value = current.copy(
-                status = if (paused) PlayerStatus.Paused else PlayerStatus.Playing,
+                status = nextStatus,
                 errorMessage = null,
             )
         }
@@ -470,6 +485,10 @@ private class LibMpvBackend(
                     "observe $property",
                 )
             }
+            AppLogger.i(
+                DESKTOP_MPV_LOG_TAG,
+                "libmpv initialized observedProperties=${OBSERVED_PROPERTIES.joinToString(",")}",
+            )
         } catch (throwable: Throwable) {
             library.mpv_terminate_destroy(handle)
             throw throwable
@@ -505,6 +524,7 @@ private class LibMpvBackend(
                 expectedPlaylistEntryId = playlistEntryId
             }
         } catch (throwable: Throwable) {
+            AppLogger.e(DESKTOP_MPV_LOG_TAG, "backend load failed", throwable)
             expectedPath = null
             expectedPlaylistEntryId = null
             polledActivePath = null
@@ -556,43 +576,36 @@ private class LibMpvBackend(
                 when (event.eventId) {
                     MPV_EVENT_NONE -> Unit
                     MPV_EVENT_SHUTDOWN -> break
-                    MPV_EVENT_START_FILE -> {
-                        event.data?.let { data ->
-                            val startFile = MpvNativeStartFile(data)
-                            if (startFileMatchesCurrentRequest(startFile.playlistEntryId)) {
-                                listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
-                            }
+                    MPV_EVENT_START_FILE -> event.data?.let { data ->
+                        val startFile = MpvNativeStartFile(data)
+                        if (startFileMatchesCurrentRequest(startFile.playlistEntryId)) {
+                            listener(DesktopMpvBackendEvent.StartFile(startFile.playlistEntryId))
                         }
                     }
                     MPV_EVENT_FILE_LOADED -> activateExpectedRequestFromFileLoaded()
                     MPV_EVENT_PLAYBACK_RESTART -> listener(DesktopMpvBackendEvent.PlaybackRestart)
-                    MPV_EVENT_PROPERTY_CHANGE -> {
-                        event.data?.let { data ->
-                            val property = MpvNativeEventProperty(data)
+                    MPV_EVENT_PROPERTY_CHANGE -> event.data?.let { data ->
+                        val property = MpvNativeEventProperty(data)
+                        dispatchProperty(
+                            name = property.name?.getString(0, StandardCharsets.UTF_8.name()).orEmpty(),
+                            value = property.stringValue(),
+                        )
+                    }
+                    MPV_EVENT_END_FILE -> event.data?.let { data ->
+                        val endFile = MpvNativeEndFile(data)
+                        val expectedEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
+                        val matches = expectedEntryId != null && endFile.playlistEntryId == expectedEntryId
+                        if (matches) {
+                            expectedPlaylistEntryId = expectedEntryId
                             listener(
-                                DesktopMpvBackendEvent.Property(
-                                    name = property.name?.getString(0, StandardCharsets.UTF_8.name()).orEmpty(),
-                                    value = property.stringValue(),
+                                DesktopMpvBackendEvent.EndFile(
+                                    playlistEntryId = endFile.playlistEntryId,
+                                    reason = endFile.reason,
+                                    errorMessage = endFile.error
+                                        .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
+                                        ?.let(library::mpv_error_string),
                                 ),
                             )
-                        }
-                    }
-                    MPV_EVENT_END_FILE -> {
-                        event.data?.let { data ->
-                            val endFile = MpvNativeEndFile(data)
-                            val expectedEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
-                            if (expectedEntryId != null && endFile.playlistEntryId == expectedEntryId) {
-                                expectedPlaylistEntryId = expectedEntryId
-                                listener(
-                                    DesktopMpvBackendEvent.EndFile(
-                                        playlistEntryId = endFile.playlistEntryId,
-                                        reason = endFile.reason,
-                                        errorMessage = endFile.error
-                                            .takeIf { endFile.reason == MPV_END_FILE_REASON_ERROR && it < 0 }
-                                            ?.let(library::mpv_error_string),
-                                    ),
-                                )
-                            }
                         }
                     }
                 }
@@ -604,16 +617,19 @@ private class LibMpvBackend(
                 }
             }
         } catch (throwable: Throwable) {
-            if (!closed.get()) listener(DesktopMpvBackendEvent.Failure(throwable))
+            if (!closed.get()) {
+                AppLogger.e(DESKTOP_MPV_LOG_TAG, "backend event loop failed", throwable)
+                listener(DesktopMpvBackendEvent.Failure(throwable))
+            }
         }
     }
 
     private fun startFileMatchesCurrentRequest(playlistEntryId: Long): Boolean {
         if (expectedPath == null) return false
         val expectedEntryId = expectedPlaylistEntryId
-        if (expectedEntryId != null) return playlistEntryId == expectedEntryId
-        expectedPlaylistEntryId = playlistEntryId
-        return true
+        val accepted = expectedEntryId == null || playlistEntryId == expectedEntryId
+        if (accepted && expectedEntryId == null) expectedPlaylistEntryId = playlistEntryId
+        return accepted
     }
 
     private fun activateExpectedRequestFromFileLoaded(): Boolean {
@@ -651,17 +667,14 @@ private class LibMpvBackend(
         val currentPlaylistEntryId = currentPlaylistEntryId()
         val currentPath = getPropertyString("path")
         val currentPlaylistFilename = currentPlaylistEntryFilename()
-        if (
-            !desktopMpvSourceMatchesRequest(
-                requestedPath = requestedPath,
-                expectedPlaylistEntryId = expectedPlaylistEntryId,
-                currentPlaylistEntryId = currentPlaylistEntryId,
-                currentPath = currentPath,
-                currentPlaylistFilename = currentPlaylistFilename,
-            )
-        ) {
-            return false
-        }
+        val matches = desktopMpvSourceMatchesRequest(
+            requestedPath = requestedPath,
+            expectedPlaylistEntryId = expectedPlaylistEntryId,
+            currentPlaylistEntryId = currentPlaylistEntryId,
+            currentPath = currentPath,
+            currentPlaylistFilename = currentPlaylistFilename,
+        )
+        if (!matches) return false
 
         val playlistEntryId = currentPlaylistEntryId ?: expectedPlaylistEntryId
         if (playlistEntryId != null) expectedPlaylistEntryId = playlistEntryId
@@ -693,9 +706,13 @@ private class LibMpvBackend(
         if (!activateCurrentRequestFromPolling()) return
         POLLED_PROPERTIES.forEach { property ->
             getPropertyString(property)?.let { value ->
-                listener(DesktopMpvBackendEvent.Property(property, value))
+                dispatchProperty(property, value)
             }
         }
+    }
+
+    private fun dispatchProperty(name: String, value: String?) {
+        listener(DesktopMpvBackendEvent.Property(name, value))
     }
 
     private fun getPropertyString(name: String): String? {
@@ -759,7 +776,7 @@ internal interface MpvNative : Library {
     fun mpv_error_string(error: Int): String?
 }
 
-private class MpvNativeEvent(pointer: Pointer) : Structure(pointer) {
+internal class MpvNativeEvent(pointer: Pointer) : Structure(pointer) {
     @JvmField var eventId: Int = 0
     @JvmField var error: Int = 0
     @JvmField var replyUserdata: Long = 0L
@@ -772,7 +789,7 @@ private class MpvNativeEvent(pointer: Pointer) : Structure(pointer) {
     }
 }
 
-private class MpvNativeStartFile(pointer: Pointer) : Structure(pointer) {
+internal class MpvNativeStartFile(pointer: Pointer) : Structure(pointer) {
     @JvmField var playlistEntryId: Long = 0L
 
     override fun getFieldOrder(): List<String> = listOf("playlistEntryId")
@@ -782,7 +799,7 @@ private class MpvNativeStartFile(pointer: Pointer) : Structure(pointer) {
     }
 }
 
-private class MpvNativeEventProperty(pointer: Pointer) : Structure(pointer) {
+internal class MpvNativeEventProperty(pointer: Pointer) : Structure(pointer) {
     @JvmField var name: Pointer? = null
     @JvmField var format: Int = 0
     @JvmField var data: Pointer? = null
@@ -800,7 +817,7 @@ private class MpvNativeEventProperty(pointer: Pointer) : Structure(pointer) {
     }
 }
 
-private class MpvNativeEndFile(pointer: Pointer) : Structure(pointer) {
+internal class MpvNativeEndFile(pointer: Pointer) : Structure(pointer) {
     @JvmField var reason: Int = 0
     @JvmField var error: Int = 0
     @JvmField var playlistEntryId: Long = 0L
@@ -836,7 +853,9 @@ private fun loadMpvLibrary(): MpvNative {
     var lastFailure: Throwable? = null
     candidates.forEach { candidate ->
         try {
-            return Native.load(candidate, MpvNative::class.java)
+            return Native.load(candidate, MpvNative::class.java).also {
+                AppLogger.i(DESKTOP_MPV_LOG_TAG, "libmpv loaded candidate=$candidate")
+            }
         } catch (throwable: Throwable) {
             lastFailure = throwable
         }
@@ -860,18 +879,28 @@ internal fun encodeMpvLoadfileOptions(headers: Map<String, String>): String {
     val userAgent = sanitized.firstOrNull { (name, _) -> name.equals("User-Agent", ignoreCase = true) }?.second
     val headerFields = sanitized
         .filterNot { (name, _) -> name.equals("User-Agent", ignoreCase = true) }
-        .map { (name, value) -> "$name: $value" }
-        .joinToString(",") { header -> mpvFixedLength(header) }
+        .map { (name, value) -> escapeMpvStringListItem("$name: $value") }
+        .joinToString(",")
 
     return buildList {
         userAgent?.let { add("user-agent=${mpvFixedLength(it)}") }
         if (headerFields.isNotEmpty()) {
-            // The loadfile options argument is itself a comma-separated key/value list, while
-            // http-header-fields is another comma-separated list. Quote the complete inner list
-            // once more so the outer parser cannot mistake header separators for option separators.
+            // loadfile parses the outer option list before mpv parses http-header-fields. The
+            // complete header list therefore needs one fixed-length quote; quoting each header
+            // item here would leave the %length% marker in the actual HTTP header name.
             add("http-header-fields=${mpvFixedLength(headerFields)}")
         }
     }.joinToString(",")
+}
+
+private fun escapeMpvStringListItem(value: String): String = buildString(value.length) {
+    value.forEach { char ->
+        when (char) {
+            '\\' -> append("\\\\")
+            ',' -> append("\\,")
+            else -> append(char)
+        }
+    }
 }
 
 internal fun encodeHeaderFields(headers: Map<String, String>): String = headers
@@ -925,6 +954,7 @@ private const val MPV_END_FILE_REASON_REDIRECT = 5
 private const val MPV_VOLUME_SCALE = 100.0
 private const val MPV_STATE_POLL_INTERVAL_SECONDS = 0.25
 private const val MPV_STATE_POLL_INTERVAL_NANOS = 250_000_000L
+private const val DESKTOP_MPV_LOG_TAG = "DesktopMpv"
 
 private val OBSERVED_PROPERTIES = listOf(
     "pause",

@@ -20,7 +20,7 @@ class DesktopMprisStatePreservationTest {
                 canGoNext = true,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         objectUnderTest.Next()
 
@@ -39,7 +39,7 @@ class DesktopMprisStatePreservationTest {
                 canGoPrevious = true,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         objectUnderTest.Previous()
 
@@ -57,7 +57,7 @@ class DesktopMprisStatePreservationTest {
                 canGoNext = true,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         objectUnderTest.Next()
 
@@ -76,7 +76,7 @@ class DesktopMprisStatePreservationTest {
                 canGoPrevious = false,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         objectUnderTest.Next()
         objectUnderTest.Previous()
@@ -98,7 +98,7 @@ class DesktopMprisStatePreservationTest {
                 canGoNext = true,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         objectUnderTest.Seek(2_000_000L)
 

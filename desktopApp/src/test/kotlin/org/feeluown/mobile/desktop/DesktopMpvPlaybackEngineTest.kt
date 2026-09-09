@@ -194,6 +194,28 @@ class DesktopMpvPlaybackEngineTest {
     }
 
     @Test
+    fun backendFailureDiscardsDeadBackendBeforeNextPlay() {
+        val backends = mutableListOf<FakeDesktopMpvBackend>()
+        val engine = DesktopMpvPlaybackEngine { listener ->
+            FakeDesktopMpvBackend(listener).also { backends += it }
+        }
+        val firstTrack = track(id = "netease:first-failure", source = "netease")
+        val secondTrack = track(id = "qqmusic:second-play", source = "qqmusic")
+
+        engine.play(firstTrack, payload(firstTrack, "https://example.test/first.mp3"))
+        backends.single().emit(DesktopMpvBackendEvent.Failure(IllegalStateException("event loop stopped")))
+
+        assertEquals(PlayerStatus.Error, engine.state.value.status)
+        assertTrue(backends.single().closed)
+
+        engine.play(secondTrack, payload(secondTrack, "https://example.test/second.mp3"))
+
+        assertEquals(2, backends.size)
+        assertEquals(PlayerStatus.Loading, engine.state.value.status)
+        assertEquals(secondTrack.id, engine.state.value.currentTrack?.id)
+    }
+
+    @Test
     fun headerFieldsUseMpvListQuotingAndRejectLineInjection() {
         val validHeaders = listOf(
             "Referer: https://www.bilibili.com/",
@@ -213,13 +235,13 @@ class DesktopMpvPlaybackEngineTest {
     }
 
     @Test
-    fun loadfileOptionsSeparateUserAgentAndQuoteNestedHeaderList() {
+    fun loadfileOptionsEncodeOuterHeaderList() {
         val userAgent = "FuoEvolve/desktop, mpv"
         val rawHeaders = listOf(
             "Referer: https://www.bilibili.com/",
             "Cookie: a=b,c=d",
         )
-        val headerList = rawHeaders.joinToString(",") { header -> fixedLength(header) }
+        val headerList = rawHeaders.joinToString(",") { header -> header.replace(",", "\\,") }
         val expected = listOf(
             "user-agent=${fixedLength(userAgent)}",
             "http-header-fields=${fixedLength(headerList)}",
@@ -272,6 +294,7 @@ private class FakeDesktopMpvBackend(
     var loadedHeaders: Map<String, String> = emptyMap()
     var paused: Boolean? = null
     var seekPositionMs: Long? = null
+    var closed = false
 
     override fun load(url: String, headers: Map<String, String>) {
         loadedUrl = url
@@ -288,7 +311,9 @@ private class FakeDesktopMpvBackend(
         seekPositionMs = positionMs
     }
 
-    override fun close() = Unit
+    override fun close() {
+        closed = true
+    }
 
     fun emit(event: DesktopMpvBackendEvent) {
         listener(event)

@@ -29,7 +29,7 @@ class DesktopMprisSessionTest {
                 shuffleEnabled = true,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         assertEquals("Playing", objectUnderTest.getPlaybackStatus())
         assertEquals("Track", objectUnderTest.getLoopStatus())
@@ -61,7 +61,7 @@ class DesktopMprisSessionTest {
             ),
         )
         val seeked = mutableListOf<Long>()
-        val objectUnderTest = LinuxMprisObject(session, seeked::add)
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = seeked::add)
 
         objectUnderTest.Play()
         objectUnderTest.Pause()
@@ -123,6 +123,81 @@ class DesktopMprisSessionTest {
     }
 
     @Test
+    fun publishesSeekedPositionForSameTrackResumeJump() {
+        val track = track("track-a")
+        val paused = PlaybackSessionState(
+            status = PlaybackSessionStatus.Paused,
+            currentTrack = track,
+            positionMs = 65_717L,
+            durationMs = 211_981L,
+        )
+        val loading = paused.copy(
+            status = PlaybackSessionStatus.Loading,
+            positionMs = 0L,
+        )
+        val playingAtStart = loading.copy(status = PlaybackSessionStatus.Playing)
+        val resumed = playingAtStart.copy(positionMs = 65_717L)
+
+        assertEquals(null, mprisSeekedPositionUs(paused, loading))
+        assertEquals(null, mprisSeekedPositionUs(loading, playingAtStart))
+        assertEquals(65_717_000L, mprisSeekedPositionUs(playingAtStart, resumed))
+    }
+
+    @Test
+    fun enablesKdePositionWorkaroundOnlyForKdeEnvironment() {
+        assertTrue(isKdeDesktop(mapOf("XDG_CURRENT_DESKTOP" to "KDE")))
+        assertTrue(isKdeDesktop(mapOf("XDG_CURRENT_DESKTOP" to "KDE;wayland")))
+        assertTrue(isKdeDesktop(mapOf("XDG_SESSION_DESKTOP" to "plasma")))
+        assertTrue(isKdeDesktop(mapOf("KDE_FULL_SESSION" to "true")))
+        assertFalse(isKdeDesktop(mapOf("XDG_CURRENT_DESKTOP" to "GNOME")))
+        assertFalse(isKdeDesktop(emptyMap()))
+    }
+
+    @Test
+    fun sendsKdePositionSignalAtMostOncePerSecondOfProgress() {
+        assertTrue(
+            kdePositionSignalDue(
+                enabled = true,
+                status = PlaybackSessionStatus.Playing,
+                positionUs = 0L,
+                lastPublishedPositionUs = null,
+            ),
+        )
+        assertFalse(
+            kdePositionSignalDue(
+                enabled = true,
+                status = PlaybackSessionStatus.Playing,
+                positionUs = 999_000L,
+                lastPublishedPositionUs = 0L,
+            ),
+        )
+        assertTrue(
+            kdePositionSignalDue(
+                enabled = true,
+                status = PlaybackSessionStatus.Playing,
+                positionUs = 1_000_000L,
+                lastPublishedPositionUs = 0L,
+            ),
+        )
+        assertFalse(
+            kdePositionSignalDue(
+                enabled = true,
+                status = PlaybackSessionStatus.Paused,
+                positionUs = 2_000_000L,
+                lastPublishedPositionUs = 0L,
+            ),
+        )
+        assertFalse(
+            kdePositionSignalDue(
+                enabled = false,
+                status = PlaybackSessionStatus.Playing,
+                positionUs = 2_000_000L,
+                lastPublishedPositionUs = 0L,
+            ),
+        )
+    }
+
+    @Test
     fun ignoresPlaybackModeWritesWhenQueuePolicyLocksThem() {
         val session = FakePlaybackSession(
             PlaybackSessionState(
@@ -131,7 +206,7 @@ class DesktopMprisSessionTest {
                 canChangePlaybackMode = false,
             ),
         )
-        val objectUnderTest = LinuxMprisObject(session) { }
+        val objectUnderTest = LinuxMprisObject(session, onSeeked = {})
 
         objectUnderTest.setLoopStatus("Track")
         objectUnderTest.setShuffle(true)
@@ -149,7 +224,7 @@ class DesktopMprisSessionTest {
                 durationMs = 100_000,
             ),
         )
-        val loadingObject = LinuxMprisObject(loading) { }
+        val loadingObject = LinuxMprisObject(loading, onSeeked = {})
         assertFalse(loadingObject.getCanPause())
         assertFalse(loadingObject.getCanSeek())
 
