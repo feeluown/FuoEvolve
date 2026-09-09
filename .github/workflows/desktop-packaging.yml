@@ -66,11 +66,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/windows-smtc/Cargo.lock
             desktopApp/native/windows-smtc/target
-            desktopApp/native/web-login/Cargo.lock
             desktopApp/native/web-login/target
-          key: desktop-rust-windows-x64-${{ hashFiles('desktopApp/native/windows-smtc/Cargo.toml', 'desktopApp/native/windows-smtc/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
+          key: desktop-rust-windows-x64-${{ hashFiles('desktopApp/native/windows-smtc/Cargo.toml', 'desktopApp/native/windows-smtc/Cargo.lock', 'desktopApp/native/windows-smtc/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-windows-x64-
 
@@ -212,11 +210,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/macos-now-playing/Cargo.lock
             desktopApp/native/macos-now-playing/target
-            desktopApp/native/web-login/Cargo.lock
             desktopApp/native/web-login/target
-          key: desktop-rust-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/native/macos-now-playing/Cargo.toml', 'desktopApp/native/macos-now-playing/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
+          key: desktop-rust-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/native/macos-now-playing/Cargo.toml', 'desktopApp/native/macos-now-playing/Cargo.lock', 'desktopApp/native/macos-now-playing/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-macos-${{ matrix.arch }}-
 
@@ -361,11 +357,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/linux-tray/Cargo.lock
             desktopApp/native/linux-tray/target
-            desktopApp/native/web-login/Cargo.lock
             desktopApp/native/web-login/target
-          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
+          key: desktop-rust-linux-system-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/Cargo.lock', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-linux-system-x64-
 
@@ -526,11 +520,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/linux-tray/Cargo.lock
             desktopApp/native/linux-tray/target
-            desktopApp/native/web-login/Cargo.lock
             desktopApp/native/web-login/target
-          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/src/**') }}
+          key: desktop-rust-linux-appimage-x64-${{ hashFiles('desktopApp/native/linux-tray/Cargo.toml', 'desktopApp/native/linux-tray/Cargo.lock', 'desktopApp/native/linux-tray/src/**', 'desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
             desktop-rust-linux-appimage-x64-
 
