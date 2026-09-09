@@ -129,6 +129,30 @@ class DesktopSecureProviderCredentialStoreTest {
         assertTrue(error.message.orEmpty().contains("凭证数据"))
     }
 
+    @Test
+    fun macOsSafeStoreEncodesInteractiveSecurityPayloadAndRoundTrips() {
+        val backend = FakeDesktopSecretStore()
+        val store = MacOsSafeDesktopSecretStore(backend)
+        val original = "{\"cookie\":\"uin=123; p_skey=quote\\\"value\",\n\"unicode\":\"中文\"}"
+
+        assertTrue(store.put("qqmusic", original.toCharArray()))
+
+        val persisted = backend.values.getValue("qqmusic").concatToString()
+        assertTrue('"' !in persisted, "encoded Keychain payload must not contain quotes")
+        assertTrue('\n' !in persisted, "encoded Keychain payload must stay on one security -i command line")
+        assertEquals(original, store.get("qqmusic")?.concatToString())
+    }
+
+    @Test
+    fun macOsSafeStoreReadsLegacyUnencodedValues() {
+        val backend = FakeDesktopSecretStore()
+        val legacy = "v1:generation1:3"
+        backend.values["manifest"] = legacy.toCharArray()
+        val store = MacOsSafeDesktopSecretStore(backend)
+
+        assertEquals(legacy, store.get("manifest")?.concatToString())
+    }
+
     private fun largeCredentials(cookiePrefix: String = "cookie"): ProviderCredentials = ProviderCredentials(
         cookies = (1..80).associate { index ->
             "key$index" to "$cookiePrefix-$index-${"x".repeat(48)}"
