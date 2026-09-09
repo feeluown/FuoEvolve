@@ -251,7 +251,7 @@ internal class AndroidAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = appScope,
-            onProviderMutation = homeRefreshPort::refreshMine,
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
