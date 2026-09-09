@@ -49,7 +49,7 @@ internal class DesktopSecureProviderCredentialStore(
             val previous = readManifest(store, providerId)
             val serialized = json.encodeToString(ProviderCredentials.serializer(), credentials)
             val generation = generationProvider()
-            val chunks = serialized.chunked(SECRET_CHUNK_CHAR_LIMIT).ifEmpty { listOf("") }
+            val chunks = chunkCredentialPayload(serialized).ifEmpty { listOf("") }
             val writtenKeys = mutableListOf<String>()
 
             try {
@@ -296,6 +296,30 @@ private data class DesktopCredentialManifest(
             return DesktopCredentialManifest(generation, chunkCount)
         }
     }
+}
+
+internal fun chunkCredentialPayload(
+    value: String,
+    maxChars: Int = SECRET_CHUNK_CHAR_LIMIT,
+): List<String> {
+    require(maxChars >= 2) { "credential chunk size must leave room for a surrogate pair" }
+    if (value.isEmpty()) return emptyList()
+
+    val chunks = mutableListOf<String>()
+    var start = 0
+    while (start < value.length) {
+        var end = minOf(start + maxChars, value.length)
+        if (
+            end < value.length &&
+            Character.isHighSurrogate(value[end - 1]) &&
+            Character.isLowSurrogate(value[end])
+        ) {
+            end--
+        }
+        chunks += value.substring(start, end)
+        start = end
+    }
+    return chunks
 }
 
 private fun readSecret(store: DesktopSecretStore, key: String): String? {
