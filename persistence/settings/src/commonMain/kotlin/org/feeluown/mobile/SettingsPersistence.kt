@@ -76,6 +76,7 @@ data class PersistedSettingsV1(
     val lyricFontSize: String? = null,
     val statusBarLyricsEnabled: Boolean? = null,
     val bydInstrumentLyricsEnabled: Boolean? = null,
+    val bluetoothLyricsEnabled: Boolean? = null,
     val themeMode: String? = null,
     val themeColorScheme: String? = null,
     val themePaletteStyle: String? = null,
