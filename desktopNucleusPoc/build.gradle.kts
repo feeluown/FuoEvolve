@@ -306,6 +306,7 @@ tasks.withType<Jar>()
     }
 
 val requestedTargetFormat = providers.gradleProperty("fuoevolve.nucleus.targetFormat")
+    .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_TARGET_FORMAT"))
     .orNull
     ?.trim()
     ?.lowercase()
@@ -348,6 +349,7 @@ nucleus.application {
             shortcut = true
             appCategory = "AudioVideo"
             menuGroup = "AudioVideo"
+            debMaintainer = "FuoEvolve Maintainers <6873988+BruceZhang1993@users.noreply.github.com>"
             pacmanDepends = listOf(
                 "gtk3",
                 "libx11",
