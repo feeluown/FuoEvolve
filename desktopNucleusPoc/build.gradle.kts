@@ -13,10 +13,17 @@ kotlin {
 
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
+val packageResourceOs = when {
+    isWindowsHost -> "windows"
+    hostOs.contains("mac") || hostOs.contains("darwin") -> "macos"
+    hostOs.contains("linux") -> "linux"
+    else -> "common"
+}
 val webLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
 val webLoginProjectDir = rootProject.layout.projectDirectory.dir("desktopApp/native/web-login")
 val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
 val nucleusAppResources = layout.buildDirectory.dir("nucleus-app-resources")
+val stagedNativeResourceRoot = "$packageResourceOs/native"
 
 val buildNucleusWebLoginHelper by tasks.registering(Exec::class) {
     group = "build"
@@ -30,7 +37,7 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
     description = "Stage native resources required by the Nucleus desktop runtime."
     dependsOn(buildNucleusWebLoginHelper)
     from(webLoginExecutable) {
-        into("native/helpers")
+        into("$stagedNativeResourceRoot/helpers")
         if (!isWindowsHost) {
             filePermissions {
                 unix("755")
@@ -41,7 +48,7 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
 
     doLast {
         val stagedHelper = nucleusAppResources.get().asFile
-            .resolve("native/helpers/$webLoginExecutableName")
+            .resolve("$stagedNativeResourceRoot/helpers/$webLoginExecutableName")
         if (!stagedHelper.isFile) {
             throw GradleException("Nucleus web login helper was not staged: ${stagedHelper.absolutePath}")
         }
