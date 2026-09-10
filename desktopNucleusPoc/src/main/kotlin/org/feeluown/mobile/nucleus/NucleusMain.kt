@@ -26,6 +26,7 @@ private const val SMOKE_ENV = "FUOEVOLVE_NUCLEUS_POC_SMOKE"
 private const val PLAYBACK_SMOKE_ENV = "FUOEVOLVE_NUCLEUS_PLAYBACK_SMOKE"
 
 fun main() {
+    configurePackagedNativeRuntime()
     installDesktopAppLogger()
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     installDesktopPlaybackEngineFactory {
@@ -44,7 +45,7 @@ fun main() {
             onCloseRequest = requestExit,
             state = rememberWindowState(size = DpSize(1280.dp, 800.dp)),
             minimumSize = DpSize(900.dp, 600.dp),
-            title = "FuoEvolve · Nucleus",
+            title = "FuoEvolve",
         ) {
             if (playbackSmokeFile != null) {
                 LaunchedEffect(playbackSmokeFile) {
@@ -89,9 +90,8 @@ fun main() {
                 }
             } else if (smokeMode) {
                 LaunchedEffect(Unit) {
-                    // Reaching this effect means the Tao window and the existing FuoEvolve
-                    // composition both started successfully. Give one frame a short grace period
-                    // before exiting so CI validates the actual runtime path, not only compilation.
+                    // Reaching this effect means Tao and the existing FuoEvolve composition both
+                    // started successfully. Give one frame a short grace period before exiting.
                     delay(1_500)
                     requestExit()
                 }
@@ -99,5 +99,20 @@ fun main() {
 
             DesktopAppHost()
         }
+    }
+}
+
+private fun configurePackagedNativeRuntime() {
+    if (!System.getProperty("os.name").orEmpty().contains("linux", ignoreCase = true)) return
+    if (!System.getProperty("fuoevolve.libsecret.dir").isNullOrBlank()) return
+    if (!System.getenv("FUOEVOLVE_LIBSECRET_DIR").isNullOrBlank()) return
+
+    val resourcesDir = System.getProperty("compose.application.resources.dir")
+        ?.takeIf(String::isNotBlank)
+        ?.let(::File)
+        ?: return
+    val bundledLibSecret = resourcesDir.resolve("native/libsecret")
+    if (bundledLibSecret.isDirectory) {
+        System.setProperty("fuoevolve.libsecret.dir", bundledLibSecret.absolutePath)
     }
 }
