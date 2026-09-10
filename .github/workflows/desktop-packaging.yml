@@ -14,6 +14,7 @@ jobs:
     env:
       FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR: ${{ github.workspace }}\build\nucleus-native\windows\mpv
       FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR: ${{ github.workspace }}\build\nucleus-native\windows\mpv
+      FUOEVOLVE_NUCLEUS_TARGET_FORMAT: msi
 
     steps:
       - name: Checkout
@@ -79,7 +80,6 @@ jobs:
             --stacktrace `
             -PenableNucleusDesktopPoc=true `
             -PnativeMarch=compatibility `
-            -Pfuoevolve.nucleus.targetFormat=msi `
             :desktopNucleusPoc:packageGraalvmMsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
