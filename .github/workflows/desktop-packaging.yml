@@ -31,7 +31,7 @@ jobs:
           }
 
       - name: Set up Nucleus GraalVM toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           graalvm: "true"
@@ -139,7 +139,7 @@ jobs:
           fi
 
       - name: Set up Nucleus GraalVM toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           graalvm: "true"
@@ -180,6 +180,11 @@ jobs:
           while IFS= read -r dylib; do
             if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/' >/dev/null; then
               echo "Cached macOS libmpv bundle is not relocatable: $dylib" >&2
+              exit 1
+            fi
+            duplicate_count="$(otool -l "$dylib" | awk '$1 == "cmd" && $2 == "LC_RPATH" { r=1; next } r && $1 == "path" { if ($2 == "@loader_path/") c++; r=0 } END { print c+0 }')"
+            if [[ "$duplicate_count" -gt 1 ]]; then
+              echo "Cached macOS dylib contains duplicate @loader_path/ LC_RPATH entries: $dylib" >&2
               exit 1
             fi
           done < <(find "$FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
@@ -252,7 +257,7 @@ jobs:
           fi
 
       - name: Set up Nucleus GraalVM toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           graalvm: "true"
@@ -351,7 +356,7 @@ jobs:
           fi
 
       - name: Set up Nucleus GraalVM toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           graalvm: "true"
