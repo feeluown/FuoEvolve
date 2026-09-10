@@ -9,12 +9,15 @@ import dev.nucleusframework.application.NucleusBackend
 import dev.nucleusframework.application.nucleusApplication
 import kotlinx.coroutines.delay
 import org.feeluown.mobile.DesktopAppHost
+import org.feeluown.mobile.desktop.createDesktopSecureProviderCredentialStore
 import org.feeluown.mobile.installDesktopAppLogger
+import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 
 private const val SMOKE_ENV = "FUOEVOLVE_NUCLEUS_POC_SMOKE"
 
 fun main() {
     installDesktopAppLogger()
+    installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     val smokeMode = System.getenv(SMOKE_ENV) == "1"
 
     nucleusApplication(backend = NucleusBackend.Tao) {
@@ -24,7 +27,7 @@ fun main() {
             onCloseRequest = requestExit,
             state = rememberWindowState(size = DpSize(1280.dp, 800.dp)),
             minimumSize = DpSize(900.dp, 600.dp),
-            title = "FuoEvolve · Nucleus PoC",
+            title = "FuoEvolve · Nucleus",
         ) {
             if (smokeMode) {
                 LaunchedEffect(Unit) {
