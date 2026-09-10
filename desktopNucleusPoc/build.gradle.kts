@@ -17,8 +17,14 @@ dependencies {
 
     implementation("dev.nucleusframework:nucleus.nucleus-application:2.5.15")
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
+    implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
 }
 
 nucleus.application {
     mainClass = "org.feeluown.mobile.nucleus.NucleusMainKt"
+
+    graalvm {
+        isEnabled.set(true)
+        imageName.set("fuoevolve-nucleus-poc")
+    }
 }
