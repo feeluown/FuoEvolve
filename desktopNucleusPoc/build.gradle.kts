@@ -1,7 +1,8 @@
-import org.gradle.api.tasks.Sync
-import org.gradle.jvm.tasks.Jar
+import dev.nucleusframework.desktop.application.dsl.TargetFormat
 import java.io.File
 import java.util.zip.ZipFile
+import org.gradle.api.tasks.Sync
+import org.gradle.jvm.tasks.Jar
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -14,12 +15,28 @@ kotlin {
     jvmToolchain(17)
 }
 
+fun gitOutput(vararg args: String): String? = runCatching {
+    providers.exec {
+        workingDir = rootProject.projectDir
+        commandLine("git", *args)
+    }.standardOutput.asText.get().trim().takeIf(String::isNotBlank)
+}.getOrNull()
+
+val desktopPackageVersion = providers.gradleProperty("fuoevolve.packageVersion")
+    .orElse(providers.environmentVariable("FUOEVOLVE_PACKAGE_VERSION"))
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?: gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
+        ?.let { tag -> Regex("\\d+\\.\\d+\\.\\d+").find(tag)?.value }
+    ?: "0.1.0"
+
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
+val isMacHost = hostOs.contains("mac") || hostOs.contains("darwin")
 val isLinuxHost = hostOs.contains("linux")
 val packageResourceOs = when {
     isWindowsHost -> "windows"
-    hostOs.contains("mac") || hostOs.contains("darwin") -> "macos"
+    isMacHost -> "macos"
     isLinuxHost -> "linux"
     else -> "common"
 }
@@ -31,11 +48,19 @@ val stagedNativeResourceRoot = "$packageResourceOs/native"
 
 val mpvJniLibraryName = when {
     isWindowsHost -> "fuoevolve_mpv_jni.dll"
-    hostOs.contains("mac") || hostOs.contains("darwin") -> "libfuoevolve_mpv_jni.dylib"
+    isMacHost -> "libfuoevolve_mpv_jni.dylib"
     else -> "libfuoevolve_mpv_jni.so"
 }
 val mpvJniSource = layout.projectDirectory.file("native/mpv-jni/fuoevolve_mpv_jni.c")
 val mpvJniOutput = layout.buildDirectory.file("native/mpv-jni/$mpvJniLibraryName")
+val mpvDevDirPath = providers.gradleProperty("fuoevolve.nucleus.libmpvDevDir")
+    .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"))
+val mpvRuntimeDirPath = providers.gradleProperty("fuoevolve.nucleus.libmpvRuntimeDir")
+    .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR"))
+val bundleLinuxRuntime = providers.gradleProperty("fuoevolve.nucleus.bundleLinuxRuntime")
+    .map(String::toBoolean)
+    .orElse(false)
+val portableLinuxRuntime = layout.buildDirectory.dir("nucleus-portable-linux-runtime")
 
 private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
 
@@ -60,70 +85,175 @@ val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
     description = "Build the thin JNI bridge used by the Nucleus libmpv playback backend."
     inputs.file(mpvJniSource)
     outputs.file(mpvJniOutput)
-    onlyIf {
-        // Linux is the first validated Native Image playback target. macOS/Windows keep the
-        // existing JVM playback path until their JNI bridge packaging is validated separately.
-        isLinuxHost
-    }
+
     doFirst {
         mpvJniOutput.get().asFile.parentFile.mkdirs()
+        val javaHome = File(System.getProperty("java.home"))
+        val includeRoot = javaHome.resolve("include")
+        val platformInclude = includeRoot.resolve(
+            when {
+                isWindowsHost -> "win32"
+                isMacHost -> "darwin"
+                else -> "linux"
+            },
+        )
+        check(includeRoot.isDirectory && platformInclude.isDirectory) {
+            "JNI headers were not found below ${javaHome.absolutePath}"
+        }
+
+        when {
+            isWindowsHost -> {
+                val devDir = mpvDevDirPath.orNull?.let(::file)
+                    ?: throw GradleException(
+                        "Windows Nucleus JNI build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
+                    )
+                val header = devDir.resolve("include/mpv/client.h")
+                val importLibrary = devDir.resolve("libmpv.dll.a")
+                check(header.isFile && importLibrary.isFile) {
+                    "Windows libmpv development bundle is incomplete: ${devDir.absolutePath}"
+                }
+                commandLine(
+                    "clang",
+                    "-shared",
+                    "-O2",
+                    "-Wall",
+                    "-Wextra",
+                    "-I${includeRoot.absolutePath}",
+                    "-I${platformInclude.absolutePath}",
+                    "-I${devDir.resolve("include").absolutePath}",
+                    mpvJniSource.asFile.absolutePath,
+                    "-L${devDir.absolutePath}",
+                    "-lmpv",
+                    "-o",
+                    mpvJniOutput.get().asFile.absolutePath,
+                )
+            }
+
+            isMacHost -> {
+                val devDir = mpvDevDirPath.orNull?.let(::file)
+                    ?: throw GradleException(
+                        "macOS Nucleus JNI build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
+                    )
+                val runtimeDir = mpvRuntimeDirPath.orNull?.let(::file) ?: devDir.resolve("lib")
+                val header = devDir.resolve("include/mpv/client.h")
+                check(header.isFile) {
+                    "macOS libmpv development headers are missing: ${header.absolutePath}"
+                }
+                commandLine(
+                    "cc",
+                    "-dynamiclib",
+                    "-fPIC",
+                    "-O2",
+                    "-Wall",
+                    "-Wextra",
+                    "-I${includeRoot.absolutePath}",
+                    "-I${platformInclude.absolutePath}",
+                    "-I${devDir.resolve("include").absolutePath}",
+                    mpvJniSource.asFile.absolutePath,
+                    "-L${runtimeDir.absolutePath}",
+                    "-lmpv",
+                    "-Wl,-rpath,@loader_path",
+                    "-o",
+                    mpvJniOutput.get().asFile.absolutePath,
+                )
+            }
+
+            isLinuxHost -> commandLine(
+                "cc",
+                "-shared",
+                "-fPIC",
+                "-O2",
+                "-Wall",
+                "-Wextra",
+                "-I${includeRoot.absolutePath}",
+                "-I${platformInclude.absolutePath}",
+                mpvJniSource.asFile.absolutePath,
+                "-Wl,-rpath,\$ORIGIN",
+                "-o",
+                mpvJniOutput.get().asFile.absolutePath,
+                "-lmpv",
+            )
+
+            else -> throw GradleException("Unsupported Nucleus desktop host: $hostOs")
+        }
     }
-    val javaHome = File(System.getProperty("java.home"))
+}
+
+val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
+    group = "distribution"
+    description = "Collect the portable libmpv/Libsecret/WebKitGTK closure used by the Nucleus AppImage."
+    dependsOn(buildNucleusWebLoginHelper)
+    onlyIf { isLinuxHost && bundleLinuxRuntime.get() }
+    inputs.file(webLoginExecutable)
+    outputs.dir(portableLinuxRuntime)
+    doFirst {
+        portableLinuxRuntime.get().asFile.deleteRecursively()
+    }
     commandLine(
-        "cc",
-        "-shared",
-        "-fPIC",
-        "-O2",
-        "-Wall",
-        "-Wextra",
-        "-I${javaHome.resolve("include").absolutePath}",
-        "-I${javaHome.resolve("include/linux").absolutePath}",
-        mpvJniSource.asFile.absolutePath,
-        "-o",
-        mpvJniOutput.get().asFile.absolutePath,
-        "-lmpv",
+        "bash",
+        layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh").asFile.absolutePath,
+        portableLinuxRuntime.get().asFile.absolutePath,
+        webLoginExecutable.asFile.absolutePath,
     )
 }
 
 val prepareNucleusAppResources by tasks.registering(Sync::class) {
     group = "distribution"
     description = "Stage native resources required by the Nucleus desktop runtime."
-    dependsOn(buildNucleusWebLoginHelper)
-    if (isLinuxHost) {
-        dependsOn(buildNucleusMpvJniBridge)
-    }
+    dependsOn(buildNucleusWebLoginHelper, buildNucleusMpvJniBridge)
+    if (isLinuxHost) dependsOn(prepareNucleusPortableLinuxRuntime)
+
     from(webLoginExecutable) {
         into("$stagedNativeResourceRoot/helpers")
         if (!isWindowsHost) {
-            filePermissions {
-                unix("755")
-            }
+            filePermissions { unix("755") }
         }
     }
-    if (isLinuxHost) {
-        from(mpvJniOutput) {
+    from(mpvJniOutput) {
+        into("$stagedNativeResourceRoot/lib")
+        if (!isWindowsHost) {
+            filePermissions { unix("755") }
+        }
+    }
+
+    mpvRuntimeDirPath.orNull?.let { configuredPath ->
+        from(file(configuredPath)) {
+            include("*.dll", "*.dylib", "*.so", "*.so.*")
             into("$stagedNativeResourceRoot/lib")
-            filePermissions {
-                unix("755")
-            }
         }
     }
+
+    if (isLinuxHost) {
+        from(portableLinuxRuntime) {
+            into(stagedNativeResourceRoot)
+            onlyIf { bundleLinuxRuntime.get() }
+        }
+    }
+
     into(nucleusAppResources)
 
     doLast {
-        val stagedHelper = nucleusAppResources.get().asFile
-            .resolve("$stagedNativeResourceRoot/helpers/$webLoginExecutableName")
+        val platformRoot = nucleusAppResources.get().asFile.resolve(stagedNativeResourceRoot)
+        val stagedHelper = platformRoot.resolve("helpers/$webLoginExecutableName")
+        val stagedMpvBridge = platformRoot.resolve("lib/$mpvJniLibraryName")
         if (!stagedHelper.isFile) {
             throw GradleException("Nucleus web login helper was not staged: ${stagedHelper.absolutePath}")
         }
         if (!isWindowsHost && !stagedHelper.canExecute()) {
             throw GradleException("Nucleus web login helper is not executable: ${stagedHelper.absolutePath}")
         }
-        if (isLinuxHost) {
-            val stagedMpvBridge = nucleusAppResources.get().asFile
-                .resolve("$stagedNativeResourceRoot/lib/$mpvJniLibraryName")
-            if (!stagedMpvBridge.isFile) {
-                throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
+        if (!stagedMpvBridge.isFile) {
+            throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
+        }
+        if ((isWindowsHost || isMacHost || (isLinuxHost && bundleLinuxRuntime.get()))) {
+            val runtimeNames = platformRoot.resolve("lib").listFiles().orEmpty().map(File::getName)
+            val hasLibMpv = when {
+                isWindowsHost -> runtimeNames.any { it.equals("libmpv-2.dll", true) || it.equals("mpv-2.dll", true) || it.equals("mpv.dll", true) }
+                isMacHost -> "libmpv.dylib" in runtimeNames
+                else -> runtimeNames.any { it.startsWith("libmpv.so") }
+            }
+            if (!hasLibMpv) {
+                throw GradleException("Bundled Nucleus package is missing the libmpv runtime")
             }
         }
     }
@@ -145,8 +275,7 @@ dependencies {
 
 // Nucleus feeds native-image a repackaged uber JAR rather than the original dependency JARs.
 // Upstream credential-secure-storage is signed, so its META-INF signature blocks no longer match
-// after the merge. Strip only JAR-level signatures from this Nucleus-owned uber JAR; the existing
-// JVM desktop packaging path and platform distribution signing remain completely untouched.
+// after the merge. Strip only JAR-level signatures from this Nucleus-owned uber JAR.
 tasks.withType<Jar>()
     .matching { task -> task.name.contains("UberJar", ignoreCase = true) }
     .configureEach {
@@ -172,27 +301,80 @@ tasks.withType<Jar>()
         }
     }
 
+val requestedTargetFormat = providers.gradleProperty("fuoevolve.nucleus.targetFormat")
+    .orNull
+    ?.trim()
+    ?.lowercase()
+val nucleusTargetFormats = when (requestedTargetFormat) {
+    null, "all" -> arrayOf(
+        TargetFormat.Msi,
+        TargetFormat.Dmg,
+        TargetFormat.AppImage,
+        TargetFormat.Pacman,
+    )
+    "msi" -> arrayOf(TargetFormat.Msi)
+    "dmg" -> arrayOf(TargetFormat.Dmg)
+    "appimage" -> arrayOf(TargetFormat.AppImage)
+    "pacman", "arch" -> arrayOf(TargetFormat.Pacman)
+    else -> throw GradleException("Unsupported Nucleus target format: $requestedTargetFormat")
+}
+
 nucleus.application {
     mainClass = "org.feeluown.mobile.nucleus.NucleusMainKt"
 
     nativeDistributions {
+        appName = "FuoEvolve"
+        packageName = "FuoEvolve"
+        packageVersion = desktopPackageVersion
+        homepage = "https://feeluown.github.io/FuoEvolve/"
+        targetFormats(*nucleusTargetFormats)
         appResourcesRootDir.set(nucleusAppResources)
+
+        windows {
+            packageName = "FuoEvolve"
+        }
+        macOS {
+            packageName = "FuoEvolve"
+            bundleID = "org.feeluown.FuoEvolve"
+            appCategory = "public.app-category.music"
+        }
+        linux {
+            packageName = "fuoevolve"
+            shortcut = true
+            appCategory = "AudioVideo"
+            menuGroup = "AudioVideo"
+            pacmanDepends = listOf(
+                "gtk3",
+                "libx11",
+                "libxkbcommon",
+                "libsecret",
+                "mpv",
+                "webkit2gtk-4.1",
+            )
+        }
     }
 
     graalvm {
         isEnabled.set(true)
-        imageName.set("fuoevolve-nucleus-poc")
+        imageName.set("fuoevolve")
     }
 }
 
 // Compose/Nucleus consume appResources through prepareAppResources. Make the staging dependency
-// explicit so Gradle 9 validation and both JVM/GraalVM pipelines see native resources deterministically.
+// explicit so Gradle validation and JVM/GraalVM pipelines see native resources deterministically.
 tasks.matching { it.name == "prepareAppResources" }.configureEach {
     dependsOn(prepareNucleusAppResources)
 }
-tasks.matching { it.name == "run" }.configureEach {
-    dependsOn(buildNucleusWebLoginHelper)
-    if (isLinuxHost) {
-        dependsOn(buildNucleusMpvJniBridge)
-    }
+tasks.matching { task ->
+    task.name == "run" ||
+        task.name.startsWith("runGraalvm") ||
+        task.name.startsWith("packageGraalvm") ||
+        task.name.startsWith("createGraalvm")
+}.configureEach {
+    dependsOn(prepareNucleusAppResources)
+}
+
+tasks.register("printNucleusPackageVersion") {
+    group = "distribution"
+    doLast { println(desktopPackageVersion) }
 }
