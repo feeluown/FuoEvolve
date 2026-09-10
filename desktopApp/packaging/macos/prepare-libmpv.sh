@@ -80,6 +80,15 @@ while IFS= read -r dylib; do
   fi
 done < <(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
 
+# dylibbundler and install_name_tool rewrite Mach-O load commands and invalidate any existing code
+# signature. Apple Silicon requires arm64 Mach-O code to carry a valid signature, so re-sign the
+# final relocatable dependency closure only after every binary rewrite has completed. Ad-hoc signing
+# keeps unsigned CI/development packages loadable; production app signing can replace these later.
+while IFS= read -r dylib; do
+  codesign --force --sign - --timestamp=none "$dylib"
+  codesign --verify --strict --verbose=2 "$dylib"
+done < <(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.dylib' -print | sort)
+
 {
   echo "Source: Homebrew mpv $INSTALLED_MPV_VERSION"
   echo "Pinned version key: $MPV_VERSION_KEY"
