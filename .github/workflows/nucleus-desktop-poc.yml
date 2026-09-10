@@ -11,6 +11,10 @@ name: Nucleus Desktop PoC
 permissions:
   contents: read
 
+concurrency:
+  group: nucleus-desktop-poc-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux-tao:
     name: Linux Tao JVM and GraalVM smoke
@@ -113,3 +117,11 @@ jobs:
           openbox &
           sleep 1
           timeout 90s "$BIN"
+
+      - name: Upload packaged native PoC
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoevolve-nucleus-linux-poc
+          path: desktopNucleusPoc/build/compose/binaries/**/graalvm-app/**
+          if-no-files-found: error
+          retention-days: 7
