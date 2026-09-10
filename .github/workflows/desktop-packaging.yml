@@ -184,7 +184,10 @@ jobs:
           JNI="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'libfuoevolve_mpv_jni.dylib' -print -quit)"
           MPV="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'libmpv.dylib' -print -quit)"
           HELPER="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'fuoevolve-web-login' -print -quit)"
-          test -n "$JNI" && test -n "$MPV" && test -n "$HELPER"
+          PLIST="$(find desktopNucleusPoc/build/compose/binaries -type f -path '*.app/Contents/Info.plist' -print -quit)"
+          test -n "$JNI" && test -n "$MPV" && test -n "$HELPER" && test -n "$PLIST"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$PLIST")" = "org.feeluown.mobile.desktop"
+          test "$(plutil -extract NSMicrophoneUsageDescription raw -o - "$PLIST")" = "FuoEvolve 使用麦克风进行听歌识曲。"
           if otool -L "$JNI" "$MPV" | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
             echo "Nucleus macOS package still references Homebrew" >&2
             exit 1
@@ -192,14 +195,15 @@ jobs:
 
       - name: Prepare macOS artifact
         run: |
-          mapfile -t artifacts < <(find desktopNucleusPoc/build -type f -name '*.dmg' -print)
-          if [[ "${#artifacts[@]}" -ne 1 ]]; then
-            echo "Expected exactly one DMG, found ${#artifacts[@]}" >&2
-            printf '%s\n' "${artifacts[@]}" >&2
+          artifact_count="$(find desktopNucleusPoc/build -type f -name '*.dmg' -print | wc -l | tr -d ' ')"
+          if [[ "$artifact_count" -ne 1 ]]; then
+            echo "Expected exactly one DMG, found $artifact_count" >&2
+            find desktopNucleusPoc/build -type f -name '*.dmg' -print >&2
             exit 1
           fi
+          artifact="$(find desktopNucleusPoc/build -type f -name '*.dmg' -print -quit)"
           mkdir -p build/artifacts
-          cp "${artifacts[0]}" "build/artifacts/FuoEvolve-macos-${{ matrix.arch }}.dmg"
+          cp "$artifact" "build/artifacts/FuoEvolve-macos-${{ matrix.arch }}.dmg"
           du -h "build/artifacts/FuoEvolve-macos-${{ matrix.arch }}.dmg"
 
       - name: Upload macOS DMG
