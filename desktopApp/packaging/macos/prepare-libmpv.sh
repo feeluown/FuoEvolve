@@ -46,8 +46,13 @@ fi
 
 MPV_PREFIX="$(brew --prefix mpv)"
 SOURCE_LIB="$MPV_PREFIX/lib/libmpv.dylib"
+SOURCE_HEADERS="$MPV_PREFIX/include/mpv"
 if [[ ! -f "$SOURCE_LIB" ]]; then
   echo "Homebrew mpv did not provide $SOURCE_LIB" >&2
+  exit 1
+fi
+if [[ ! -f "$SOURCE_HEADERS/client.h" ]]; then
+  echo "Homebrew mpv did not provide development headers below $SOURCE_HEADERS" >&2
   exit 1
 fi
 
@@ -57,18 +62,25 @@ WORKING_LIB="$WORK_DIR/libmpv.dylib"
 cp -L "$SOURCE_LIB" "$WORKING_LIB"
 
 rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR/include"
 
-# dylibbundler clears its dependency output directory before copying dependencies. Keep the root
-# libmpv dylib in a separate working directory while it is rewritten, then move it next to the
-# collected dylibs once the dependency closure is complete.
+# Keep the development headers with the relocatable runtime so CI can cache one immutable bundle
+# and compile the JNI bridge without consulting Homebrew on cache hits.
+cp -R "$SOURCE_HEADERS" "$OUTPUT_DIR/include/mpv"
+
+# dylibbundler clears its dependency output directory before copying dependencies. Its output must
+# therefore go to a temporary sibling directory; merge the collected dylibs into OUTPUT_DIR after
+# the closure is complete so the cached include/ tree is preserved.
+BUNDLED_LIB_DIR="$WORK_DIR/bundled-libs"
+mkdir -p "$BUNDLED_LIB_DIR"
 dylibbundler \
   -od \
   -b \
   -x "$WORKING_LIB" \
-  -d "$OUTPUT_DIR" \
+  -d "$BUNDLED_LIB_DIR" \
   -p "@loader_path/"
 install_name_tool -id "@loader_path/libmpv.dylib" "$WORKING_LIB"
+find "$BUNDLED_LIB_DIR" -maxdepth 1 -type f -name '*.dylib' -exec cp -p {} "$OUTPUT_DIR/" \;
 mv "$WORKING_LIB" "$OUTPUT_DIR/libmpv.dylib"
 
 # A relocatable bundle must not retain references to the Homebrew prefix/Cellar.
@@ -85,7 +97,7 @@ done < <(find "$OUTPUT_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
   echo "Pinned version key: $MPV_VERSION_KEY"
   echo "Pinned version: $PINNED_MPV_VERSION"
   echo "Homebrew prefix: $MPV_PREFIX"
-  echo "Purpose: bundled relocatable libmpv runtime for the FuoEvolve macOS desktop package"
+  echo "Purpose: cached development headers + bundled relocatable libmpv runtime for FuoEvolve macOS desktop"
 } > "$OUTPUT_DIR/FUOEVOLVE_LIBMPV_SOURCE.txt"
 
 printf 'Prepared macOS libmpv bundle (%s) at %s\n' "$(uname -m)" "$OUTPUT_DIR"
