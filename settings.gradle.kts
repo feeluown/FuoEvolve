@@ -59,6 +59,7 @@ include(":persistence:settings")
 include(":persistence:listening")
 include(":shared")
 include(":androidApp")
+include(":desktopRuntime")
 include(":desktopApp")
 
 // Keep the experimental Nucleus/Tao desktop chain completely outside the normal project graph.
