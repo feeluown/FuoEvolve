@@ -241,7 +241,7 @@ jobs:
 
   linux-appimage:
     name: Linux x64 AppImage
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 100
 
     steps:
@@ -274,9 +274,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-          key: nucleus-web-login-linux-ubuntu22.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+          key: nucleus-web-login-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
-            nucleus-web-login-linux-ubuntu22.04-x64-rust-1.98.1-
+            nucleus-web-login-linux-ubuntu24.04-x64-rust-1.98.1-
 
       - name: Install portable Linux native dependencies
         run: |
