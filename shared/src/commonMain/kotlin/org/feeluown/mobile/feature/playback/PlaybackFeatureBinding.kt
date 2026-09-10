@@ -61,6 +61,7 @@ fun createPlaybackFeatureOwner(
         scope = scope,
         openTrackDetail = openTrackDetail,
         nowMillis = nowMillis,
+        playbackDiagnostic = { message -> AppLogger.i("PlaybackStart", message) },
     )
     val listeningHistoryRepository = (listeningHistorySink as? ListeningHistoryRepository)?.let { repository ->
         LegacyPlaylistStatsMigratingRepository(

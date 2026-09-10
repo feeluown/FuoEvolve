@@ -39,6 +39,7 @@ internal class PlaybackQueueCoordinator(
     private val setMessage: (String) -> Unit,
     feedbackState: MutableStateFlow<String?> = MutableStateFlow(null),
     private val shuffleTracks: (List<MusicTrack>) -> List<MusicTrack> = { it.shuffled() },
+    private val playbackDiagnostic: (String) -> Unit = {},
 ) : PlaybackTransportCoordinator {
     private val queueState = queue
     private val mutableFeedback = feedbackState
@@ -62,10 +63,15 @@ internal class PlaybackQueueCoordinator(
         get() = queueState.isFmQueue
 
     override fun startCurrent() {
-        (queueState.currentTrack() ?: fallbackTrack())?.let { track ->
+        val queueTrack = queueState.currentTrack()
+        val track = queueTrack ?: fallbackTrack()
+        playbackDiagnostic(
+            "resume requested hasTrack=${track != null} fromQueue=${queueTrack != null}",
+        )
+        track?.let { current ->
             val parts = playbackParts()
             val resumePartIndex = currentPartIndex().takeIf { it in parts.indices }
-            startTrack(track, 0, resumePartIndex, PlaybackStartReason.RESUME)
+            startTrack(current, 0, resumePartIndex, PlaybackStartReason.RESUME)
         }
     }
 

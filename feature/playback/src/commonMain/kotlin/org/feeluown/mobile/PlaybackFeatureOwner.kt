@@ -42,6 +42,7 @@ fun createPlaybackFeatureOwner(
     scope: CoroutineScope,
     openTrackDetail: (MusicTrack) -> Unit,
     nowMillis: () -> Long,
+    playbackDiagnostic: (String) -> Unit = {},
 ): PlaybackFeatureOwner = DefaultPlaybackFeatureOwner(
     providerRepository = providerRepository,
     playbackEngine = playbackEngine,
@@ -52,6 +53,7 @@ fun createPlaybackFeatureOwner(
     scope = scope,
     openTrackDetail = openTrackDetail,
     nowMillis = nowMillis,
+    playbackDiagnostic = playbackDiagnostic,
 )
 
 private class DefaultPlaybackFeatureOwner(
@@ -64,6 +66,7 @@ private class DefaultPlaybackFeatureOwner(
     private val scope: CoroutineScope,
     private val openTrackDetail: (MusicTrack) -> Unit,
     nowMillis: () -> Long,
+    private val playbackDiagnostic: (String) -> Unit,
 ) : PlaybackFeatureOwner {
     private val queueState = PlaybackQueueController()
     private val playbackRepository: ProviderPlaybackRepository = providerRepository
@@ -155,12 +158,15 @@ private class DefaultPlaybackFeatureOwner(
             }
         },
         prefetchQueue = ::prefetchFeatureQueueIfNeeded,
+        playbackDiagnostic = playbackDiagnostic,
     )
 
     private val queueOwner = PlaybackQueueCoordinator(
         queue = queueState,
         scope = scope,
-        fallbackTrack = { playbackState.value.currentTrack },
+        fallbackTrack = {
+            playbackState.value.currentTrack ?: playbackEngine.state.value.currentTrack
+        },
         playbackParts = { playbackParts },
         currentPartIndex = { currentPartIndex },
         startPlayback = { track, skippedUnavailableCount, requestedPartIndex ->
@@ -173,6 +179,7 @@ private class DefaultPlaybackFeatureOwner(
         setTrackChangeDirection = {},
         setMessage = {},
         feedbackState = playbackFeedback,
+        playbackDiagnostic = playbackDiagnostic,
     )
 
     private val replacementOwner = PlaybackReplacementController(

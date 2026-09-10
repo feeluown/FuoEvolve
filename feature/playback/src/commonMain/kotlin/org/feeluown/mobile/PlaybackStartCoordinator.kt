@@ -79,6 +79,7 @@ internal class PlaybackStartCoordinator(
     private val onManualSelectionStarted: (Long, MusicTrack, SmartReplacementSelection, MusicTrack?) -> Unit,
     private val onStartFailure: (Long, MusicTrack, Int, SmartReplacementSelection?, Throwable) -> Unit,
     private val prefetchQueue: () -> Unit,
+    private val playbackDiagnostic: (String) -> Unit = {},
 ) : PlaybackStartFailureSource {
     private val _startFailure = MutableStateFlow<PlaybackStartFailure?>(null)
     override val startFailure: StateFlow<PlaybackStartFailure?> = _startFailure.asStateFlow()
@@ -119,6 +120,9 @@ internal class PlaybackStartCoordinator(
                 )
         }
         val startReason = transaction.reason
+        playbackDiagnostic(
+            "start requested reason=$startReason source=${logicalTrack.source} local=${logicalTrack.localUri != null}",
+        )
         val serial = nextRequestSerial()
         _startFailure.value = null
         onRequestStarted(serial, suppressPlaybackRecovery)
@@ -253,6 +257,9 @@ internal class PlaybackStartCoordinator(
         messageAfterStart: String?,
     ) {
         scope.launch playRequest@{
+            playbackDiagnostic(
+                "resolving source=${logicalTrack.source} local=${resolveTrack.localUri != null}",
+            )
             runCatching {
                 val payload = resolveTrack.toLocalPayload()
                     ?: if (manualSelection != null) {
@@ -272,6 +279,9 @@ internal class PlaybackStartCoordinator(
                             true,
                         )
                     }
+                playbackDiagnostic(
+                    "resolved source=${payload.source} urlKind=${playbackUrlKind(payload.url)} headers=${payload.headers.size}",
+                )
                 if (serial != currentRequestSerial()) return@playRequest
                 if (queue.activePlaybackTransaction()?.id != transaction.id) return@playRequest
                 // The legacy direct-resolution path cleared recovery suppression once
@@ -326,6 +336,10 @@ internal class PlaybackStartCoordinator(
                 )
                 prefetchQueue()
             }.onFailure { throwable ->
+                val detail = throwable.message?.replace(Regex("\\s+"), " ")?.take(160).orEmpty()
+                playbackDiagnostic(
+                    "resolve/start failed source=${logicalTrack.source} type=${throwable::class.simpleName} detail=$detail",
+                )
                 if (serial == currentRequestSerial() && queue.activePlaybackTransaction()?.id == transaction.id) {
                     _startFailure.value = PlaybackStartFailure(
                         trackId = logicalTrack.id,
@@ -351,6 +365,13 @@ internal class PlaybackStartCoordinator(
         val part = playbackParts().getOrNull(index) ?: return null
         return "${track.title} · 第 ${index + 1}P · ${part.title.ifBlank { "未命名分段" }}"
     }
+}
+
+private fun playbackUrlKind(url: String): String = when {
+    url.startsWith("http://", ignoreCase = true) -> "http"
+    url.startsWith("https://", ignoreCase = true) -> "https"
+    url.startsWith("file:", ignoreCase = true) -> "file"
+    else -> "other"
 }
 
 private fun MusicTrack.toLocalPayload(): PlaybackPayload? {
