@@ -1,4 +1,6 @@
 import org.gradle.api.tasks.Sync
+import org.gradle.jvm.tasks.Jar
+import java.util.zip.ZipFile
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -24,6 +26,17 @@ val webLoginProjectDir = rootProject.layout.projectDirectory.dir("desktopApp/nat
 val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
 val nucleusAppResources = layout.buildDirectory.dir("nucleus-app-resources")
 val stagedNativeResourceRoot = "$packageResourceOs/native"
+
+private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
+
+private fun isJarSignatureEntry(name: String): Boolean {
+    val normalized = name.replace('\\', '/')
+    if (!normalized.startsWith("META-INF/", ignoreCase = true)) return false
+    val fileName = normalized.substringAfter("META-INF/")
+    if (fileName.isBlank() || '/' in fileName) return false
+    val extension = fileName.substringAfterLast('.', missingDelimiterValue = "")
+    return extension.uppercase() in jarSignatureExtensions
+}
 
 val buildNucleusWebLoginHelper by tasks.registering(Exec::class) {
     group = "build"
@@ -69,6 +82,35 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
 }
+
+// Nucleus feeds native-image a repackaged uber JAR rather than the original dependency JARs.
+// Upstream credential-secure-storage is signed, so its META-INF signature blocks no longer match
+// after the merge. Strip only JAR-level signatures from this Nucleus-owned uber JAR; the existing
+// JVM desktop packaging path and platform distribution signing remain completely untouched.
+tasks.withType<Jar>()
+    .matching { task -> task.name.contains("UberJar", ignoreCase = true) }
+    .configureEach {
+        exclude { element -> isJarSignatureEntry(element.path) }
+
+        doLast {
+            val uberJar = archiveFile.get().asFile
+            val staleSignatures = ZipFile(uberJar).use { zip ->
+                buildList {
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        if (isJarSignatureEntry(entry.name)) add(entry.name)
+                    }
+                }
+            }
+            if (staleSignatures.isNotEmpty()) {
+                throw GradleException(
+                    "Nucleus uber JAR still contains invalid dependency signatures: " +
+                        staleSignatures.joinToString(),
+                )
+            }
+        }
+    }
 
 nucleus.application {
     mainClass = "org.feeluown.mobile.nucleus.NucleusMainKt"
