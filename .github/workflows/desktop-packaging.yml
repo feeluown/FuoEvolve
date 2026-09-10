@@ -410,6 +410,7 @@ jobs:
             exit 1
           fi
           package="${artifacts[0]}"
+          mkdir -p build
           bsdtar -xOf "$package" .PKGINFO | tee build/arch-pkginfo.txt
           grep -Eq '^depend = mpv($|[<>=])' build/arch-pkginfo.txt
           grep -Eq '^depend = libsecret($|[<>=])' build/arch-pkginfo.txt
