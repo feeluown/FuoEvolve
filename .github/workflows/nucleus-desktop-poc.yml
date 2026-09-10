@@ -61,12 +61,14 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libmpv-dev
 
-      - name: Test shared desktop runtime
+      - name: Test shared desktop runtime and Nucleus event gate
         run: >-
           ./gradlew
           --no-configuration-cache
           --warning-mode all
+          -PenableNucleusDesktopPoc=true
           :desktopRuntime:test
+          :desktopNucleusPoc:test
 
       - name: Compile Nucleus runtime and native helpers
         run: >-
@@ -194,10 +196,33 @@ jobs:
           sleep 1
           timeout 90s "$BIN"
 
-      - name: Upload packaged native PoC
+      - name: Build installable Nucleus Linux DEB
+        run: |
+          APPDIR=$(find desktopNucleusPoc/build/compose/binaries -type d -name graalvm-app | head -1)
+          BIN=$(find "$APPDIR" -type f -name 'fuoevolve-nucleus-poc' -perm -111 | head -1)
+          RUNTIME_DIR=$(dirname "$BIN")
+          VERSION=$(git describe --tags --match '[0-9]*' --abbrev=0 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          test -n "$VERSION"
+
+          bash desktopNucleusPoc/packaging/linux/package-deb.sh \
+            "$RUNTIME_DIR" \
+            "$VERSION" \
+            desktopNucleusPoc/build/packages
+
+          DEB=$(find desktopNucleusPoc/build/packages -type f -name '*.deb' -print -quit)
+          test -n "$DEB"
+          dpkg-deb -I "$DEB" | tee desktopNucleusPoc/build/packages/deb-info.txt
+          dpkg-deb -c "$DEB" | tee desktopNucleusPoc/build/packages/deb-contents.txt
+          grep -q 'libmpv2' desktopNucleusPoc/build/packages/deb-info.txt
+          grep -q 'libsecret-1-0' desktopNucleusPoc/build/packages/deb-info.txt
+          grep -q 'libwebkit2gtk-4.1-0' desktopNucleusPoc/build/packages/deb-info.txt
+          grep -q 'opt/fuoevolve-nucleus-poc/fuoevolve-nucleus-poc' desktopNucleusPoc/build/packages/deb-contents.txt
+          grep -q 'opt/fuoevolve-nucleus-poc/native/lib/libfuoevolve_mpv_jni.so' desktopNucleusPoc/build/packages/deb-contents.txt
+
+      - name: Upload installable Nucleus Linux PoC
         uses: actions/upload-artifact@v4
         with:
-          name: fuoevolve-nucleus-linux-poc
-          path: desktopNucleusPoc/build/compose/binaries/**/graalvm-app/**
+          name: fuoevolve-nucleus-linux-poc-deb
+          path: desktopNucleusPoc/build/packages/*.deb
           if-no-files-found: error
           retention-days: 7
