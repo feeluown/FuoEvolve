@@ -1,18 +1,16 @@
 # Nucleus desktop runtime
 
-This module is the opt-in path for running the existing FuoEvolve Compose UI on the Nucleus Tao desktop backend and GraalVM Native Image.
+This module hosts the production desktop path for running the existing FuoEvolve Compose UI on Nucleus/Tao and GraalVM Native Image.
 
-It remains outside the normal Gradle project graph unless `-PenableNucleusDesktopPoc=true` is supplied, so the existing `desktopApp` JVM packaging path stays available in parallel.
+It is still enabled with `-PenableNucleusDesktopPoc=true` while the Gradle module keeps its historical name, but desktop CI no longer tests or packages the legacy JVM `desktopApp` host.
 
-## JVM / Tao run
+## Local run
 
 ```bash
 ./gradlew -PenableNucleusDesktopPoc=true :desktopNucleusPoc:run
 ```
 
-This uses Nucleus/Tao as the window host while still running on the regular JVM. The task builds the existing Rust system-WebView login helper and, on Linux, the thin JNI libmpv bridge used by the Nucleus playback backend.
-
-For Linux development, install the libmpv development package so the JNI bridge can link against `libmpv`.
+The Nucleus host reuses the shared Compose UI and desktop runtime services. Provider login uses the existing Rust system-WebView helper. Playback uses the shared Kotlin playback state machine with a thin JNI libmpv backend; there is no playback sidecar process and no native-to-Kotlin callback surface.
 
 ## GraalVM Native Image
 
@@ -25,49 +23,48 @@ Build the packaged native application folder with:
   :desktopNucleusPoc:packageGraalvmNative
 ```
 
-The packaged output is written below:
-
-```text
-desktopNucleusPoc/build/compose/binaries/**/graalvm-app/
-```
-
-The Linux executable is named `fuoevolve-nucleus-poc`. The complete `graalvm-app` folder is an intermediate runtime image rather than a portable Linux distribution: Nucleus places the Skiko/AWT/native sidecars and FuoEvolve app resources alongside the executable, while libmpv, Secret Service and WebKitGTK remain host ABI dependencies.
-
-For Linux distribution, package the Native Image runtime so those dependencies are declared by the package manager:
+The `graalvm-app` directory is an intermediate runtime image. User-facing installers are created by Nucleus through:
 
 ```bash
-bash desktopNucleusPoc/packaging/linux/package-deb.sh \
-  /path/to/graalvm-app/desktopNucleusPoc \
-  1.5.3 \
-  desktopNucleusPoc/build/packages
+./gradlew \
+  -PenableNucleusDesktopPoc=true \
+  -PnativeMarch=compatibility \
+  -Pfuoevolve.nucleus.targetFormat=<msi|dmg|appimage|pacman> \
+  :desktopNucleusPoc:packageGraalvmNativeDistributionForCurrentOS
 ```
 
-The generated DEB declares the system dependencies required by playback, provider credentials, WebView login and the native UI runtime. CI verifies the dependency metadata and uploads this installable package instead of publishing the raw `graalvm-app` folder as a user-facing artifact.
+## Distribution matrix
 
-## Current usable scope
+Desktop CI produces only Nucleus/GraalVM artifacts:
 
-The Nucleus path now wires the runtime pieces required for provider use and Linux audio playback:
+| Platform | Artifact | Native dependency policy |
+| --- | --- | --- |
+| Windows x64 | MSI | JNI bridge + pinned libmpv runtime bundled |
+| macOS arm64 | DMG | JNI bridge + relocatable libmpv dylib closure bundled |
+| macOS x64 | DMG | JNI bridge + relocatable libmpv dylib closure bundled |
+| Arch Linux x64 | Pacman/Arch package | distro-managed `mpv`, `libsecret`, WebKitGTK and UI ABI dependencies |
+| Portable Linux x64 | AppImage | libmpv, Libsecret client, WebKitGTK subprocess/runtime and TLS module closures bundled |
+
+Linux AppImage runtime directories are discovered through `compose.application.resources.dir`; no wrapper-script-only environment is required for provider login or secure credential fallback.
+
+## Current runtime scope
+
+The Nucleus path includes:
 
 - Nucleus 2.5.15 + Tao window backend;
-- existing `shared` `DesktopAppHost` and Compose UI;
-- existing desktop settings persistence and provider HTTP cache;
-- the same OS-backed provider credential format used by the JVM desktop app (Windows Credential Manager, macOS Keychain, Linux Secret Service/Libsecret);
-- the existing Rust system-WebView login helper packaged as an app resource;
+- the shared `DesktopAppHost` Compose UI;
+- desktop settings persistence and provider HTTP cache;
+- the same OS-backed provider credential namespace used by the previous JVM host;
+- the Rust system-WebView login helper as a packaged resource;
 - the shared `desktopRuntime` libmpv playback state machine;
-- a Linux JNI libmpv backend with no native-to-Kotlin callbacks;
-- request-correlated libmpv lifecycle events so stale events from rapid source replacement cannot confirm the new track;
-- GraalVM Native Image compilation and packaged native startup.
+- direct JNI libmpv playback on Windows, macOS and Linux packaging targets;
+- stale-event correlation for rapid source replacement;
+- GraalVM Native Image compilation and native installer packaging.
 
-JVM and Nucleus use the same credential key namespace, so switching runtime paths does not intentionally create a second provider login state. The JVM host continues to use the existing JNA libmpv backend while the Nucleus host uses JNI; both feed the same Kotlin playback state machine.
+Local music indexing, listening history, tray, external activation, video rendering, and system media integration still need to be moved from the legacy JVM host behind shared desktop runtime boundaries. They are not pulled into Nucleus implicitly by the packaging migration.
 
-Linux is the first validated Nucleus native-playback target. The installable DEB deliberately uses distro-managed native libraries, including `libmpv`, rather than bundling an Ubuntu library closure into a cross-distribution runtime. macOS and Windows Nucleus JNI bridge packaging are intentionally deferred until the Linux path is proven end-to-end; their existing JVM desktop playback path is unchanged.
+## CI
 
-Local music indexing, listening history, tray, external activation, video rendering, and system media integration are still owned by the existing JVM `desktopApp` path. They will be migrated behind explicit desktop runtime boundaries rather than pulling the current host implementation wholesale into Native Image.
+`.github/workflows/desktop-tests.yml` validates shared desktop tests, `desktopRuntime`, Nucleus tests, JNI compilation and packaged-resource staging on Linux, Windows and macOS.
 
-## CI smoke modes
-
-`FUOEVOLVE_NUCLEUS_POC_SMOKE=1` makes the application exit shortly after the existing UI reaches composition.
-
-`FUOEVOLVE_NUCLEUS_PLAYBACK_SMOKE=/absolute/path/to/audio.wav` starts a dedicated libmpv playback probe. CI requires the shared playback state to reach `Playing` and advance beyond 300 ms before the application exits.
-
-The dedicated Linux workflow validates the shared desktop runtime and Nucleus lifecycle gate, builds and stages the Rust WebView helper and JNI libmpv bridge, runs the Tao/JVM host, builds `packageGraalvmNative`, verifies all packaged native resources, starts the packaged native binary, plays a generated local WAV through the packaged Native Image + JNI + libmpv path, and finally builds an installable DEB with explicit system dependency metadata.
+`.github/workflows/desktop-packaging.yml` builds the four user-facing artifact classes above entirely through `packageGraalvmNativeDistributionForCurrentOS`. `master-canary.yml` calls that reusable workflow after the normal platform test gates.
