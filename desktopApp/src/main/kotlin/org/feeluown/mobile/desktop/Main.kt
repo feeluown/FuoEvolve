@@ -43,7 +43,7 @@ fun main(args: Array<String>) {
     installDesktopPlaybackEngineFactory {
         configureLibMpvNumericLocale()
         PersistentDesktopPlaybackEngine(
-            delegate = DesktopMpvPlaybackEngine(),
+            delegate = DesktopMpvPlaybackEngine { listener -> LibMpvBackend(listener) },
             resumeStore = createDesktopPlaybackResumeStore(),
         )
     }
