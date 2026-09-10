@@ -34,10 +34,17 @@ jobs:
         with:
           add-job-summary: never
 
-      - name: Install Tao smoke-test runtime
+      - name: Install Tao headful runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgtk-3-0 libxkbcommon-x11-0
+          sudo apt-get install -y \
+            xvfb \
+            openbox \
+            mesa-utils \
+            libegl1 \
+            libgl1-mesa-dri \
+            libgtk-3-0 \
+            libxkbcommon-x11-0
 
       - name: Compile isolated Nucleus module
         run: >-
@@ -50,10 +57,17 @@ jobs:
       - name: Start Tao window and compose existing UI
         env:
           FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
-        run: >-
-          timeout 90s xvfb-run -a
-          ./gradlew
-          --no-configuration-cache
-          --warning-mode all
-          -PenableNucleusDesktopPoc=true
-          :desktopNucleusPoc:run
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1600x1200x24 &
+          for i in $(seq 1 50); do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 0.2
+          done
+          openbox &
+          sleep 1
+          timeout 90s ./gradlew \
+            --no-configuration-cache \
+            --warning-mode all \
+            -PenableNucleusDesktopPoc=true \
+            :desktopNucleusPoc:run
