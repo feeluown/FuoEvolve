@@ -31,8 +31,19 @@ jobs:
           packaging-tools: "false"
           setup-node: "false"
 
-      - name: Set up Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust 1.98.1
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache Rust WebView helper
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/web-login/target
+          key: nucleus-web-login-linux-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+          restore-keys: |
+            nucleus-web-login-linux-x64-rust-1.98.1-
 
       - name: Install Linux native dependencies
         run: |
@@ -83,10 +94,29 @@ jobs:
           packaging-tools: "false"
           setup-node: "false"
 
-      - name: Set up Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust 1.98.1
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache Rust WebView helper
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/web-login/target
+          key: nucleus-web-login-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+          restore-keys: |
+            nucleus-web-login-windows-x64-rust-1.98.1-
+
+      - name: Cache pinned Windows libmpv bundle
+        id: windows-libmpv-cache
+        uses: actions/cache@v6
+        with:
+          path: build/nucleus-native/windows/mpv
+          key: nucleus-libmpv-windows-x64-${{ hashFiles('desktopApp/packaging/native-deps.lock') }}
 
       - name: Prepare pinned Windows libmpv development bundle
+        if: steps.windows-libmpv-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: >-
           ./desktopNucleusPoc/packaging/windows/prepare-libmpv-dev.ps1
@@ -94,7 +124,9 @@ jobs:
 
       - name: Verify Windows native compiler
         shell: pwsh
-        run: clang --version
+        run: |
+          clang --version
+          lld-link --version
 
       - name: Test shared desktop and Nucleus runtime
         shell: pwsh
@@ -133,8 +165,19 @@ jobs:
           packaging-tools: "false"
           setup-node: "false"
 
-      - name: Set up Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust 1.98.1
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache Rust WebView helper
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktopApp/native/web-login/target
+          key: nucleus-web-login-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+          restore-keys: |
+            nucleus-web-login-macos-arm64-rust-1.98.1-
 
       - name: Prepare macOS libmpv development runtime
         run: |
