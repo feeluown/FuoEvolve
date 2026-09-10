@@ -21,7 +21,7 @@ class DesktopMpvLibmpvSmokeTest {
     @Test
     fun localWavReachesPlayingThroughRealLibmpv() {
         val fixture = Files.createTempFile("fuoevolve-libmpv-smoke-", ".wav")
-        val engine = DesktopMpvPlaybackEngine()
+        val engine = DesktopMpvPlaybackEngine { listener -> LibMpvBackend(listener) }
         try {
             writeSineWave(fixture)
             val track = MusicTrack(
