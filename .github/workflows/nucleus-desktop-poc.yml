@@ -1,0 +1,59 @@
+name: Nucleus Desktop PoC
+
+"on":
+  pull_request:
+    paths:
+      - "desktopNucleusPoc/**"
+      - "settings.gradle.kts"
+      - ".github/workflows/nucleus-desktop-poc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-tao:
+    name: Linux Tao compile and window smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
+
+      - name: Install Tao smoke-test runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libxkbcommon-x11-0
+
+      - name: Compile isolated Nucleus module
+        run: >-
+          ./gradlew
+          --no-configuration-cache
+          --warning-mode all
+          -PenableNucleusDesktopPoc=true
+          :desktopNucleusPoc:compileKotlin
+
+      - name: Start Tao window and compose existing UI
+        env:
+          FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
+        run: >-
+          timeout 90s xvfb-run -a
+          ./gradlew
+          --no-configuration-cache
+          --warning-mode all
+          -PenableNucleusDesktopPoc=true
+          :desktopNucleusPoc:run
