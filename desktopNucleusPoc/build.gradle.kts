@@ -1,6 +1,7 @@
 import dev.nucleusframework.desktop.application.dsl.TargetFormat
 import java.io.File
 import java.util.zip.ZipFile
+import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
 import org.gradle.jvm.tasks.Jar
 
@@ -338,7 +339,8 @@ nucleus.application {
         }
         macOS {
             packageName = "FuoEvolve"
-            bundleID = "org.feeluown.FuoEvolve"
+            // Preserve the existing desktop bundle identity across the JVM -> Nucleus migration.
+            bundleID = "org.feeluown.mobile.desktop"
             appCategory = "public.app-category.music"
         }
         linux {
@@ -361,6 +363,35 @@ nucleus.application {
         isEnabled.set(true)
         imageName.set("fuoevolve")
     }
+}
+
+// Nucleus 2.5.15 does not apply macOS.infoPlist.extraKeysRawXml to its GraalVM bundle.
+// Patch the plist immediately after Nucleus copies it into Contents; the bundle codesign task
+// depends on this Copy task, so the final signature covers the patched permission metadata.
+if (isMacHost) {
+    tasks.withType<Copy>()
+        .matching { task -> task.name.contains("graalvmInfoPlist", ignoreCase = true) }
+        .configureEach {
+            doLast {
+                val plist = destinationDir.resolve("Info.plist")
+                check(plist.isFile) { "Nucleus GraalVM Info.plist was not copied: ${plist.absolutePath}" }
+                val command = "Set :NSMicrophoneUsageDescription FuoEvolve 使用麦克风进行听歌识曲。"
+                val setResult = providers.exec {
+                    isIgnoreExitValue = true
+                    commandLine("/usr/libexec/PlistBuddy", "-c", command, plist.absolutePath)
+                }.result.get()
+                if (setResult.exitValue != 0) {
+                    providers.exec {
+                        commandLine(
+                            "/usr/libexec/PlistBuddy",
+                            "-c",
+                            "Add :NSMicrophoneUsageDescription string FuoEvolve 使用麦克风进行听歌识曲。",
+                            plist.absolutePath,
+                        )
+                    }.result.get().assertNormalExitValue()
+                }
+            }
+        }
 }
 
 // Compose/Nucleus consume appResources through prepareAppResources. Make the staging dependency
