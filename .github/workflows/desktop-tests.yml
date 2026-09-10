@@ -1,4 +1,4 @@
-name: Desktop Tests
+name: Nucleus Desktop Tests
 
 "on":
   workflow_call:
@@ -8,9 +8,9 @@ permissions:
 
 jobs:
   linux:
-    name: Linux desktop, tray and WebView login
+    name: Linux Nucleus runtime
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -24,42 +24,43 @@ jobs:
             git branch master origin/master
           fi
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Set up Nucleus toolchain
+        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
         with:
-          distribution: temurin
           java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          add-job-summary: never
+          packaging-tools: "false"
+          setup-node: "false"
 
       - name: Set up Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
-          rustc --version
-          cargo --version
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Linux WebKitGTK build dependency
+      - name: Install Linux native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev
+          sudo apt-get install -y \
+            build-essential \
+            libmpv-dev \
+            libsecret-1-dev \
+            libwebkit2gtk-4.1-dev
 
-      - name: Compile Rust StatusNotifier tray bridge
-        run: cargo build --manifest-path desktopApp/native/linux-tray/Cargo.toml --release
-
-      - name: Test Rust WebView login helper
-        run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
-
-      - name: Test Linux desktop foundation
-        run: ./gradlew --no-configuration-cache --warning-mode all ciDesktopTest
+      - name: Test shared desktop and Nucleus runtime
+        run: |
+          ./gradlew \
+            --no-configuration-cache \
+            --warning-mode all \
+            -PenableNucleusDesktopPoc=true \
+            ciDesktopTest \
+            :desktopNucleusPoc:test \
+            :desktopNucleusPoc:compileKotlin \
+            :desktopNucleusPoc:prepareNucleusAppResources
 
   windows:
-    name: Windows desktop, SMTC and WebView login
+    name: Windows Nucleus runtime
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
+    env:
+      FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR: ${{ github.workspace }}\build\nucleus-native\windows\mpv
+      FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR: ${{ github.workspace }}\build\nucleus-native\windows\mpv
 
     steps:
       - name: Checkout
@@ -75,41 +76,43 @@ jobs:
             git branch master origin/master
           }
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Set up Nucleus toolchain
+        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
         with:
-          distribution: temurin
           java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          add-job-summary: never
+          packaging-tools: "false"
+          setup-node: "false"
 
       - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare pinned Windows libmpv development bundle
+        shell: pwsh
+        run: >-
+          ./desktopNucleusPoc/packaging/windows/prepare-libmpv-dev.ps1
+          -OutputDir "$env:FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"
+
+      - name: Verify Windows native compiler
+        shell: pwsh
+        run: clang --version
+
+      - name: Test shared desktop and Nucleus runtime
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
-          rustc --version
-          cargo --version
-
-      - name: Compile Rust SMTC bridge
-        shell: pwsh
-        run: cargo build --manifest-path desktopApp/native/windows-smtc/Cargo.toml --release
-
-      - name: Test Rust WebView login helper
-        shell: pwsh
-        run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
-
-      - name: Test Windows desktop foundation
-        shell: pwsh
-        run: ./gradlew.bat --no-configuration-cache --warning-mode all ciDesktopTest
+          .\gradlew.bat `
+            --no-configuration-cache `
+            --warning-mode all `
+            -PenableNucleusDesktopPoc=true `
+            ciDesktopTest `
+            :desktopNucleusPoc:test `
+            :desktopNucleusPoc:compileKotlin `
+            :desktopNucleusPoc:prepareNucleusAppResources
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   macos:
-    name: macOS desktop, Now Playing and WebView login
-    runs-on: macos-latest
-    timeout-minutes: 45
+    name: macOS Nucleus runtime
+    runs-on: macos-15
+    timeout-minutes: 50
 
     steps:
       - name: Checkout
@@ -123,41 +126,31 @@ jobs:
             git branch master origin/master
           fi
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Set up Nucleus toolchain
+        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
         with:
-          distribution: temurin
           java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          add-job-summary: never
+          packaging-tools: "false"
+          setup-node: "false"
 
       - name: Set up Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
-          rustc --version
-          cargo --version
-          swift --version
-          xcodebuild -version
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Homebrew libmpv for native playback smoke test
+      - name: Prepare macOS libmpv development runtime
         run: |
+          export HOMEBREW_NO_AUTO_UPDATE=1
           brew list mpv >/dev/null 2>&1 || brew install mpv
-          echo "FUOEVOLVE_LIBMPV_PATH=$(brew --prefix mpv)/lib/libmpv.dylib" >> "$GITHUB_ENV"
+          MPV_PREFIX="$(brew --prefix mpv)"
+          echo "FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR=$MPV_PREFIX" >> "$GITHUB_ENV"
+          echo "FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR=$MPV_PREFIX/lib" >> "$GITHUB_ENV"
 
-      - name: Run real macOS libmpv playback smoke test
-        env:
-          FUOEVOLVE_LIBMPV_AO: "null"
-        run: ./gradlew --no-configuration-cache --warning-mode all :desktopApp:desktopMpvSmokeTest
-
-      - name: Compile Rust Now Playing bridge
-        run: cargo build --manifest-path desktopApp/native/macos-now-playing/Cargo.toml --release
-
-      - name: Test Rust WebView login helper
-        run: cargo test --manifest-path desktopApp/native/web-login/Cargo.toml --release
-
-      - name: Test macOS desktop foundation
-        run: ./gradlew --no-configuration-cache --warning-mode all ciDesktopTest
+      - name: Test shared desktop and Nucleus runtime
+        run: |
+          ./gradlew \
+            --no-configuration-cache \
+            --warning-mode all \
+            -PenableNucleusDesktopPoc=true \
+            ciDesktopTest \
+            :desktopNucleusPoc:test \
+            :desktopNucleusPoc:compileKotlin \
+            :desktopNucleusPoc:prepareNucleusAppResources
