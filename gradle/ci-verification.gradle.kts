@@ -91,6 +91,7 @@ val ciDesktopTest = tasks.register("ciDesktopTest") {
     dependsOn(
         ":desktopApp:compileKotlin",
         ":desktopApp:test",
+        ":desktopRuntime:test",
     )
 }
 
