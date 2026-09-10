@@ -25,7 +25,7 @@ jobs:
           fi
 
       - name: Set up Nucleus toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           packaging-tools: "false"
@@ -88,7 +88,7 @@ jobs:
           }
 
       - name: Set up Nucleus toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           packaging-tools: "false"
@@ -162,7 +162,7 @@ jobs:
           fi
 
       - name: Set up Nucleus toolchain
-        uses: NucleusFramework/Nucleus/.github/actions/setup-nucleus@v2.5.15
+        uses: ./.github/actions/setup-nucleus
         with:
           java-version: "17"
           packaging-tools: "false"
@@ -199,6 +199,11 @@ jobs:
         run: |
           test -f "$FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR/include/mpv/client.h"
           test -f "$FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR/libmpv.dylib"
+          duplicate_count="$(otool -l "$FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR/libmpv.dylib" | awk '$1 == "cmd" && $2 == "LC_RPATH" { r=1; next } r && $1 == "path" { if ($2 == "@loader_path/") c++; r=0 } END { print c+0 }')"
+          if [[ "$duplicate_count" -gt 1 ]]; then
+            echo "Duplicate @loader_path/ LC_RPATH remains in cached libmpv.dylib" >&2
+            exit 1
+          fi
 
       - name: Test shared desktop and Nucleus runtime
         run: |
