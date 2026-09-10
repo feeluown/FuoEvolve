@@ -9,13 +9,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.sun.jna.Library
-import com.sun.jna.Native
-import com.sun.jna.Platform
 import java.awt.Window as AwtWindow
 import javax.swing.SwingUtilities
 import org.feeluown.mobile.AppLogger
@@ -32,25 +30,6 @@ import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
 import org.feeluown.mobile.persistence.listening.DesktopListeningHistoryDriverFactory
 import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
-
-private interface CLocaleNative : Library {
-    fun setlocale(category: Int, locale: String): String?
-}
-
-private val cLocaleNative: CLocaleNative by lazy {
-    Native.load(Platform.C_LIBRARY_NAME, CLocaleNative::class.java)
-}
-
-private fun configureLibMpvNumericLocale() {
-    val lcNumeric = when {
-        Platform.isLinux() -> 1
-        Platform.isMac() || Platform.isWindows() -> 4
-        else -> return
-    }
-    check(cLocaleNative.setlocale(lcNumeric, "C") != null) {
-        "Failed to set LC_NUMERIC=C for libmpv"
-    }
-}
 
 fun main(args: Array<String>) {
     installDesktopAppLogger()
@@ -120,6 +99,7 @@ fun main(args: Array<String>) {
                 },
                 visible = windowVisible,
                 title = "FuoEvolve",
+                icon = painterResource("ic_launcher.png"),
                 state = rememberWindowState(width = 1280.dp, height = 800.dp),
             ) {
                 SideEffect {

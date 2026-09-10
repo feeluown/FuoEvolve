@@ -488,6 +488,7 @@ private class LibMpvBackend(
     private var polledActivePath: String? = null
 
     init {
+        configureLibMpvNumericLocale()
         handle = library.mpv_create()
             ?: throw IllegalStateException("libmpv mpv_create() returned null")
         try {
@@ -941,6 +942,25 @@ private fun loadMpvLibrary(): MpvNative {
         "Unable to load libmpv from ${candidates.joinToString()}",
         lastFailure,
     )
+}
+
+private interface CLocaleNative : Library {
+    fun setlocale(category: Int, locale: String): String?
+}
+
+private val cLocaleNative: CLocaleNative by lazy {
+    Native.load(Platform.C_LIBRARY_NAME, CLocaleNative::class.java)
+}
+
+internal fun configureLibMpvNumericLocale() {
+    val lcNumeric = when {
+        Platform.isLinux() -> 1
+        Platform.isMac() || Platform.isWindows() -> 4
+        else -> return
+    }
+    check(cLocaleNative.setlocale(lcNumeric, "C") != null) {
+        "Failed to set LC_NUMERIC=C for libmpv"
+    }
 }
 
 private fun desktopMpvSourceKind(url: String): String = when {

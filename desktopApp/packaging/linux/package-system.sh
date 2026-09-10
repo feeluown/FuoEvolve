@@ -10,6 +10,9 @@ PACKAGE_TYPE="$1"
 APP_IMAGE="$2"
 VERSION="$3"
 OUTPUT_DIR="$4"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+ICON="$REPO_ROOT/androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
 
 if [[ "$PACKAGE_TYPE" != "deb" && "$PACKAGE_TYPE" != "rpm" ]]; then
   echo "unsupported Linux package type: $PACKAGE_TYPE" >&2
@@ -17,6 +20,10 @@ if [[ "$PACKAGE_TYPE" != "deb" && "$PACKAGE_TYPE" != "rpm" ]]; then
 fi
 if [[ ! -d "$APP_IMAGE" || ! -x "$APP_IMAGE/bin/FuoEvolve" ]]; then
   echo "invalid Compose app image: $APP_IMAGE" >&2
+  exit 1
+fi
+if [[ ! -f "$ICON" ]]; then
+  echo "desktop package icon is missing: $ICON" >&2
   exit 1
 fi
 if [[ ! -x "$JAVA_HOME/bin/jpackage" ]]; then
@@ -34,6 +41,7 @@ COMMON_ARGS=(
   --app-version "$VERSION"
   --vendor FeelUOwn
   --description "A cross-platform multi-source music player based on FeelUOwn"
+  --icon "$ICON"
   --linux-package-name fuoevolve
   --linux-shortcut
   --linux-menu-group AudioVideo

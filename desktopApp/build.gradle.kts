@@ -19,6 +19,16 @@ kotlin {
     jvmToolchain(17)
 }
 
+private val desktopAppIcon = rootProject.file(
+    "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+)
+
+sourceSets {
+    named("main") {
+        resources.srcDir(desktopAppIcon.parentFile)
+    }
+}
+
 fun gitOutput(vararg args: String): String? = runCatching {
     val output = providers.exec {
         workingDir = rootProject.projectDir
@@ -408,6 +418,14 @@ tasks.named<Test>("test") {
     }
 }
 
+kover {
+    currentProject {
+        instrumentation {
+            disabledForTestTasks.add("desktopMpvSmokeTest")
+        }
+    }
+}
+
 tasks.register<Test>("desktopMpvSmokeTest") {
     group = "verification"
     description = "Runs the opt-in native libmpv desktop playback smoke test."
@@ -511,6 +529,7 @@ compose.desktop {
                 packageName = "fuoevolve"
                 menuGroup = "AudioVideo"
                 appCategory = "sound"
+                iconFile.set(desktopAppIcon)
             }
         }
     }
