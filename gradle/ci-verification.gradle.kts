@@ -87,12 +87,8 @@ val ciIosTest = tasks.register("ciIosTest") {
 
 val ciDesktopTest = tasks.register("ciDesktopTest") {
     group = "verification"
-    description = "Runs all desktop-target tests plus desktop application unit tests."
-    dependsOn(
-        ":desktopApp:compileKotlin",
-        ":desktopApp:test",
-        ":desktopRuntime:test",
-    )
+    description = "Runs shared desktop-target tests and the Nucleus-ready desktop runtime tests."
+    dependsOn(":desktopRuntime:test")
 }
 
 tasks.register("ciCoverage") {
