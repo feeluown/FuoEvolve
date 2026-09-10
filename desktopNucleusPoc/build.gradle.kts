@@ -139,6 +139,8 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.nucleus-application:2.5.15")
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
+
+    testImplementation(kotlin("test"))
 }
 
 // Nucleus feeds native-image a repackaged uber JAR rather than the original dependency JARs.
