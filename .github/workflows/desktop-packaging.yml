@@ -109,6 +109,9 @@ jobs:
     name: macOS ${{ matrix.arch }} DMG
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR: ${{ github.workspace }}/build/nucleus-native/macos/mpv
+      FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR: ${{ github.workspace }}/build/nucleus-native/macos/mpv
     strategy:
       fail-fast: false
       matrix:
@@ -157,13 +160,29 @@ jobs:
           restore-keys: |
             nucleus-web-login-macos-${{ matrix.arch }}-rust-1.98.1-
 
+      - name: Cache relocatable macOS libmpv bundle
+        id: macos-libmpv-cache
+        uses: actions/cache@v6
+        with:
+          path: build/nucleus-native/macos/mpv
+          key: nucleus-libmpv-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/macos/prepare-libmpv.sh') }}
+
       - name: Prepare relocatable macOS libmpv runtime
+        if: steps.macos-libmpv-cache.outputs.cache-hit != 'true'
+        run: >-
+          bash desktopApp/packaging/macos/prepare-libmpv.sh
+          "${{ github.workspace }}/build/nucleus-native/macos/mpv"
+
+      - name: Verify cached macOS libmpv bundle
         run: |
-          bash desktopApp/packaging/macos/prepare-libmpv.sh \
-            "${{ github.workspace }}/build/nucleus-native/macos/mpv"
-          MPV_PREFIX="$(brew --prefix mpv)"
-          echo "FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR=$MPV_PREFIX" >> "$GITHUB_ENV"
-          echo "FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR=${{ github.workspace }}/build/nucleus-native/macos/mpv" >> "$GITHUB_ENV"
+          test -f "$FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR/include/mpv/client.h"
+          test -f "$FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR/libmpv.dylib"
+          while IFS= read -r dylib; do
+            if otool -L "$dylib" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/' >/dev/null; then
+              echo "Cached macOS libmpv bundle is not relocatable: $dylib" >&2
+              exit 1
+            fi
+          done < <(find "$FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR" -maxdepth 1 -type f -name '*.dylib' -print)
 
       - name: Build Nucleus Native Image DMG
         env:
