@@ -13,9 +13,9 @@ permissions:
 
 jobs:
   linux-tao:
-    name: Linux Tao compile and window smoke
+    name: Linux Tao JVM and GraalVM smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -34,10 +34,12 @@ jobs:
         with:
           add-job-summary: never
 
-      - name: Install Tao headful runtime
+      - name: Install Tao and Native Image runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
+            patchelf \
             xvfb \
             openbox \
             mesa-utils \
@@ -54,12 +56,14 @@ jobs:
           -PenableNucleusDesktopPoc=true
           :desktopNucleusPoc:compileKotlin
 
-      - name: Start Tao window and compose existing UI
+      - name: Start Tao JVM window and compose existing UI
         env:
           FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1600x1200x24 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 50); do
             xdpyinfo -display :99 >/dev/null 2>&1 && break
             sleep 0.2
@@ -71,3 +75,23 @@ jobs:
             --warning-mode all \
             -PenableNucleusDesktopPoc=true \
             :desktopNucleusPoc:run
+
+      - name: Build and start GraalVM Native Image
+        env:
+          FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
+        run: |
+          export DISPLAY=:100
+          Xvfb :100 -screen 0 1600x1200x24 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            xdpyinfo -display :100 >/dev/null 2>&1 && break
+            sleep 0.2
+          done
+          openbox &
+          sleep 1
+          timeout 1200s ./gradlew \
+            --no-configuration-cache \
+            --warning-mode all \
+            -PenableNucleusDesktopPoc=true \
+            :desktopNucleusPoc:runGraalvmNative
