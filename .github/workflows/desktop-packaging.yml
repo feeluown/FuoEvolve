@@ -283,7 +283,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            libfuse2 \
+            libfuse2t64 \
             libmpv-dev \
             libsecret-1-dev \
             libwebkit2gtk-4.1-dev \
