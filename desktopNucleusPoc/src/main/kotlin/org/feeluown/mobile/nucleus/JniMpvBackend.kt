@@ -21,6 +21,7 @@ internal class JniMpvBackend(
     private val closed = AtomicBoolean(false)
     private val handle: Long
     private val eventThread: Thread
+    private val lifecycleGate = NucleusMpvLifecycleGate()
 
     @Volatile
     private var expectedPath: String? = null
@@ -68,6 +69,7 @@ internal class JniMpvBackend(
         expectedPath = url
         expectedPlaylistEntryId = null
         polledActivePath = null
+        lifecycleGate.reset()
         val perFileOptions = encodeMpvLoadfileOptions(headers)
         try {
             if (perFileOptions.isEmpty()) {
@@ -75,7 +77,12 @@ internal class JniMpvBackend(
             } else {
                 command("loadfile", url, "replace", "-1", perFileOptions)
             }
-            currentPlaylistEntryId()?.let { expectedPlaylistEntryId = it }
+            // The replace command owns playlist slot 0 synchronously. Prefer that id over the
+            // currently-playing position, which may still describe the previous entry while mpv
+            // drains queued lifecycle events from a rapid source switch.
+            getPropertyString("playlist/0/id")?.toLongOrNull()?.let { playlistEntryId ->
+                expectedPlaylistEntryId = playlistEntryId
+            }
             AppLogger.i(
                 LOG_TAG,
                 "JNI loadfile submitted sourceKind=${sourceKind(url)} headers=${headers.size}",
@@ -84,6 +91,7 @@ internal class JniMpvBackend(
             expectedPath = null
             expectedPlaylistEntryId = null
             polledActivePath = null
+            lifecycleGate.reset()
             throw throwable
         }
     }
@@ -103,6 +111,7 @@ internal class JniMpvBackend(
         expectedPath = null
         expectedPlaylistEntryId = null
         polledActivePath = null
+        lifecycleGate.reset()
         command("stop")
     }
 
@@ -116,6 +125,7 @@ internal class JniMpvBackend(
         expectedPath = null
         expectedPlaylistEntryId = null
         polledActivePath = null
+        lifecycleGate.reset()
         JniMpvApi.nativeWakeup(handle)
         if (Thread.currentThread() !== eventThread) {
             runCatching { eventThread.join() }
@@ -145,7 +155,11 @@ internal class JniMpvBackend(
         when {
             encoded == "shutdown" -> closed.set(true)
             encoded == "loaded" -> activateExpectedRequestFromFileLoaded()
-            encoded == "restart" -> listener(DesktopMpvBackendEvent.PlaybackRestart)
+            encoded == "restart" -> {
+                if (playbackRestartMatchesCurrentRequest()) {
+                    listener(DesktopMpvBackendEvent.PlaybackRestart)
+                }
+            }
             encoded.startsWith("start:") -> {
                 val playlistEntryId = encoded.substringAfter(':').toLongOrNull() ?: return
                 if (startFileMatchesCurrentRequest(playlistEntryId)) {
@@ -176,31 +190,73 @@ internal class JniMpvBackend(
     }
 
     private fun startFileMatchesCurrentRequest(playlistEntryId: Long): Boolean {
-        if (expectedPath == null) return false
+        val requestedPath = expectedPath ?: return false
         val expectedEntryId = expectedPlaylistEntryId
-        val accepted = expectedEntryId == null || playlistEntryId == expectedEntryId
-        if (accepted && expectedEntryId == null) expectedPlaylistEntryId = playlistEntryId
-        return accepted
+        val currentEntryId = currentPlaylistEntryId()
+        val queuedEntryId = getPropertyString("playlist/0/id")?.toLongOrNull()
+        val idMatches = when {
+            expectedEntryId != null -> playlistEntryId == expectedEntryId
+            queuedEntryId != null -> playlistEntryId == queuedEntryId
+            currentEntryId != null -> playlistEntryId == currentEntryId
+            else -> false
+        }
+        if (!idMatches) return false
+
+        val currentPath = getPropertyString("path")
+        val currentPlaylistFilename = currentPlaylistEntryFilename()
+        val queuedFilename = getPropertyString("playlist/0/filename")
+        val sourceMatches = currentPath == requestedPath ||
+            currentPlaylistFilename == requestedPath ||
+            queuedFilename == requestedPath
+        if (!sourceMatches) return false
+
+        expectedPlaylistEntryId = playlistEntryId
+        lifecycleGate.matchStart(playlistEntryId)
+        return true
     }
 
     private fun activateExpectedRequestFromFileLoaded(): Boolean {
         val requestedPath = expectedPath ?: return false
-        if (polledActivePath == requestedPath) return true
-        val playlistEntryId = expectedPlaylistEntryId ?: currentPlaylistEntryId()
-        if (playlistEntryId != null) expectedPlaylistEntryId = playlistEntryId
+        val playlistEntryId = currentPlaylistEntryId() ?: return false
+        if (!lifecycleGate.canAcceptFileLoaded(playlistEntryId)) return false
+        if (!currentRequestMatchesEntry(requestedPath, playlistEntryId)) return false
+        if (polledActivePath == requestedPath) {
+            lifecycleGate.markActivated(playlistEntryId)
+            return true
+        }
+
+        expectedPlaylistEntryId = playlistEntryId
         polledActivePath = requestedPath
+        lifecycleGate.markActivated(playlistEntryId)
         listener(DesktopMpvBackendEvent.FileLoaded(requestedPath, playlistEntryId))
         return true
+    }
+
+    private fun playbackRestartMatchesCurrentRequest(): Boolean {
+        val requestedPath = expectedPath ?: return false
+        val playlistEntryId = currentPlaylistEntryId() ?: return false
+        return lifecycleGate.canAcceptPlaybackRestart(playlistEntryId) &&
+            currentRequestMatchesEntry(requestedPath, playlistEntryId)
+    }
+
+    private fun currentRequestMatchesEntry(requestedPath: String, playlistEntryId: Long): Boolean {
+        val currentEntryId = currentPlaylistEntryId() ?: return false
+        if (currentEntryId != playlistEntryId) return false
+        val currentPath = getPropertyString("path")
+        val currentPlaylistFilename = currentPlaylistEntryFilename()
+        return currentPath == requestedPath || currentPlaylistFilename == requestedPath
     }
 
     private fun activateCurrentRequestFromPolling(): Boolean {
         val requestedPath = expectedPath ?: return false
         if (polledActivePath == requestedPath) {
-            if (expectedPlaylistEntryId == null) {
-                currentPlaylistEntryId()?.let { playlistEntryId ->
-                    expectedPlaylistEntryId = playlistEntryId
-                    listener(DesktopMpvBackendEvent.FileLoaded(requestedPath, playlistEntryId))
-                }
+            val currentEntryId = currentPlaylistEntryId()
+            if (expectedPlaylistEntryId == null && currentEntryId != null) {
+                expectedPlaylistEntryId = currentEntryId
+                lifecycleGate.markActivated(currentEntryId)
+                listener(DesktopMpvBackendEvent.FileLoaded(requestedPath, currentEntryId))
+            } else if (currentEntryId != null) {
+                lifecycleGate.markActivated(currentEntryId)
             }
             return true
         }
@@ -210,13 +266,17 @@ internal class JniMpvBackend(
         val playlistFilename = currentPlaylistEntryFilename()
         val matches = when {
             expectedPlaylistEntryId != null && currentEntryId != null ->
-                expectedPlaylistEntryId == currentEntryId
+                expectedPlaylistEntryId == currentEntryId &&
+                    (currentPath == requestedPath || playlistFilename == requestedPath)
             else -> currentPath == requestedPath || playlistFilename == requestedPath
         }
         if (!matches) return false
 
         val playlistEntryId = currentEntryId ?: expectedPlaylistEntryId
-        if (playlistEntryId != null) expectedPlaylistEntryId = playlistEntryId
+        if (playlistEntryId != null) {
+            expectedPlaylistEntryId = playlistEntryId
+            lifecycleGate.markActivated(playlistEntryId)
+        }
         polledActivePath = requestedPath
         listener(DesktopMpvBackendEvent.FileLoaded(requestedPath, playlistEntryId))
         return true
