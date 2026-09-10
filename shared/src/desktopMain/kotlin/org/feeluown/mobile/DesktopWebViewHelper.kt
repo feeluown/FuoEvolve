@@ -8,9 +8,17 @@ internal fun resolveDesktopWebViewHelper(): File? {
     val appDir = System.getProperty("fuoevolve.appdir")
         ?.takeIf { it.isNotBlank() && !it.contains("\$APPDIR") }
         ?.let(::File)
+    val composeResourcesDir = System.getProperty("compose.application.resources.dir")
+        ?.takeIf(String::isNotBlank)
+        ?.let(::File)
     val userDir = File(System.getProperty("user.dir").orEmpty().ifBlank { "." })
 
     val directCandidates = buildList {
+        if (composeResourcesDir != null) {
+            // Nucleus exposes prepared appResources through this standard Compose property for
+            // both JVM distributables and GraalVM packaged native applications.
+            add(File(composeResourcesDir, "native/helpers/$executableName"))
+        }
         if (appDir != null) {
             add(File(appDir, "resources/native/helpers/$executableName"))
         }
@@ -19,13 +27,17 @@ internal fun resolveDesktopWebViewHelper(): File? {
     }
     directCandidates.firstOrNull(::isUsableDesktopWebViewHelper)?.let { return it }
 
-    return appDir
-        ?.takeIf { it.isDirectory }
-        ?.walkTopDown()
-        ?.maxDepth(6)
-        ?.firstOrNull { candidate ->
-            candidate.name == executableName && isUsableDesktopWebViewHelper(candidate)
+    return sequenceOf(composeResourcesDir, appDir)
+        .filterNotNull()
+        .filter(File::isDirectory)
+        .flatMap { root ->
+            root.walkTopDown()
+                .maxDepth(6)
+                .filter { candidate ->
+                    candidate.name == executableName && isUsableDesktopWebViewHelper(candidate)
+                }
         }
+        .firstOrNull()
 }
 
 internal fun readDesktopWebViewHelperDiagnosticTail(reader: Reader): String {

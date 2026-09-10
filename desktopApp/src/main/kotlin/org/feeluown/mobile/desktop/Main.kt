@@ -51,7 +51,7 @@ fun main(args: Array<String>) {
         configureLibMpvNumericLocale()
         DesktopMpvVideoController()
     }
-    installDesktopProviderCredentialStoreFactory { DesktopSecureProviderCredentialStore() }
+    installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     installDesktopLocalMusicRepositoryFactory { DesktopLocalMusicRepository() }
     installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
 

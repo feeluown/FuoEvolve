@@ -18,6 +18,10 @@ import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.ProviderCredentials
 
+/** Shared JVM/GraalVM desktop credential entry point. */
+fun createDesktopSecureProviderCredentialStore(): ProviderCredentialStore =
+    DesktopSecureProviderCredentialStore()
+
 internal class DesktopSecureProviderCredentialStore(
     private val secretStoreProvider: () -> DesktopSecretStore? = ::createMicrosoftSecretStore,
     private val generationProvider: () -> String = { UUID.randomUUID().toString().replace("-", "") },
@@ -195,15 +199,13 @@ private fun isMacOs(): Boolean =
     System.getProperty("os.name").orEmpty().contains("mac", ignoreCase = true)
 
 private fun createLinuxLibSecretStore(): DesktopSecretStore {
-    // AppImage ships a compatibility libsecret closure, but an installed package and a portable
-    // image must see the same host Secret Service/keyring. Prefer the host client library and only
-    // add the bundled directory to JNA's search path when the host libsecret cannot be loaded.
+    // Installed packages and portable images must see the same host Secret Service/keyring.
+    // Prefer the host client library and only add a bundled directory when it cannot be loaded.
     configureLinuxLibSecretRuntime()
 
-    // StorageProvider performs a preflight that rejects a locked default collection before
-    // normal libsecret interaction can display the system unlock prompt. Use its underlying
-    // libsecret store directly on Linux instead: reads request SECRET_SEARCH_UNLOCK and writes
-    // use libsecret's default collection, so the Secret Service can handle user interaction.
+    // StorageProvider rejects a locked default collection before normal libsecret interaction can
+    // display the system unlock prompt. Use its underlying store directly so Secret Service owns
+    // the interaction and unlock flow.
     LibSecretLibrary.INSTANCE
     return MicrosoftDesktopSecretStore(LibSecretBackedTokenStore())
 }

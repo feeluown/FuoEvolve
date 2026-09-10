@@ -4,6 +4,9 @@ name: Nucleus Desktop PoC
   pull_request:
     paths:
       - "desktopNucleusPoc/**"
+      - "desktopRuntime/**"
+      - "desktopApp/native/web-login/**"
+      - "shared/src/desktopMain/kotlin/org/feeluown/mobile/DesktopWebViewHelper.kt"
       - "settings.gradle.kts"
       - ".github/workflows/nucleus-desktop-poc.yml"
   workflow_dispatch:
@@ -38,7 +41,10 @@ jobs:
         with:
           add-job-summary: never
 
-      - name: Install Tao and Native Image runtime
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tao, WebView and Native Image runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -50,15 +56,25 @@ jobs:
             libegl1 \
             libgl1-mesa-dri \
             libgtk-3-0 \
-            libxkbcommon-x11-0
+            libxkbcommon-x11-0 \
+            libsecret-1-dev \
+            libwebkit2gtk-4.1-dev
 
-      - name: Compile isolated Nucleus module
+      - name: Test shared desktop credential runtime
+        run: >-
+          ./gradlew
+          --no-configuration-cache
+          --warning-mode all
+          :desktopRuntime:test
+
+      - name: Compile Nucleus runtime and web login helper
         run: >-
           ./gradlew
           --no-configuration-cache
           --warning-mode all
           -PenableNucleusDesktopPoc=true
           :desktopNucleusPoc:compileKotlin
+          :desktopNucleusPoc:prepareNucleusAppResources
 
       - name: Start Tao JVM window and compose existing UI
         env:
@@ -93,18 +109,27 @@ jobs:
             -PnativeMarch=compatibility \
             :desktopNucleusPoc:packageGraalvmNative
 
-      - name: Start packaged native binary and compose existing UI
-        env:
-          FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
+      - name: Verify packaged native runtime
         run: |
           APPDIR=$(find desktopNucleusPoc/build/compose/binaries -type d -name graalvm-app | head -1)
           echo "app dir: $APPDIR"
           test -n "$APPDIR" && test -d "$APPDIR"
 
           BIN=$(find "$APPDIR" -type f -name 'fuoevolve-nucleus-poc' -perm -111 | head -1)
+          HELPER=$(find "$APPDIR" -type f -name 'fuoevolve-web-login' -perm -111 | head -1)
           echo "native binary: $BIN"
+          echo "web login helper: $HELPER"
           test -n "$BIN" && test -x "$BIN"
+          test -n "$HELPER" && test -x "$HELPER"
           file "$BIN"
+          file "$HELPER"
+
+      - name: Start packaged native binary and compose existing UI
+        env:
+          FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
+        run: |
+          APPDIR=$(find desktopNucleusPoc/build/compose/binaries -type d -name graalvm-app | head -1)
+          BIN=$(find "$APPDIR" -type f -name 'fuoevolve-nucleus-poc' -perm -111 | head -1)
 
           export DISPLAY=:100
           Xvfb :100 -screen 0 1600x1200x24 &
