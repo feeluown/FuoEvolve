@@ -145,6 +145,9 @@ jobs:
     name: macOS Nucleus runtime
     runs-on: macos-15
     timeout-minutes: 50
+    env:
+      FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR: ${{ github.workspace }}/build/nucleus-native/macos/mpv
+      FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR: ${{ github.workspace }}/build/nucleus-native/macos/mpv
 
     steps:
       - name: Checkout
@@ -179,13 +182,23 @@ jobs:
           restore-keys: |
             nucleus-web-login-macos-arm64-rust-1.98.1-
 
-      - name: Prepare macOS libmpv development runtime
+      - name: Cache relocatable macOS libmpv bundle
+        id: macos-libmpv-cache
+        uses: actions/cache@v6
+        with:
+          path: build/nucleus-native/macos/mpv
+          key: nucleus-libmpv-macos-arm64-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/macos/prepare-libmpv.sh') }}
+
+      - name: Prepare relocatable macOS libmpv bundle
+        if: steps.macos-libmpv-cache.outputs.cache-hit != 'true'
+        run: >-
+          bash desktopApp/packaging/macos/prepare-libmpv.sh
+          "${{ github.workspace }}/build/nucleus-native/macos/mpv"
+
+      - name: Verify cached macOS libmpv bundle
         run: |
-          export HOMEBREW_NO_AUTO_UPDATE=1
-          brew list mpv >/dev/null 2>&1 || brew install mpv
-          MPV_PREFIX="$(brew --prefix mpv)"
-          echo "FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR=$MPV_PREFIX" >> "$GITHUB_ENV"
-          echo "FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR=$MPV_PREFIX/lib" >> "$GITHUB_ENV"
+          test -f "$FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR/include/mpv/client.h"
+          test -f "$FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR/libmpv.dylib"
 
       - name: Test shared desktop and Nucleus runtime
         run: |
