@@ -439,6 +439,7 @@ tasks.register<Test>("desktopMpvSmokeTest") {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":desktopRuntime"))
     implementation(project(":playback:api"))
     implementation(project(":persistence:listening"))
     implementation(compose.desktop.currentOs)
@@ -446,7 +447,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.jna)
     implementation(libs.jna.platform)
-    implementation(libs.credential.secure.storage)
     implementation(libs.jaudiotagger)
     implementation(libs.dbus.java.core)
     runtimeOnly(libs.dbus.java.transport.native.unixsocket)
