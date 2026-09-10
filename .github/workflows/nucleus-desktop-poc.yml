@@ -97,7 +97,7 @@ jobs:
           echo "app dir: $APPDIR"
           test -n "$APPDIR" && test -d "$APPDIR"
 
-          BIN=$(find "$APPDIR" -maxdepth 1 -type f -perm -111 ! -name '*.so*' | head -1)
+          BIN=$(find "$APPDIR" -type f -name 'fuoevolve-nucleus-poc' -perm -111 | head -1)
           echo "native binary: $BIN"
           test -n "$BIN" && test -x "$BIN"
           file "$BIN"
