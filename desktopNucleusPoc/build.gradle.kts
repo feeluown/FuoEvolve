@@ -223,10 +223,9 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         }
     }
 
-    if (isLinuxHost) {
+    if (isLinuxHost && bundleLinuxRuntime.get()) {
         from(portableLinuxRuntime) {
             into(stagedNativeResourceRoot)
-            onlyIf { bundleLinuxRuntime.get() }
         }
     }
 
@@ -245,10 +244,14 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         if (!stagedMpvBridge.isFile) {
             throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
         }
-        if ((isWindowsHost || isMacHost || (isLinuxHost && bundleLinuxRuntime.get()))) {
+        if (isWindowsHost || isMacHost || (isLinuxHost && bundleLinuxRuntime.get())) {
             val runtimeNames = platformRoot.resolve("lib").listFiles().orEmpty().map(File::getName)
             val hasLibMpv = when {
-                isWindowsHost -> runtimeNames.any { it.equals("libmpv-2.dll", true) || it.equals("mpv-2.dll", true) || it.equals("mpv.dll", true) }
+                isWindowsHost -> runtimeNames.any {
+                    it.equals("libmpv-2.dll", true) ||
+                        it.equals("mpv-2.dll", true) ||
+                        it.equals("mpv.dll", true)
+                }
                 isMacHost -> "libmpv.dylib" in runtimeNames
                 else -> runtimeNames.any { it.startsWith("libmpv.so") }
             }
