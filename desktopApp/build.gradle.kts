@@ -6,6 +6,7 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -399,6 +400,23 @@ tasks.register("printDesktopPackageVersion") {
 tasks.register("printDesktopPackageProfile") {
     group = "distribution"
     doLast { println(desktopPackageProfile) }
+}
+
+tasks.named<Test>("test") {
+    filter {
+        excludeTestsMatching("org.feeluown.mobile.desktop.DesktopMpvLibmpvSmokeTest")
+    }
+}
+
+tasks.register<Test>("desktopMpvSmokeTest") {
+    group = "verification"
+    description = "Runs the opt-in native libmpv desktop playback smoke test."
+    dependsOn("testClasses")
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    filter {
+        includeTestsMatching("org.feeluown.mobile.desktop.DesktopMpvLibmpvSmokeTest")
+    }
 }
 
 dependencies {

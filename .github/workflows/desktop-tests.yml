@@ -143,6 +143,16 @@ jobs:
           swift --version
           xcodebuild -version
 
+      - name: Install Homebrew libmpv for native playback smoke test
+        run: |
+          brew list mpv >/dev/null 2>&1 || brew install mpv
+          echo "FUOEVOLVE_LIBMPV_PATH=$(brew --prefix mpv)/lib/libmpv.dylib" >> "$GITHUB_ENV"
+
+      - name: Run real macOS libmpv playback smoke test
+        env:
+          FUOEVOLVE_LIBMPV_AO: "null"
+        run: ./gradlew --no-configuration-cache --warning-mode all :desktopApp:desktopMpvSmokeTest
+
       - name: Compile Rust Now Playing bridge
         run: cargo build --manifest-path desktopApp/native/macos-now-playing/Cargo.toml --release
 

@@ -11,6 +11,7 @@ class MpvNativeStructureTest {
             MpvNativeEvent::class.java,
             MpvNativeStartFile::class.java,
             MpvNativeEventProperty::class.java,
+            MpvNativeLogMessage::class.java,
             MpvNativeEndFile::class.java,
         ).forEach { structure ->
             assertTrue(

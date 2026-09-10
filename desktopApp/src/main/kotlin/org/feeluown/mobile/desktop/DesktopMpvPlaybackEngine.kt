@@ -193,6 +193,11 @@ internal class DesktopMpvPlaybackEngine(
             playbackParts = payload.parts,
             currentPartIndex = payload.currentPartIndex,
         )
+        AppLogger.i(
+            DESKTOP_MPV_LOG_TAG,
+            "playback requested sourceKind=${desktopMpvSourceKind(payload.url)} " +
+                "headers=${payload.headers.size} hasAudioQuality=${!payload.audioQuality.isNullOrBlank()}",
+        )
         val activeBackend = ensureBackend() ?: run {
             publishBackendFailure(backendFailure ?: IllegalStateException("libmpv unavailable"))
             return
@@ -206,8 +211,14 @@ internal class DesktopMpvPlaybackEngine(
         backend?.let { return it }
         if (backendFailure != null) return null
         return runCatching { backendFactory(::handleBackendEvent) }
-            .onSuccess { backend = it }
-            .onFailure { backendFailure = it }
+            .onSuccess {
+                backend = it
+                AppLogger.i(DESKTOP_MPV_LOG_TAG, "libmpv backend created")
+            }
+            .onFailure {
+                backendFailure = it
+                AppLogger.e(DESKTOP_MPV_LOG_TAG, "libmpv backend creation failed", it)
+            }
             .getOrNull()
     }
 
@@ -236,6 +247,10 @@ internal class DesktopMpvPlaybackEngine(
                 ) {
                     event.playlistEntryId?.let { activePlaylistEntryId = it }
                     activeFileLoaded = true
+                    AppLogger.i(
+                        DESKTOP_MPV_LOG_TAG,
+                        "event FILE_LOADED entry=${event.playlistEntryId ?: "unknown"}",
+                    )
                     if (pendingPlaybackRestart) {
                         pendingPlaybackRestart = false
                         confirmPlaybackRestart()
@@ -251,6 +266,7 @@ internal class DesktopMpvPlaybackEngine(
                         (current.status == PlayerStatus.Loading || current.status == PlayerStatus.Paused)
                     ) {
                         pendingPlaybackRestart = true
+                        AppLogger.d(DESKTOP_MPV_LOG_TAG, "event PLAYBACK_RESTART deferred until FILE_LOADED")
                     }
                     return
                 }
@@ -317,6 +333,7 @@ internal class DesktopMpvPlaybackEngine(
                 status = nextStatus,
                 errorMessage = null,
             )
+            AppLogger.i(DESKTOP_MPV_LOG_TAG, "playback confirmed status=$nextStatus")
         }
     }
 
@@ -420,6 +437,11 @@ internal class DesktopMpvPlaybackEngine(
         pendingPlaybackRestart = false
         lastLoadingPositionMs = null
         val current = mutableState.value
+        AppLogger.e(
+            DESKTOP_MPV_LOG_TAG,
+            "playback failed previousStatus=${current.status}",
+            throwable,
+        )
         mutableState.value = current.copy(
             status = PlayerStatus.Error,
             errorMessage = desktopMpvFailureMessage(throwable),
@@ -477,8 +499,13 @@ private class LibMpvBackend(
             val audioOutput = System.getProperty("fuoevolve.libmpv.ao")
                 ?.takeIf(String::isNotBlank)
                 ?: System.getenv("FUOEVOLVE_LIBMPV_AO")?.takeIf(String::isNotBlank)
+            AppLogger.i(
+                DESKTOP_MPV_LOG_TAG,
+                "initializing libmpv audioOutput=${audioOutput ?: "default"}",
+            )
             audioOutput?.let { setOption("ao", it) }
             checkMpv(library.mpv_initialize(handle), "mpv_initialize")
+            checkMpv(library.mpv_request_log_messages(handle, "warn"), "request log messages")
             OBSERVED_PROPERTIES.forEach { property ->
                 checkMpv(
                     library.mpv_observe_property(handle, 0L, property, MPV_FORMAT_STRING),
@@ -518,6 +545,11 @@ private class LibMpvBackend(
                 // therefore require an explicit -1 before the fourth argument.
                 command("loadfile", url, "replace", "-1", perFileOptions)
             }
+            AppLogger.i(
+                DESKTOP_MPV_LOG_TAG,
+                "loadfile submitted sourceKind=${desktopMpvSourceKind(url)} " +
+                    "headers=${headers.size} hasPerFileOptions=${perFileOptions.isNotEmpty()}",
+            )
             getPropertyString("playlist/0/id")?.toLongOrNull()?.let { playlistEntryId ->
                 // START_FILE can race with the synchronous loadfile call. Never erase an entry id
                 // already confirmed by the event thread just because this immediate lookup is empty.
@@ -576,6 +608,27 @@ private class LibMpvBackend(
                 when (event.eventId) {
                     MPV_EVENT_NONE -> Unit
                     MPV_EVENT_SHUTDOWN -> break
+                    MPV_EVENT_LOG_MESSAGE -> event.data?.let { data ->
+                        val logMessage = MpvNativeLogMessage(data)
+                        val text = logMessage.text
+                            ?.getString(0, StandardCharsets.UTF_8.name())
+                            ?.let(::sanitizeMpvLogText)
+                            .orEmpty()
+                        if (text.isNotBlank()) {
+                            val prefix = logMessage.prefix
+                                ?.getString(0, StandardCharsets.UTF_8.name())
+                                .orEmpty()
+                            val level = logMessage.level
+                                ?.getString(0, StandardCharsets.UTF_8.name())
+                                .orEmpty()
+                            val message = "libmpv[$prefix/$level] $text"
+                            when (level) {
+                                "error", "fatal" -> AppLogger.e(DESKTOP_MPV_LOG_TAG, message)
+                                "warn" -> AppLogger.w(DESKTOP_MPV_LOG_TAG, message)
+                                else -> AppLogger.d(DESKTOP_MPV_LOG_TAG, message)
+                            }
+                        }
+                    }
                     MPV_EVENT_START_FILE -> event.data?.let { data ->
                         val startFile = MpvNativeStartFile(data)
                         if (startFileMatchesCurrentRequest(startFile.playlistEntryId)) {
@@ -597,6 +650,11 @@ private class LibMpvBackend(
                         val matches = expectedEntryId != null && endFile.playlistEntryId == expectedEntryId
                         if (matches) {
                             expectedPlaylistEntryId = expectedEntryId
+                            AppLogger.i(
+                                DESKTOP_MPV_LOG_TAG,
+                                "event END_FILE entry=${endFile.playlistEntryId} " +
+                                    "reason=${endFile.reason} error=${endFile.error}",
+                            )
                             listener(
                                 DesktopMpvBackendEvent.EndFile(
                                     playlistEntryId = endFile.playlistEntryId,
@@ -764,6 +822,7 @@ internal fun desktopMpvSourceMatchesRequest(
 internal interface MpvNative : Library {
     fun mpv_create(): Pointer?
     fun mpv_initialize(ctx: Pointer): Int
+    fun mpv_request_log_messages(ctx: Pointer, minLevel: String): Int
     fun mpv_terminate_destroy(ctx: Pointer)
     fun mpv_set_option_string(ctx: Pointer, name: String, data: String): Int
     fun mpv_set_property_string(ctx: Pointer, name: String, data: String): Int
@@ -817,6 +876,19 @@ internal class MpvNativeEventProperty(pointer: Pointer) : Structure(pointer) {
     }
 }
 
+internal class MpvNativeLogMessage(pointer: Pointer) : Structure(pointer) {
+    @JvmField var prefix: Pointer? = null
+    @JvmField var level: Pointer? = null
+    @JvmField var text: Pointer? = null
+    @JvmField var logLevel: Int = 0
+
+    override fun getFieldOrder(): List<String> = listOf("prefix", "level", "text", "logLevel")
+
+    init {
+        read()
+    }
+}
+
 internal class MpvNativeEndFile(pointer: Pointer) : Structure(pointer) {
     @JvmField var reason: Int = 0
     @JvmField var error: Int = 0
@@ -860,11 +932,28 @@ private fun loadMpvLibrary(): MpvNative {
             lastFailure = throwable
         }
     }
+    AppLogger.e(
+        DESKTOP_MPV_LOG_TAG,
+        "libmpv load failed candidates=${candidates.joinToString()}",
+        lastFailure,
+    )
     throw IllegalStateException(
         "Unable to load libmpv from ${candidates.joinToString()}",
         lastFailure,
     )
 }
+
+private fun desktopMpvSourceKind(url: String): String = when {
+    url.startsWith("file:", ignoreCase = true) -> "file"
+    url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true) -> "http"
+    else -> "other"
+}
+
+private fun sanitizeMpvLogText(value: String): String = value
+    .replace(Regex("https?://\\S+"), "<url>")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+    .take(1_000)
 
 internal fun encodeMpvLoadfileOptions(headers: Map<String, String>): String {
     val sanitized = headers.mapNotNull { (name, value) ->
@@ -940,6 +1029,7 @@ private fun desktopMpvFailureMessage(throwable: Throwable): String {
 private const val MPV_FORMAT_STRING = 1
 private const val MPV_EVENT_NONE = 0
 private const val MPV_EVENT_SHUTDOWN = 1
+private const val MPV_EVENT_LOG_MESSAGE = 2
 private const val MPV_EVENT_START_FILE = 6
 private const val MPV_EVENT_END_FILE = 7
 private const val MPV_EVENT_FILE_LOADED = 8
