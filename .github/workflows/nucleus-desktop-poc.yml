@@ -15,7 +15,7 @@ jobs:
   linux-tao:
     name: Linux Tao JVM and GraalVM smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -76,10 +76,32 @@ jobs:
             -PenableNucleusDesktopPoc=true \
             :desktopNucleusPoc:run
 
-      - name: Build and start GraalVM Native Image
+      - name: Build packaged GraalVM Native Image
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          timeout 2400s ./gradlew \
+            --no-daemon \
+            --no-configuration-cache \
+            --warning-mode all \
+            --stacktrace \
+            -PenableNucleusDesktopPoc=true \
+            -PnativeMarch=compatibility \
+            :desktopNucleusPoc:packageGraalvmNative
+
+      - name: Start packaged native binary and compose existing UI
         env:
           FUOEVOLVE_NUCLEUS_POC_SMOKE: "1"
         run: |
+          APPDIR=$(find desktopNucleusPoc/build/compose/binaries -type d -name graalvm-app | head -1)
+          echo "app dir: $APPDIR"
+          test -n "$APPDIR" && test -d "$APPDIR"
+
+          BIN=$(find "$APPDIR" -maxdepth 1 -type f -perm -111 ! -name '*.so*' | head -1)
+          echo "native binary: $BIN"
+          test -n "$BIN" && test -x "$BIN"
+          file "$BIN"
+
           export DISPLAY=:100
           Xvfb :100 -screen 0 1600x1200x24 &
           xvfb_pid=$!
@@ -90,8 +112,4 @@ jobs:
           done
           openbox &
           sleep 1
-          timeout 1200s ./gradlew \
-            --no-configuration-cache \
-            --warning-mode all \
-            -PenableNucleusDesktopPoc=true \
-            :desktopNucleusPoc:runGraalvmNative
+          timeout 90s "$BIN"
