@@ -1,0 +1,133 @@
+name: Setup Nucleus
+description: Setup the JDK, native build prerequisites, Gradle, GraalVM cache, and Node.js for Nucleus builds
+
+inputs:
+  java-version:
+    description: JDK version used to run Gradle
+    required: false
+    default: '17'
+  java-package:
+    description: JDK package variant
+    required: false
+    default: 'jdk'
+  packaging-tools:
+    description: Install Linux packaging tools
+    required: false
+    default: 'true'
+  setup-gradle:
+    description: Configure Gradle caching
+    required: false
+    default: 'true'
+  graalvm:
+    description: Prepare platform native-image prerequisites and cache the Nucleus GraalVM toolchain
+    required: false
+    default: 'false'
+  graalvm-version:
+    description: GraalVM toolchain version cache-key component
+    required: false
+    default: '25i3'
+  graalvm-distribution:
+    description: GraalVM distribution cache-key component
+    required: false
+    default: 'community'
+  setup-node:
+    description: Setup Node.js for Nucleus packaging
+    required: false
+    default: 'true'
+  node-version:
+    description: Node.js version
+    required: false
+    default: '24'
+
+outputs:
+  java-home:
+    description: Path to the configured JDK
+    value: ${{ steps.set-java-home.outputs.java-home }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        distribution: ${{ runner.os == 'Windows' && 'microsoft' || 'temurin' }}
+        java-version: ${{ inputs.java-version }}
+        java-package: ${{ inputs.java-package }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+    - name: Select Xcode 26
+      if: runner.os == 'macOS' && inputs.graalvm == 'true'
+      shell: bash
+      run: sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+
+    # Keep the MSVC setup free of JavaScript actions so it cannot inherit an old Node runtime.
+    # Capture the environment produced by VsDevCmd.bat and persist it for later Gradle/native-image steps.
+    - name: Set up MSVC
+      if: runner.os == 'Windows' && inputs.graalvm == 'true'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (-not (Test-Path $vswhere)) {
+          throw "vswhere.exe was not found at $vswhere"
+        }
+        $installationPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+        if (-not $installationPath) {
+          throw 'Visual Studio with the x64 C++ toolchain was not found'
+        }
+        $vsDevCmd = Join-Path $installationPath 'Common7\Tools\VsDevCmd.bat'
+        if (-not (Test-Path $vsDevCmd)) {
+          throw "VsDevCmd.bat was not found at $vsDevCmd"
+        }
+        $environment = & cmd.exe /d /s /c "`"$vsDevCmd`" -no_logo -arch=x64 -host_arch=x64 >nul && set"
+        if ($LASTEXITCODE -ne 0) {
+          throw "VsDevCmd.bat failed with exit code $LASTEXITCODE"
+        }
+        foreach ($line in $environment) {
+          if ($line -match '^([^=]+)=(.*)$') {
+            $name = $Matches[1]
+            $value = $Matches[2]
+            "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+        }
+
+    - name: Cache GraalVM toolchain
+      if: inputs.graalvm == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ~/.gradle/nucleus/graalvm
+        key: graalvm-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ inputs.graalvm-distribution }}-${{ inputs.graalvm-version }}
+
+    - name: Set java-home output
+      id: set-java-home
+      shell: bash
+      run: echo "java-home=$JAVA_HOME" >> "$GITHUB_OUTPUT"
+
+    - name: Verify JDK
+      shell: bash
+      run: java -version
+
+    - name: Install packaging tools (Linux)
+      if: runner.os == 'Linux' && inputs.packaging-tools == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y xvfb rpm fakeroot libarchive-tools libdbus-1-dev libglib2.0-dev libx11-dev libgtk-3-dev patchelf
+        if ! pgrep -x Xvfb >/dev/null 2>&1; then
+          Xvfb :99 -screen 0 1280x1024x24 >/tmp/xvfb.log 2>&1 &
+        fi
+        echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+    - name: Set up Gradle
+      if: inputs.setup-gradle == 'true'
+      uses: gradle/actions/setup-gradle@v6
+      with:
+        add-job-summary: never
+
+    - name: Set up Node.js
+      if: inputs.setup-node == 'true'
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
