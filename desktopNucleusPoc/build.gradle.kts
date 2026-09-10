@@ -1,5 +1,6 @@
 import org.gradle.api.tasks.Sync
 import org.gradle.jvm.tasks.Jar
+import java.io.File
 import java.util.zip.ZipFile
 
 plugins {
@@ -15,10 +16,11 @@ kotlin {
 
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
+val isLinuxHost = hostOs.contains("linux")
 val packageResourceOs = when {
     isWindowsHost -> "windows"
     hostOs.contains("mac") || hostOs.contains("darwin") -> "macos"
-    hostOs.contains("linux") -> "linux"
+    isLinuxHost -> "linux"
     else -> "common"
 }
 val webLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
@@ -26,6 +28,14 @@ val webLoginProjectDir = rootProject.layout.projectDirectory.dir("desktopApp/nat
 val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
 val nucleusAppResources = layout.buildDirectory.dir("nucleus-app-resources")
 val stagedNativeResourceRoot = "$packageResourceOs/native"
+
+val mpvJniLibraryName = when {
+    isWindowsHost -> "fuoevolve_mpv_jni.dll"
+    hostOs.contains("mac") || hostOs.contains("darwin") -> "libfuoevolve_mpv_jni.dylib"
+    else -> "libfuoevolve_mpv_jni.so"
+}
+val mpvJniSource = layout.projectDirectory.file("native/mpv-jni/fuoevolve_mpv_jni.c")
+val mpvJniOutput = layout.buildDirectory.file("native/mpv-jni/$mpvJniLibraryName")
 
 private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
 
@@ -45,13 +55,54 @@ val buildNucleusWebLoginHelper by tasks.registering(Exec::class) {
     commandLine("cargo", "build", "--release")
 }
 
+val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the thin JNI bridge used by the Nucleus libmpv playback backend."
+    inputs.file(mpvJniSource)
+    outputs.file(mpvJniOutput)
+    onlyIf {
+        // Linux is the first validated Native Image playback target. macOS/Windows keep the
+        // existing JVM playback path until their JNI bridge packaging is validated separately.
+        isLinuxHost
+    }
+    doFirst {
+        mpvJniOutput.get().asFile.parentFile.mkdirs()
+    }
+    val javaHome = File(System.getProperty("java.home"))
+    commandLine(
+        "cc",
+        "-shared",
+        "-fPIC",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-I${javaHome.resolve("include").absolutePath}",
+        "-I${javaHome.resolve("include/linux").absolutePath}",
+        mpvJniSource.asFile.absolutePath,
+        "-o",
+        mpvJniOutput.get().asFile.absolutePath,
+        "-lmpv",
+    )
+}
+
 val prepareNucleusAppResources by tasks.registering(Sync::class) {
     group = "distribution"
     description = "Stage native resources required by the Nucleus desktop runtime."
     dependsOn(buildNucleusWebLoginHelper)
+    if (isLinuxHost) {
+        dependsOn(buildNucleusMpvJniBridge)
+    }
     from(webLoginExecutable) {
         into("$stagedNativeResourceRoot/helpers")
         if (!isWindowsHost) {
+            filePermissions {
+                unix("755")
+            }
+        }
+    }
+    if (isLinuxHost) {
+        from(mpvJniOutput) {
+            into("$stagedNativeResourceRoot/lib")
             filePermissions {
                 unix("755")
             }
@@ -67,6 +118,13 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         }
         if (!isWindowsHost && !stagedHelper.canExecute()) {
             throw GradleException("Nucleus web login helper is not executable: ${stagedHelper.absolutePath}")
+        }
+        if (isLinuxHost) {
+            val stagedMpvBridge = nucleusAppResources.get().asFile
+                .resolve("$stagedNativeResourceRoot/lib/$mpvJniLibraryName")
+            if (!stagedMpvBridge.isFile) {
+                throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
+            }
         }
     }
 }
@@ -126,10 +184,13 @@ nucleus.application {
 }
 
 // Compose/Nucleus consume appResources through prepareAppResources. Make the staging dependency
-// explicit so Gradle 9 validation and both JVM/GraalVM pipelines see the helper deterministically.
+// explicit so Gradle 9 validation and both JVM/GraalVM pipelines see native resources deterministically.
 tasks.matching { it.name == "prepareAppResources" }.configureEach {
     dependsOn(prepareNucleusAppResources)
 }
 tasks.matching { it.name == "run" }.configureEach {
     dependsOn(buildNucleusWebLoginHelper)
+    if (isLinuxHost) {
+        dependsOn(buildNucleusMpvJniBridge)
+    }
 }
