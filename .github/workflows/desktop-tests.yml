@@ -9,7 +9,7 @@ permissions:
 jobs:
   linux:
     name: Linux Nucleus runtime
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
@@ -41,9 +41,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-          key: nucleus-web-login-linux-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+          key: nucleus-web-login-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
           restore-keys: |
-            nucleus-web-login-linux-x64-rust-1.98.1-
+            nucleus-web-login-linux-ubuntu24.04-x64-rust-1.98.1-
 
       - name: Install Linux native dependencies
         run: |
