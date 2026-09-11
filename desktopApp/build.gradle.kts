@@ -4,6 +4,7 @@ import java.io.File
 import java.util.zip.ZipFile
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.WriteProperties
 import org.gradle.jvm.tasks.Jar
 
 plugins {
@@ -23,16 +24,76 @@ private val desktopAppIcon = rootProject.file(
 private val desktopWindowsIcon = layout.projectDirectory.file("packaging/icons/fuoevolve.ico")
 private val desktopMacIcon = layout.projectDirectory.file("packaging/icons/fuoevolve.icns")
 
-sourceSets {
-    named("main") {
-        resources.srcDir(desktopAppIcon.parentFile)
-    }
-}
+fun gitOutput(vararg args: String): String? = providers.exec {
+    workingDir = rootProject.projectDir
+    isIgnoreExitValue = true
+    commandLine("git", *args)
+}.standardOutput.asText.get().trim().takeIf(String::isNotBlank)
+
+private val versionPattern = Regex("\\d+\\.\\d+\\.\\d+")
+private val exactTaggedVersion = gitOutput(
+    "describe",
+    "--tags",
+    "--exact-match",
+    "--match",
+    "[0-9]*",
+    "HEAD",
+)?.let { tag -> versionPattern.find(tag)?.value }
+private val latestTaggedVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
+    ?.let { tag -> versionPattern.find(tag)?.value }
 
 val desktopPackageVersion = providers.gradleProperty("fuoevolve.packageVersion")
     .orElse(providers.environmentVariable("FUOEVOLVE_PACKAGE_VERSION"))
-    .orElse("0.1.0")
-    .get()
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?: exactTaggedVersion
+    ?: latestTaggedVersion
+    ?: "0.1.0"
+val desktopCommitSha = providers.environmentVariable("FUOEVOLVE_COMMIT_SHA")
+    .orElse(providers.environmentVariable("GITHUB_SHA"))
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?: gitOutput("rev-parse", "HEAD")
+    ?: "unknown"
+val desktopVersionChannel = providers.environmentVariable("FUOEVOLVE_DESKTOP_CHANNEL")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+    ?: if (exactTaggedVersion != null) "stable" else "canary"
+val desktopVersionLabel = providers.environmentVariable("FUOEVOLVE_DESKTOP_VERSION_LABEL")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+    ?: if (desktopVersionChannel == "stable") {
+        desktopPackageVersion
+    } else {
+        "$desktopPackageVersion-canary+${desktopCommitSha.take(8)}"
+    }
+
+val generatedDesktopVersionResourceDir = layout.buildDirectory.dir("generated/resources/desktopVersion")
+val generateDesktopVersionInfo by tasks.registering(WriteProperties::class) {
+    group = "build"
+    description = "Generate desktop version metadata embedded into the application."
+    destinationFile.set(
+        generatedDesktopVersionResourceDir.map { directory ->
+            directory.file("fuoevolve-desktop-version.properties")
+        },
+    )
+    property("versionLabel", desktopVersionLabel)
+    property("packageVersion", desktopPackageVersion)
+    property("channel", desktopVersionChannel)
+    property("commitSha", desktopCommitSha)
+}
+
+sourceSets {
+    named("main") {
+        resources.srcDir(desktopAppIcon.parentFile)
+        resources.srcDir(generatedDesktopVersionResourceDir)
+    }
+}
+tasks.named("processResources").configure {
+    dependsOn(generateDesktopVersionInfo)
+}
 
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
