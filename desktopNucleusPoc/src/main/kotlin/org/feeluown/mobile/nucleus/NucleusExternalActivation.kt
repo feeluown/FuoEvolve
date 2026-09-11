@@ -24,12 +24,12 @@ internal class NucleusExternalActivation private constructor(
             )
             val focusRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
 
-            // Nucleus onDeepLink handles cold-start URI arguments itself. Plain .fuo paths are not
-            // URIs, so seed only those here before DesktopAppHost starts collecting.
+            // Nucleus onDeepLink handles cold-start URI arguments itself. Seed only plain .fuo
+            // paths here so file:// URIs are not delivered twice after composition starts.
             args.asSequence()
                 .map(::normalizeArgument)
-                .filter(::isFuoPlaylistArgument)
-                .forEach(inputs::tryEmit)
+                .filter { input -> isFuoPlaylistArgument(input) && !isUriArgument(input) }
+                .forEach { input -> inputs.tryEmit(input) }
 
             val isPrimary = SingleInstanceManager.isSingleInstance(
                 onRestoreFileCreated = {
@@ -41,7 +41,7 @@ internal class NucleusExternalActivation private constructor(
                     forwarded
                         .map(::normalizeArgument)
                         .filter(::isExternalInputArgument)
-                        .forEach(inputs::tryEmit)
+                        .forEach { input -> inputs.tryEmit(input) }
                     focusRequests.tryEmit(Unit)
                 },
             )
