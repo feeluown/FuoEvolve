@@ -17,6 +17,7 @@ import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.NucleusBackend
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.composenativetray.tray.api.Tray
+import dev.nucleusframework.window.TitleBar
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -165,6 +166,7 @@ fun main(args: Array<String>) {
                     oauthDeviceCodeAssistant.clearUserCodeNotification()
                 }
             }
+            TitleBar { _ -> }
 
             LaunchedEffect(activationRequest) {
                 if (activationRequest > 0L) {
