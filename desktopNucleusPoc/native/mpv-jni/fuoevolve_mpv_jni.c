@@ -427,7 +427,8 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderSoftware(
     int64_t required = (int64_t)stride * (int64_t)height;
     if (required <= 0 || required > pixel_length) return MPV_ERROR_INVALID_PARAMETER;
 
-    jbyte *pixels = (*env)->GetPrimitiveArrayCritical(env, pixels_value, NULL);
+    jboolean is_copy = JNI_FALSE;
+    jbyte *pixels = (*env)->GetByteArrayElements(env, pixels_value, &is_copy);
     if (pixels == NULL) return MPV_ERROR_NOMEM;
 
     int size[2] = {width, height};
@@ -440,9 +441,9 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderSoftware(
         {MPV_RENDER_PARAM_SW_POINTER, pixels},
         {MPV_RENDER_PARAM_INVALID, NULL},
     };
-    int result = mpv_render_context_render(context, params);
-    (*env)->ReleasePrimitiveArrayCritical(env, pixels_value, pixels, 0);
-    return result;
+    mpv_render_context_render(context, params);
+    (*env)->ReleaseByteArrayElements(env, pixels_value, pixels, 0);
+    return 0;
 }
 
 JNIEXPORT void JNICALL
