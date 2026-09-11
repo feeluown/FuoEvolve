@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <locale.h>
 #include <mpv/client.h>
+#include <mpv/render.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +9,10 @@
 
 static mpv_handle *handle_from_jlong(jlong value) {
     return (mpv_handle *)(intptr_t)value;
+}
+
+static mpv_render_context *render_context_from_jlong(jlong value) {
+    return (mpv_render_context *)(intptr_t)value;
 }
 
 static char *jstring_to_utf8(JNIEnv *env, jstring value) {
@@ -299,4 +304,155 @@ Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeErrorString(
 ) {
     (void)self;
     return utf8_to_jstring(env, mpv_error_string(error));
+}
+
+/* Shared desktop video controller aliases the existing client API so the audio and video
+ * implementations stay on the same JNI bridge and libmpv runtime. */
+JNIEXPORT jlong JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCreate(JNIEnv *env, jobject self) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeCreate(env, self);
+}
+
+JNIEXPORT jint JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeInitialize(
+    JNIEnv *env, jobject self, jlong handle_value
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeInitialize(env, self, handle_value);
+}
+
+JNIEXPORT jint JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeSetOption(
+    JNIEnv *env, jobject self, jlong handle_value, jstring name_value, jstring data_value
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeSetOption(
+        env, self, handle_value, name_value, data_value
+    );
+}
+
+JNIEXPORT jint JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeSetProperty(
+    JNIEnv *env, jobject self, jlong handle_value, jstring name_value, jstring data_value
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeSetProperty(
+        env, self, handle_value, name_value, data_value
+    );
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeGetProperty(
+    JNIEnv *env, jobject self, jlong handle_value, jstring name_value
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeGetProperty(
+        env, self, handle_value, name_value
+    );
+}
+
+JNIEXPORT jint JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCommand(
+    JNIEnv *env, jobject self, jlong handle_value, jobjectArray args_value
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeCommand(
+        env, self, handle_value, args_value
+    );
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeWaitEvent(
+    JNIEnv *env, jobject self, jlong handle_value, jdouble timeout_seconds
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeWaitEvent(
+        env, self, handle_value, timeout_seconds
+    );
+}
+
+JNIEXPORT void JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeWakeup(
+    JNIEnv *env, jobject self, jlong handle_value
+) {
+    Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeWakeup(env, self, handle_value);
+}
+
+JNIEXPORT void JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeDestroy(
+    JNIEnv *env, jobject self, jlong handle_value
+) {
+    Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeDestroy(env, self, handle_value);
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeErrorString(
+    JNIEnv *env, jobject self, jint error
+) {
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeErrorString(env, self, error);
+}
+
+JNIEXPORT jlong JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCreateSoftwareRenderContext(
+    JNIEnv *env,
+    jobject self,
+    jlong handle_value
+) {
+    (void)env;
+    (void)self;
+    mpv_handle *handle = handle_from_jlong(handle_value);
+    if (handle == NULL) return 0;
+
+    mpv_render_context *context = NULL;
+    mpv_render_param params[] = {
+        {MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_SW},
+        {MPV_RENDER_PARAM_INVALID, NULL},
+    };
+    int result = mpv_render_context_create(&context, handle, params);
+    if (result < 0 || context == NULL) return 0;
+    return (jlong)(intptr_t)context;
+}
+
+JNIEXPORT jint JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderSoftware(
+    JNIEnv *env,
+    jobject self,
+    jlong render_context_value,
+    jint width,
+    jint height,
+    jint stride,
+    jbyteArray pixels_value
+) {
+    (void)self;
+    mpv_render_context *context = render_context_from_jlong(render_context_value);
+    if (context == NULL || width <= 0 || height <= 0 || stride <= 0 || pixels_value == NULL) {
+        return MPV_ERROR_INVALID_PARAMETER;
+    }
+
+    jsize pixel_length = (*env)->GetArrayLength(env, pixels_value);
+    int64_t required = (int64_t)stride * (int64_t)height;
+    if (required <= 0 || required > pixel_length) return MPV_ERROR_INVALID_PARAMETER;
+
+    jbyte *pixels = (*env)->GetPrimitiveArrayCritical(env, pixels_value, NULL);
+    if (pixels == NULL) return MPV_ERROR_NOMEM;
+
+    int size[2] = {width, height};
+    const char *format = "bgr0";
+    size_t native_stride = (size_t)stride;
+    mpv_render_param params[] = {
+        {MPV_RENDER_PARAM_SW_SIZE, size},
+        {MPV_RENDER_PARAM_SW_FORMAT, (void *)format},
+        {MPV_RENDER_PARAM_SW_STRIDE, &native_stride},
+        {MPV_RENDER_PARAM_SW_POINTER, pixels},
+        {MPV_RENDER_PARAM_INVALID, NULL},
+    };
+    int result = mpv_render_context_render(context, params);
+    (*env)->ReleasePrimitiveArrayCritical(env, pixels_value, pixels, 0);
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeFreeRenderContext(
+    JNIEnv *env,
+    jobject self,
+    jlong render_context_value
+) {
+    (void)env;
+    (void)self;
+    mpv_render_context *context = render_context_from_jlong(render_context_value);
+    if (context != NULL) mpv_render_context_free(context);
 }
