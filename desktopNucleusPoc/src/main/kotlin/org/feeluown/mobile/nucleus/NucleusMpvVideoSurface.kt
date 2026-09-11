@@ -13,14 +13,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import dev.nucleusframework.window.tao.TaoMetalRenderContext
 import dev.nucleusframework.window.tao.TaoOpenGlRenderContext
+import dev.nucleusframework.window.tao.TextureView
+import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import dev.nucleusframework.window.tao.rememberTaoGpuRenderContext
+import dev.nucleusframework.window.tao.rememberTextureViewController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import org.feeluown.mobile.AppLogger
+import org.feeluown.mobile.DesktopIoSurfaceVideoController
 import org.feeluown.mobile.DesktopOpenGlVideoController
 import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
@@ -38,10 +46,10 @@ import org.jetbrains.skia.SurfaceOrigin
 /**
  * Native/Nucleus video presentation surface.
  *
- * Windows and Linux render libmpv directly into an FBO allocated on Tao's current ANGLE/EGL
- * context. Skia wraps that FBO on the same DirectContext, so video never round-trips through a
- * CPU ByteArray. macOS currently uses the existing software fallback until the IOSurface/Metal
- * import path is wired.
+ * Windows/Linux render libmpv directly into an FBO on Tao's ANGLE/EGL context and let the same
+ * Skia DirectContext sample it. macOS renders libmpv into an IOSurface-backed CGL FBO which
+ * Nucleus imports into its Metal scene through TextureView. Neither GPU path performs a CPU frame
+ * readback; the software ImageBitmap path remains the last-resort fallback.
  */
 internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
     @Composable
@@ -50,14 +58,16 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
         payload: VideoPlaybackPayload?,
         modifier: Modifier,
     ) {
-        val gpuController = controller as? DesktopOpenGlVideoController
+        val openGlController = controller as? DesktopOpenGlVideoController
+        val ioSurfaceController = controller as? DesktopIoSurfaceVideoController
         val taoContext = rememberTaoGpuRenderContext()
         val openGlContext = taoContext as? TaoOpenGlRenderContext
-        var gpuDisabled by remember(controller, openGlContext) { mutableStateOf(false) }
+        val metalContext = taoContext as? TaoMetalRenderContext
+        var gpuDisabled by remember(controller, taoContext) { mutableStateOf(false) }
 
-        if (gpuController != null && openGlContext != null && !gpuDisabled) {
-            val rendererResult = remember(gpuController, openGlContext) {
-                runCatching { NucleusOpenGlMpvVideoRenderer(gpuController, openGlContext) }
+        if (openGlController != null && openGlContext != null && !gpuDisabled) {
+            val rendererResult = remember(openGlController, openGlContext) {
+                runCatching { NucleusOpenGlMpvVideoRenderer(openGlController, openGlContext) }
                     .onFailure { throwable ->
                         AppLogger.w(
                             "DesktopVideo",
@@ -83,9 +93,36 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
             }
         }
 
+        if (ioSurfaceController != null && metalContext != null && !gpuDisabled) {
+            val rendererResult = remember(ioSurfaceController, metalContext) {
+                runCatching { NucleusIoSurfaceMpvVideoRenderer(ioSurfaceController) }
+                    .onFailure { throwable ->
+                        AppLogger.w(
+                            "DesktopVideo",
+                            "macOS IOSurface video setup failed; falling back to software: ${throwable.message}",
+                        )
+                    }
+            }
+            val renderer = rendererResult.getOrNull()
+            if (renderer != null) {
+                DisposableEffect(renderer) {
+                    onDispose(renderer::close)
+                }
+                NucleusIoSurfaceVideoContent(
+                    renderer = renderer,
+                    modifier = modifier,
+                    onFailure = { throwable ->
+                        AppLogger.e("DesktopVideo", "macOS IOSurface video rendering failed", throwable)
+                        gpuDisabled = true
+                    },
+                )
+                return
+            }
+        }
+
         NucleusSoftwareVideoContent(
             controller = controller,
-            gpuController = gpuController,
+            gpuController = openGlController,
             contentDescription = payload?.video?.title,
             modifier = modifier,
         )
@@ -153,6 +190,81 @@ private fun NucleusGpuVideoContent(
             )
         }
     }
+}
+
+@Composable
+private fun NucleusIoSurfaceVideoContent(
+    renderer: NucleusIoSurfaceMpvVideoRenderer,
+    modifier: Modifier,
+    onFailure: (Throwable) -> Unit,
+) {
+    val textureController = rememberTextureViewController()
+    var width by remember(renderer) { mutableStateOf(0) }
+    var height by remember(renderer) { mutableStateOf(0) }
+    var target by remember(renderer) { mutableStateOf<IoSurfaceVideoTarget?>(null) }
+
+    LaunchedEffect(renderer, width, height) {
+        if (width <= 0 || height <= 0) return@LaunchedEffect
+        try {
+            val next = withContext(Dispatchers.Default) {
+                renderer.createTarget(width = width, height = height)
+            }
+            val previous = target
+            target = next
+            if (previous != null) {
+                // Let Compose publish/import the new source before retiring the old IOSurface.
+                withFrameNanos { }
+                withContext(Dispatchers.Default) { previous.close() }
+            }
+        } catch (throwable: Throwable) {
+            onFailure(throwable)
+        }
+    }
+
+    val activeTarget = target
+    LaunchedEffect(renderer, activeTarget, textureController) {
+        val renderTarget = activeTarget ?: return@LaunchedEffect
+        try {
+            while (isActive) {
+                withFrameNanos { }
+                val rendered = withContext(Dispatchers.Default) {
+                    renderer.render(renderTarget)
+                }
+                if (rendered) textureController.markFrameAvailable()
+            }
+        } catch (throwable: Throwable) {
+            onFailure(throwable)
+        }
+    }
+
+    DisposableEffect(renderer) {
+        onDispose {
+            target?.close()
+            target = null
+        }
+    }
+
+    val source = remember(activeTarget) {
+        activeTarget?.let { renderTarget ->
+            nucleusIOSurfaceTextureSource(
+                ioSurface = renderTarget.ioSurface,
+                widthPx = renderTarget.width,
+                heightPx = renderTarget.height,
+            )
+        }
+    }
+    TextureView(
+        source = source,
+        controller = textureController,
+        modifier = modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                width = size.width
+                height = size.height
+            },
+        contentScale = ContentScale.Fit,
+        filterQuality = FilterQuality.Low,
+    )
 }
 
 @Composable
@@ -293,6 +405,67 @@ private class NucleusOpenGlMpvVideoRenderer(
             destroyTarget()
             controller.destroyOpenGlRenderContext(mpvRenderContext)
         }
+    }
+}
+
+private class NucleusIoSurfaceMpvVideoRenderer(
+    private val controller: DesktopIoSurfaceVideoController,
+) : AutoCloseable {
+    private val lock = Any()
+    private val renderContext = controller.createIoSurfaceRenderContext()
+    private val targets = mutableSetOf<Long>()
+    private var closed = false
+
+    fun createTarget(width: Int, height: Int): IoSurfaceVideoTarget = synchronized(lock) {
+        check(!closed) { "IOSurface video renderer is closed" }
+        val handle = controller.createIoSurfaceRenderTarget(renderContext, width, height)
+        targets += handle
+        IoSurfaceVideoTarget(
+            owner = this,
+            handle = handle,
+            ioSurface = controller.ioSurfaceRenderTargetPointer(handle),
+            width = width,
+            height = height,
+        ).also {
+            AppLogger.i("DesktopVideo", "IOSurface video target ${width}x$height attached to Tao/Metal")
+        }
+    }
+
+    fun render(target: IoSurfaceVideoTarget): Boolean = synchronized(lock) {
+        if (closed || target.handle !in targets) return@synchronized false
+        controller.renderIoSurface(renderContext, target.handle)
+    }
+
+    fun release(handle: Long) = synchronized(lock) {
+        if (handle !in targets) return@synchronized
+        targets.remove(handle)
+        if (!closed) controller.destroyIoSurfaceRenderTarget(renderContext, handle)
+    }
+
+    override fun close() = synchronized(lock) {
+        if (closed) return@synchronized
+        targets.toList().forEach { handle ->
+            controller.destroyIoSurfaceRenderTarget(renderContext, handle)
+        }
+        targets.clear()
+        controller.destroyIoSurfaceRenderContext(renderContext)
+        closed = true
+    }
+}
+
+private class IoSurfaceVideoTarget(
+    private val owner: NucleusIoSurfaceMpvVideoRenderer,
+    val handle: Long,
+    val ioSurface: Long,
+    val width: Int,
+    val height: Int,
+) : AutoCloseable {
+    private var closed = false
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        owner.release(handle)
     }
 }
 
