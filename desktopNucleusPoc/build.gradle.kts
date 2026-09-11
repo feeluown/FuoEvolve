@@ -1,3 +1,4 @@
+import dev.nucleusframework.desktop.application.dsl.NativeImageMarch
 import dev.nucleusframework.desktop.application.dsl.TargetFormat
 import java.io.File
 import java.util.zip.ZipFile
@@ -393,6 +394,7 @@ nucleus.application {
     graalvm {
         isEnabled.set(true)
         imageName.set("fuoevolve")
+        march.set(NativeImageMarch.COMPATIBILITY)
     }
 }
 
