@@ -31,7 +31,7 @@ Supported `fuoevolve.nucleus.targetFormat` values are `msi`, `dmg`, `appimage`, 
 
 Desktop package versions are derived from release tags (`x.y.z`) unless `fuoevolve.packageVersion` / `FUOEVOLVE_PACKAGE_VERSION` explicitly overrides them.
 
-CI also writes `fuoevolve-desktop-version.properties` into the desktop application resources:
+Gradle generates `fuoevolve-desktop-version.properties` into the desktop build resources from the same version inputs used by packaging. CI exports explicit stable/Canary metadata, while local builds derive the current tag/SHA directly from Git when those overrides are absent. As a result, local `:desktopApp:run` and Native Image package builds show the same version identity they are built with:
 
 - exact release-tag builds display the tag version, for example `1.2.3`;
 - non-tagged builds display `x.y.z-canary+<short-sha>`;
