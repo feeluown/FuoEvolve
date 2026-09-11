@@ -31,16 +31,31 @@ interface DesktopOpenGlVideoController {
 }
 
 /**
+ * macOS GPU extension. libmpv renders on a private accelerated CGL context into an
+ * IOSurface-backed FBO; Nucleus imports that IOSurface into its Metal scene via TextureView.
+ */
+interface DesktopIoSurfaceVideoController {
+    fun createIoSurfaceRenderContext(): Long
+    fun createIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long
+    fun ioSurfaceRenderTargetPointer(renderTarget: Long): Long
+    fun renderIoSurface(renderContext: Long, renderTarget: Long): Boolean
+    fun destroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long)
+    fun destroyIoSurfaceRenderContext(renderContext: Long)
+}
+
+/**
  * GraalVM-friendly desktop video controller backed by the same libmpv JNI bridge packaged by the
  * Nucleus desktop runtime. The legacy JVM host installs its JNA controller explicitly, so this
  * controller is only used by the Native/Nucleus host.
  *
  * A render context is intentionally created lazily. Windows/Linux attach libmpv to Tao's active
- * OpenGL/ANGLE context. macOS and any failed GPU setup explicitly enable the software fallback.
+ * OpenGL/ANGLE context. macOS renders into IOSurface on a private CGL context and lets Tao/Metal
+ * import the surface. Any failed GPU setup can explicitly enable the software fallback.
  */
 internal class DesktopJniMpvVideoController :
     DesktopPlatformVideoController,
-    DesktopOpenGlVideoController {
+    DesktopOpenGlVideoController,
+    DesktopIoSurfaceVideoController {
     private val closed = AtomicBoolean(false)
     private val renderContextLock = Any()
     private val mutableState = MutableStateFlow(PlatformVideoPlaybackState())
@@ -57,6 +72,7 @@ internal class DesktopJniMpvVideoController :
     @Volatile private var playbackActive = false
     @Volatile private var softwareRenderContext = 0L
     @Volatile private var openGlRenderContext = 0L
+    @Volatile private var ioSurfaceRenderContext = 0L
     @Volatile private var lastPipelineDescription: String? = null
 
     init {
@@ -144,8 +160,8 @@ internal class DesktopJniMpvVideoController :
 
     override fun createOpenGlRenderContext(): Long = synchronized(renderContextLock) {
         ensureOpen()
-        check(softwareRenderContext == 0L) {
-            "software libmpv video renderer is already active"
+        check(softwareRenderContext == 0L && ioSurfaceRenderContext == 0L) {
+            "another libmpv video renderer is already active"
         }
         if (openGlRenderContext != 0L) return@synchronized openGlRenderContext
         val context = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderContext(handle)
@@ -201,12 +217,62 @@ internal class DesktopJniMpvVideoController :
         }
     }
 
+    override fun createIoSurfaceRenderContext(): Long = synchronized(renderContextLock) {
+        ensureOpen()
+        check(softwareRenderContext == 0L && openGlRenderContext == 0L) {
+            "another libmpv video renderer is already active"
+        }
+        if (ioSurfaceRenderContext != 0L) return@synchronized ioSurfaceRenderContext
+        val context = DesktopJniMpvVideoApi.nativeCreateIoSurfaceRenderContext(handle)
+        check(context != 0L) { "libmpv macOS IOSurface render context creation failed" }
+        ioSurfaceRenderContext = context
+        AppLogger.i("DesktopVideo", "attached libmpv IOSurface renderer with hwdec=auto")
+        context
+    }
+
+    override fun createIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long {
+        ensureIoSurfaceContext(renderContext)
+        require(width > 0 && height > 0) { "IOSurface video target must have positive dimensions" }
+        val target = DesktopJniMpvVideoApi.nativeCreateIoSurfaceRenderTarget(renderContext, width, height)
+        check(target != 0L) { "macOS IOSurface video target creation failed" }
+        return target
+    }
+
+    override fun ioSurfaceRenderTargetPointer(renderTarget: Long): Long {
+        ensureOpen()
+        val surface = DesktopJniMpvVideoApi.nativeIoSurfaceRenderTargetPointer(renderTarget)
+        check(surface != 0L) { "macOS video target has no IOSurface" }
+        return surface
+    }
+
+    override fun renderIoSurface(renderContext: Long, renderTarget: Long): Boolean {
+        ensureIoSurfaceContext(renderContext)
+        check(renderTarget != 0L) { "IOSurface video render target is closed" }
+        return DesktopJniMpvVideoApi.nativeRenderIoSurface(renderContext, renderTarget)
+    }
+
+    override fun destroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long) {
+        if (renderTarget == 0L) return
+        ensureIoSurfaceContext(renderContext)
+        DesktopJniMpvVideoApi.nativeDestroyIoSurfaceRenderTarget(renderContext, renderTarget)
+    }
+
+    override fun destroyIoSurfaceRenderContext(renderContext: Long) {
+        if (renderContext == 0L) return
+        synchronized(renderContextLock) {
+            if (ioSurfaceRenderContext != renderContext) return
+            DesktopJniMpvVideoApi.nativeFreeIoSurfaceRenderContext(renderContext)
+            ioSurfaceRenderContext = 0L
+            lastPipelineDescription = null
+        }
+    }
+
     override fun enableSoftwareRendering() {
         synchronized(renderContextLock) {
             ensureOpen()
             if (softwareRenderContext != 0L) return
-            check(openGlRenderContext == 0L) {
-                "OpenGL libmpv video renderer is already active"
+            check(openGlRenderContext == 0L && ioSurfaceRenderContext == 0L) {
+                "GPU libmpv video renderer is already active"
             }
             val context = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
             check(context != 0L) { "libmpv software video render context creation failed" }
@@ -226,6 +292,10 @@ internal class DesktopJniMpvVideoController :
             softwareRenderContext.takeIf { it != 0L }?.let { context ->
                 DesktopJniMpvVideoApi.nativeFreeRenderContext(context)
                 softwareRenderContext = 0L
+            }
+            ioSurfaceRenderContext.takeIf { it != 0L }?.let { context ->
+                DesktopJniMpvVideoApi.nativeFreeIoSurfaceRenderContext(context)
+                ioSurfaceRenderContext = 0L
             }
             openGlRenderContext != 0L
         }
@@ -313,6 +383,7 @@ internal class DesktopJniMpvVideoController :
 
     private fun publishPipelineIfChanged() {
         val renderer = when {
+            ioSurfaceRenderContext != 0L -> "iosurface-metal"
             openGlRenderContext != 0L -> "opengl-gpu"
             softwareRenderContext != 0L -> "software"
             else -> "pending"
@@ -371,6 +442,13 @@ internal class DesktopJniMpvVideoController :
         ensureOpen()
         check(renderContext != 0L && renderContext == openGlRenderContext) {
             "OpenGL libmpv video render context is not active"
+        }
+    }
+
+    private fun ensureIoSurfaceContext(renderContext: Long) {
+        ensureOpen()
+        check(renderContext != 0L && renderContext == ioSurfaceRenderContext) {
+            "IOSurface libmpv video render context is not active"
         }
     }
 
@@ -495,6 +573,12 @@ private object DesktopJniMpvVideoApi {
     external fun nativeRenderOpenGl(renderContext: Long, renderTarget: Long)
     external fun nativeReportSwap(renderContext: Long)
     external fun nativeDestroyOpenGlRenderTarget(renderTarget: Long)
+    external fun nativeCreateIoSurfaceRenderContext(handle: Long): Long
+    external fun nativeCreateIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long
+    external fun nativeIoSurfaceRenderTargetPointer(renderTarget: Long): Long
+    external fun nativeRenderIoSurface(renderContext: Long, renderTarget: Long): Boolean
+    external fun nativeDestroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long)
+    external fun nativeFreeIoSurfaceRenderContext(renderContext: Long)
     external fun nativeRenderSoftware(
         renderContext: Long,
         width: Int,
