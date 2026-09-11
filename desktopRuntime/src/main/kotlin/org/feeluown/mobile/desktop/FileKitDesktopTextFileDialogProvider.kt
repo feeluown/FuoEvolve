@@ -32,10 +32,11 @@ internal class FileKitDesktopTextFileDialogProvider(
     ): DesktopTextFile? {
         ensureNativeDialogAvailable()
         val normalizedExtensions = normalizeExtensions(extensions)
-        val type = normalizedExtensions
-            .takeIf { it.isNotEmpty() }
-            ?.let(::FileKitType.File)
-            ?: FileKitType.File()
+        val type = if (normalizedExtensions.isEmpty()) {
+            FileKitType.File()
+        } else {
+            FileKitType.File(normalizedExtensions)
+        }
         val picked = FileKit.openFilePicker(
             type = type,
             dialogSettings = FileKitDialogSettings(title = dialogTitle),
