@@ -27,22 +27,17 @@ import org.feeluown.mobile.installDesktopPlatformVideoControllerFactory
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
+import org.feeluown.mobile.installDesktopTextFileDialogProviderFactory
 import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
-import org.feeluown.mobile.persistence.listening.DesktopListeningHistoryDriverFactory
-import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
 
 fun main(args: Array<String>) {
     installDesktopAppLogger()
     val activation = DesktopExternalActivationSession.open(args.toList()) ?: return
     registerDesktopFuoProtocolHandler()
-    installDesktopListeningHistorySinkFactory { databasePath ->
-        SqlDelightListeningHistoryStore(
-            DesktopListeningHistoryDriverFactory(databasePath),
-        )
-    }
+    installDesktopListeningHistorySinkFactory(::createDesktopRuntimeListeningHistorySink)
     installDesktopPlaybackEngineFactory {
         configureLibMpvNumericLocale()
-        PersistentDesktopPlaybackEngine(
+        createPersistentDesktopPlaybackEngine(
             delegate = DesktopMpvPlaybackEngine { listener -> LibMpvBackend(listener) },
             resumeStore = createDesktopPlaybackResumeStore(),
         )
@@ -52,7 +47,8 @@ fun main(args: Array<String>) {
         DesktopMpvVideoController()
     }
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
-    installDesktopLocalMusicRepositoryFactory { DesktopLocalMusicRepository() }
+    installDesktopLocalMusicRepositoryFactory(::createDesktopRuntimeLocalMusicRepository)
+    installDesktopTextFileDialogProviderFactory(::createDesktopNativeTextFileDialogProvider)
     installFallbackOAuthDeviceCodeAssistant(DesktopOAuthDeviceCodeAssistant())
 
     try {
