@@ -65,10 +65,12 @@ The Nucleus path includes:
 - Nucleus single-instance locking plus URI and `.fuo` file activation forwarding;
 - `fuo://` protocol and `.fuo` file-association packaging;
 - FileKit OS-native Open/Save dialogs instead of Swing file choosers;
+- Nucleus native notifications for YouTube Music OAuth device codes, with dismissable notification handles;
+- Tao/Compose clipboard integration for device-code copying, including the native GTK/Wayland clipboard bridge on Linux;
 - stale-event correlation for rapid source replacement;
 - GraalVM Native Image compilation and native installer packaging.
 
-Remaining desktop parity work is intentionally separate: video rendering, native OAuth device-code clipboard/notification assistance, desktop app updates, and dedicated Native Image runtime validation for microphone capture/audio recognition.
+Remaining desktop parity work is intentionally separate: video rendering, desktop app updates, and dedicated Native Image runtime validation for microphone capture/audio recognition.
 
 ## CI
 
