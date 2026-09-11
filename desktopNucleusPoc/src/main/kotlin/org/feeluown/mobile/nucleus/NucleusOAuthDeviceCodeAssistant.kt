@@ -1,5 +1,7 @@
 package org.feeluown.mobile.nucleus
 
+import dev.nucleusframework.notification.AuthorizationOption
+import dev.nucleusframework.notification.NotificationCenter
 import dev.nucleusframework.notification.common.NotificationManager
 import dev.nucleusframework.notification.common.NotificationResult
 import dev.nucleusframework.notification.common.notification
@@ -51,6 +53,34 @@ internal class NucleusOAuthDeviceCodeAssistant(
     }
 }
 
+private class DeferredNucleusNotificationHandle : NucleusNotificationHandle {
+    private val lock = Any()
+    private var dismissed = false
+    private var delegate: NucleusNotificationHandle? = null
+
+    fun attach(handle: NucleusNotificationHandle?) {
+        if (handle == null) return
+        val dismissImmediately = synchronized(lock) {
+            if (dismissed) {
+                true
+            } else {
+                delegate?.dismissSafely()
+                delegate = handle
+                false
+            }
+        }
+        if (dismissImmediately) handle.dismissSafely()
+    }
+
+    override fun dismiss() {
+        val handle = synchronized(lock) {
+            dismissed = true
+            delegate.also { delegate = null }
+        }
+        handle?.dismissSafely()
+    }
+}
+
 private fun NucleusNotificationHandle.dismissSafely() {
     runCatching(::dismiss)
 }
@@ -59,8 +89,24 @@ private fun sendNativeOAuthDeviceCodeNotification(
     userCode: String,
     copyUserCode: () -> Unit,
 ): NucleusNotificationHandle? {
-    if (!NotificationManager.isAvailable()) return null
+    if (isMacOs()) {
+        if (!NotificationCenter.isAvailable) return null
+        val pending = DeferredNucleusNotificationHandle()
+        NotificationCenter.requestAuthorization(setOf(AuthorizationOption.ALERT)) { granted, _ ->
+            if (granted) {
+                pending.attach(sendCommonOAuthDeviceCodeNotification(userCode, copyUserCode))
+            }
+        }
+        return pending
+    }
+    return sendCommonOAuthDeviceCodeNotification(userCode, copyUserCode)
+}
 
+private fun sendCommonOAuthDeviceCodeNotification(
+    userCode: String,
+    copyUserCode: () -> Unit,
+): NucleusNotificationHandle? {
+    if (!NotificationManager.isAvailable()) return null
     return when (
         val result = notification(
             title = "FuoEvolve",
@@ -73,4 +119,9 @@ private fun sendNativeOAuthDeviceCodeNotification(
         is NotificationResult.Success -> NucleusNotificationHandle { result.handle.dismiss() }
         is NotificationResult.Failure -> null
     }
+}
+
+private fun isMacOs(): Boolean {
+    val osName = System.getProperty("os.name").orEmpty()
+    return osName.contains("mac", ignoreCase = true) || osName.contains("darwin", ignoreCase = true)
 }
