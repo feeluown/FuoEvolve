@@ -43,6 +43,20 @@ interface DesktopIoSurfaceVideoController {
     fun destroyIoSurfaceRenderContext(renderContext: Long)
 }
 
+internal data class DesktopJniVideoSourceCandidate(
+    val url: String = "",
+    val videoUrl: String = "",
+    val audioUrl: String = "",
+) {
+    val mainUrl: String
+        get() = url.ifBlank { videoUrl }
+
+    val externalAudioUrl: String?
+        get() = if (url.isBlank()) audioUrl.takeIf(String::isNotBlank) else null
+
+    fun debugDescription(): String = if (url.isNotBlank()) "combined" else "split-dash"
+}
+
 /**
  * GraalVM-friendly desktop video controller backed by the same libmpv JNI bridge packaged by the
  * Nucleus desktop runtime. The legacy JVM host installs its JNA controller explicitly, so this
@@ -70,6 +84,13 @@ internal class DesktopJniMpvVideoController :
     @Volatile private var viewportWidth = 0
     @Volatile private var viewportHeight = 0
     @Volatile private var playbackActive = false
+    @Volatile private var playWhenReady = false
+    @Volatile private var reachedEof = false
+    @Volatile private var softwareFrameDirty = false
+    @Volatile private var activePayload: VideoPlaybackPayload? = null
+    @Volatile private var activeCandidates: List<DesktopJniVideoSourceCandidate> = emptyList()
+    @Volatile private var activeCandidateIndex = -1
+    @Volatile private var activePlaylistEntryId: Long? = null
     @Volatile private var softwareRenderContext = 0L
     @Volatile private var openGlRenderContext = 0L
     @Volatile private var ioSurfaceRenderContext = 0L
@@ -112,50 +133,90 @@ internal class DesktopJniMpvVideoController :
         ensureOpen()
         mutableFrame.value = null
         lastPipelineDescription = null
+        activePlaylistEntryId = null
+        reachedEof = false
+        softwareFrameDirty = true
+
         if (payload == null) {
+            activePayload = null
+            activeCandidates = emptyList()
+            activeCandidateIndex = -1
             playbackActive = false
+            playWhenReady = false
             command("stop")
             mutableState.value = PlatformVideoPlaybackState()
             return
         }
 
-        val mainUrl = payload.url.takeIf(String::isNotBlank)
-            ?: payload.videoUrl.takeIf(String::isNotBlank)
-        if (mainUrl == null) {
+        val candidates = desktopJniVideoSourceCandidates(payload)
+        if (candidates.isEmpty()) {
+            activePayload = null
+            activeCandidates = emptyList()
+            activeCandidateIndex = -1
             playbackActive = false
+            playWhenReady = false
             mutableState.value = PlatformVideoPlaybackState(errorMessage = "当前视频没有可播放地址")
             return
         }
 
-        val externalAudio = if (payload.url.isBlank()) payload.audioUrl.takeIf(String::isNotBlank) else null
-        val options = encodeDesktopJniVideoLoadfileOptions(payload.headers, externalAudio)
+        activePayload = payload
+        activeCandidates = candidates
+        activeCandidateIndex = 0
         mutableState.value = PlatformVideoPlaybackState()
-        playbackActive = true
-        if (options.isBlank()) {
-            command("loadfile", mainUrl, "replace")
-        } else {
-            command("loadfile", mainUrl, "replace", "-1", options)
-        }
+        prepareCandidate(index = 0, positionMs = 0L, shouldPlay = true)
     }
 
     override fun setViewportSize(width: Int, height: Int) {
-        viewportWidth = width.coerceAtLeast(0)
-        viewportHeight = height.coerceAtLeast(0)
+        val newWidth = width.coerceAtLeast(0)
+        val newHeight = height.coerceAtLeast(0)
+        if (newWidth != viewportWidth || newHeight != viewportHeight) {
+            softwareFrameDirty = true
+        }
+        viewportWidth = newWidth
+        viewportHeight = newHeight
     }
 
     override fun play() {
         ensureOpen()
+        playWhenReady = true
+        softwareFrameDirty = true
+        val current = mutableState.value
+        if (
+            activeCandidateIndex in activeCandidates.indices &&
+            shouldRestartDesktopJniVideoPlayback(
+                reachedEof = reachedEof,
+                playbackActive = playbackActive,
+                positionMs = current.positionMs,
+                durationMs = current.durationMs,
+            )
+        ) {
+            val restartPosition = if (reachedEof) 0L else current.positionMs.coerceAtLeast(0L)
+            prepareCandidate(activeCandidateIndex, restartPosition, shouldPlay = true)
+            return
+        }
         setProperty("pause", "no")
     }
 
     override fun pause() {
         ensureOpen()
+        playWhenReady = false
         setProperty("pause", "yes")
     }
 
     override fun seekTo(positionMs: Long) {
         ensureOpen()
-        command("seek", (positionMs.coerceAtLeast(0L) / 1000.0).toString(), "absolute")
+        val duration = mutableState.value.durationMs
+        val target = if (duration > 0L) {
+            positionMs.coerceIn(0L, duration)
+        } else {
+            positionMs.coerceAtLeast(0L)
+        }
+        softwareFrameDirty = true
+        if (!playbackActive && activeCandidateIndex in activeCandidates.indices) {
+            prepareCandidate(activeCandidateIndex, target, shouldPlay = playWhenReady)
+        } else {
+            command("seek", (target / 1000.0).toString(), "absolute")
+        }
     }
 
     override fun createOpenGlRenderContext(): Long = synchronized(renderContextLock) {
@@ -277,6 +338,7 @@ internal class DesktopJniMpvVideoController :
             val context = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
             check(context != 0L) { "libmpv software video render context creation failed" }
             softwareRenderContext = context
+            softwareFrameDirty = true
             AppLogger.w("DesktopVideo", "using software video rendering fallback")
         }
     }
@@ -320,35 +382,9 @@ internal class DesktopJniMpvVideoController :
         try {
             var nextPollAtNanos = System.nanoTime()
             while (!closed.get()) {
-                DesktopJniMpvVideoApi.nativeWaitEvent(handle, EVENT_WAIT_SECONDS)?.let { event ->
-                    when {
-                        event == "shutdown" -> return
-                        event == "loaded" || event == "restart" -> {
-                            playbackActive = true
-                            mutableState.value = mutableState.value.copy(
-                                isPlaying = getProperty("pause") != "yes",
-                                errorMessage = null,
-                            )
-                            publishPipelineIfChanged()
-                        }
-                        event.startsWith("end:") -> {
-                            playbackActive = false
-                            val endEvent = parseDesktopJniVideoEndEvent(event)
-                            mutableState.value = mutableState.value.copy(
-                                isPlaying = false,
-                                errorMessage = if (
-                                    endEvent?.reason == MPV_END_FILE_REASON_ERROR && endEvent.error < 0
-                                ) {
-                                    DesktopJniMpvVideoApi.nativeErrorString(endEvent.error)
-                                        ?.let { "视频播放失败：$it" }
-                                        ?: "视频播放失败"
-                                } else {
-                                    null
-                                },
-                            )
-                        }
-                    }
-                }
+                val event = DesktopJniMpvVideoApi.nativeWaitEvent(handle, EVENT_WAIT_SECONDS)
+                if (event == "shutdown") return
+                if (event != null) handleEvent(event)
 
                 val now = System.nanoTime()
                 if (playbackActive && now >= nextPollAtNanos) {
@@ -364,6 +400,113 @@ internal class DesktopJniMpvVideoController :
                 )
             }
         }
+    }
+
+    private fun handleEvent(event: String) {
+        when {
+            event.startsWith("start:") -> {
+                activePlaylistEntryId = parseDesktopJniVideoStartEvent(event)
+                softwareFrameDirty = true
+            }
+            event == "loaded" || event == "restart" -> {
+                playbackActive = true
+                reachedEof = false
+                softwareFrameDirty = true
+                mutableState.value = mutableState.value.copy(
+                    isPlaying = getProperty("pause") != "yes",
+                    errorMessage = null,
+                )
+                publishPipelineIfChanged()
+            }
+            event.startsWith("end:") -> handleEndEvent(event)
+        }
+    }
+
+    private fun handleEndEvent(encoded: String) {
+        val endEvent = parseDesktopJniVideoEndEvent(encoded) ?: return
+        // loadfile replace and payload/source switches can deliver END_FILE for the previous
+        // playlist entry after a new load was already requested. Never let a stale event stop or
+        // retry the current source.
+        if (activePlaylistEntryId == null || endEvent.playlistEntryId != activePlaylistEntryId) {
+            return
+        }
+        activePlaylistEntryId = null
+
+        if (
+            endEvent.reason == MPV_END_FILE_REASON_ERROR &&
+            endEvent.error < 0 &&
+            retryNextCandidate()
+        ) {
+            return
+        }
+
+        playbackActive = false
+        reachedEof = endEvent.reason == MPV_END_FILE_REASON_EOF
+        playWhenReady = false
+        softwareFrameDirty = reachedEof
+        val errorMessage = if (
+            endEvent.reason == MPV_END_FILE_REASON_ERROR && endEvent.error < 0
+        ) {
+            DesktopJniMpvVideoApi.nativeErrorString(endEvent.error)
+                ?.let { "视频播放失败：$it" }
+                ?: "视频播放失败"
+        } else {
+            null
+        }
+        val current = mutableState.value
+        mutableState.value = current.copy(
+            isPlaying = false,
+            positionMs = if (reachedEof && current.durationMs > 0L) current.durationMs else current.positionMs,
+            errorMessage = errorMessage,
+        )
+    }
+
+    private fun retryNextCandidate(): Boolean {
+        val nextIndex = activeCandidateIndex + 1
+        if (nextIndex !in activeCandidates.indices) return false
+        val current = mutableState.value
+        val shouldPlay = playWhenReady
+        AppLogger.w(
+            "DesktopVideo",
+            "retrying source ${nextIndex + 1}/${activeCandidates.size} " +
+                "(${activeCandidates[nextIndex].debugDescription()}) after playback error",
+        )
+        return prepareCandidate(
+            index = nextIndex,
+            positionMs = current.positionMs.coerceAtLeast(0L),
+            shouldPlay = shouldPlay,
+        )
+    }
+
+    private fun prepareCandidate(index: Int, positionMs: Long, shouldPlay: Boolean): Boolean {
+        val payload = activePayload ?: return false
+        val candidate = activeCandidates.getOrNull(index) ?: return false
+        if (candidate.mainUrl.isBlank()) return false
+
+        activeCandidateIndex = index
+        activePlaylistEntryId = null
+        reachedEof = false
+        playbackActive = true
+        playWhenReady = shouldPlay
+        softwareFrameDirty = true
+        lastPipelineDescription = null
+        mutableState.value = mutableState.value.copy(
+            isPlaying = false,
+            positionMs = positionMs.coerceAtLeast(0L),
+            errorMessage = null,
+        )
+
+        setProperty("pause", if (shouldPlay) "no" else "yes")
+        val options = encodeDesktopJniVideoLoadfileOptions(payload.headers, candidate.externalAudioUrl)
+        if (options.isBlank()) {
+            command("loadfile", candidate.mainUrl, "replace")
+        } else {
+            command("loadfile", candidate.mainUrl, "replace", "-1", options)
+        }
+        if (positionMs > 0L) {
+            command("seek", (positionMs / 1000.0).toString(), "absolute")
+        }
+        return true
     }
 
     private fun publishPolledState() {
@@ -399,6 +542,11 @@ internal class DesktopJniMpvVideoController :
     }
 
     private fun renderLoop() {
+        var pixels = ByteArray(0)
+        var bufferWidth = 0
+        var bufferHeight = 0
+        var bufferStride = 0
+
         while (!closed.get()) {
             val renderContext = softwareRenderContext
             if (renderContext == 0L) {
@@ -411,9 +559,26 @@ internal class DesktopJniMpvVideoController :
                 continue
             }
 
+            val currentlyPlaying = mutableState.value.isPlaying
+            if (!currentlyPlaying && !softwareFrameDirty) {
+                Thread.sleep(PAUSED_RENDER_IDLE_MS)
+                continue
+            }
+
             try {
                 val stride = alignTo64(width * BYTES_PER_PIXEL)
-                val pixels = ByteArray(stride * height)
+                val requiredBytes = stride * height
+                if (
+                    pixels.size != requiredBytes ||
+                    bufferWidth != width ||
+                    bufferHeight != height ||
+                    bufferStride != stride
+                ) {
+                    pixels = ByteArray(requiredBytes)
+                    bufferWidth = width
+                    bufferHeight = height
+                    bufferStride = stride
+                }
                 checkMpv(
                     DesktopJniMpvVideoApi.nativeRenderSoftware(
                         renderContext = renderContext,
@@ -426,6 +591,7 @@ internal class DesktopJniMpvVideoController :
                 )
                 val imageInfo = ImageInfo.makeN32(width, height, ColorAlphaType.OPAQUE)
                 mutableFrame.value = Image.makeRaster(imageInfo, pixels, stride).toComposeImageBitmap()
+                softwareFrameDirty = false
             } catch (throwable: Throwable) {
                 if (!closed.get()) {
                     mutableState.value = mutableState.value.copy(
@@ -434,7 +600,7 @@ internal class DesktopJniMpvVideoController :
                 }
                 Thread.sleep(100L)
             }
-            Thread.sleep(VIDEO_RENDER_INTERVAL_MS)
+            Thread.sleep(if (currentlyPlaying) VIDEO_RENDER_INTERVAL_MS else PAUSED_RENDER_IDLE_MS)
         }
     }
 
@@ -481,19 +647,81 @@ internal class DesktopJniMpvVideoController :
 }
 
 internal data class DesktopJniVideoEndEvent(
+    val playlistEntryId: Long,
     val reason: Int,
     val error: Int,
 )
 
+internal fun parseDesktopJniVideoStartEvent(encoded: String): Long? {
+    if (!encoded.startsWith("start:")) return null
+    return encoded.substringAfter(':').toLongOrNull()
+}
+
 internal fun parseDesktopJniVideoEndEvent(encoded: String): DesktopJniVideoEndEvent? {
     val fields = encoded.split(':', limit = 4)
     if (fields.size != 4 || fields[0] != "end") return null
-    if (fields[1].toLongOrNull() == null) return null
     return DesktopJniVideoEndEvent(
+        playlistEntryId = fields[1].toLongOrNull() ?: return null,
         reason = fields[2].toIntOrNull() ?: return null,
         error = fields[3].toIntOrNull() ?: return null,
     )
 }
+
+internal fun desktopJniVideoSourceCandidates(
+    payload: VideoPlaybackPayload,
+): List<DesktopJniVideoSourceCandidate> {
+    val candidates = mutableListOf<DesktopJniVideoSourceCandidate>()
+    (listOf(payload.url) + payload.fallbackUrls)
+        .filter(String::isNotBlank)
+        .distinct()
+        .forEach { mediaUrl -> candidates += DesktopJniVideoSourceCandidate(url = mediaUrl) }
+
+    if (payload.videoUrl.isNotBlank() && payload.audioUrl.isNotBlank()) {
+        val videos = (listOf(payload.videoUrl) + payload.fallbackVideoUrls)
+            .filter(String::isNotBlank)
+            .distinct()
+        val audios = (listOf(payload.audioUrl) + payload.fallbackAudioUrls)
+            .filter(String::isNotBlank)
+            .distinct()
+        if (videos.isNotEmpty() && audios.isNotEmpty()) {
+            candidates += DesktopJniVideoSourceCandidate(
+                videoUrl = videos.first(),
+                audioUrl = audios.first(),
+            )
+            videos.drop(1).forEach { fallbackVideo ->
+                candidates += DesktopJniVideoSourceCandidate(
+                    videoUrl = fallbackVideo,
+                    audioUrl = audios.first(),
+                )
+            }
+            audios.drop(1).forEach { fallbackAudio ->
+                candidates += DesktopJniVideoSourceCandidate(
+                    videoUrl = videos.first(),
+                    audioUrl = fallbackAudio,
+                )
+            }
+            videos.drop(1).forEach { fallbackVideo ->
+                audios.drop(1).forEach { fallbackAudio ->
+                    candidates += DesktopJniVideoSourceCandidate(
+                        videoUrl = fallbackVideo,
+                        audioUrl = fallbackAudio,
+                    )
+                }
+            }
+        }
+    }
+
+    return candidates.distinct().take(MAX_VIDEO_SOURCE_CANDIDATES)
+}
+
+internal fun shouldRestartDesktopJniVideoPlayback(
+    reachedEof: Boolean,
+    playbackActive: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+): Boolean = reachedEof ||
+    !playbackActive ||
+    (durationMs > 0L && positionMs >= (durationMs - RESTART_NEAR_END_THRESHOLD_MS).coerceAtLeast(0L))
 
 internal fun boundedDesktopJniVideoRenderSize(width: Int, height: Int): Pair<Int, Int> {
     if (width <= 0 || height <= 0) return 0 to 0
@@ -628,8 +856,12 @@ private fun resolveDesktopJniMpvVideoBridge(): File? {
 
 private const val EVENT_WAIT_SECONDS = 0.05
 private const val STATE_POLL_INTERVAL_NANOS = 100_000_000L
+private const val MPV_END_FILE_REASON_EOF = 0
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val MPV_RENDER_UPDATE_FRAME = 1L
 private const val BYTES_PER_PIXEL = 4
 private const val VIDEO_RENDER_INTERVAL_MS = 33L
+private const val PAUSED_RENDER_IDLE_MS = 100L
+private const val RESTART_NEAR_END_THRESHOLD_MS = 500L
+private const val MAX_VIDEO_SOURCE_CANDIDATES = 24
 private const val MAX_SOFTWARE_RENDER_PIXELS = 1920L * 1080L
