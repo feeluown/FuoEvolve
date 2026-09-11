@@ -6,11 +6,11 @@ Desktop CI packages the Nucleus/Tao + GraalVM Native Image runtime. The legacy J
 
 | Target | Artifact | Runtime | Native dependency policy |
 | --- | --- | --- | --- |
-| Windows x64 | MSI | GraalVM Native Image | JNI libmpv bridge + pinned libmpv DLL runtime bundled |
-| macOS arm64 | DMG | GraalVM Native Image | JNI libmpv bridge + relocatable libmpv dylib closure bundled |
-| macOS x64 | DMG | GraalVM Native Image | JNI libmpv bridge + relocatable libmpv dylib closure bundled |
-| Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | distribution `mpv`, `libsecret`, WebKitGTK and desktop UI dependencies |
-| Portable Linux x64 | AppImage | GraalVM Native Image | bundled libmpv/Libsecret/WebKitGTK/TLS native closures |
+| Windows x64 | MSI | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + pinned libmpv DLL runtime bundled |
+| macOS arm64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
+| macOS x64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
+| Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | system-output capture library bundled; `mpv`, `libsecret`, PipeWire/PulseAudio, WebKitGTK and desktop UI dependencies are distro-managed |
+| Portable Linux x64 | AppImage | GraalVM Native Image | bundled system-output capture library/ELF closure plus libmpv/Libsecret/WebKitGTK/TLS native closures |
 
 There is no bundled JVM in these artifacts.
 
@@ -35,6 +35,7 @@ Immutable Windows libmpv inputs remain recorded in `desktopApp/packaging/native-
 - Windows uses the pinned `mpv-winbuild-cmake` development archive. CI verifies its SHA-256, extracts headers/import library for JNI compilation, and bundles the runtime DLLs.
 - macOS uses the architecture-specific Homebrew mpv version pinned by the existing lock, then `dylibbundler` converts it to an `@loader_path`-relative closure before Nucleus packaging.
 - Arch packages keep native libraries distro-managed through Nucleus `pacmanDepends` metadata.
+- Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source. Captured PCM remains bounded and in memory.
 - AppImage uses Ubuntu 22.04 as the lower-glibc build baseline and collects libmpv, Libsecret client, WebKitGTK subprocess, GIO TLS, and transitive ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
 
 ## CI
@@ -64,4 +65,4 @@ Canary desktop artifacts are unsigned. Pull requests do not produce desktop inst
 
 ## Linux portability
 
-The Arch package intentionally relies on the target distribution's package manager. The AppImage intentionally bundles user-space native dependency closures and uses `$ORIGIN`-relative loader paths. The WebView helper discovers its packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer discovers the packaged Libsecret fallback from the same Nucleus resource root.
+The Arch package intentionally relies on the target distribution's package manager. The AppImage intentionally bundles user-space native dependency closures and uses `$ORIGIN`-relative loader paths. The WebView helper discovers its packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer and system-audio capture loader discover their packaged native libraries from the same Nucleus resource root.

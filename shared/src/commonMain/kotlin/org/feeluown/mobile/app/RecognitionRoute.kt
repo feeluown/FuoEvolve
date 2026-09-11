@@ -20,8 +20,7 @@ internal fun RecognitionRoute(
     graph: RecognitionRouteGraph,
     onBack: () -> Unit,
     onSearchSong: (RecognizedSong) -> Unit,
-    hasMicrophonePermission: Boolean,
-    onRequestMicrophonePermission: () -> Unit,
+    audioRecognitionAccess: AudioRecognitionAccess,
 ) {
     val uiState by graph.controller.uiState.collectAsStateWithLifecycle()
     val detailLoadState by graph.appPort.detailLoadState.collectAsStateWithLifecycle()
@@ -46,8 +45,7 @@ internal fun RecognitionRoute(
                     detailScope.launch { graph.appPort.openNeteaseDetail(song) }
                 },
             ),
-            hasMicrophonePermission = hasMicrophonePermission,
-            onRequestMicrophonePermission = onRequestMicrophonePermission,
+            audioRecognitionAccess = audioRecognitionAccess,
         )
         SnackbarHost(
             hostState = snackbarHostState,

@@ -215,8 +215,11 @@ class MainActivity : ComponentActivity() {
                         appVersionInfo = "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         onRequestAudioPermission = { permissionLauncher.launch(mediaPermissions()) },
                         onRequestImagePermission = { permissionLauncher.launch(imagePermissions()) },
-                        hasMicrophonePermission = hasMicrophonePermission,
-                        onRequestMicrophonePermission = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        audioRecognitionAccess = AudioRecognitionAccess(
+                            source = AudioRecognitionSource.Microphone,
+                            isAvailable = hasMicrophonePermission,
+                            requestAccess = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        ),
                         onOpenProviderWebLogin = { provider ->
                             if (provider.loginConfig != null) {
                                 pendingWebLoginProviderId = provider.providerId

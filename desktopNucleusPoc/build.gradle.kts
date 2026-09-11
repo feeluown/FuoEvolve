@@ -54,6 +54,13 @@ val packageResourceOs = when {
 val webLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
 val webLoginProjectDir = rootProject.layout.projectDirectory.dir("desktopApp/native/web-login")
 val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
+val audioCaptureLibraryName = when {
+    isWindowsHost -> "fuoevolve_audio_capture.dll"
+    isMacHost -> "libfuoevolve_audio_capture.dylib"
+    else -> "libfuoevolve_audio_capture.so"
+}
+val audioCaptureProjectDir = rootProject.layout.projectDirectory.dir("desktopNucleusPoc/native/audio-capture")
+val audioCaptureLibrary = audioCaptureProjectDir.file("target/release/$audioCaptureLibraryName")
 val nucleusAppResources = layout.buildDirectory.dir("nucleus-app-resources")
 val stagedNativeResourceRoot = "$packageResourceOs/native"
 
@@ -88,6 +95,19 @@ val buildNucleusWebLoginHelper by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the shared system-WebView login helper for the Nucleus desktop runtime."
     workingDir(webLoginProjectDir)
+    commandLine("cargo", "build", "--release")
+}
+
+val buildNucleusAudioCaptureLibrary by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the system-output audio capture library used by the Nucleus desktop runtime."
+    workingDir(audioCaptureProjectDir)
+    inputs.files(
+        audioCaptureProjectDir.file("Cargo.toml"),
+        audioCaptureProjectDir.file("Cargo.lock"),
+        audioCaptureProjectDir.dir("src"),
+    )
+    outputs.file(audioCaptureLibrary)
     commandLine("cargo", "build", "--release")
 }
 
@@ -192,10 +212,14 @@ val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
 
 val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
     group = "distribution"
-    description = "Collect the portable libmpv/Libsecret/WebKitGTK closure used by the Nucleus AppImage."
-    dependsOn(buildNucleusWebLoginHelper)
+    description = "Collect the portable Nucleus libmpv/Libsecret/WebKitGTK/audio closure used by the AppImage."
+    dependsOn(buildNucleusWebLoginHelper, buildNucleusAudioCaptureLibrary)
     onlyIf { isLinuxHost && bundleLinuxRuntime.get() }
-    inputs.file(webLoginExecutable)
+    inputs.files(
+        webLoginExecutable,
+        audioCaptureLibrary,
+        layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh"),
+    )
     outputs.dir(portableLinuxRuntime)
     doFirst {
         portableLinuxRuntime.get().asFile.deleteRecursively()
@@ -205,13 +229,14 @@ val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
         layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh").asFile.absolutePath,
         portableLinuxRuntime.get().asFile.absolutePath,
         webLoginExecutable.asFile.absolutePath,
+        audioCaptureLibrary.asFile.absolutePath,
     )
 }
 
 val prepareNucleusAppResources by tasks.registering(Sync::class) {
     group = "distribution"
     description = "Stage native resources required by the Nucleus desktop runtime."
-    dependsOn(buildNucleusWebLoginHelper, buildNucleusMpvJniBridge)
+    dependsOn(buildNucleusWebLoginHelper, buildNucleusAudioCaptureLibrary, buildNucleusMpvJniBridge)
     if (isLinuxHost) dependsOn(prepareNucleusPortableLinuxRuntime)
 
     from(webLoginExecutable) {
@@ -224,6 +249,15 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         into("$stagedNativeResourceRoot/lib")
         if (!isWindowsHost) {
             filePermissions { unix("755") }
+        }
+    }
+
+    if (!(isLinuxHost && bundleLinuxRuntime.get())) {
+        from(audioCaptureLibrary) {
+            into("$stagedNativeResourceRoot/audio")
+            if (!isWindowsHost) {
+                filePermissions { unix("755") }
+            }
         }
     }
 
@@ -246,6 +280,7 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         val platformRoot = nucleusAppResources.get().asFile.resolve(stagedNativeResourceRoot)
         val stagedHelper = platformRoot.resolve("helpers/$webLoginExecutableName")
         val stagedMpvBridge = platformRoot.resolve("lib/$mpvJniLibraryName")
+        val stagedAudioCapture = platformRoot.resolve("audio/$audioCaptureLibraryName")
         if (!stagedHelper.isFile) {
             throw GradleException("Nucleus web login helper was not staged: ${stagedHelper.absolutePath}")
         }
@@ -254,6 +289,9 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         }
         if (!stagedMpvBridge.isFile) {
             throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
+        }
+        if (!stagedAudioCapture.isFile) {
+            throw GradleException("Nucleus system audio capture library was not staged: ${stagedAudioCapture.absolutePath}")
         }
         if (isWindowsHost || isMacHost || (isLinuxHost && bundleLinuxRuntime.get())) {
             val runtimeNames = platformRoot.resolve("lib").listFiles().orEmpty().map(File::getName)
@@ -377,6 +415,9 @@ nucleus.application {
                 "libsecret",
                 "mpv",
                 "webkit2gtk-4.1",
+                "alsa-lib",
+                "pipewire",
+                "libpulse",
             )
         }
     }
@@ -397,20 +438,25 @@ if (isMacHost) {
             doLast {
                 val plist = destinationDir.resolve("Info.plist")
                 check(plist.isFile) { "Nucleus GraalVM Info.plist was not copied: ${plist.absolutePath}" }
-                val command = "Set :NSMicrophoneUsageDescription FuoEvolve 使用麦克风进行听歌识曲。"
-                val setResult = providers.exec {
-                    isIgnoreExitValue = true
-                    commandLine("/usr/libexec/PlistBuddy", "-c", command, plist.absolutePath)
-                }.result.get()
-                if (setResult.exitValue != 0) {
-                    providers.exec {
-                        commandLine(
-                            "/usr/libexec/PlistBuddy",
-                            "-c",
-                            "Add :NSMicrophoneUsageDescription string FuoEvolve 使用麦克风进行听歌识曲。",
-                            plist.absolutePath,
-                        )
-                    }.result.get().assertNormalExitValue()
+                listOf(
+                    "NSMicrophoneUsageDescription" to "FuoEvolve 使用麦克风进行听歌识曲。",
+                    "NSAudioCaptureUsageDescription" to "FuoEvolve 使用系统音频进行听歌识曲。",
+                ).forEach { (key, value) ->
+                    val setCommand = "Set :$key $value"
+                    val setResult = providers.exec {
+                        isIgnoreExitValue = true
+                        commandLine("/usr/libexec/PlistBuddy", "-c", setCommand, plist.absolutePath)
+                    }.result.get()
+                    if (setResult.exitValue != 0) {
+                        providers.exec {
+                            commandLine(
+                                "/usr/libexec/PlistBuddy",
+                                "-c",
+                                "Add :$key string $value",
+                                plist.absolutePath,
+                            )
+                        }.result.get().assertNormalExitValue()
+                    }
                 }
             }
         }

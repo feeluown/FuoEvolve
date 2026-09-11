@@ -52,14 +52,13 @@ internal data class RecognitionFeatureActions(
 internal fun AudioRecognitionFeatureScreen(
     uiState: RecognitionUiState,
     actions: RecognitionFeatureActions,
-    hasMicrophonePermission: Boolean,
-    onRequestMicrophonePermission: () -> Unit,
+    audioRecognitionAccess: AudioRecognitionAccess,
 ) {
     DisposableEffect(Unit) {
         onDispose { actions.dispatch(RecognitionAction.CancelIfInProgress) }
     }
-    LaunchedEffect(hasMicrophonePermission, uiState) {
-        if (hasMicrophonePermission && uiState == RecognitionUiState.Idle) {
+    LaunchedEffect(audioRecognitionAccess.isAvailable, uiState) {
+        if (audioRecognitionAccess.isAvailable && uiState == RecognitionUiState.Idle) {
             actions.dispatch(RecognitionAction.Start)
         }
     }
@@ -91,27 +90,30 @@ internal fun AudioRecognitionFeatureScreen(
             }
         },
     ) { paddingValues ->
-        if (hasMicrophonePermission) {
+        if (audioRecognitionAccess.isAvailable) {
             RecognitionContent(
                 uiState = uiState,
                 actions = actions,
+                source = audioRecognitionAccess.source,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
             )
         } else {
-            MicrophonePermissionContent(
+            AudioRecognitionAccessContent(
+                source = audioRecognitionAccess.source,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                onRequestPermission = onRequestMicrophonePermission,
+                onRequestPermission = audioRecognitionAccess.requestAccess,
             )
         }
     }
 }
 
 @Composable
-private fun MicrophonePermissionContent(
+private fun AudioRecognitionAccessContent(
+    source: AudioRecognitionSource,
     modifier: Modifier,
     onRequestPermission: () -> Unit,
 ) {
@@ -122,10 +124,19 @@ private fun MicrophonePermissionContent(
     ) {
         RecognitionIcon()
         Spacer(Modifier.size(24.dp))
-        Text("需要麦克风权限", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            when (source) {
+                AudioRecognitionSource.Microphone -> "需要麦克风权限"
+                AudioRecognitionSource.SystemOutput -> "需要系统音频权限"
+            },
+            style = MaterialTheme.typography.headlineSmall,
+        )
         Spacer(Modifier.size(8.dp))
         Text(
-            text = "录音仅在内存中用于生成音频指纹，不会保存或上传原始音频。",
+            text = when (source) {
+                AudioRecognitionSource.Microphone -> "录音仅在内存中用于生成音频指纹，不会保存或上传原始音频。"
+                AudioRecognitionSource.SystemOutput -> "仅采集当前系统播放的声音用于生成音频指纹，不会保存或上传原始音频。"
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -142,19 +153,32 @@ private fun MicrophonePermissionContent(
 private fun RecognitionContent(
     uiState: RecognitionUiState,
     actions: RecognitionFeatureActions,
+    source: AudioRecognitionSource,
     modifier: Modifier,
 ) {
     when (val state = uiState) {
         RecognitionUiState.Idle -> ListeningContent(
             modifier = modifier,
-            title = "正在准备麦克风",
-            subtitle = "录音不会保存到设备",
+            title = when (source) {
+                AudioRecognitionSource.Microphone -> "正在准备麦克风"
+                AudioRecognitionSource.SystemOutput -> "正在准备系统音频"
+            },
+            subtitle = when (source) {
+                AudioRecognitionSource.Microphone -> "录音不会保存到设备"
+                AudioRecognitionSource.SystemOutput -> "不会暂停当前播放"
+            },
             progress = null,
         )
         is RecognitionUiState.Capturing -> ListeningContent(
             modifier = modifier,
-            title = "正在聆听",
-            subtitle = "请靠近声音来源，并保持周围环境安静",
+            title = when (source) {
+                AudioRecognitionSource.Microphone -> "正在聆听"
+                AudioRecognitionSource.SystemOutput -> "正在聆听系统音频"
+            },
+            subtitle = when (source) {
+                AudioRecognitionSource.Microphone -> "请靠近声音来源，并保持周围环境安静"
+                AudioRecognitionSource.SystemOutput -> "请保持音乐继续通过系统默认输出播放"
+            },
             progress = (state.capturedMs.toFloat() / state.windowDurationMs).coerceIn(0f, 1f),
         )
         RecognitionUiState.Matching -> ListeningContent(
@@ -171,7 +195,10 @@ private fun RecognitionContent(
         RecognitionUiState.NoResult -> RecognitionMessage(
             modifier = modifier,
             title = "暂未识别到歌曲",
-            message = "可以让手机更靠近声音来源，或换到安静一点的环境再试一次。",
+            message = when (source) {
+                AudioRecognitionSource.Microphone -> "可以让手机更靠近声音来源，或换到安静一点的环境再试一次。"
+                AudioRecognitionSource.SystemOutput -> "请确认音乐正在通过系统默认输出播放，再重试。"
+            },
             actionLabel = "重新识别",
             onAction = { actions.dispatch(RecognitionAction.Retry) },
         )

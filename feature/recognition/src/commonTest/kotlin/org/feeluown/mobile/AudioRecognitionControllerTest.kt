@@ -75,6 +75,31 @@ class AudioRecognitionControllerTest {
     }
 
     @Test
+    fun systemOutputCaptureDoesNotPausePlayback() = runTest {
+        var pauseCount = 0
+        val repository = object : AudioRecognitionRepository {
+            override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> {
+                awaitCancellation()
+            }
+
+            override fun cancel() = Unit
+        }
+        val controller = createRecognitionFeatureController(
+            repository = repository,
+            scope = this,
+            isPlaybackActive = { true },
+            pausePlayback = { pauseCount += 1 },
+            pausePlaybackBeforeCapture = false,
+        )
+
+        controller.dispatch(RecognitionAction.Start)
+        runCurrent()
+
+        assertEquals(0, pauseCount)
+        controller.dispatch(RecognitionAction.Cancel)
+    }
+
+    @Test
     fun closeReturnsFeatureToIdle() = runTest {
         val repository = object : AudioRecognitionRepository {
             override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> = emptyList()

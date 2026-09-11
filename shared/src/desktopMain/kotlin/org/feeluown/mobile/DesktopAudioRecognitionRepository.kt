@@ -3,11 +3,8 @@ package org.feeluown.mobile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
-import javax.sound.sampled.AudioFormat
-import javax.sound.sampled.AudioSystem
-import javax.sound.sampled.DataLine
-import javax.sound.sampled.TargetDataLine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -31,69 +28,44 @@ internal class DesktopAudioRecognitionRepository : AudioRecognitionRepository {
 }
 
 internal class DesktopAudioRecognitionCaptureDevice : AudioRecognitionCaptureDevice {
-    private val activeLine = AtomicReference<TargetDataLine?>()
+    private val activeHandle = AtomicLong(0L)
 
     override suspend fun capture(onSamples: (FloatArray) -> Unit) = withContext(Dispatchers.IO) {
-        val format = AudioFormat(
-            AUDIO_RECOGNITION_SAMPLE_RATE.toFloat(),
-            PCM_BITS_PER_SAMPLE,
-            PCM_CHANNELS,
-            true,
-            false,
-        )
-        val lineInfo = DataLine.Info(TargetDataLine::class.java, format)
-        val line = runCatching { AudioSystem.getLine(lineInfo) as TargetDataLine }
-            .getOrElse { throw IllegalStateException("系统没有可用的麦克风输入设备", it) }
-        try {
-            line.open(format, DESKTOP_AUDIO_BUFFER_BYTES)
-        } catch (throwable: Throwable) {
-            runCatching { line.close() }
-            throw IllegalStateException("麦克风不支持 48 kHz 单声道 PCM 录音", throwable)
+        DesktopAudioCaptureNativeLoader.ensureLoaded()
+        val handle = DesktopAudioCaptureNative.nativeOpen()
+        if (handle == 0L) {
+            throw IllegalStateException(
+                DesktopAudioCaptureNative.nativeLastError(0L)
+                    ?: "系统音频采集不可用，请确认默认输出设备和系统音频权限",
+            )
         }
-        check(activeLine.compareAndSet(null, line)) { "麦克风录音已经在进行中" }
+        check(activeHandle.compareAndSet(0L, handle)) {
+            DesktopAudioCaptureNative.nativeCancel(handle)
+            DesktopAudioCaptureNative.nativeClose(handle)
+            "系统音频采集已经在进行中"
+        }
 
-        val bytes = ByteArray(DESKTOP_AUDIO_READ_BYTES)
+        val samples = FloatArray(DESKTOP_AUDIO_READ_SAMPLES)
         try {
-            line.start()
-            while (activeLine.get() === line) {
-                val read = line.read(bytes, 0, bytes.size)
-                if (read < 0) {
-                    if (activeLine.get() !== line) break
-                    throw IllegalStateException("麦克风读取失败")
-                }
-                if (read >= PCM_BYTES_PER_SAMPLE) {
-                    onSamples(decodePcm16Le(bytes, read))
+            while (activeHandle.get() == handle) {
+                when (val read = DesktopAudioCaptureNative.nativeRead(handle, samples, 0, samples.size)) {
+                    READ_CANCELLED -> break
+                    READ_FAILED -> throw IllegalStateException(
+                        DesktopAudioCaptureNative.nativeLastError(handle)
+                            ?: "系统音频采集失败，请确认默认输出设备和系统音频权限",
+                    )
+                    0 -> Unit
+                    else -> onSamples(samples.copyOf(read))
                 }
             }
         } finally {
-            releaseLine(line)
+            activeHandle.compareAndSet(handle, 0L)
+            DesktopAudioCaptureNative.nativeClose(handle)
         }
     }
 
     override fun cancel() {
-        activeLine.getAndSet(null)?.let(::stopAndClose)
-    }
-
-    private fun releaseLine(line: TargetDataLine) {
-        activeLine.compareAndSet(line, null)
-        stopAndClose(line)
-    }
-
-    private fun stopAndClose(line: TargetDataLine) {
-        runCatching { line.stop() }
-        runCatching { line.flush() }
-        runCatching { line.close() }
-    }
-}
-
-internal fun decodePcm16Le(bytes: ByteArray, length: Int): FloatArray {
-    val sampleCount = length.coerceAtMost(bytes.size) / PCM_BYTES_PER_SAMPLE
-    return FloatArray(sampleCount) { index ->
-        val byteOffset = index * PCM_BYTES_PER_SAMPLE
-        val low = bytes[byteOffset].toInt() and 0xff
-        val high = bytes[byteOffset + 1].toInt()
-        val sample = ((high shl 8) or low).toShort()
-        sample / 32768f
+        activeHandle.get().takeIf { it != 0L }?.let(DesktopAudioCaptureNative::nativeCancel)
     }
 }
 
@@ -104,7 +76,9 @@ private class DesktopAudioFingerprintRuntime : AudioFingerprintRuntime {
     override suspend fun generate(samples: FloatArray): String = withContext(Dispatchers.IO) {
         val helper = resolveDesktopWebViewHelper()
             ?: throw IllegalStateException("桌面音频指纹组件未找到，请重新安装应用")
-        val process = ProcessBuilder(helper.absolutePath).start()
+        val processBuilder = ProcessBuilder(helper.absolutePath)
+        configureDesktopWebLoginProcessEnvironment(processBuilder.environment())
+        val process = processBuilder.start()
         check(activeProcess.compareAndSet(null, process)) {
             process.destroyForcibly()
             "音频指纹任务已经在进行中"
@@ -172,8 +146,6 @@ private data class DesktopFingerprintResponse(
     val message: String? = null,
 )
 
-private const val PCM_BITS_PER_SAMPLE = 16
-private const val PCM_CHANNELS = 1
-private const val PCM_BYTES_PER_SAMPLE = PCM_BITS_PER_SAMPLE / 8
-private const val DESKTOP_AUDIO_READ_BYTES = 4_096
-private const val DESKTOP_AUDIO_BUFFER_BYTES = 16_384
+private const val DESKTOP_AUDIO_READ_SAMPLES = 4_096
+private const val READ_CANCELLED = -1
+private const val READ_FAILED = -2

@@ -39,11 +39,11 @@ Desktop CI produces only Nucleus/GraalVM artifacts:
 
 | Platform | Artifact | Native dependency policy |
 | --- | --- | --- |
-| Windows x64 | MSI | JNI bridge + pinned libmpv runtime bundled |
-| macOS arm64 | DMG | JNI bridge + relocatable libmpv dylib closure bundled |
-| macOS x64 | DMG | JNI bridge + relocatable libmpv dylib closure bundled |
-| Arch Linux x64 | Pacman/Arch package | distro-managed `mpv`, `libsecret`, WebKitGTK and UI ABI dependencies |
-| Portable Linux x64 | AppImage | libmpv, Libsecret client, WebKitGTK subprocess/runtime and TLS module closures bundled |
+| Windows x64 | MSI | JNI bridge + system-output capture library + pinned libmpv runtime bundled |
+| macOS arm64 | DMG | JNI bridge + system-output capture library + relocatable libmpv dylib closure bundled |
+| macOS x64 | DMG | JNI bridge + system-output capture library + relocatable libmpv dylib closure bundled |
+| Arch Linux x64 | Pacman/Arch package | system-output capture library bundled; `mpv`, `libsecret`, PipeWire/PulseAudio, WebKitGTK and UI ABI dependencies are distro-managed |
+| Portable Linux x64 | AppImage | system-output capture library and its ELF closure, plus libmpv, Libsecret client, WebKitGTK subprocess/runtime and TLS module closures bundled |
 
 Linux AppImage runtime directories are discovered through `compose.application.resources.dir`; no wrapper-script-only environment is required for provider login or secure credential fallback.
 
@@ -58,6 +58,8 @@ The Nucleus path includes:
 - the Rust system-WebView login helper as a packaged resource;
 - the shared `desktopRuntime` libmpv playback state machine with persistent playback-resume state;
 - direct JNI libmpv playback on Windows, macOS and Linux packaging targets;
+- system-output audio recognition through the native CPAL/JNI capture library; Windows and macOS use the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source;
+- desktop audio recognition does not pause the current playback session and keeps captured samples in a bounded in-memory pipeline;
 - local-music indexing, metadata editing and sidecar lyrics through the shared desktop runtime;
 - SQLDelight listening-history persistence;
 - Nucleus `media-control` integration for Windows SMTC, macOS Now Playing / Remote Command Center and Linux MPRIS;
@@ -70,7 +72,7 @@ The Nucleus path includes:
 - stale-event correlation for rapid source replacement;
 - GraalVM Native Image compilation and native installer packaging.
 
-Remaining desktop parity work is intentionally separate: video rendering, desktop app updates, and dedicated Native Image runtime validation for microphone capture/audio recognition.
+Remaining desktop parity work is intentionally separate: video rendering, desktop app updates, and manual Native Image capture validation on real Windows, macOS and Linux audio-session matrices.
 
 ## CI
 

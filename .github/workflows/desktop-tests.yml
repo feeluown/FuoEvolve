@@ -34,23 +34,27 @@ jobs:
       - name: Set up Rust 1.98.1
         uses: dtolnay/rust-toolchain@1.98.1
 
-      - name: Cache Rust WebView helper
+      - name: Cache Rust native helpers
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-          key: nucleus-web-login-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+            desktopNucleusPoc/native/audio-capture/target
+          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
           restore-keys: |
-            nucleus-web-login-linux-ubuntu24.04-x64-rust-1.98.1-
+            nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
 
       - name: Install Linux native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            libasound2-dev \
             libmpv-dev \
+            libpipewire-0.3-dev \
+            libpulse-dev \
             libsecret-1-dev \
             libwebkit2gtk-4.1-dev
 
@@ -97,16 +101,17 @@ jobs:
       - name: Set up Rust 1.98.1
         uses: dtolnay/rust-toolchain@1.98.1
 
-      - name: Cache Rust WebView helper
+      - name: Cache Rust native helpers
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-          key: nucleus-web-login-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+            desktopNucleusPoc/native/audio-capture/target
+          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
           restore-keys: |
-            nucleus-web-login-windows-x64-rust-1.98.1-
+            nucleus-native-windows-x64-rust-1.98.1-
 
       - name: Cache pinned Windows libmpv bundle
         id: windows-libmpv-cache
@@ -171,16 +176,17 @@ jobs:
       - name: Set up Rust 1.98.1
         uses: dtolnay/rust-toolchain@1.98.1
 
-      - name: Cache Rust WebView helper
+      - name: Cache Rust native helpers
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-          key: nucleus-web-login-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**') }}
+            desktopNucleusPoc/native/audio-capture/target
+          key: nucleus-native-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
           restore-keys: |
-            nucleus-web-login-macos-arm64-rust-1.98.1-
+            nucleus-native-macos-arm64-rust-1.98.1-
 
       - name: Cache relocatable macOS libmpv bundle
         id: macos-libmpv-cache
