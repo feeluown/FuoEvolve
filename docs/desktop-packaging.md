@@ -48,11 +48,11 @@ Desktop self-update is intentionally not implemented yet. These version values a
 
 ## AppImage LTS baseline
 
-The portable Linux build is pinned to the **latest Ubuntu LTS baseline used by the repository, currently Ubuntu 24.04 LTS**. The workflow explicitly verifies `VERSION_ID=24.04` before building so the native executable and bundled user-space ELF closure cannot silently drift to `ubuntu-latest` or a newer glibc baseline.
+The portable Linux build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. The workflow uses the explicit `ubuntu-26.04` runner label and verifies `VERSION_ID=26.04` before building so the native executable and bundled user-space ELF closure cannot silently drift with `ubuntu-latest`.
 
 The AppImage bundles libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
 
-When the repository intentionally moves to a newer Ubuntu LTS, update the pinned runner, baseline verification, cache key, and this documentation in the same change.
+Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the AppImage policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, cache key, and this documentation in the same change.
 
 ## CI
 
@@ -64,7 +64,7 @@ Pull requests use runtime-level validation and do not build the full MSI/DMG/App
 
 1. Windows x64 MSI.
 2. macOS arm64 and x64 DMGs.
-3. Linux x64 AppImage against the pinned Ubuntu 24.04 LTS baseline.
+3. Linux x64 AppImage against the pinned Ubuntu 26.04 LTS baseline.
 4. Linux x64 Arch/Pacman package with dependency metadata verification.
 
 `master-canary.yml` invokes that workflow for preview builds. `release.yml` invokes the same workflow for release tags and publishes all five desktop assets alongside the Android APK. The release job renames assets with the release tag and publishes `SHA256SUMS.txt`.
