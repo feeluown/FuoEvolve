@@ -6,7 +6,7 @@ import kotlin.test.assertTrue
 
 class NativeImageReachabilityMetadataTest {
     @Test
-    fun credentialStorageJnaProxiesAreRegistered() {
+    fun nativeImageMetadataKeepsRequiredDesktopRuntimeEntries() {
         val resourcePath =
             "META-INF/native-image/org.feeluown/fuoevolve/reachability-metadata.json"
         val stream = assertNotNull(javaClass.classLoader.getResourceAsStream(resourcePath))
@@ -37,5 +37,10 @@ class NativeImageReachabilityMetadataTest {
                 "Missing Native Image DataStore field metadata for $typeName.$fieldName",
             )
         }
+
+        assertTrue(
+            metadata.contains("\"fuoevolve-desktop-version.properties\""),
+            "Missing Native Image resource metadata for the packaged desktop version",
+        )
     }
 }
