@@ -8,6 +8,8 @@ import io.github.vinceglb.filekit.name
 import io.github.vinceglb.filekit.path
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.feeluown.mobile.DesktopTextFile
@@ -17,12 +19,17 @@ import org.feeluown.mobile.DesktopTextFileDialogProvider
  * OS-native desktop Open/Save dialogs via FileKit. Nucleus ships GraalVM reachability metadata for
  * FileKit, so this path stays compatible with the Tao Native Image host without Swing/AWT dialogs.
  */
-internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvider {
+internal class FileKitDesktopTextFileDialogProvider(
+    private val requireNativeLinuxPortal: Boolean = false,
+    private val osName: String = System.getProperty("os.name").orEmpty(),
+    private val linuxPortalAvailable: () -> Boolean = ::linuxDesktopPortalAvailable,
+) : DesktopTextFileDialogProvider {
     override suspend fun openTextFile(
         dialogTitle: String,
         filterDescription: String,
         extensions: List<String>,
     ): DesktopTextFile? {
+        ensureNativeDialogAvailable()
         val normalizedExtensions = normalizeExtensions(extensions)
         val picked = if (normalizedExtensions.isEmpty()) {
             FileKit.openFilePicker()
@@ -46,6 +53,7 @@ internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvi
         extensions: List<String>,
         content: String,
     ): Boolean {
+        ensureNativeDialogAvailable()
         val normalizedExtensions = normalizeExtensions(extensions)
         val defaultExtension = normalizedExtensions.firstOrNull()
         val suggestedName = suggestedFileName
@@ -62,6 +70,38 @@ internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvi
         }
         return true
     }
+
+    private fun ensureNativeDialogAvailable() {
+        if (!requireNativeLinuxPortal) return
+        if (!osName.lowercase(Locale.ROOT).contains("linux")) return
+        check(linuxPortalAvailable()) {
+            "系统文件选择器不可用，请安装并启动适合当前桌面环境的 xdg-desktop-portal 后重试"
+        }
+    }
+}
+
+internal fun desktopNativeFileDialogAvailable(
+    osName: String,
+    linuxPortalProbe: () -> Boolean,
+): Boolean = !osName.lowercase(Locale.ROOT).contains("linux") || linuxPortalProbe()
+
+private fun linuxDesktopPortalAvailable(): Boolean {
+    if (System.getenv("DBUS_SESSION_BUS_ADDRESS").isNullOrBlank()) return false
+    return runCatching {
+        val process = ProcessBuilder(
+            "busctl",
+            "--user",
+            "--no-pager",
+            "status",
+            "org.freedesktop.portal.Desktop",
+        ).redirectErrorStream(true).start()
+        val finished = process.waitFor(LINUX_PORTAL_PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            return@runCatching false
+        }
+        process.exitValue() == 0
+    }.getOrDefault(false)
 }
 
 private fun normalizeExtensions(extensions: List<String>): List<String> =
@@ -69,3 +109,5 @@ private fun normalizeExtensions(extensions: List<String>): List<String> =
         .map { extension -> extension.trim().removePrefix(".").lowercase() }
         .filter(String::isNotBlank)
         .distinct()
+
+private const val LINUX_PORTAL_PROBE_TIMEOUT_SECONDS = 1L
