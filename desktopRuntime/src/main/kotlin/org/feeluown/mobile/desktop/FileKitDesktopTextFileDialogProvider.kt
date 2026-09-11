@@ -9,7 +9,6 @@ import io.github.vinceglb.filekit.path
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.feeluown.mobile.DesktopTextFile
 import org.feeluown.mobile.DesktopTextFileDialogProvider
@@ -19,19 +18,19 @@ import org.feeluown.mobile.DesktopTextFileDialogProvider
  * FileKit, so this path stays compatible with the Tao Native Image host without Swing/AWT dialogs.
  */
 internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvider {
-    override fun openTextFile(
+    override suspend fun openTextFile(
         dialogTitle: String,
         filterDescription: String,
         extensions: List<String>,
-    ): DesktopTextFile? = runBlocking {
+    ): DesktopTextFile? {
         val normalizedExtensions = normalizeExtensions(extensions)
         val picked = if (normalizedExtensions.isEmpty()) {
             FileKit.openFilePicker()
         } else {
             FileKit.openFilePicker(type = FileKitType.File(*normalizedExtensions.toTypedArray()))
-        } ?: return@runBlocking null
+        } ?: return null
 
-        withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             val path = Path.of(picked.path)
             DesktopTextFile(
                 fileName = picked.name,
@@ -40,13 +39,13 @@ internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvi
         }
     }
 
-    override fun saveTextFile(
+    override suspend fun saveTextFile(
         dialogTitle: String,
         suggestedFileName: String,
         filterDescription: String,
         extensions: List<String>,
         content: String,
-    ): Boolean = runBlocking {
+    ): Boolean {
         val normalizedExtensions = normalizeExtensions(extensions)
         val defaultExtension = normalizedExtensions.firstOrNull()
         val suggestedName = suggestedFileName
@@ -55,12 +54,13 @@ internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvi
         val picked = FileKit.openFileSaver(
             suggestedName = suggestedName,
             defaultExtension = defaultExtension,
-        ) ?: return@runBlocking false
+            allowedExtensions = normalizedExtensions.takeIf(List<String>::isNotEmpty)?.toSet(),
+        ) ?: return false
 
         withContext(Dispatchers.IO) {
             Files.writeString(Path.of(picked.path), content, Charsets.UTF_8)
         }
-        true
+        return true
     }
 }
 
