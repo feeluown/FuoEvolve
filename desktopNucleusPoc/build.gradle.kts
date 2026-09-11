@@ -284,6 +284,7 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
     implementation("dev.nucleusframework:nucleus.media-control:2.5.15")
+    implementation("dev.nucleusframework:nucleus.notification-common:2.5.15")
     implementation("dev.nucleusframework:composenativetray:2.1.6")
 
     testImplementation(kotlin("test"))
