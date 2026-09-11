@@ -1,7 +1,9 @@
 #![cfg(target_os = "linux")]
 
 use std::ffi::c_char;
+use std::io::Cursor;
 use std::ptr;
+use std::sync::LazyLock;
 
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
@@ -31,7 +33,41 @@ impl Tray for FuoTray {
     }
 
     fn icon_name(&self) -> String {
-        "multimedia-player".into()
+        "fuoevolve".into()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        static ICON: LazyLock<ksni::Icon> = LazyLock::new(|| {
+            let decoder = png::Decoder::new(Cursor::new(
+                include_bytes!(
+                    "../../../../androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+                )
+                .as_slice(),
+            ));
+            let mut reader = decoder
+                .read_info()
+                .expect("FuoEvolve icon must be valid PNG");
+            let mut buffer = vec![
+                0;
+                reader
+                    .output_buffer_size()
+                    .expect("FuoEvolve icon dimensions must be bounded")
+            ];
+            let info = reader
+                .next_frame(&mut buffer)
+                .expect("FuoEvolve icon PNG frame must be readable");
+            assert_eq!(info.color_type, png::ColorType::Rgba);
+            let mut data = buffer[..info.buffer_size()].to_vec();
+            for pixel in data.chunks_exact_mut(4) {
+                pixel.rotate_right(1);
+            }
+            ksni::Icon {
+                width: info.width as i32,
+                height: info.height as i32,
+                data,
+            }
+        });
+        vec![ICON.clone()]
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {

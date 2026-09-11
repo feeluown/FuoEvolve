@@ -22,6 +22,12 @@ kotlin {
 private val desktopAppIcon = rootProject.file(
     "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
 )
+private val desktopWindowsIcon = rootProject.file(
+    "desktopApp/packaging/icons/fuoevolve.ico",
+)
+private val desktopMacIcon = rootProject.file(
+    "desktopApp/packaging/icons/fuoevolve.icns",
+)
 
 sourceSets {
     named("main") {
@@ -230,6 +236,7 @@ val buildLinuxTrayBridge by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the Rust Linux StatusNotifier tray bridge used by the desktop runtime."
     onlyIf { isLinuxHost }
+    inputs.file(desktopAppIcon)
     workingDir(layout.projectDirectory.dir("native/linux-tray"))
     commandLine("cargo", "build", "--release")
 }
@@ -502,11 +509,13 @@ compose.desktop {
                 dirChooser = true
                 menuGroup = "FuoEvolve"
                 upgradeUuid = "2c663b22-3837-4f6b-a5d0-74cba65a6c31"
+                iconFile.set(desktopWindowsIcon)
             }
             macOS {
                 bundleID = "org.feeluown.mobile.desktop"
                 dockName = "FuoEvolve"
                 appCategory = "public.app-category.music"
+                iconFile.set(desktopMacIcon)
                 infoPlist {
                     extraKeysRawXml = """
                         <key>NSMicrophoneUsageDescription</key>

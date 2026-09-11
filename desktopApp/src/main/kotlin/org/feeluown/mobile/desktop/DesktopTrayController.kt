@@ -5,12 +5,9 @@ import com.sun.jna.Library
 import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
-import java.awt.Color
-import java.awt.Graphics2D
 import java.awt.GraphicsEnvironment
 import java.awt.MenuItem
 import java.awt.PopupMenu
-import java.awt.RenderingHints
 import java.awt.SystemTray
 import java.awt.TrayIcon
 import java.awt.image.BufferedImage
@@ -18,6 +15,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.Locale
+import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
 import org.feeluown.mobile.AppLogger
 
@@ -218,27 +216,16 @@ private fun dispatchToDesktopUi(action: () -> Unit) {
 }
 
 private fun createTrayImage(): BufferedImage {
-    val size = 32
-    return BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).also { image ->
-        val graphics = image.createGraphics()
-        try {
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            graphics.color = Color(35, 35, 35)
-            graphics.fillOval(2, 2, 28, 28)
-            graphics.color = Color.WHITE
-            graphics.fillOval(5, 5, 22, 22)
-            graphics.color = Color(35, 35, 35)
-            drawMusicNote(graphics)
-        } finally {
-            graphics.dispose()
+    val stream = requireNotNull(
+        DesktopTrayController::class.java.getResourceAsStream("/ic_launcher.png"),
+    ) {
+        "Desktop tray icon resource is missing"
+    }
+    return stream.use { input ->
+        requireNotNull(ImageIO.read(input)) {
+            "Desktop tray icon resource is not a readable image"
         }
     }
-}
-
-private fun drawMusicNote(graphics: Graphics2D) {
-    graphics.fillRoundRect(17, 8, 3, 13, 2, 2)
-    graphics.fillRoundRect(11, 10, 8, 3, 2, 2)
-    graphics.fillOval(12, 18, 7, 6)
 }
 
 private const val ERROR_BUFFER_BYTES = 2048
