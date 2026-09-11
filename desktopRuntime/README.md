@@ -1,17 +1,21 @@
 # Desktop runtime
 
-`desktopRuntime` contains desktop host services that must be shared by both the existing JVM `desktopApp` and the opt-in Nucleus/GraalVM desktop path.
+`desktopRuntime` contains reusable desktop services consumed by the production `desktopApp` Native Image host.
 
-The module is intentionally narrower than either application host. It should contain reusable desktop runtime integrations only when both hosts can use the same implementation and persistence/behavior contract.
+The module is intentionally narrower than the application host. Shared desktop behavior belongs here when it is independent of Nucleus/Tao windowing and platform-specific native presentation boundaries.
 
-Current responsibilities:
+Current responsibilities include:
 
-- OS-backed provider credential storage with the existing FuoEvolve credential key namespace.
-- The desktop libmpv playback state machine and backend event contract. Queue identity, stale-event filtering, Loading/Playing transitions, pause/resume, seeking, timeline updates and audio-format reporting live here so JVM and Native Image hosts do not diverge.
+- OS-backed provider credential storage with the existing FuoEvolve credential namespace.
+- The desktop libmpv playback state machine and backend event contract, including queue identity, stale-event filtering, Loading/Playing transitions, pause/resume, seeking, timeline updates, audio-format reporting, and persistent playback resume behavior.
+- Filesystem-backed local music and listening-history services used by the desktop composition root.
 
-Host-specific native transports remain outside this module:
+The production `desktopApp` supplies the host-specific integrations:
 
-- `desktopApp` keeps the existing JNA-backed libmpv transport.
-- `desktopNucleusPoc` uses a thin JNI bridge for GraalVM Native Image; the native side has no callbacks into Kotlin and only exposes synchronous libmpv calls/event polling.
+- a thin JNI libmpv transport for GraalVM Native Image;
+- Nucleus/Tao windowing and tray lifecycle;
+- Windows SMTC, macOS Now Playing / Remote Command Center, and Linux MPRIS;
+- GPU video presentation through Tao/OpenGL on Windows/Linux and IOSurface/Metal on macOS, with software fallback;
+- native notifications, file dialogs, clipboard integration, single-instance activation, and package associations.
 
-Windowing, tray, system media controls, video rendering and other host-specific integrations remain outside this module until their native boundaries are migrated deliberately.
+There is no separate JVM desktop application host.
