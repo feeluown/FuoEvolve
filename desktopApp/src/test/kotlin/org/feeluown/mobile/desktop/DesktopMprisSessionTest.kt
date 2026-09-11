@@ -144,60 +144,6 @@ class DesktopMprisSessionTest {
     }
 
     @Test
-    fun enablesKdePositionWorkaroundOnlyForKdeEnvironment() {
-        assertTrue(isKdeDesktop(mapOf("XDG_CURRENT_DESKTOP" to "KDE")))
-        assertTrue(isKdeDesktop(mapOf("XDG_CURRENT_DESKTOP" to "KDE;wayland")))
-        assertTrue(isKdeDesktop(mapOf("XDG_SESSION_DESKTOP" to "plasma")))
-        assertTrue(isKdeDesktop(mapOf("KDE_FULL_SESSION" to "true")))
-        assertFalse(isKdeDesktop(mapOf("XDG_CURRENT_DESKTOP" to "GNOME")))
-        assertFalse(isKdeDesktop(emptyMap()))
-    }
-
-    @Test
-    fun sendsKdePositionSignalAtMostOncePerSecondOfProgress() {
-        assertTrue(
-            kdePositionSignalDue(
-                enabled = true,
-                status = PlaybackSessionStatus.Playing,
-                positionUs = 0L,
-                lastPublishedPositionUs = null,
-            ),
-        )
-        assertFalse(
-            kdePositionSignalDue(
-                enabled = true,
-                status = PlaybackSessionStatus.Playing,
-                positionUs = 999_000L,
-                lastPublishedPositionUs = 0L,
-            ),
-        )
-        assertTrue(
-            kdePositionSignalDue(
-                enabled = true,
-                status = PlaybackSessionStatus.Playing,
-                positionUs = 1_000_000L,
-                lastPublishedPositionUs = 0L,
-            ),
-        )
-        assertFalse(
-            kdePositionSignalDue(
-                enabled = true,
-                status = PlaybackSessionStatus.Paused,
-                positionUs = 2_000_000L,
-                lastPublishedPositionUs = 0L,
-            ),
-        )
-        assertFalse(
-            kdePositionSignalDue(
-                enabled = false,
-                status = PlaybackSessionStatus.Playing,
-                positionUs = 2_000_000L,
-                lastPublishedPositionUs = 0L,
-            ),
-        )
-    }
-
-    @Test
     fun ignoresPlaybackModeWritesWhenQueuePolicyLocksThem() {
         val session = FakePlaybackSession(
             PlaybackSessionState(

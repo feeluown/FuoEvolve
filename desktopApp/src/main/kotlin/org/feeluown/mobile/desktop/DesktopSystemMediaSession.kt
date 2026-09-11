@@ -2,7 +2,6 @@ package org.feeluown.mobile.desktop
 
 import java.security.MessageDigest
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,8 +44,6 @@ private class LinuxMprisSession(
         .withShared(false)
         .build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val kdePositionWorkaroundEnabled = isKdeDesktop(System.getenv())
-    private val lastKdePositionSignalUs = AtomicLong(NO_POSITION_SIGNAL_US)
     @Volatile
     private var expectedExplicitSeekPositionUs: Long? = null
     private val exportedObject = LinuxMprisObject(
@@ -59,33 +56,15 @@ private class LinuxMprisSession(
     init {
         connection.requestBusName(MPRIS_BUS_NAME)
         connection.exportObject(exportedObject)
-        AppLogger.i(
-            MPRIS_LOG_TAG,
-            "MPRIS KDE position workaround enabled=$kdePositionWorkaroundEnabled",
-        )
         scope.launch {
             var previous = playbackSession.state.value
             playbackSession.state.collect { current ->
                 val changed = mprisChangedProperties(previous, current)
-                val sameTrack = previous.currentTrack?.id == current.currentTrack?.id
                 val currentPositionUs = current.positionMs * MICROSECONDS_PER_MILLISECOND
-                if (current.status != PlaybackSessionStatus.Playing || !sameTrack) {
-                    lastKdePositionSignalUs.set(NO_POSITION_SIGNAL_US)
-                }
                 val explicitSeekObserved = expectedExplicitSeekPositionUs == currentPositionUs
                 if (explicitSeekObserved) expectedExplicitSeekPositionUs = null
                 if (!explicitSeekObserved) {
                     mprisSeekedPositionUs(previous, current)?.let(::publishSeeked)
-                }
-                if (kdePositionSignalDue(
-                        enabled = kdePositionWorkaroundEnabled,
-                        status = current.status,
-                        positionUs = currentPositionUs,
-                        lastPublishedPositionUs = lastKdePositionSignalUs.get()
-                            .takeUnless { it == NO_POSITION_SIGNAL_US },
-                    )
-                ) {
-                    publishSeeked(currentPositionUs)
                 }
                 if (changed.isNotEmpty()) {
                     runCatching {
@@ -105,7 +84,6 @@ private class LinuxMprisSession(
     }
 
     private fun publishSeeked(positionUs: Long) {
-        if (kdePositionWorkaroundEnabled) lastKdePositionSignalUs.set(positionUs)
         runCatching {
             connection.sendMessage(MprisPlayer.Seeked(MPRIS_OBJECT_PATH, positionUs))
         }
@@ -423,30 +401,6 @@ internal fun mprisSeekedPositionUs(
     return current.positionMs * MICROSECONDS_PER_MILLISECOND
 }
 
-internal fun isKdeDesktop(environment: Map<String, String>): Boolean {
-    val desktopEnvironment = listOf(
-        environment["XDG_CURRENT_DESKTOP"],
-        environment["XDG_SESSION_DESKTOP"],
-        environment["DESKTOP_SESSION"],
-    ).filterNotNull().joinToString(":")
-    return desktopEnvironment.split(':', ';', ',', ' ', '\t').any { marker ->
-        marker.equals("kde", ignoreCase = true) || marker.equals("plasma", ignoreCase = true)
-    } || environment["KDE_FULL_SESSION"].isTruthyEnvironmentFlag() ||
-        !environment["KDE_SESSION_VERSION"].isNullOrBlank()
-}
-
-internal fun kdePositionSignalDue(
-    enabled: Boolean,
-    status: PlaybackSessionStatus,
-    positionUs: Long,
-    lastPublishedPositionUs: Long?,
-): Boolean = enabled &&
-    status == PlaybackSessionStatus.Playing &&
-    (lastPublishedPositionUs == null || positionUs - lastPublishedPositionUs >= KDE_POSITION_SIGNAL_INTERVAL_US)
-
-private fun String?.isTruthyEnvironmentFlag(): Boolean =
-    this.equals("true", ignoreCase = true) || this == "1" || this.equals("yes", ignoreCase = true)
-
 private fun mprisCanGoNext(state: PlaybackSessionState): Boolean = state.canGoNext
 private fun mprisCanGoPrevious(state: PlaybackSessionState): Boolean = state.canGoPrevious
 private fun mprisCanPlay(state: PlaybackSessionState): Boolean = state.currentTrack != null || state.queueTrackIds.isNotEmpty()
@@ -459,11 +413,8 @@ private fun mprisCanSeek(state: PlaybackSessionState): Boolean =
         (state.status == PlaybackSessionStatus.Playing || state.status == PlaybackSessionStatus.Paused)
 
 private const val MPRIS_BUS_NAME = "org.mpris.MediaPlayer2.FuoEvolve"
-private const val MPRIS_LOG_TAG = "SystemMediaSession"
 private const val MPRIS_OBJECT_PATH = "/org/mpris/MediaPlayer2"
 private const val MPRIS_ROOT_INTERFACE = "org.mpris.MediaPlayer2"
 private const val MPRIS_PLAYER_INTERFACE = "org.mpris.MediaPlayer2.Player"
 private const val MICROSECONDS_PER_MILLISECOND = 1_000L
 private const val POSITION_JUMP_LOG_THRESHOLD_MS = 1_000L
-private const val KDE_POSITION_SIGNAL_INTERVAL_US = 1_000_000L
-private const val NO_POSITION_SIGNAL_US = Long.MIN_VALUE
