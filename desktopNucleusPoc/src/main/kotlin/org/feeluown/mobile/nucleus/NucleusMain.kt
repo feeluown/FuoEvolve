@@ -154,7 +154,9 @@ fun main(args: Array<String>) {
             DisposableEffect(oauthDeviceCodeAssistant, clipboardManager) {
                 val clipboardWriter: (String) -> Unit = { value ->
                     uiScope.launch {
-                        clipboardManager.setText(AnnotatedString(value))
+                        runCatching {
+                            clipboardManager.setText(AnnotatedString(value))
+                        }
                     }
                 }
                 oauthDeviceCodeAssistant.bindClipboardWriter(clipboardWriter)
