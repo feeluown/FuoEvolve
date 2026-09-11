@@ -61,14 +61,3 @@ include(":shared")
 include(":androidApp")
 include(":desktopRuntime")
 include(":desktopApp")
-
-// Keep the experimental Nucleus/Tao desktop chain completely outside the normal project graph.
-// This guarantees the existing JVM desktop build/package tasks and CI do not resolve or apply
-// Nucleus unless a developer explicitly opts into the PoC.
-val enableNucleusDesktopPoc = providers.gradleProperty("enableNucleusDesktopPoc")
-    .orNull
-    ?.toBooleanStrictOrNull()
-    ?: false
-if (enableNucleusDesktopPoc) {
-    include(":desktopNucleusPoc")
-}
