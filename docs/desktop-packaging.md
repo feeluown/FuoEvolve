@@ -41,6 +41,8 @@ Immutable Windows libmpv inputs remain recorded in `desktopApp/packaging/native-
 
 `.github/workflows/desktop-tests.yml` is the only reusable desktop test workflow. It runs shared desktop tests plus `desktopRuntime` and Nucleus tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages Nucleus resources. It does not compile or test `desktopApp`.
 
+Pull requests use that runtime-level validation only. They do not invoke GraalVM Native Image packaging and do not build MSI, DMG, AppImage, or Pacman artifacts.
+
 `.github/workflows/desktop-packaging.yml` is the only reusable desktop packaging/upload workflow. It builds:
 
 1. Windows x64 MSI.
@@ -54,7 +56,7 @@ The earlier standalone Linux Nucleus PoC workflow and temporary DEB artifact are
 
 ## Signing and release
 
-Canary and PR validation artifacts are unsigned. Production release publication should add the platform signing layer without falling back to JVM packaging:
+Canary desktop artifacts are unsigned. Pull requests do not produce desktop installers. Production release publication should add the platform signing layer without falling back to JVM packaging:
 
 - Windows Authenticode signing for the Native Image executable, JNI/native DLLs and MSI.
 - macOS Developer ID signing, hardened runtime, notarization and stapling for both architectures.
