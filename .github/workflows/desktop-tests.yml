@@ -57,18 +57,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            libfuse2t64 \
             libasound2-dev \
             libmpv-dev \
             libpipewire-0.3-dev \
             libpulse-dev \
             libsecret-1-dev \
-            libwebkit2gtk-4.1-dev
+            libwebkit2gtk-4.1-dev \
+            glib-networking \
+            patchelf \
+            pax-utils
 
       - name: Test shared desktop and Nucleus runtime
         run: |
           ./gradlew \
             --no-configuration-cache \
             --warning-mode all \
+            -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
             ciDesktopTest \
             :desktopApp:test \
             :desktopApp:compileKotlin \
