@@ -125,13 +125,6 @@ runs:
           channel=canary
           version_label="${package_version}-canary+${commit_sha:0:8}"
         fi
-        mkdir -p desktopApp/src/main/resources
-        cat > desktopApp/src/main/resources/fuoevolve-desktop-version.properties <<EOF
-        versionLabel=$version_label
-        packageVersion=$package_version
-        channel=$channel
-        commitSha=$commit_sha
-        EOF
         {
           echo "FUOEVOLVE_PACKAGE_VERSION=$package_version"
           echo "FUOEVOLVE_DESKTOP_CHANNEL=$channel"
