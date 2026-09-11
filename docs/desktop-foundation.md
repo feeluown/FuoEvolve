@@ -47,7 +47,7 @@ Desktop packages are produced only from `desktopApp`:
 - Linux x64 AppImage.
 - Linux x64 Arch/Pacman package.
 
-The AppImage is built against the pinned Ubuntu 24.04 LTS baseline and bundles its portable user-space native closure. The Arch package intentionally relies on distribution-managed native dependencies.
+The AppImage is built against the pinned Ubuntu 26.04 LTS baseline and bundles its portable user-space native closure. The Arch package intentionally relies on distribution-managed native dependencies.
 
 No desktop package contains a bundled JVM.
 
