@@ -20,5 +20,8 @@ fun createPersistentDesktopPlaybackEngine(
 fun createDesktopRuntimeListeningHistorySink(databasePath: Path): ListeningHistorySink =
     SqlDelightListeningHistoryStore(DesktopListeningHistoryDriverFactory(databasePath))
 
-fun createDesktopNativeTextFileDialogProvider(): DesktopTextFileDialogProvider =
-    FileKitDesktopTextFileDialogProvider()
+fun createDesktopNativeTextFileDialogProvider(
+    requireNativeLinuxPortal: Boolean = false,
+): DesktopTextFileDialogProvider = FileKitDesktopTextFileDialogProvider(
+    requireNativeLinuxPortal = requireNativeLinuxPortal,
+)
