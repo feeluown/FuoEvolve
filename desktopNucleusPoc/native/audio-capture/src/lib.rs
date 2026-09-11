@@ -329,6 +329,34 @@ fn open_device_config(
 fn select_capture_device() -> Result<(cpal::Device, SupportedStreamConfig), String> {
     let mut attempts = Vec::new();
 
+    // Prefer the PulseAudio compatibility monitor on Linux. It exposes the actual sink monitor
+    // reliably on PipeWire systems; keep the native PipeWire path as a fallback.
+    match cpal::host_from_id(cpal::HostId::PulseAudio) {
+        Ok(host) => match host.input_devices() {
+            Ok(devices) => {
+                for device in devices.take(MAX_PULSE_DEVICES) {
+                    let display_name = device.to_string();
+                    let device_id = device.id().map(|id| id.to_string()).unwrap_or_default();
+                    if !display_name.ends_with(".monitor") && !device_id.ends_with(".monitor") {
+                        continue;
+                    }
+                    match open_device_config(device, "PulseAudio 输出监视器") {
+                        Ok(result) => return Ok(result),
+                        Err(error) => add_attempt(&mut attempts, error),
+                    }
+                }
+            }
+            Err(error) => add_attempt(
+                &mut attempts,
+                format!("PulseAudio 输入设备不可用：{}", bounded_message(error)),
+            ),
+        },
+        Err(error) => add_attempt(
+            &mut attempts,
+            format!("PulseAudio 不可用：{}", bounded_message(error)),
+        ),
+    }
+
     match cpal::host_from_id(cpal::HostId::PipeWire) {
         Ok(host) => match host.devices() {
             Ok(devices) => {
@@ -367,32 +395,6 @@ fn select_capture_device() -> Result<(cpal::Device, SupportedStreamConfig), Stri
         Err(error) => add_attempt(
             &mut attempts,
             format!("PipeWire 不可用：{}", bounded_message(error)),
-        ),
-    }
-
-    match cpal::host_from_id(cpal::HostId::PulseAudio) {
-        Ok(host) => match host.input_devices() {
-            Ok(devices) => {
-                for device in devices.take(MAX_PULSE_DEVICES) {
-                    let display_name = device.to_string();
-                    let device_id = device.id().map(|id| id.to_string()).unwrap_or_default();
-                    if !display_name.ends_with(".monitor") && !device_id.ends_with(".monitor") {
-                        continue;
-                    }
-                    match open_device_config(device, "PulseAudio 输出监视器") {
-                        Ok(result) => return Ok(result),
-                        Err(error) => add_attempt(&mut attempts, error),
-                    }
-                }
-            }
-            Err(error) => add_attempt(
-                &mut attempts,
-                format!("PulseAudio 输入设备不可用：{}", bounded_message(error)),
-            ),
-        },
-        Err(error) => add_attempt(
-            &mut attempts,
-            format!("PulseAudio 不可用：{}", bounded_message(error)),
         ),
     }
 

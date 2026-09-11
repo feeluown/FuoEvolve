@@ -87,6 +87,9 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)
         }
+        desktopTest.dependencies {
+            implementation(compose.desktop.currentOs)
+        }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.media3.datasource)

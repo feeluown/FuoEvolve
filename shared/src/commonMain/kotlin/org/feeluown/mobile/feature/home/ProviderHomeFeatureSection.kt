@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,7 +43,7 @@ fun ProviderContentHomeFeatureSection(
     var initialLoadPending by remember(section) { mutableStateOf(sections.isEmpty()) }
     var initialLoadObserved by remember(section) { mutableStateOf(state.isLoading) }
     val isPullRefreshing = refreshRequested && state.isLoading
-    val showPageLoading = !refreshRequested && (state.isLoading || initialLoadPending)
+    val showPageLoading = initialLoadPending
 
     LaunchedEffect(state.isLoading, sections.isEmpty()) {
         if (sections.isNotEmpty()) {
@@ -56,19 +57,11 @@ fun ProviderContentHomeFeatureSection(
         }
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PullToRefreshBox(
-            isRefreshing = isPullRefreshing,
-            onRefresh = {
-                refreshRequested = true
-                home.refreshHome(section)
-            },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+    val pageContent: @Composable () -> Unit = {
+        PageLoadingContent(
+            loading = showPageLoading,
+            modifier = Modifier.fillMaxSize(),
         ) {
-            PageLoadingContent(
-                loading = showPageLoading,
-                modifier = Modifier.fillMaxSize(),
-            ) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -242,7 +235,25 @@ fun ProviderContentHomeFeatureSection(
                             ProviderLockedSummary(lockedProviders) { home.openSettings(it.providerId) }
                         }
                     }
-                }
+            }
+        }
+    }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (layoutInfo.useWideLayout) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                pageContent()
+            }
+        } else {
+            PullToRefreshBox(
+                isRefreshing = isPullRefreshing,
+                onRefresh = {
+                    refreshRequested = true
+                    home.refreshHome(section)
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) {
+                pageContent()
             }
         }
     }

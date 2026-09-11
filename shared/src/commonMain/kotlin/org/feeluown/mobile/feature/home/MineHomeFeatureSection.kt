@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,7 +61,7 @@ fun MineHomeSection(
     var initialLoadPending by rememberSaveable(state.mineSection) { mutableStateOf(!hasInitialContent) }
     var initialLoadStarted by rememberSaveable(state.mineSection) { mutableStateOf(isLoading) }
     val isPullRefreshing = refreshRequested && isLoading
-    val showPageLoading = !refreshRequested && (isLoading || initialLoadPending)
+    val showPageLoading = initialLoadPending
 
     LaunchedEffect(state.mineSection, isLoading, hasInitialContent, hasAudioPermission) {
         when {
@@ -84,14 +85,7 @@ fun MineHomeSection(
                 home = home,
                 includeSecondary = wide,
             )
-            PullToRefreshBox(
-                isRefreshing = isPullRefreshing,
-                onRefresh = {
-                    refreshRequested = true
-                    home.refreshMine()
-                },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
+            val sectionContent: @Composable () -> Unit = {
                 when (state.mineSection) {
                     MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
                     MineSection.Artists -> MineOwnerMediaItems(home, ProviderContentType.Artists, "歌手", Modifier.fillMaxSize())
@@ -104,6 +98,22 @@ fun MineHomeSection(
                         showModeFilter = !wide,
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
+            }
+            if (wide) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    sectionContent()
+                }
+            } else {
+                PullToRefreshBox(
+                    isRefreshing = isPullRefreshing,
+                    onRefresh = {
+                        refreshRequested = true
+                        home.refreshMine()
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    sectionContent()
                 }
             }
         }

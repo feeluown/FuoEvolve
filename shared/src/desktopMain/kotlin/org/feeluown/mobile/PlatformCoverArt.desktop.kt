@@ -33,9 +33,12 @@ import java.nio.file.Paths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Bitmap
-import org.jetbrains.skia.Codec
-import org.jetbrains.skia.Data
+import org.jetbrains.skia.Canvas
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Image as SkiaImage
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.SurfaceProps
 import org.jetbrains.skia.impl.use
 
 @Composable
@@ -118,25 +121,30 @@ private suspend fun loadDesktopCover(imageUrl: String, maxSizePx: Int): ImageBit
     decodeDesktopCover(bytes, maxSizePx)
 }
 
-private fun decodeDesktopCover(bytes: ByteArray, maxSizePx: Int): ImageBitmap? = runCatching {
+internal fun decodeDesktopCover(bytes: ByteArray, maxSizePx: Int): ImageBitmap? = runCatching {
     if (bytes.isEmpty()) return@runCatching null
-    Data.makeFromBytes(bytes).use { encodedData ->
-        Codec.makeFromData(encodedData).use { codec ->
-            val sourceInfo = codec.imageInfo
-            if (sourceInfo.width <= 0 || sourceInfo.height <= 0) return@use null
-            val scale = minOf(
-                1f,
-                maxSizePx.toFloat() / sourceInfo.width,
-                maxSizePx.toFloat() / sourceInfo.height,
+    SkiaImage.makeFromEncoded(bytes).use { image ->
+        val sourceInfo = image.imageInfo
+        if (sourceInfo.width <= 0 || sourceInfo.height <= 0) return@use null
+        val scale = minOf(
+            1f,
+            maxSizePx.toFloat() / sourceInfo.width,
+            maxSizePx.toFloat() / sourceInfo.height,
+        )
+        val targetWidth = (sourceInfo.width * scale).toInt().coerceAtLeast(1)
+        val targetHeight = (sourceInfo.height * scale).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap()
+        bitmap.use {
+            check(
+                it.allocPixels(
+                    ImageInfo.makeN32(targetWidth, targetHeight, ColorAlphaType.PREMUL),
+                ),
             )
-            val targetWidth = (sourceInfo.width * scale).toInt().coerceAtLeast(1)
-            val targetHeight = (sourceInfo.height * scale).toInt().coerceAtLeast(1)
-            val bitmap = Bitmap()
-            bitmap.use {
-                check(it.allocPixels(sourceInfo.withWidthHeight(targetWidth, targetHeight)))
-                codec.readPixels(it)
-                SkiaImage.makeFromBitmap(it).toComposeImageBitmap()
-            }
+            Canvas(it, SurfaceProps()).drawImageRect(
+                image,
+                Rect.makeWH(targetWidth.toFloat(), targetHeight.toFloat()),
+            )
+            SkiaImage.makeFromBitmap(it).toComposeImageBitmap()
         }
     }
 }.getOrNull()
