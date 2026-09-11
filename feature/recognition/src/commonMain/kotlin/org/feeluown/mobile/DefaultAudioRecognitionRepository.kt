@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Platform microphone boundary. Implementations emit normalized mono PCM chunks at 48 kHz. */
+/** Platform audio capture boundary. Implementations emit normalized mono PCM chunks at 48 kHz. */
 interface AudioRecognitionCaptureDevice {
     suspend fun capture(onSamples: (FloatArray) -> Unit)
     fun cancel()

@@ -194,8 +194,7 @@ internal fun AppNavHost(
                             graph = uiGraph.recognition,
                             onBack = appViewModel::closeRecognition,
                             onSearchSong = uiGraph.search.controller::searchRecognizedSong,
-                            hasMicrophonePermission = platform.hasMicrophonePermission,
-                            onRequestMicrophonePermission = platform.onRequestMicrophonePermission,
+                            audioRecognitionAccess = platform.audioRecognitionAccess,
                         )
                         AppRoute.Settings -> SettingsFeatureScreen(
                             settingsController = uiGraph.settings,

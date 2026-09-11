@@ -1,0 +1,12 @@
+[package]
+name = "fuoevolve-audio-capture"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cpal = { version = "=0.18.2", default-features = false, features = ["pipewire", "pulseaudio"] }
+jni = "=0.22.4"

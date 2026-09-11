@@ -4,8 +4,7 @@ package org.feeluown.mobile
 data class AppPlatformBindings(
     val hasAudioPermission: Boolean,
     val onRequestAudioPermission: () -> Unit,
-    val hasMicrophonePermission: Boolean,
-    val onRequestMicrophonePermission: () -> Unit,
+    val audioRecognitionAccess: AudioRecognitionAccess,
     val onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     val onLogoutProvider: (ProviderInfo) -> Unit,
     val onImportYtmusicHeaderFile: (() -> Unit)? = null,

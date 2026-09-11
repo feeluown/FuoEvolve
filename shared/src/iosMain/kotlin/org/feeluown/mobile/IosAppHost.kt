@@ -77,8 +77,11 @@ private fun IosApp(
         platform = AppPlatformBindings(
             hasAudioPermission = container.hasAudioPermission,
             onRequestAudioPermission = container::requestAudioPermission,
-            hasMicrophonePermission = container.hasMicrophonePermission,
-            onRequestMicrophonePermission = container::requestMicrophonePermission,
+            audioRecognitionAccess = AudioRecognitionAccess(
+                source = AudioRecognitionSource.Microphone,
+                isAvailable = container.hasMicrophonePermission,
+                requestAccess = container::requestMicrophonePermission,
+            ),
             onOpenProviderWebLogin = container::openProviderWebLogin,
             onLogoutProvider = container::logoutProvider,
             onImportYtmusicHeaderFile = {

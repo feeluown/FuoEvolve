@@ -28,12 +28,14 @@ fun createRecognitionFeatureController(
     scope: CoroutineScope,
     isPlaybackActive: () -> Boolean,
     pausePlayback: () -> Unit,
+    pausePlaybackBeforeCapture: Boolean = true,
     initialState: RecognitionUiState = RecognitionUiState.Idle,
 ): RecognitionFeatureController = AudioRecognitionController(
     repository = repository,
     scope = scope,
     isPlaybackActive = isPlaybackActive,
     pausePlayback = pausePlayback,
+    pausePlaybackBeforeCapture = pausePlaybackBeforeCapture,
     initialState = initialState,
 )
 
@@ -42,6 +44,7 @@ internal class AudioRecognitionController(
     private val scope: CoroutineScope,
     private val isPlaybackActive: () -> Boolean,
     private val pausePlayback: () -> Unit,
+    private val pausePlaybackBeforeCapture: Boolean,
     initialState: RecognitionUiState = RecognitionUiState.Idle,
 ) : RecognitionFeatureController {
     private val mutableUiState = MutableStateFlow(initialState)
@@ -67,7 +70,7 @@ internal class AudioRecognitionController(
 
     private fun start() {
         if (recognitionJob?.isActive == true) return
-        if (isPlaybackActive()) {
+        if (pausePlaybackBeforeCapture && isPlaybackActive()) {
             pausePlayback()
         }
         mutableUiState.value = RecognitionUiState.Capturing(

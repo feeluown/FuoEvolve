@@ -39,8 +39,10 @@ fun DesktopAppHost(
             platform = AppPlatformBindings(
                 hasAudioPermission = true,
                 onRequestAudioPermission = {},
-                hasMicrophonePermission = true,
-                onRequestMicrophonePermission = {},
+                audioRecognitionAccess = AudioRecognitionAccess(
+                    source = AudioRecognitionSource.SystemOutput,
+                    isAvailable = true,
+                ),
                 onOpenProviderWebLogin = container::openProviderWebLogin,
                 onLogoutProvider = container::logoutProvider,
                 onImportLocalPlaylistFile = container::importLocalPlaylistFile,
@@ -136,6 +138,7 @@ private class DesktopAppContainer {
             scope = scope,
             isPlaybackActive = { playbackEngine.state.value.status == PlayerStatus.Playing },
             pausePlayback = playbackEngine::pause,
+            pausePlaybackBeforeCapture = false,
         )
     }
 

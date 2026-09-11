@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <output-dir> <web-login-helper>" >&2
+if [[ $# -ne 3 ]]; then
+  echo "usage: $0 <output-dir> <web-login-helper> <audio-capture-library>" >&2
   exit 2
 fi
 
 OUTPUT_DIR="$(mkdir -p "$1" && realpath "$1")"
 WEB_LOGIN_HELPER="$(realpath "$2")"
+AUDIO_CAPTURE_LIBRARY="$(realpath "$3")"
 
 for command in lddtree patchelf ldconfig find; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -17,6 +18,10 @@ for command in lddtree patchelf ldconfig find; do
 done
 if [[ ! -x "$WEB_LOGIN_HELPER" ]]; then
   echo "WebView login helper is missing or not executable: $WEB_LOGIN_HELPER" >&2
+  exit 1
+fi
+if [[ ! -f "$AUDIO_CAPTURE_LIBRARY" ]]; then
+  echo "System audio capture library is missing: $AUDIO_CAPTURE_LIBRARY" >&2
   exit 1
 fi
 
@@ -88,7 +93,8 @@ WEBVIEW_ROOT="$OUTPUT_DIR/webview"
 WEBVIEW_LIB_DIR="$WEBVIEW_ROOT/lib"
 WEBKIT_RUNTIME_DIR="$WEBVIEW_ROOT/webkit2gtk-4.1"
 GIO_MODULE_DIR="$WEBVIEW_ROOT/gio/modules"
-mkdir -p "$MPV_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" "$WEBKIT_RUNTIME_DIR" "$GIO_MODULE_DIR"
+AUDIO_ROOT="$OUTPUT_DIR/audio"
+mkdir -p "$MPV_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" "$WEBKIT_RUNTIME_DIR" "$GIO_MODULE_DIR" "$AUDIO_ROOT"
 
 LIBMPV="$(find_shared_library 'libmpv[.]so' 'libmpv.so.*')"
 LIBSECRET="$(find_shared_library 'libsecret-1[.]so[.]0' 'libsecret-1.so.0*')"
@@ -105,11 +111,14 @@ copy_library_to "$LIBMPV" "$MPV_LIB_DIR"
 copy_elf_closure "$LIBMPV" "$MPV_LIB_DIR"
 copy_library_to "$LIBSECRET" "$LIBSECRET_LIB_DIR"
 copy_elf_closure "$LIBSECRET" "$LIBSECRET_LIB_DIR"
+copy_library_to "$AUDIO_CAPTURE_LIBRARY" "$AUDIO_ROOT"
+copy_elf_closure "$AUDIO_CAPTURE_LIBRARY" "$AUDIO_ROOT"
 
 BUNDLED_LIBMPV="$(find "$MPV_LIB_DIR" -maxdepth 1 -type f -name 'libmpv.so.*' -print -quit)"
 BUNDLED_LIBSECRET="$(find "$LIBSECRET_LIB_DIR" -maxdepth 1 -type f -name 'libsecret-1.so.0*' -print -quit)"
-if [[ -z "$BUNDLED_LIBMPV" || -z "$BUNDLED_LIBSECRET" ]]; then
-  echo "Portable runtime collection did not capture libmpv/libsecret" >&2
+BUNDLED_AUDIO_CAPTURE="$(find "$AUDIO_ROOT" -maxdepth 1 -type f -name 'libfuoevolve_audio_capture.so' -print -quit)"
+if [[ -z "$BUNDLED_LIBMPV" || -z "$BUNDLED_LIBSECRET" || -z "$BUNDLED_AUDIO_CAPTURE" ]]; then
+  echo "Portable runtime collection did not capture libmpv/libsecret/audio capture" >&2
   exit 1
 fi
 ln -sfn "$(basename "$BUNDLED_LIBMPV")" "$MPV_LIB_DIR/libmpv.so"
@@ -151,7 +160,7 @@ copy_elf_closure "$SYSTEM_GIO_TLS_MODULE" "$WEBVIEW_LIB_DIR"
 
 while IFS= read -r library; do
   patchelf --set-rpath '$ORIGIN' "$library" 2>/dev/null || true
-done < <(find "$MPV_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" -maxdepth 1 -type f -name '*.so*' -print)
+done < <(find "$MPV_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" "$AUDIO_ROOT" -maxdepth 1 -type f -name '*.so*' -print)
 while IFS= read -r executable; do
   patchelf --set-rpath '$ORIGIN/../lib:$ORIGIN/../../lib' "$executable" 2>/dev/null || true
 done < <(find "$WEBKIT_RUNTIME_DIR" -maxdepth 1 -type f -perm -u+x -print)
