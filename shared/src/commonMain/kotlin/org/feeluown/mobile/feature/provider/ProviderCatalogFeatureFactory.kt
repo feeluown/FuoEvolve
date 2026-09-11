@@ -56,8 +56,11 @@ fun createProviderCatalogFeatureController(
         scope = scope,
         defaultEnabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS,
         defaultProviderOrderIds = DEFAULT_PROVIDER_ORDER_IDS,
+        onConfigurationChanged = { section ->
+            onHomeRefreshNeeded(section?.toApp())
+        },
     )
-    return BoundProviderCatalogFeatureController(owner, scope, onHomeRefreshNeeded)
+    return BoundProviderCatalogFeatureController(owner, scope)
 }
 
 private class BoundProviderCatalogFeatureController(
@@ -68,7 +71,6 @@ private class BoundProviderCatalogFeatureController(
         ProviderSessionState,
     >,
     scope: CoroutineScope,
-    private val onHomeRefreshNeeded: (ProviderDisplaySection?) -> Unit,
 ) : ProviderCatalogFeatureController {
     override val uiState: StateFlow<ProviderCatalogUiState> = owner.state
         .map { state -> state.toUiState() }
@@ -79,25 +81,10 @@ private class BoundProviderCatalogFeatureController(
         )
 
     override fun refresh() = owner.refresh()
-    override fun setProviderEnabled(providerId: String, enabled: Boolean) {
-        onHomeRefreshNeeded(null)
-        owner.setProviderEnabled(providerId, enabled)
-    }
-
-    override fun moveProvider(providerId: String, offset: Int) {
-        onHomeRefreshNeeded(null)
-        owner.moveProvider(providerId, offset)
-    }
-
-    override fun setDisplayProviderEnabled(section: ProviderDisplaySection, providerId: String, enabled: Boolean) {
-        if (section == ProviderDisplaySection.Recommend ||
-            section == ProviderDisplaySection.Explore ||
-            section == ProviderDisplaySection.Mine
-        ) {
-            onHomeRefreshNeeded(section)
-        }
+    override fun setProviderEnabled(providerId: String, enabled: Boolean) = owner.setProviderEnabled(providerId, enabled)
+    override fun moveProvider(providerId: String, offset: Int) = owner.moveProvider(providerId, offset)
+    override fun setDisplayProviderEnabled(section: ProviderDisplaySection, providerId: String, enabled: Boolean) =
         owner.setDisplayProviderEnabled(section.toCore(), providerId, enabled)
-    }
 }
 
 private class ProviderCatalogRepositoryBinding(
@@ -125,9 +112,11 @@ private class ProviderCatalogPreferencesBinding(
 
     override suspend fun awaitPreferences(): ProviderCatalogPreferences = delegate.awaitSettings().toProviderCatalogPreferences()
 
-    override suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences) {
+    override suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences): ProviderCatalogPreferences {
+        var updatedPreferences: ProviderCatalogPreferences? = null
         delegate.update { current ->
             val next = transform(current.toProviderCatalogPreferences())
+            updatedPreferences = next
             current.copy(
                 enabledProviderIds = next.enabledProviderIds,
                 providerOrderIds = next.providerOrderIds,
@@ -138,6 +127,7 @@ private class ProviderCatalogPreferencesBinding(
                 smartReplacementProviderIds = next.replacementProviderIds,
             )
         }
+        return requireNotNull(updatedPreferences)
     }
 }
 
@@ -190,6 +180,14 @@ private fun ProviderDisplaySection.toCore(): CoreProviderCatalogDisplaySection =
     ProviderDisplaySection.Explore -> CoreProviderCatalogDisplaySection.Explore
     ProviderDisplaySection.Mine -> CoreProviderCatalogDisplaySection.Mine
     ProviderDisplaySection.Replace -> CoreProviderCatalogDisplaySection.Replace
+}
+
+private fun CoreProviderCatalogDisplaySection.toApp(): ProviderDisplaySection = when (this) {
+    CoreProviderCatalogDisplaySection.Search -> ProviderDisplaySection.Search
+    CoreProviderCatalogDisplaySection.Recommend -> ProviderDisplaySection.Recommend
+    CoreProviderCatalogDisplaySection.Explore -> ProviderDisplaySection.Explore
+    CoreProviderCatalogDisplaySection.Mine -> ProviderDisplaySection.Mine
+    CoreProviderCatalogDisplaySection.Replace -> ProviderDisplaySection.Replace
 }
 
 internal fun normalizedEnabledProviderIds(

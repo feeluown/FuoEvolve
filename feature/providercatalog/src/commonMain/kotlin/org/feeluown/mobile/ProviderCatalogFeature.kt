@@ -64,7 +64,7 @@ interface ProviderCatalogRepositoryPort<Provider, Feature, Capability> {
 interface ProviderCatalogPreferencesPort {
     val state: StateFlow<ProviderCatalogPreferencesState>
     suspend fun awaitPreferences(): ProviderCatalogPreferences
-    suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences)
+    suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences): ProviderCatalogPreferences
 }
 
 interface ProviderCatalogSessionPort<Provider, Session> {
@@ -88,6 +88,7 @@ fun <Provider, Feature, Capability, Session> createProviderCatalogFeatureOwner(
     scope: CoroutineScope,
     defaultEnabledProviderIds: Set<String> = emptySet(),
     defaultProviderOrderIds: List<String> = emptyList(),
+    onConfigurationChanged: (ProviderCatalogDisplaySection?) -> Unit = {},
 ): ProviderCatalogFeatureOwner<Provider, Feature, Capability, Session> = DefaultProviderCatalogFeatureOwner(
     repository = repository,
     preferences = preferences,
@@ -95,6 +96,7 @@ fun <Provider, Feature, Capability, Session> createProviderCatalogFeatureOwner(
     scope = scope,
     defaultEnabledProviderIds = defaultEnabledProviderIds,
     defaultProviderOrderIds = defaultProviderOrderIds,
+    onConfigurationChanged = onConfigurationChanged,
 )
 
 private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, Session>(
@@ -104,6 +106,7 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
     private val scope: CoroutineScope,
     private val defaultEnabledProviderIds: Set<String>,
     private val defaultProviderOrderIds: List<String>,
+    private val onConfigurationChanged: (ProviderCatalogDisplaySection?) -> Unit,
 ) : ProviderCatalogFeatureOwner<Provider, Feature, Capability, Session> {
     private val mutableState = MutableStateFlow(
         ProviderCatalogFeatureState<Provider, Feature, Capability, Session>(sessions = sessions.state.value),
@@ -128,10 +131,14 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
     }
 
     override fun refresh() {
+        refreshCatalog()
+    }
+
+    private fun refreshCatalog(initialPreferences: ProviderCatalogPreferences? = null) {
         scope.launch {
             loading = true
             error = null
-            publish()
+            publish(initialPreferences)
             runCatching {
                 repository.initialize()
                 val settings = preferences.awaitPreferences()
@@ -162,7 +169,7 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
 
     override fun setProviderEnabled(providerId: String, enabled: Boolean) {
         scope.launch {
-            preferences.update { settings ->
+            val updatedPreferences = preferences.update { settings ->
                 val availableIds = catalogAvailable.map(repository::providerId)
                 val next = updatedEnabledProviderIds(
                     current = settings.enabledProviderIds,
@@ -173,13 +180,15 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
                 )
                 if (next == settings.enabledProviderIds) settings else settings.copy(enabledProviderIds = next)
             }
-            refresh()
+            publish(updatedPreferences)
+            onConfigurationChanged(null)
+            refreshCatalog(updatedPreferences)
         }
     }
 
     override fun moveProvider(providerId: String, offset: Int) {
         scope.launch {
-            preferences.update { settings ->
+            val updatedPreferences = preferences.update { settings ->
                 val available = catalogAvailable.map(repository::providerId)
                 val order = (settings.providerOrderIds + defaultProviderOrderIds + available).distinct().toMutableList()
                 val from = order.indexOf(providerId)
@@ -190,7 +199,8 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
                 order.add(to, providerId)
                 settings.copy(providerOrderIds = order)
             }
-            publish()
+            publish(updatedPreferences)
+            onConfigurationChanged(null)
         }
     }
 
@@ -200,7 +210,7 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
         enabled: Boolean,
     ) {
         scope.launch {
-            preferences.update { settings ->
+            val updatedPreferences = preferences.update { settings ->
                 fun next(current: Set<String>): Set<String> = if (enabled) current + providerId else current - providerId
                 when (section) {
                     ProviderCatalogDisplaySection.Search -> settings.copy(searchProviderIds = next(settings.searchProviderIds))
@@ -212,6 +222,8 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
                     )
                 }
             }
+            publish(updatedPreferences)
+            onConfigurationChanged(section)
         }
     }
 
@@ -221,9 +233,9 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
         }
     }
 
-    private fun publish() {
+    private fun publish(preferencesOverride: ProviderCatalogPreferences? = null) {
         val preferencesState = preferences.state.value
-        val settings = preferencesState.settings
+        val settings = preferencesOverride ?: preferencesState.settings
         val availableIds = catalogAvailable.map(repository::providerId)
         val enabled = normalizedEnabledProviderIds(
             configuredProviderIds = settings.enabledProviderIds,

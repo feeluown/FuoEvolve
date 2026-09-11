@@ -67,6 +67,34 @@ class ProviderCatalogFeatureTest {
     }
 
     @Test
+    fun configurationChangeCallbackRunsAfterCatalogStateIsPublished() = runTest {
+        val repository = FakeRepository()
+        val preferences = FakePreferences(ProviderCatalogPreferences())
+        val sessions = FakeSessions()
+        lateinit var owner: ProviderCatalogFeatureOwner<Provider, String, Capability, String>
+        var callbackSection: ProviderCatalogDisplaySection? = null
+        var callbackSelection: Set<String>? = null
+
+        owner = createProviderCatalogFeatureOwner(
+            repository = repository,
+            preferences = preferences,
+            sessions = sessions,
+            scope = backgroundScope,
+            onConfigurationChanged = { section ->
+                callbackSection = section
+                callbackSelection = owner.state.value.recommendProviderIds
+            },
+        )
+        runCurrent()
+
+        owner.setDisplayProviderEnabled(ProviderCatalogDisplaySection.Recommend, "qqmusic", enabled = true)
+        runCurrent()
+
+        assertEquals(ProviderCatalogDisplaySection.Recommend, callbackSection)
+        assertEquals(setOf("qqmusic"), callbackSelection)
+    }
+
+    @Test
     fun disablingFinalAvailableProviderIsRejected() {
         assertEquals(
             setOf("netease"),
@@ -116,8 +144,10 @@ class ProviderCatalogFeatureTest {
 
         override suspend fun awaitPreferences(): ProviderCatalogPreferences = mutableState.value.settings
 
-        override suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences) {
-            mutableState.value = mutableState.value.copy(settings = transform(mutableState.value.settings))
+        override suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences): ProviderCatalogPreferences {
+            val updated = transform(mutableState.value.settings)
+            mutableState.value = mutableState.value.copy(settings = updated)
+            return updated
         }
     }
 
