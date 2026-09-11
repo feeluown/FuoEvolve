@@ -135,7 +135,10 @@ fn run_login(request: LoginRequest) -> Result<(), Box<dyn Error>> {
     let webview = {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;
-        builder.build_gtk(window.gtk_window())?
+        let container = window.default_vbox().ok_or_else(|| {
+            io::Error::other("tao GTK window default container unavailable")
+        })?;
+        builder.build_gtk(container)?
     };
 
     #[cfg(not(target_os = "linux"))]
@@ -221,7 +224,10 @@ fn run_fingerprint(request: FingerprintRequest) -> Result<(), Box<dyn Error>> {
     let webview = {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;
-        builder.build_gtk(window.gtk_window())?
+        let container = window.default_vbox().ok_or_else(|| {
+            io::Error::other("tao GTK window default container unavailable")
+        })?;
+        builder.build_gtk(container)?
     };
 
     #[cfg(not(target_os = "linux"))]
