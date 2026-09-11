@@ -146,6 +146,16 @@ private class DesktopAppContainer {
             sessionRepository = providerSessionRepository,
             settingsRepository = settingsRepository,
             scope = scope,
+            onHomeRefreshNeeded = { section ->
+                when (section) {
+                    null -> homeRefreshPort.markAllStale()
+                    ProviderDisplaySection.Recommend -> homeRefreshPort.markHomeSectionStale(HomeSection.Recommend)
+                    ProviderDisplaySection.Explore -> homeRefreshPort.markHomeSectionStale(HomeSection.Music)
+                    ProviderDisplaySection.Mine -> homeRefreshPort.markHomeSectionStale(HomeSection.Mine)
+                    ProviderDisplaySection.Search,
+                    ProviderDisplaySection.Replace -> Unit
+                }
+            },
         )
     }
 
@@ -266,7 +276,7 @@ private class DesktopAppContainer {
                     ?.providerName
                     ?: providerId
             },
-            onSessionChanged = homeRefreshPort::refreshAll,
+            onSessionChanged = homeRefreshPort::markAllStale,
         )
     }
 
@@ -300,6 +310,7 @@ private class DesktopAppContainer {
             searchController = searchController,
             settingsRepository = settingsRepository,
             scope = scope,
+            onProviderConfigurationChanged = homeRefreshPort::markAllStale,
         )
     }
 

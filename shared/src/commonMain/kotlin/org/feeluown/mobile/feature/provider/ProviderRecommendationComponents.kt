@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.PlayArrow
@@ -26,40 +27,56 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun ProviderVideoList(videos: List<ProviderVideo>, onClick: (ProviderVideo) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        videos.forEach { video ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fuoInteractive()
-                    .clickable(role = Role.Button) { onClick(video) }
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlatformCoverArt(
-                    title = video.title,
-                    imageUrl = video.coverUrl,
-                    modifier = Modifier.size(48.dp),
-                    placeholder = CoverPlaceholder.Song,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        video.artists.ifBlank { video.providerName },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Icon(Icons.Filled.PlayArrow, contentDescription = "播放视频")
-            }
+        videos.forEach { video -> ProviderVideoRow(video, onClick) }
+    }
+}
+
+internal fun LazyListScope.addProviderVideoItems(
+    videos: List<ProviderVideo>,
+    keyPrefix: String,
+    onClick: (ProviderVideo) -> Unit,
+) {
+    videos.forEach { video ->
+        item("$keyPrefix:${video.providerId}:${video.id}") {
+            ProviderVideoRow(video, onClick)
         }
+    }
+}
+
+@Composable
+private fun ProviderVideoRow(video: ProviderVideo, onClick: (ProviderVideo) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fuoInteractive()
+            .clickable(role = Role.Button) { onClick(video) }
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlatformCoverArt(
+            title = video.title,
+            imageUrl = video.coverUrl,
+            modifier = Modifier.size(48.dp),
+            placeholder = CoverPlaceholder.Song,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                video.artists.ifBlank { video.providerName },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(Icons.Filled.PlayArrow, contentDescription = "播放视频")
     }
 }
 
@@ -145,6 +162,35 @@ fun ProviderFeatureCoverGrid(
                     )
                 }
                 repeat(columns - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+internal fun LazyListScope.addProviderFeatureCoverRows(
+    features: List<ProviderFeature>,
+    columns: Int,
+    spacing: Dp,
+    keyPrefix: String,
+    onClick: (ProviderFeature) -> Unit,
+) {
+    val normalizedColumns = columns.coerceAtLeast(1)
+    features.chunked(normalizedColumns).forEachIndexed { rowIndex, row ->
+        item("$keyPrefix:row:$rowIndex") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                row.forEach { feature ->
+                    ProviderFeatureCoverCard(
+                        feature = feature,
+                        onClick = { onClick(feature) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                repeat(normalizedColumns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }

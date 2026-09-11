@@ -161,6 +161,16 @@ internal class AndroidAppContainer(
             sessionRepository = providerSessionRepository,
             settingsRepository = settingsRepository,
             scope = appScope,
+            onHomeRefreshNeeded = { section ->
+                when (section) {
+                    null -> homeRefreshPort.markAllStale()
+                    ProviderDisplaySection.Recommend -> homeRefreshPort.markHomeSectionStale(HomeSection.Recommend)
+                    ProviderDisplaySection.Explore -> homeRefreshPort.markHomeSectionStale(HomeSection.Music)
+                    ProviderDisplaySection.Mine -> homeRefreshPort.markHomeSectionStale(HomeSection.Mine)
+                    ProviderDisplaySection.Search,
+                    ProviderDisplaySection.Replace -> Unit
+                }
+            },
         )
     }
 
@@ -279,7 +289,7 @@ internal class AndroidAppContainer(
                 providerCatalogFeatureController.uiState.value.availableProviders
                     .firstOrNull { it.providerId == providerId }?.providerName ?: providerId
             },
-            onSessionChanged = homeRefreshPort::refreshAll,
+            onSessionChanged = homeRefreshPort::markAllStale,
         )
     }
 
@@ -315,6 +325,7 @@ internal class AndroidAppContainer(
             searchController = searchController,
             settingsRepository = settingsRepository,
             scope = appScope,
+            onProviderConfigurationChanged = homeRefreshPort::markAllStale,
         )
     }
 

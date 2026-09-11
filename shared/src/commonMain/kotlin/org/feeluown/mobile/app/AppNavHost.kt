@@ -142,6 +142,11 @@ internal fun AppNavHost(
     LaunchedEffect(activeRoute, uiGraph.playback.queue) {
         uiGraph.playback.queue.setPlaybackContextHint(activeRoute?.toPlaybackContextSnapshot())
     }
+    LaunchedEffect(activeRoute) {
+        if (activeRoute == AppRoute.Home) {
+            uiGraph.home.home.refreshCurrentSectionIfNeeded()
+        }
+    }
 
     val entries = rememberDecoratedNavEntries(
         backStack = backStack,

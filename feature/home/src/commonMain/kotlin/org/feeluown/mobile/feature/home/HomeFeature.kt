@@ -141,6 +141,8 @@ interface HomeFeatureOwner<Provider, Feature, Content, Track, Playlist, Stats> {
     fun setHomeSection(section: HomeTopSection)
     fun setMineSection(section: HomeMineSection)
     fun setPlaylistFilter(filter: HomePlaylistFilter)
+    fun markRefreshNeeded(section: HomeTopSection)
+    fun refreshCurrentSectionIfNeeded()
     fun refreshHome(section: HomeTopSection)
     fun refreshMine()
     fun ensureInitialContent()
@@ -194,6 +196,7 @@ private class DefaultHomeFeatureOwner<Provider, Feature, Content, Track, Playlis
     private var minePlaylistRefreshSerial = 0L
     private var mineContentRefreshSerial = 0L
     private var initialRefreshStarted = false
+    private val refreshNeeded = mutableSetOf<HomeTopSection>()
 
     init {
         scope.launch {
@@ -218,8 +221,8 @@ private class DefaultHomeFeatureOwner<Provider, Feature, Content, Track, Playlis
         mutableState.value = state.value.copy(homeSection = section)
         scope.launch { preferences.setHomeSection(section) }
         when (section) {
-            HomeTopSection.Recommend -> if (state.value.recommendSections.isEmpty()) refreshHome(section)
-            HomeTopSection.Explore -> if (state.value.exploreSections.isEmpty()) refreshHome(section)
+            HomeTopSection.Recommend -> refreshHomeIfNeeded(section)
+            HomeTopSection.Explore -> refreshHomeIfNeeded(section)
             HomeTopSection.Mine -> refreshMineIfNeeded()
         }
     }
@@ -240,17 +243,39 @@ private class DefaultHomeFeatureOwner<Provider, Feature, Content, Track, Playlis
         }
     }
 
-    override fun ensureInitialContent() {
-        if (initialRefreshStarted) return
-        initialRefreshStarted = true
+    override fun markRefreshNeeded(section: HomeTopSection) {
+        refreshNeeded += section
+    }
+
+    override fun refreshCurrentSectionIfNeeded() {
+        if (!initialRefreshStarted) return
         when (state.value.homeSection) {
-            HomeTopSection.Recommend -> refreshHome(HomeTopSection.Recommend)
-            HomeTopSection.Explore -> refreshHome(HomeTopSection.Explore)
+            HomeTopSection.Recommend -> refreshHomeIfNeeded(HomeTopSection.Recommend)
+            HomeTopSection.Explore -> refreshHomeIfNeeded(HomeTopSection.Explore)
             HomeTopSection.Mine -> refreshMineIfNeeded()
         }
     }
 
+    override fun ensureInitialContent() {
+        if (initialRefreshStarted) return
+        initialRefreshStarted = true
+        when (state.value.homeSection) {
+            HomeTopSection.Recommend -> {
+                refreshNeeded.remove(HomeTopSection.Recommend)
+                refreshHome(HomeTopSection.Recommend)
+            }
+            HomeTopSection.Explore -> {
+                refreshNeeded.remove(HomeTopSection.Explore)
+                refreshHome(HomeTopSection.Explore)
+            }
+            HomeTopSection.Mine -> {
+                refreshMineIfNeeded()
+            }
+        }
+    }
+
     override fun refreshHome(section: HomeTopSection) {
+        refreshNeeded.remove(section)
         if (section == HomeTopSection.Mine) {
             refreshMine()
             return
@@ -303,6 +328,7 @@ private class DefaultHomeFeatureOwner<Provider, Feature, Content, Track, Playlis
     }
 
     override fun refreshMine() {
+        refreshNeeded.remove(HomeTopSection.Mine)
         when (state.value.mineSection) {
             HomeMineSection.Playlists -> refreshMinePlaylists()
             HomeMineSection.Artists, HomeMineSection.Albums -> refreshMineContent()
@@ -381,6 +407,10 @@ private class DefaultHomeFeatureOwner<Provider, Feature, Content, Track, Playlis
     }
 
     private fun refreshMineIfNeeded() {
+        if (refreshNeeded.remove(HomeTopSection.Mine)) {
+            refreshMine()
+            return
+        }
         when (state.value.mineSection) {
             HomeMineSection.Playlists -> if (
                 state.value.minePlaylistSections.isEmpty() && state.value.mineFavoritePlaylistSections.isEmpty()
@@ -392,6 +422,19 @@ private class DefaultHomeFeatureOwner<Provider, Feature, Content, Track, Playlis
             }
             HomeMineSection.LocalMusic -> localLibrary.ensureLocalMusic()
         }
+    }
+
+    private fun refreshHomeIfNeeded(section: HomeTopSection) {
+        if (refreshNeeded.remove(section)) {
+            refreshHome(section)
+            return
+        }
+        val hasContent = when (section) {
+            HomeTopSection.Recommend -> state.value.recommendSections.isNotEmpty()
+            HomeTopSection.Explore -> state.value.exploreSections.isNotEmpty()
+            HomeTopSection.Mine -> error("mine is loaded separately")
+        }
+        if (!hasContent) refreshHome(section)
     }
 
     private fun refreshMinePlaylists() {

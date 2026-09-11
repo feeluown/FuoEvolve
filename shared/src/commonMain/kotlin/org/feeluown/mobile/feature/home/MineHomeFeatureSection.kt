@@ -165,6 +165,9 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     val state by home.uiState.collectAsStateWithLifecycle()
     val local by graph.localPlaylist.uiState.collectAsStateWithLifecycle()
     val catalog by graph.providerCatalog.uiState.collectAsStateWithLifecycle()
+    val layoutInfo = LocalAppLayoutInfo.current
+    val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
+    val gridSpacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
     val fileActions = LocalLocalPlaylistFileActions.current
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     var initialPlaylistLoadPending by rememberSaveable {
@@ -233,15 +236,18 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (state.playlistFilter == PlaylistFilter.UserPlaylists) {
-                item("mine-frequent") {
-                    if (frequent.isNotEmpty()) {
+                if (frequent.isNotEmpty()) {
+                    item("mine-frequent") {
                         Text("我的常听", style = MaterialTheme.typography.titleMedium)
-                        ProviderPlaylistGrid(
-                            frequent,
-                            { home.openPlaylist(it, home.categoryForMinePlaylist(it)) },
-                            maxRows = 2,
-                        )
                     }
+                    addProviderPlaylistGridRows(
+                        playlists = frequent,
+                        columns = gridColumns,
+                        spacing = gridSpacing,
+                        keyPrefix = "mine-frequent-grid",
+                        onClick = { home.openPlaylist(it, home.categoryForMinePlaylist(it)) },
+                        maxRows = 2,
+                    )
                 }
             }
             if (state.playlistFilter == PlaylistFilter.Local) {
@@ -255,14 +261,15 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
                     }
                 }
                 if (local.playlists.isEmpty()) item("local-empty") { ProviderContentMessage("暂无本地歌单，可新建或导入 .fuo 文件") }
-                else item("local-grid") {
-                    ProviderPlaylistGrid(
-                        playlists = local.playlists.map { p ->
-                            ProviderPlaylist(p.id, p.title, "local", "本地 · ${p.tracks.size} 首", description = p.description, trackCount = p.tracks.size)
-                        },
-                        onClick = { card -> local.playlists.firstOrNull { it.id == card.id }?.let(graph.localPlaylist::open) },
-                    )
-                }
+                else addProviderPlaylistGridRows(
+                    playlists = local.playlists.map { p ->
+                        ProviderPlaylist(p.id, p.title, "local", "本地 · ${p.tracks.size} 首", description = p.description, trackCount = p.tracks.size)
+                    },
+                    columns = gridColumns,
+                    spacing = gridSpacing,
+                    keyPrefix = "local-grid",
+                    onClick = { card -> local.playlists.firstOrNull { it.id == card.id }?.let(graph.localPlaylist::open) },
+                )
             }
             visible.forEach { section ->
                 item("head:${section.feature.id}") {
@@ -275,17 +282,24 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
                 }
                 val errorMessage = section.errorMessage
                 if (errorMessage != null) item("err:${section.feature.id}") { ProviderContentMessage(errorMessage) }
-                else if (section.playlists.isNotEmpty()) item("grid:${section.feature.id}") {
-                    ProviderPlaylistGrid(
-                        mineSortPlaylists(section.playlists, playlistHistoryStats),
-                        { home.openPlaylist(it, section.feature.category) },
-                    )
-                }
+                else if (section.playlists.isNotEmpty()) addProviderPlaylistGridRows(
+                    playlists = mineSortPlaylists(section.playlists, playlistHistoryStats),
+                    columns = gridColumns,
+                    spacing = gridSpacing,
+                    keyPrefix = "grid:${section.feature.id}",
+                    onClick = { home.openPlaylist(it, section.feature.category) },
+                )
             }
             if (locked.isNotEmpty()) item("mine-locked") { ProviderLockedSummary(locked) { home.openSettings(it.providerId) } }
             if (state.playlistFilter == PlaylistFilter.UserPlaylists && songEntries.isNotEmpty()) {
                 item("mine-songs-head") { Text("我的歌曲", style = MaterialTheme.typography.titleMedium) }
-                item("mine-songs") { ProviderFeatureCoverGrid(songEntries, home::openFeature) }
+                addProviderFeatureCoverRows(
+                    features = songEntries,
+                    columns = gridColumns,
+                    spacing = gridSpacing,
+                    keyPrefix = "mine-songs",
+                    onClick = home::openFeature,
+                )
             }
         }
     }
@@ -340,6 +354,9 @@ private fun PlaylistNameDialog(
 @Composable
 private fun MineOwnerMediaItems(home: HomeFeatureController, type: ProviderContentType, title: String, modifier: Modifier) {
     val state by home.uiState.collectAsStateWithLifecycle()
+    val layoutInfo = LocalAppLayoutInfo.current
+    val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
+    val gridSpacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
     val sections = state.mineSections.filter { it.feature.contentType == type }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (sections.isEmpty()) item { EmptyProviderContentHint(title) }
@@ -347,9 +364,13 @@ private fun MineOwnerMediaItems(home: HomeFeatureController, type: ProviderConte
             item("head:${section.feature.id}") { ProviderFeatureHeader(section.feature) }
             val errorMessage = section.errorMessage
             if (errorMessage != null) item("err:${section.feature.id}") { ProviderContentMessage(errorMessage) }
-            else if (section.mediaItems.isNotEmpty()) item("items:${section.feature.id}") {
-                ProviderMediaItemGrid(section.mediaItems, home::openMediaItem)
-            }
+            else if (section.mediaItems.isNotEmpty()) addProviderMediaItemGridRows(
+                items = section.mediaItems,
+                columns = gridColumns,
+                spacing = gridSpacing,
+                keyPrefix = "items:${section.feature.id}",
+                onClick = home::openMediaItem,
+            )
         }
         val locked = sections.filter { it.isLoginRequired }.map { it.feature }.distinctBy { it.providerId }
         if (locked.isNotEmpty()) item("locked:$title") { ProviderLockedSummary(locked) { home.openSettings(it.providerId) } }

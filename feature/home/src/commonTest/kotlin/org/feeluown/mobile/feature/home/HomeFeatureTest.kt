@@ -73,6 +73,32 @@ class HomeFeatureTest {
     }
 
     @Test
+    fun markedRefreshWaitsUntilCurrentSectionIsEntered() = runTest {
+        val feature = FakeFeature("recommend", "p1", HomeFeatureKind.Recommend)
+        val preferences = FakePreferences(loaded = true)
+        val catalog = FakeCatalog(
+            readyCatalog(
+                providers = listOf(FakeProvider("p1")),
+                features = listOf(feature),
+            ),
+        )
+        val content = FakeContentPort().apply {
+            pages[feature.id to 0] = FakeContent(feature, tracks = listOf(FakeTrack("1")))
+        }
+        val owner = owner(backgroundScope, preferences, catalog, content)
+        runCurrent()
+
+        content.loads.clear()
+        owner.markRefreshNeeded(HomeTopSection.Recommend)
+        runCurrent()
+        assertTrue(content.loads.isEmpty())
+
+        owner.refreshCurrentSectionIfNeeded()
+        runCurrent()
+        assertEquals(listOf("recommend" to 0), content.loads)
+    }
+
+    @Test
     fun mineLocalMusicUsesNarrowEnsurePortOnInitialLoad() = runTest {
         val preferences = FakePreferences(
             loaded = true,

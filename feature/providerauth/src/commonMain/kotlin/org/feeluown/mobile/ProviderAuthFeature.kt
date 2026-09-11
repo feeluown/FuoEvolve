@@ -444,9 +444,13 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
 
     override fun refreshAll(providers: List<Provider>, refreshUserInfo: Boolean) {
         scope.launch {
+            var sessionChanged = false
             providers.forEach { provider ->
-                runCatching { sessionPort.refresh(providerId(provider), refreshUserInfo) }.onFailure(::failure)
+                runCatching { sessionPort.refresh(providerId(provider), refreshUserInfo) }
+                    .onSuccess { sessionChanged = true }
+                    .onFailure(::failure)
             }
+            if (sessionChanged) onSessionChanged()
         }
     }
 

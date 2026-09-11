@@ -25,6 +25,7 @@ fun createSharedResourceActionPort(
     searchController: SearchFeatureController,
     settingsRepository: AppSettingsRepository,
     scope: CoroutineScope,
+    onProviderConfigurationChanged: () -> Unit = {},
 ): SharedResourceActionPort = DefaultSharedResourceActionController(
     providerRegistry = providerRegistry,
     providerCatalog = providerCatalog,
@@ -32,6 +33,7 @@ fun createSharedResourceActionPort(
     searchController = searchController,
     settingsRepository = settingsRepository,
     scope = scope,
+    onProviderConfigurationChanged = onProviderConfigurationChanged,
 )
 
 private class DefaultSharedResourceActionController(
@@ -41,6 +43,7 @@ private class DefaultSharedResourceActionController(
     private val searchController: SearchFeatureController,
     private val settingsRepository: AppSettingsRepository,
     private val scope: CoroutineScope,
+    private val onProviderConfigurationChanged: () -> Unit,
 ) : SharedResourceActionPort {
     private val mutableFeedback = MutableStateFlow<String?>(null)
     override val feedback: StateFlow<String?> = mutableFeedback.asStateFlow()
@@ -87,6 +90,7 @@ private class DefaultSharedResourceActionController(
         val enabled = settings.enabledProviderIds + providerId
         providerRegistry.updateEnabledProviders(enabled)
         settingsRepository.update { current -> current.copy(enabledProviderIds = enabled) }
+        onProviderConfigurationChanged()
         providerCatalog.refresh()
     }
 

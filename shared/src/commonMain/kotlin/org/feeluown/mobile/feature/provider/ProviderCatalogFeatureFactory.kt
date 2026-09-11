@@ -47,6 +47,7 @@ fun createProviderCatalogFeatureController(
     sessionRepository: ProviderSessionRepository,
     settingsRepository: AppSettingsRepository,
     scope: CoroutineScope,
+    onHomeRefreshNeeded: (ProviderDisplaySection?) -> Unit = {},
 ): ProviderCatalogFeatureController {
     val owner = createProviderCatalogFeatureOwner(
         repository = ProviderCatalogRepositoryBinding(providerRegistry, providerCatalog),
@@ -55,6 +56,9 @@ fun createProviderCatalogFeatureController(
         scope = scope,
         defaultEnabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS,
         defaultProviderOrderIds = DEFAULT_PROVIDER_ORDER_IDS,
+        onConfigurationChanged = { section ->
+            onHomeRefreshNeeded(section?.toApp())
+        },
     )
     return BoundProviderCatalogFeatureController(owner, scope)
 }
@@ -108,9 +112,11 @@ private class ProviderCatalogPreferencesBinding(
 
     override suspend fun awaitPreferences(): ProviderCatalogPreferences = delegate.awaitSettings().toProviderCatalogPreferences()
 
-    override suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences) {
+    override suspend fun update(transform: (ProviderCatalogPreferences) -> ProviderCatalogPreferences): ProviderCatalogPreferences {
+        var updatedPreferences: ProviderCatalogPreferences? = null
         delegate.update { current ->
             val next = transform(current.toProviderCatalogPreferences())
+            updatedPreferences = next
             current.copy(
                 enabledProviderIds = next.enabledProviderIds,
                 providerOrderIds = next.providerOrderIds,
@@ -121,6 +127,7 @@ private class ProviderCatalogPreferencesBinding(
                 smartReplacementProviderIds = next.replacementProviderIds,
             )
         }
+        return requireNotNull(updatedPreferences)
     }
 }
 
@@ -173,6 +180,14 @@ private fun ProviderDisplaySection.toCore(): CoreProviderCatalogDisplaySection =
     ProviderDisplaySection.Explore -> CoreProviderCatalogDisplaySection.Explore
     ProviderDisplaySection.Mine -> CoreProviderCatalogDisplaySection.Mine
     ProviderDisplaySection.Replace -> CoreProviderCatalogDisplaySection.Replace
+}
+
+private fun CoreProviderCatalogDisplaySection.toApp(): ProviderDisplaySection = when (this) {
+    CoreProviderCatalogDisplaySection.Search -> ProviderDisplaySection.Search
+    CoreProviderCatalogDisplaySection.Recommend -> ProviderDisplaySection.Recommend
+    CoreProviderCatalogDisplaySection.Explore -> ProviderDisplaySection.Explore
+    CoreProviderCatalogDisplaySection.Mine -> ProviderDisplaySection.Mine
+    CoreProviderCatalogDisplaySection.Replace -> ProviderDisplaySection.Replace
 }
 
 internal fun normalizedEnabledProviderIds(
