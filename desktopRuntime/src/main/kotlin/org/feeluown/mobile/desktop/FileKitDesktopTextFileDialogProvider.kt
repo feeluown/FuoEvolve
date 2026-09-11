@@ -1,6 +1,7 @@
 package org.feeluown.mobile.desktop
 
 import io.github.vinceglb.filekit.FileKit
+import io.github.vinceglb.filekit.dialogs.FileKitDialogSettings
 import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.openFilePicker
 import io.github.vinceglb.filekit.dialogs.openFileSaver
@@ -31,11 +32,14 @@ internal class FileKitDesktopTextFileDialogProvider(
     ): DesktopTextFile? {
         ensureNativeDialogAvailable()
         val normalizedExtensions = normalizeExtensions(extensions)
-        val picked = if (normalizedExtensions.isEmpty()) {
-            FileKit.openFilePicker()
-        } else {
-            FileKit.openFilePicker(type = FileKitType.File(*normalizedExtensions.toTypedArray()))
-        } ?: return null
+        val type = normalizedExtensions
+            .takeIf { it.isNotEmpty() }
+            ?.let(::FileKitType.File)
+            ?: FileKitType.File()
+        val picked = FileKit.openFilePicker(
+            type = type,
+            dialogSettings = FileKitDialogSettings(title = dialogTitle),
+        ) ?: return null
 
         return withContext(Dispatchers.IO) {
             val path = Path.of(picked.path)
@@ -63,6 +67,7 @@ internal class FileKitDesktopTextFileDialogProvider(
             suggestedName = suggestedName,
             defaultExtension = defaultExtension,
             allowedExtensions = normalizedExtensions.takeIf { it.isNotEmpty() }?.toSet(),
+            dialogSettings = FileKitDialogSettings(title = dialogTitle),
         ) ?: return false
 
         withContext(Dispatchers.IO) {
@@ -73,8 +78,7 @@ internal class FileKitDesktopTextFileDialogProvider(
 
     private fun ensureNativeDialogAvailable() {
         if (!requireNativeLinuxPortal) return
-        if (!osName.lowercase(Locale.ROOT).contains("linux")) return
-        check(linuxPortalAvailable()) {
+        check(desktopNativeFileDialogAvailable(osName, linuxPortalAvailable)) {
             "系统文件选择器不可用，请安装并启动适合当前桌面环境的 xdg-desktop-portal 后重试"
         }
     }
