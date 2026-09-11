@@ -1,5 +1,13 @@
 package org.feeluown.mobile.nucleus
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -10,14 +18,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberWindowState
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.NucleusDecoratedWindowScope
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.composenativetray.tray.api.Tray
-import dev.nucleusframework.window.TitleBar
+import dev.nucleusframework.window.NucleusDecoratedWindowTheme
+import dev.nucleusframework.window.TitleBarPlacement
+import dev.nucleusframework.window.WindowBackground
+import dev.nucleusframework.window.WindowControls
+import dev.nucleusframework.window.WindowControlsRenderer
+import dev.nucleusframework.window.WindowScaffold
+import dev.nucleusframework.window.styling.TitleBarColors
+import dev.nucleusframework.window.styling.TitleBarMetrics
+import dev.nucleusframework.window.styling.TitleBarStyle
+import dev.nucleusframework.window.windowDragArea
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -166,8 +187,6 @@ fun main(args: Array<String>) {
                     oauthDeviceCodeAssistant.clearUserCodeNotification()
                 }
             }
-            TitleBar { _ -> }
-
             LaunchedEffect(activationRequest) {
                 if (activationRequest > 0L) {
                     nucleusWindow.show()
@@ -227,7 +246,65 @@ fun main(args: Array<String>) {
                 }
             }
 
-            DesktopAppHost(externalInputs = activation.inputs)
+            DesktopAppHost(
+                externalInputs = activation.inputs,
+                windowContentWrapper = { content ->
+                    FuoDesktopWindowContent(content)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
+    content: @Composable () -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val titleBarColors = TitleBarColors(
+        background = colorScheme.surfaceContainer,
+        inactiveBackground = colorScheme.surfaceContainer,
+        content = colorScheme.onSurface,
+        border = colorScheme.outlineVariant,
+        fullscreenControlButtonsBackground = colorScheme.surfaceContainerHigh,
+        iconButtonHoveredBackground = colorScheme.surfaceContainerHigh,
+        iconButtonPressedBackground = colorScheme.surfaceContainerHighest,
+        controlButtonIconColor = colorScheme.onSurfaceVariant,
+        controlButtonIconHoverColor = colorScheme.onSurface,
+    )
+
+    NucleusDecoratedWindowTheme(
+        isDark = colorScheme.surface.luminance() < 0.5f,
+        titleBarStyle = TitleBarStyle(
+            colors = titleBarColors,
+            metrics = TitleBarMetrics(height = 48.dp),
+        ),
+    ) {
+        WindowBackground(colorScheme.surface)
+        WindowScaffold(
+            titleBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .background(colorScheme.surfaceContainer)
+                        .windowDragArea(),
+                ) {
+                    WindowControls(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        renderer = WindowControlsRenderer.Platform,
+                    )
+                }
+            },
+            titleBarPlacement = TitleBarPlacement.Docked,
+        ) { contentPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(contentPadding),
+            ) {
+                content()
+            }
         }
     }
 }

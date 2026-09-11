@@ -13,7 +13,10 @@ import kotlinx.coroutines.launch
 
 /** Desktop composition root. It hosts the same AppRoot/UI graph used by Android and iOS. */
 @Composable
-fun DesktopAppHost(externalInputs: Flow<String>? = null) {
+fun DesktopAppHost(
+    externalInputs: Flow<String>? = null,
+    windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
+) {
     val container = remember { DesktopAppContainer() }
     DisposableEffect(container) {
         onDispose(container::close)
@@ -32,6 +35,7 @@ fun DesktopAppHost(externalInputs: Flow<String>? = null) {
         AppRoot(
             appViewModel = container.appViewModel,
             uiGraph = container.appUiGraph,
+            windowContentWrapper = windowContentWrapper,
             platform = AppPlatformBindings(
                 hasAudioPermission = true,
                 onRequestAudioPermission = {},
@@ -75,11 +79,14 @@ private class DesktopAppContainer {
         resolvePayload = { track -> playbackProvider.resolve(track) },
     )
     private val downloadRepository: DownloadRepository = desktopDownloadRepository
-    private val settingsRepository: AppSettingsRepository = PersistentAppSettingsRepository(
-        store = createDesktopSettingsSnapshotStore(),
-        legacyLoader = null,
-        scope = scope,
-    )
+    private val settingsRepository: AppSettingsRepository = run {
+        AppLogger.i("AppSettings", "Desktop settings file path: ${desktopSettingsFilePath()}")
+        PersistentAppSettingsRepository(
+            store = createDesktopSettingsSnapshotStore(),
+            legacyLoader = null,
+            scope = scope,
+        )
+    }
     private val playbackEngine = DesktopUnsupportedPlaybackEngine()
     private val providerSessionRepository = DefaultProviderSessionRepository(providerGraph.auth)
     private val navigator = AppNavigator()

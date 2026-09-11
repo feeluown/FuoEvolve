@@ -277,6 +277,7 @@ dependencies {
     implementation(project(":shared"))
     implementation(project(":desktopRuntime"))
     implementation(compose.desktop.currentOs)
+    implementation(libs.compose.material3.expressive)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
 

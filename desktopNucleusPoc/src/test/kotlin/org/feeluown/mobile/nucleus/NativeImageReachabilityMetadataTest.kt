@@ -24,5 +24,18 @@ class NativeImageReachabilityMetadataTest {
                 "Missing Native Image proxy metadata for $interfaceName",
             )
         }
+
+        val requiredDatastoreFields = listOf(
+            "androidx.datastore.preferences.PreferencesProto\$PreferenceMap" to "preferences_",
+            "androidx.datastore.preferences.PreferencesProto\$Value" to "valueCase_",
+            "androidx.datastore.preferences.PreferencesProto\$Value" to "value_",
+            "androidx.datastore.preferences.PreferencesProto\$StringSet" to "strings_",
+        )
+        requiredDatastoreFields.forEach { (typeName, fieldName) ->
+            assertTrue(
+                metadata.contains("\"$typeName\"") && metadata.contains("\"$fieldName\""),
+                "Missing Native Image DataStore field metadata for $typeName.$fieldName",
+            )
+        }
     }
 }

@@ -24,6 +24,8 @@ fun createDesktopSettingsSnapshotStore(): SettingsSnapshotStore {
     )
 }
 
+fun desktopSettingsFilePath(): String = desktopConfigDirectory().resolve(APP_SETTINGS_FILE_NAME).toString()
+
 private fun desktopConfigDirectory(): Path {
     val home = System.getProperty("user.home").orEmpty()
     val osName = System.getProperty("os.name").orEmpty().lowercase()

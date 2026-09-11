@@ -20,6 +20,37 @@
           "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32"
         ]
       }
+    },
+    {
+      "type": "androidx.datastore.preferences.PreferencesProto$PreferenceMap",
+      "fields": [
+        {
+          "name": "preferences_",
+          "allowUnsafeAccess": true
+        }
+      ]
+    },
+    {
+      "type": "androidx.datastore.preferences.PreferencesProto$Value",
+      "fields": [
+        {
+          "name": "valueCase_",
+          "allowUnsafeAccess": true
+        },
+        {
+          "name": "value_",
+          "allowUnsafeAccess": true
+        }
+      ]
+    },
+    {
+      "type": "androidx.datastore.preferences.PreferencesProto$StringSet",
+      "fields": [
+        {
+          "name": "strings_",
+          "allowUnsafeAccess": true
+        }
+      ]
     }
   ]
 }

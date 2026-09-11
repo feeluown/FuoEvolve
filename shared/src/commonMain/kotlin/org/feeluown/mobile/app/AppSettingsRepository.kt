@@ -25,6 +25,7 @@ class PersistentAppSettingsRepository(
     override val state: StateFlow<SettingsState> = mutableState.asStateFlow()
 
     init {
+        AppLogger.i("AppSettings", "Settings initialization started")
         scope.launchSettingsInitialization()
     }
 
@@ -70,10 +71,20 @@ class PersistentAppSettingsRepository(
     private fun CoroutineScope.launchSettingsInitialization() = launch {
         runCatching { loadOrMigrate() }
             .onSuccess { settings ->
+                AppLogger.i(
+                    "AppSettings",
+                    "Settings initialization completed: " +
+                        "onboardingCompleted=${settings.onboardingCompleted}",
+                )
                 mutableState.value = SettingsState(isLoaded = true, settings = settings)
                 ready.complete(settings)
             }
             .onFailure { throwable ->
+                AppLogger.e(
+                    "AppSettings",
+                    "Settings initialization failed; falling back to default settings",
+                    throwable,
+                )
                 val fallback = AppSettings()
                 mutableState.value = SettingsState(
                     isLoaded = true,
@@ -85,12 +96,18 @@ class PersistentAppSettingsRepository(
     }
 
     private suspend fun loadOrMigrate(): AppSettings {
+        AppLogger.d("AppSettings", "Reading persisted settings snapshot")
         return when (val result = store.read()) {
-            is SettingsSnapshotReadResult.Loaded -> result.snapshot.toAppSettings().withoutProviderCredentials()
+            is SettingsSnapshotReadResult.Loaded -> {
+                AppLogger.i("AppSettings", "Persisted settings snapshot loaded")
+                result.snapshot.toAppSettings().withoutProviderCredentials()
+            }
             SettingsSnapshotReadResult.Corrupted -> AppSettings().also { fallback ->
+                AppLogger.w("AppSettings", "Persisted settings snapshot is corrupted; writing defaults")
                 store.write(fallback.toPersistedSettings())
             }
             SettingsSnapshotReadResult.Missing -> {
+                AppLogger.i("AppSettings", "Persisted settings snapshot is missing; writing defaults")
                 val migrated = legacyLoader
                     ?.load()
                     ?.withoutProviderCredentials()

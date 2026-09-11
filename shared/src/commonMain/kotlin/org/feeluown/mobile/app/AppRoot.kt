@@ -9,6 +9,7 @@ fun AppRoot(
     appViewModel: FuoAppViewModel,
     uiGraph: AppUiGraph,
     platform: AppPlatformBindings,
+    windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
 ) {
     val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -18,30 +19,32 @@ fun AppRoot(
         themePaletteStyle = appUiState.themePaletteStyle,
         themeColorSpec = appUiState.themeColorSpec,
     ) {
-        when {
-            !appUiState.isInitialized -> AppInitializationLoadingScreen()
-            !appUiState.onboardingCompleted -> {
-                val onboarding = requireNotNull(uiGraph.onboarding) {
-                    "Onboarding feature owner is not installed"
+        windowContentWrapper {
+            when {
+                !appUiState.isInitialized -> AppInitializationLoadingScreen()
+                !appUiState.onboardingCompleted -> {
+                    val onboarding = requireNotNull(uiGraph.onboarding) {
+                        "Onboarding feature owner is not installed"
+                    }
+                    OnboardingFeatureScreen(
+                        onboarding = onboarding,
+                        settings = uiGraph.settings,
+                        providerCatalog = uiGraph.providerCatalog,
+                        providerAuth = uiGraph.providerAuth,
+                        onOpenProviderWebLogin = platform.onOpenProviderWebLogin,
+                        onLogoutProvider = platform.onLogoutProvider,
+                        onImportYtmusicHeaderFile = platform.onImportYtmusicHeaderFile,
+                        onImportYtmusicOAuthFile = platform.onImportYtmusicOAuthFile,
+                        onStartYtmusicOAuth = platform.onStartYtmusicOAuth,
+                    )
                 }
-                OnboardingFeatureScreen(
-                    onboarding = onboarding,
-                    settings = uiGraph.settings,
-                    providerCatalog = uiGraph.providerCatalog,
-                    providerAuth = uiGraph.providerAuth,
-                    onOpenProviderWebLogin = platform.onOpenProviderWebLogin,
-                    onLogoutProvider = platform.onLogoutProvider,
-                    onImportYtmusicHeaderFile = platform.onImportYtmusicHeaderFile,
-                    onImportYtmusicOAuthFile = platform.onImportYtmusicOAuthFile,
-                    onStartYtmusicOAuth = platform.onStartYtmusicOAuth,
+                else -> AppShell(
+                    appViewModel = appViewModel,
+                    uiGraph = uiGraph,
+                    appUiState = appUiState,
+                    platform = platform,
                 )
             }
-            else -> AppShell(
-                appViewModel = appViewModel,
-                uiGraph = uiGraph,
-                appUiState = appUiState,
-                platform = platform,
-            )
         }
     }
 }
