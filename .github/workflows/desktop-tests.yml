@@ -41,8 +41,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
 
@@ -63,11 +63,10 @@ jobs:
           ./gradlew \
             --no-configuration-cache \
             --warning-mode all \
-            -PenableNucleusDesktopPoc=true \
             ciDesktopTest \
-            :desktopNucleusPoc:test \
-            :desktopNucleusPoc:compileKotlin \
-            :desktopNucleusPoc:prepareNucleusAppResources
+            :desktopApp:test \
+            :desktopApp:compileKotlin \
+            :desktopApp:prepareNucleusAppResources
 
   windows:
     name: Windows Nucleus runtime
@@ -108,8 +107,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-windows-x64-rust-1.98.1-
 
@@ -124,7 +123,7 @@ jobs:
         if: steps.windows-libmpv-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: >-
-          ./desktopNucleusPoc/packaging/windows/prepare-libmpv-dev.ps1
+          ./desktopApp/packaging/windows/prepare-libmpv-dev.ps1
           -OutputDir "$env:FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"
 
       - name: Verify Windows native compiler
@@ -139,11 +138,10 @@ jobs:
           .\gradlew.bat `
             --no-configuration-cache `
             --warning-mode all `
-            -PenableNucleusDesktopPoc=true `
             ciDesktopTest `
-            :desktopNucleusPoc:test `
-            :desktopNucleusPoc:compileKotlin `
-            :desktopNucleusPoc:prepareNucleusAppResources
+            :desktopApp:test `
+            :desktopApp:compileKotlin `
+            :desktopApp:prepareNucleusAppResources
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   macos:
@@ -183,8 +181,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-macos-arm64-rust-1.98.1-
 
@@ -216,8 +214,7 @@ jobs:
           ./gradlew \
             --no-configuration-cache \
             --warning-mode all \
-            -PenableNucleusDesktopPoc=true \
             ciDesktopTest \
-            :desktopNucleusPoc:test \
-            :desktopNucleusPoc:compileKotlin \
-            :desktopNucleusPoc:prepareNucleusAppResources
+            :desktopApp:test \
+            :desktopApp:compileKotlin \
+            :desktopApp:prepareNucleusAppResources
