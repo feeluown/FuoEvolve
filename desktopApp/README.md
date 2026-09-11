@@ -1,81 +1,76 @@
-# Nucleus desktop runtime
+# Desktop app
 
-This module hosts the production desktop path for running the existing FuoEvolve Compose UI on Nucleus/Tao and GraalVM Native Image.
+`desktopApp` is the only FuoEvolve desktop application host. It runs the shared Compose UI on Nucleus/Tao and is distributed as a GraalVM Native Image; the legacy JVM desktop host has been removed.
 
-It is still enabled with `-PenableNucleusDesktopPoc=true` while the Gradle module keeps its historical name, but desktop CI no longer tests or packages the legacy JVM `desktopApp` host.
-
-## Local run
+## Local development
 
 ```bash
-./gradlew -PenableNucleusDesktopPoc=true :desktopNucleusPoc:run
+./gradlew :desktopApp:run
 ```
 
-The Nucleus host reuses the shared Compose UI and desktop runtime services. Provider login uses the existing Rust system-WebView helper. Playback uses the shared Kotlin playback state machine with a thin JNI libmpv backend; there is no playback sidecar process and no native-to-Kotlin callback surface.
+The desktop app reuses the shared UI and desktop runtime services. Provider login uses the Rust system-WebView helper. Audio and video playback use the shared Kotlin playback state machine with a thin JNI libmpv backend.
 
-## GraalVM Native Image
+## Native Image
 
-Build the packaged native application folder with:
+Build the native application image with:
 
 ```bash
 ./gradlew \
-  -PenableNucleusDesktopPoc=true \
   -PnativeMarch=compatibility \
-  :desktopNucleusPoc:packageGraalvmNative
+  :desktopApp:packageGraalvmNative
 ```
 
-The `graalvm-app` directory is an intermediate runtime image. User-facing installers are created by Nucleus through:
+Create a user-facing package for the current OS with:
 
 ```bash
 ./gradlew \
-  -PenableNucleusDesktopPoc=true \
   -PnativeMarch=compatibility \
   -Pfuoevolve.nucleus.targetFormat=<msi|dmg|appimage|pacman> \
-  :desktopNucleusPoc:packageGraalvmNativeDistributionForCurrentOS
+  :desktopApp:packageGraalvmNativeDistributionForCurrentOS
 ```
+
+Supported target formats are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias).
 
 ## Distribution matrix
 
-Desktop CI produces only Nucleus/GraalVM artifacts:
-
 | Platform | Artifact | Native dependency policy |
 | --- | --- | --- |
-| Windows x64 | MSI | JNI bridge + system-output capture library + pinned libmpv runtime bundled |
-| macOS arm64 | DMG | JNI bridge + system-output capture library + relocatable libmpv dylib closure bundled |
-| macOS x64 | DMG | JNI bridge + system-output capture library + relocatable libmpv dylib closure bundled |
-| Arch Linux x64 | Pacman/Arch package | system-output capture library bundled; `mpv`, `libsecret`, PipeWire/PulseAudio, WebKitGTK and UI ABI dependencies are distro-managed |
-| Portable Linux x64 | AppImage | system-output capture library and its ELF closure, plus libmpv, Libsecret client, WebKitGTK subprocess/runtime and TLS module closures bundled |
+| Windows x64 | MSI | JNI bridge, system-output capture library and pinned libmpv runtime bundled |
+| macOS arm64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
+| macOS x64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
+| Arch Linux x64 | Pacman/Arch package | Native capture library bundled; mpv, Libsecret, PipeWire/PulseAudio, WebKitGTK and UI ABI dependencies are distribution-managed |
+| Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 24.04 LTS baseline |
 
-Linux AppImage runtime directories are discovered through `compose.application.resources.dir`; no wrapper-script-only environment is required for provider login or secure credential fallback.
+No desktop artifact bundles a JVM.
 
-## Current runtime scope
+## Runtime scope
 
-The Nucleus path includes:
+The desktop app includes:
 
-- Nucleus 2.5.15 + Tao window backend;
-- the shared `DesktopAppHost` Compose UI;
-- desktop settings persistence and provider HTTP cache;
-- the same OS-backed provider credential namespace used by the previous JVM host;
-- the Rust system-WebView login helper as a packaged resource;
-- the shared `desktopRuntime` libmpv playback state machine with persistent playback-resume state;
-- direct JNI libmpv playback on Windows, macOS and Linux packaging targets;
-- system-output audio recognition through the native CPAL/JNI capture library; Windows and macOS use the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source;
-- desktop audio recognition does not pause the current playback session and keeps captured samples in a bounded in-memory pipeline;
-- local-music indexing, metadata editing and sidecar lyrics through the shared desktop runtime;
-- SQLDelight listening-history persistence;
-- Nucleus `media-control` integration for Windows SMTC, macOS Now Playing / Remote Command Center and Linux MPRIS;
-- ComposeNativeTray close-to-tray support with a safe no-tray fallback;
-- Nucleus single-instance locking plus URI and `.fuo` file activation forwarding;
-- `fuo://` protocol and `.fuo` file-association packaging;
-- FileKit OS-native Open/Save dialogs instead of Swing file choosers;
-- Nucleus native notifications for YouTube Music OAuth device codes, with dismissable notification handles;
-- Tao/Compose clipboard integration for device-code copying, including the native GTK/Wayland clipboard bridge on Linux;
-- stale-event correlation for rapid source replacement;
-- GraalVM Native Image compilation and native installer packaging.
+- Nucleus/Tao windowing and Compose UI hosting;
+- direct JNI libmpv audio playback;
+- GPU video rendering through Tao/OpenGL on Windows/Linux and IOSurface/Metal on macOS, with software fallback;
+- Windows SMTC, macOS Now Playing / Remote Command Center, and Linux MPRIS;
+- close-to-tray lifecycle and single-instance activation;
+- `fuo://` protocol and `.fuo` file association;
+- OS-native file dialogs, clipboard integration and notifications;
+- Windows Credential Manager, macOS Keychain and Linux Secret Service/Libsecret credential storage;
+- system-output audio recognition using the native CPAL/JNI capture library;
+- local music indexing, metadata editing, sidecar lyrics and SQLDelight listening history;
+- Rust system-WebView provider login helper;
+- GraalVM Native Image packaging for all supported desktop targets.
 
-Remaining desktop parity work is intentionally separate: video rendering, desktop app updates, and manual Native Image capture validation on real Windows, macOS and Linux audio-session matrices.
+Desktop self-update is intentionally not implemented yet. Stable and Canary packages are delivered by GitHub Actions / GitHub Releases.
 
-## CI
+## Versioning
 
-`.github/workflows/desktop-tests.yml` validates shared desktop tests, `desktopRuntime`, Nucleus tests, JNI compilation and packaged-resource staging on Linux, Windows and macOS.
+Release tags such as `1.2.3` are embedded as the desktop package version and displayed app version. Non-tagged builds identify themselves as Canary builds using the latest release version plus the current commit SHA.
 
-`.github/workflows/desktop-packaging.yml` builds the four user-facing artifact classes above entirely through `packageGraalvmNativeDistributionForCurrentOS`. `master-canary.yml` calls that reusable workflow after the normal platform test gates.
+## CI and release
+
+- `.github/workflows/desktop-tests.yml` validates shared desktop/runtime tests and native resource staging on Linux, Windows and macOS.
+- `.github/workflows/desktop-packaging.yml` produces MSI, both DMGs, AppImage and Arch packages.
+- `master-canary.yml` publishes preview artifacts from `master`.
+- `release.yml` publishes the same desktop package matrix alongside Android for release tags and includes SHA-256 checksums.
+
+Windows and macOS packages are currently published without production code signing/notarization; signing can be layered onto the same Native Image release pipeline later.
