@@ -41,7 +41,7 @@ The desktop app shares the Compose experience with mobile and is available for W
 
 - **Windows:** SMTC system media controls and MSI packaging.
 - **macOS:** Now Playing / Remote Command Center integration with Apple Silicon and Intel DMGs.
-- **Linux:** MPRIS media controls, native Wayland/Tao support, AppImage and Arch packages. The portable AppImage is built against the pinned Ubuntu 24.04 LTS baseline.
+- **Linux:** MPRIS media controls, native Wayland/Tao support, AppImage and Arch packages. The portable AppImage is built against the pinned Ubuntu 26.04 LTS baseline.
 - **Audio and video:** direct JNI libmpv playback with GPU video presentation and software fallback.
 - **Tray lifecycle:** closing the window keeps playback and downloads running; the tray/status item can restore or exit the app.
 - **Secure login storage:** Windows Credential Manager, macOS Keychain, and Linux Secret Service/Libsecret.
@@ -66,7 +66,7 @@ Available content depends on the source, region, login state, and upstream servi
 | Android | **Stable** | Signed APK and F-Droid distribution |
 | Windows | **Stable** | x64 Native Image MSI; production signing is pending |
 | macOS | **Stable** | Native Image DMGs for Apple Silicon and Intel; signing/notarization is pending |
-| Linux | **Stable** | Native Image AppImage and Arch package; AppImage baseline is Ubuntu 24.04 LTS |
+| Linux | **Stable** | Native Image AppImage and Arch package; AppImage baseline is Ubuntu 26.04 LTS |
 | iOS | **Experimental** | Development and CI validation only |
 
 ## Development
