@@ -8,9 +8,11 @@ import com.microsoft.credentialstorage.implementation.posix.libsecret.LibSecretL
 import com.microsoft.credentialstorage.model.StoredToken
 import com.microsoft.credentialstorage.model.StoredTokenType
 import com.sun.jna.NativeLibrary
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -126,6 +128,39 @@ internal interface DesktopSecretStore {
     fun delete(key: String): Boolean
 }
 
+internal data class SecretToolCommandResult(
+    val exitCode: Int,
+    val stdout: String = "",
+)
+
+internal fun interface SecretToolCommandRunner {
+    fun run(arguments: List<String>, input: CharArray?): SecretToolCommandResult
+}
+
+/** Linux Native Image backend; it talks to the host Secret Service through secret-tool. */
+internal class SecretToolDesktopSecretStore(
+    private val commandRunner: SecretToolCommandRunner = SecretToolCommandRunner(::runSecretToolCommand),
+) : DesktopSecretStore {
+    override fun get(key: String): CharArray? {
+        val result = commandRunner.run(
+            listOf("lookup", "application", key),
+            input = null,
+        )
+        if (result.exitCode != 0) return null
+        return stripSecretToolTrailingNewline(result.stdout).toCharArray()
+    }
+
+    override fun put(key: String, value: CharArray): Boolean = commandRunner.run(
+        listOf("store", "--label=$SECRET_TOOL_LABEL", "application", key),
+        value,
+    ).exitCode == 0
+
+    override fun delete(key: String): Boolean = commandRunner.run(
+        listOf("clear", "application", key),
+        input = null,
+    ).exitCode == 0
+}
+
 private class MicrosoftDesktopSecretStore(
     private val delegate: SecretStore<StoredToken>,
 ) : DesktopSecretStore {
@@ -185,7 +220,7 @@ internal class MacOsSafeDesktopSecretStore(
 
 private fun createMicrosoftSecretStore(): DesktopSecretStore? =
     if (System.getProperty("os.name") == "Linux") {
-        createLinuxLibSecretStore()
+        if (isGraalVmNativeImage()) createLinuxSecretToolStore() else createLinuxLibSecretStore()
     } else {
         StorageProvider.getTokenStorage(true, SecureOption.REQUIRED)
             ?.takeIf { it.isSecure }
@@ -197,6 +232,12 @@ private fun createMicrosoftSecretStore(): DesktopSecretStore? =
 
 private fun isMacOs(): Boolean =
     System.getProperty("os.name").orEmpty().contains("mac", ignoreCase = true)
+
+private fun isGraalVmNativeImage(): Boolean =
+    System.getProperty("org.graalvm.nativeimage.imagecode") != null ||
+        System.getProperty("java.vm.name").orEmpty().contains("Substrate VM", ignoreCase = true)
+
+private fun createLinuxSecretToolStore(): DesktopSecretStore = SecretToolDesktopSecretStore()
 
 private fun createLinuxLibSecretStore(): DesktopSecretStore {
     // Installed packages and portable images must see the same host Secret Service/keyring.
@@ -227,6 +268,64 @@ private fun configureLinuxLibSecretRuntime() {
         ?: System.getenv("FUOEVOLVE_LIBSECRET_DIR")?.takeIf(String::isNotBlank)
         ?: return
     registerBundledLinuxLibSecretSearchPaths(bundledLibraryDir, NativeLibrary::addSearchPath)
+}
+
+internal fun stripSecretToolTrailingNewline(value: String): String =
+    value.removeSuffix("\n").removeSuffix("\r")
+
+private fun runSecretToolCommand(
+    arguments: List<String>,
+    input: CharArray?,
+): SecretToolCommandResult {
+    val operation = arguments.firstOrNull().orEmpty()
+    val process = try {
+        ProcessBuilder(listOf(SECRET_TOOL_COMMAND) + arguments)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+    } catch (error: IOException) {
+        AppLogger.e(
+            DESKTOP_CREDENTIAL_LOG_TAG,
+            "secret-tool command could not start operation=$operation",
+            error,
+        )
+        return SecretToolCommandResult(SECRET_TOOL_FAILURE_EXIT_CODE)
+    }
+
+    return try {
+        process.outputStream.use { output ->
+            input?.let { output.write(it.concatToString().toByteArray(Charsets.UTF_8)) }
+        }
+        if (!process.waitFor(SECRET_TOOL_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            AppLogger.e(
+                DESKTOP_CREDENTIAL_LOG_TAG,
+                "secret-tool command timed out operation=$operation",
+            )
+            SecretToolCommandResult(SECRET_TOOL_FAILURE_EXIT_CODE)
+        } else {
+            val stdout = process.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            SecretToolCommandResult(process.exitValue(), stdout)
+        }
+    } catch (error: IOException) {
+        AppLogger.e(
+            DESKTOP_CREDENTIAL_LOG_TAG,
+            "secret-tool command failed operation=$operation",
+            error,
+        )
+        SecretToolCommandResult(SECRET_TOOL_FAILURE_EXIT_CODE)
+    } catch (error: InterruptedException) {
+        Thread.currentThread().interrupt()
+        process.destroyForcibly()
+        AppLogger.e(
+            DESKTOP_CREDENTIAL_LOG_TAG,
+            "secret-tool command interrupted operation=$operation",
+            error,
+        )
+        SecretToolCommandResult(SECRET_TOOL_FAILURE_EXIT_CODE)
+    } finally {
+        if (process.isAlive) process.destroyForcibly()
+        process.inputStream.close()
+    }
 }
 
 internal fun registerBundledLinuxLibSecretSearchPaths(
@@ -262,8 +361,14 @@ private fun secretStoreUnavailableMessage(failure: Throwable?): String {
 
 private fun secretWriteFailureMessage(target: String): String =
     if (System.getProperty("os.name") == "Linux") {
-        "Linux 安全凭证存储写入失败（$target）：Libsecret 已加载，但 Secret Service 未能完成写入。" +
-            "请确认 org.freedesktop.secrets 服务可用且默认密钥环已解锁；KDE Plasma 可启用 KWallet 的 Secret Service 接口。"
+        if (isGraalVmNativeImage()) {
+            "Linux 安全凭证存储写入失败（$target）：secret-tool 未能完成 Secret Service 操作。" +
+                "请确认 libsecret 提供的 secret-tool 可执行、org.freedesktop.secrets 服务可用且默认密钥环已解锁；" +
+                "KDE Plasma 可启用 KWallet 的 Secret Service 接口。"
+        } else {
+            "Linux 安全凭证存储写入失败（$target）：Libsecret 已加载，但 Secret Service 未能完成写入。" +
+                "请确认 org.freedesktop.secrets 服务可用且默认密钥环已解锁；KDE Plasma 可启用 KWallet 的 Secret Service 接口。"
+        }
     } else {
         "系统安全凭证存储写入失败（$target）"
     }
@@ -381,6 +486,10 @@ private fun providerKey(providerId: String): String {
 }
 
 private const val DESKTOP_CREDENTIAL_LOG_TAG = "DesktopCredentials"
+private const val SECRET_TOOL_COMMAND = "secret-tool"
+private const val SECRET_TOOL_LABEL = "FuoEvolve provider credentials"
+private const val SECRET_TOOL_TIMEOUT_SECONDS = 15L
+private const val SECRET_TOOL_FAILURE_EXIT_CODE = -1
 private const val LIBSECRET_JNA_NAME = "secret-1"
 private val REQUIRED_LIBSECRET_SYMBOLS = listOf(
     "secret_service_search_sync",
