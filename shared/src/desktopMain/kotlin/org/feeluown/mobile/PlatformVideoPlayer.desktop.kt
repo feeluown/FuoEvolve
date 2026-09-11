@@ -18,19 +18,38 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Desktop-only bridge implemented by the host module that owns libmpv/JNA. */
+/** Desktop-only bridge implemented by the active desktop host/runtime. */
 interface DesktopPlatformVideoController : PlatformVideoController, AutoCloseable {
     val frame: StateFlow<ImageBitmap?>
     fun setPayload(payload: VideoPlaybackPayload?)
     fun setViewportSize(width: Int, height: Int)
 }
 
+/**
+ * Optional host-owned video surface. Native desktop hosts can render directly into their GPU
+ * scene while the legacy JVM host keeps consuming [DesktopPlatformVideoController.frame].
+ */
+interface DesktopPlatformVideoSurface {
+    @Composable
+    fun Content(
+        controller: DesktopPlatformVideoController,
+        payload: VideoPlaybackPayload?,
+        modifier: Modifier,
+    )
+}
+
 private var desktopPlatformVideoControllerFactory: () -> DesktopPlatformVideoController = {
     UnsupportedDesktopPlatformVideoController("桌面视频播放组件未初始化")
 }
 
+private var desktopPlatformVideoSurface: DesktopPlatformVideoSurface? = null
+
 fun installDesktopPlatformVideoControllerFactory(factory: () -> DesktopPlatformVideoController) {
     desktopPlatformVideoControllerFactory = factory
+}
+
+fun installDesktopPlatformVideoSurface(surface: DesktopPlatformVideoSurface?) {
+    desktopPlatformVideoSurface = surface
 }
 
 private class UnsupportedDesktopPlatformVideoController(
@@ -73,12 +92,6 @@ actual fun PlatformVideoPlayer(
     LaunchedEffect(desktopController, payload) {
         desktopController?.setPayload(payload)
     }
-    val frame = if (desktopController != null) {
-        val value by desktopController.frame.collectAsState()
-        value
-    } else {
-        null
-    }
 
     Box(
         modifier = modifier.onSizeChanged { size ->
@@ -86,13 +99,28 @@ actual fun PlatformVideoPlayer(
         },
         contentAlignment = Alignment.Center,
     ) {
-        frame?.let { bitmap ->
-            Image(
-                bitmap = bitmap,
-                contentDescription = payload?.video?.title,
+        val hostSurface = desktopPlatformVideoSurface
+        if (desktopController != null && hostSurface != null) {
+            hostSurface.Content(
+                controller = desktopController,
+                payload = payload,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
             )
+        } else {
+            val frame = if (desktopController != null) {
+                val value by desktopController.frame.collectAsState()
+                value
+            } else {
+                null
+            }
+            frame?.let { bitmap ->
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = payload?.video?.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
     }
 }

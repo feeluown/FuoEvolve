@@ -7,6 +7,7 @@ macos.arm64.mpv.version=0.41.0_9
 macos.x64.mpv.version=0.41.0_8
 
 # shinchiro/mpv-winbuild-cmake development archive contains the libmpv DLL + development runtime.
+# Cache schema v2 stages the complete public mpv header set for the GPU render API.
 windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260902/mpv-dev-x86_64-20260902-git-174b638f29.7z
 windows.x64.libmpv.sha256=f23fbdee1864958df65886b56b1d640a319a4430df89aaa4417473d9d581c57f
 

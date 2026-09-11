@@ -60,8 +60,10 @@ import org.feeluown.mobile.desktop.createDesktopRuntimeLocalMusicRepository
 import org.feeluown.mobile.desktop.createDesktopSecureProviderCredentialStore
 import org.feeluown.mobile.desktop.createPersistentDesktopPlaybackEngine
 import org.feeluown.mobile.installDesktopAppLogger
+import org.feeluown.mobile.installDesktopJniMpvVideoControllerFactory
 import org.feeluown.mobile.installDesktopListeningHistorySinkFactory
 import org.feeluown.mobile.installDesktopLocalMusicRepositoryFactory
+import org.feeluown.mobile.installDesktopPlatformVideoSurface
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
@@ -83,6 +85,8 @@ fun main(args: Array<String>) {
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     installDesktopListeningHistorySinkFactory(::createDesktopRuntimeListeningHistorySink)
     installDesktopLocalMusicRepositoryFactory(::createDesktopRuntimeLocalMusicRepository)
+    installDesktopJniMpvVideoControllerFactory()
+    installDesktopPlatformVideoSurface(NucleusMpvVideoSurface)
     installDesktopTextFileDialogProviderFactory {
         createDesktopNativeTextFileDialogProvider(requireNativeLinuxPortal = true)
     }

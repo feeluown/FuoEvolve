@@ -52,12 +52,20 @@ try {
     if (-not $importLibrary) { throw "Pinned Windows libmpv archive does not contain libmpv.dll.a" }
     if (-not $dlls) { throw "Pinned Windows libmpv archive does not contain libmpv runtime DLLs" }
 
+    # client.h sits in include/mpv. Copy the complete public mpv header set from that same
+    # directory; render.h and render_gl.h are required by the Native video GPU bridge.
+    $mpvHeaderDir = $clientHeader.Directory.FullName
+    $publicHeaders = Get-ChildItem -Path $mpvHeaderDir -File -Filter "*.h"
+    $requiredHeaders = @("client.h", "render.h", "render_gl.h")
+    foreach ($requiredHeader in $requiredHeaders) {
+        if (-not ($publicHeaders | Where-Object { $_.Name -eq $requiredHeader })) {
+            throw "Pinned Windows libmpv archive does not contain include/mpv/$requiredHeader"
+        }
+    }
+
     Remove-Item -Path $OutputDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir "include\mpv") | Out-Null
-    Copy-Item -Path $clientHeader.FullName -Destination (Join-Path $OutputDir "include\mpv\client.h")
-
-    $headerRoot = $clientHeader.Directory.Parent.FullName
-    Get-ChildItem -Path $headerRoot -File -Filter "*.h" | ForEach-Object {
+    $publicHeaders | ForEach-Object {
         Copy-Item -Path $_.FullName -Destination (Join-Path $OutputDir "include\mpv\$($_.Name)") -Force
     }
 
