@@ -16,11 +16,14 @@ import dev.nucleusframework.application.SingleInstanceRestoreEffect
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.composenativetray.tray.api.Tray
 import java.io.File
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopAppHost
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.PlaybackPayload
@@ -35,6 +38,7 @@ import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 
 private const val SMOKE_ENV = "FUOEVOLVE_NUCLEUS_POC_SMOKE"
 private const val PLAYBACK_SMOKE_ENV = "FUOEVOLVE_NUCLEUS_PLAYBACK_SMOKE"
+private const val LINUX_TRAY_PROBE_TIMEOUT_SECONDS = 1L
 
 fun main(args: Array<String>) {
     configurePackagedNativeRuntime()
@@ -59,8 +63,22 @@ fun main(args: Array<String>) {
     ) {
         val uiScope = rememberCoroutineScope()
         var windowVisible by remember { mutableStateOf(true) }
+        var activationRequest by remember { mutableStateOf(0L) }
+        val trayAvailable = remember(smokeMode, playbackSmokeFile) {
+            !smokeMode && playbackSmokeFile == null && nucleusTrayCanRestoreWindow().also { available ->
+                if (!available) {
+                    AppLogger.w(
+                        "DesktopTray",
+                        "Nucleus tray is unavailable; closing the main window will keep it visible",
+                    )
+                }
+            }
+        }
         val requestExit = { exitApplication() }
-        val showWindow = { windowVisible = true }
+        val showWindow = {
+            windowVisible = true
+            activationRequest += 1L
+        }
 
         onDeepLink { uri ->
             externalInputs.tryEmit(uri.toString())
@@ -83,7 +101,7 @@ fun main(args: Array<String>) {
             )
         }
 
-        if (!smokeMode && playbackSmokeFile == null) {
+        if (trayAvailable) {
             Tray(
                 icon = painterResource("ic_launcher.png"),
                 tooltip = "FuoEvolve",
@@ -100,12 +118,25 @@ fun main(args: Array<String>) {
         }
 
         DecoratedWindow(
-            onCloseRequest = { windowVisible = false },
+            onCloseRequest = {
+                if (trayAvailable) {
+                    windowVisible = false
+                }
+            },
             visible = windowVisible,
             state = rememberWindowState(size = DpSize(1280.dp, 800.dp)),
             minimumSize = DpSize(900.dp, 600.dp),
             title = "FuoEvolve",
         ) {
+            LaunchedEffect(activationRequest) {
+                if (activationRequest > 0L) {
+                    window.show()
+                    window.setMinimized(false)
+                    window.toFront()
+                    window.requestFocus()
+                }
+            }
+
             if (playbackSmokeFile != null) {
                 LaunchedEffect(playbackSmokeFile) {
                     check(playbackSmokeFile.isFile) {
@@ -159,6 +190,38 @@ fun main(args: Array<String>) {
             DesktopAppHost(externalInputs = externalInputs)
         }
     }
+}
+
+internal fun nucleusTrayCanRestoreWindow(
+    osName: String = System.getProperty("os.name").orEmpty(),
+    linuxStatusNotifierProbe: () -> Boolean = ::linuxStatusNotifierWatcherAvailable,
+): Boolean {
+    val normalized = osName.lowercase(Locale.ROOT)
+    return when {
+        normalized.contains("windows") -> true
+        normalized.contains("mac") || normalized.contains("darwin") -> true
+        normalized.contains("linux") -> linuxStatusNotifierProbe()
+        else -> false
+    }
+}
+
+private fun linuxStatusNotifierWatcherAvailable(): Boolean {
+    if (System.getenv("DBUS_SESSION_BUS_ADDRESS").isNullOrBlank()) return false
+    return runCatching {
+        val process = ProcessBuilder(
+            "busctl",
+            "--user",
+            "--no-pager",
+            "status",
+            "org.kde.StatusNotifierWatcher",
+        ).redirectErrorStream(true).start()
+        val finished = process.waitFor(LINUX_TRAY_PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            return@runCatching false
+        }
+        process.exitValue() == 0
+    }.getOrDefault(false)
 }
 
 private fun configurePackagedNativeRuntime() {
