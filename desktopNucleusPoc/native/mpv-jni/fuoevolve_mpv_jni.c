@@ -350,7 +350,7 @@ JNIEXPORT jstring JNICALL
 Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeGetProperty(
     JNIEnv *env, jobject self, jlong handle_value, jstring name_value
 ) {
-    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeGetProperty(
+    return Java_org_feeluown_mobile_nucleus_JniMpvVideoApi_nativeGetProperty(
         env, self, handle_value, name_value
     );
 }
@@ -819,3 +819,5 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeFreeRenderContext(
     mpv_render_context *context = render_context_from_jlong(render_context_value);
     if (context != NULL) mpv_render_context_free(context);
 }
+
+#include "fuoevolve_mpv_iosurface.inc"
