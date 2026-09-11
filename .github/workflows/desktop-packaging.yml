@@ -48,8 +48,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-windows-x64-rust-1.98.1-
 
@@ -64,7 +64,7 @@ jobs:
         if: steps.windows-libmpv-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: >-
-          ./desktopNucleusPoc/packaging/windows/prepare-libmpv-dev.ps1
+          ./desktopApp/packaging/windows/prepare-libmpv-dev.ps1
           -OutputDir "$env:FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"
 
       - name: Build Nucleus Native Image MSI
@@ -79,15 +79,14 @@ jobs:
             --no-configuration-cache `
             --warning-mode all `
             --stacktrace `
-            -PenableNucleusDesktopPoc=true `
             -PnativeMarch=compatibility `
-            :desktopNucleusPoc:packageGraalvmMsi
+            :desktopApp:packageGraalvmMsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Prepare Windows artifact
         shell: pwsh
         run: |
-          $artifacts = Get-ChildItem -Path desktopNucleusPoc\build -Recurse -File -Filter *.msi
+          $artifacts = Get-ChildItem -Path desktopApp\build -Recurse -File -Filter *.msi
           if ($artifacts.Count -ne 1) {
             Write-Host "Expected exactly one MSI, found $($artifacts.Count)"
             $artifacts | Select-Object FullName, Length
@@ -157,8 +156,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-macos-${{ matrix.arch }}-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-macos-${{ matrix.arch }}-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-macos-${{ matrix.arch }}-rust-1.98.1-
 
@@ -200,18 +199,17 @@ jobs:
             --no-configuration-cache \
             --warning-mode all \
             --stacktrace \
-            -PenableNucleusDesktopPoc=true \
             -PnativeMarch=compatibility \
             -Pfuoevolve.nucleus.targetFormat=dmg \
-            :desktopNucleusPoc:packageGraalvmDmg
+            :desktopApp:packageGraalvmDmg
 
       - name: Verify macOS package closure
         run: |
-          JNI="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'libfuoevolve_mpv_jni.dylib' -print -quit)"
-          MPV="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'libmpv.dylib' -print -quit)"
-          AUDIO="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'libfuoevolve_audio_capture.dylib' -print -quit)"
-          HELPER="$(find desktopNucleusPoc/build/compose/binaries -type f -name 'fuoevolve-web-login' -print -quit)"
-          PLIST="$(find desktopNucleusPoc/build/compose/binaries -type f -path '*.app/Contents/Info.plist' -print -quit)"
+          JNI="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_mpv_jni.dylib' -print -quit)"
+          MPV="$(find desktopApp/build/compose/binaries -type f -name 'libmpv.dylib' -print -quit)"
+          AUDIO="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_audio_capture.dylib' -print -quit)"
+          HELPER="$(find desktopApp/build/compose/binaries -type f -name 'fuoevolve-web-login' -print -quit)"
+          PLIST="$(find desktopApp/build/compose/binaries -type f -path '*.app/Contents/Info.plist' -print -quit)"
           test -n "$JNI" && test -n "$MPV" && test -n "$AUDIO" && test -n "$HELPER" && test -n "$PLIST"
           test "$(plutil -extract CFBundleIdentifier raw -o - "$PLIST")" = "org.feeluown.mobile.desktop"
           test "$(plutil -extract NSMicrophoneUsageDescription raw -o - "$PLIST")" = "FuoEvolve 使用麦克风进行听歌识曲。"
@@ -223,13 +221,13 @@ jobs:
 
       - name: Prepare macOS artifact
         run: |
-          artifact_count="$(find desktopNucleusPoc/build -type f -name '*.dmg' -print | wc -l | tr -d ' ')"
+          artifact_count="$(find desktopApp/build -type f -name '*.dmg' -print | wc -l | tr -d ' ')"
           if [[ "$artifact_count" -ne 1 ]]; then
             echo "Expected exactly one DMG, found $artifact_count" >&2
-            find desktopNucleusPoc/build -type f -name '*.dmg' -print >&2
+            find desktopApp/build -type f -name '*.dmg' -print >&2
             exit 1
           fi
-          artifact="$(find desktopNucleusPoc/build -type f -name '*.dmg' -print -quit)"
+          artifact="$(find desktopApp/build -type f -name '*.dmg' -print -quit)"
           mkdir -p build/artifacts
           cp "$artifact" "build/artifacts/FuoEvolve-macos-${{ matrix.arch }}.dmg"
           du -h "build/artifacts/FuoEvolve-macos-${{ matrix.arch }}.dmg"
@@ -244,7 +242,7 @@ jobs:
           if-no-files-found: error
 
   linux-appimage:
-    name: Linux x64 AppImage
+    name: Linux x64 AppImage (Ubuntu 24.04 LTS baseline)
     runs-on: ubuntu-24.04
     timeout-minutes: 100
 
@@ -253,6 +251,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Verify AppImage LTS baseline
+        run: |
+          . /etc/os-release
+          test "$ID" = "ubuntu"
+          test "$VERSION_ID" = "24.04"
+          echo "Building AppImage against Ubuntu $VERSION_ID LTS baseline"
 
       - name: Prepare Git refs for versioning
         run: |
@@ -278,8 +283,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
 
@@ -308,15 +313,14 @@ jobs:
             --no-configuration-cache \
             --warning-mode all \
             --stacktrace \
-            -PenableNucleusDesktopPoc=true \
             -PnativeMarch=compatibility \
             -Pfuoevolve.nucleus.targetFormat=appimage \
             -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
-            :desktopNucleusPoc:packageGraalvmAppImage
+            :desktopApp:packageGraalvmAppImage
 
       - name: Prepare and verify AppImage artifact
         run: |
-          mapfile -t artifacts < <(find desktopNucleusPoc/build -type f -iname '*.AppImage' -print)
+          mapfile -t artifacts < <(find desktopApp/build -type f -iname '*.AppImage' -print)
           if [[ "${#artifacts[@]}" -ne 1 ]]; then
             echo "Expected exactly one AppImage, found ${#artifacts[@]}" >&2
             printf '%s\n' "${artifacts[@]}" >&2
@@ -382,8 +386,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktopApp/native/web-login/target
-            desktopNucleusPoc/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopNucleusPoc/native/audio-capture/Cargo.toml', 'desktopNucleusPoc/native/audio-capture/Cargo.lock', 'desktopNucleusPoc/native/audio-capture/src/**') }}
+            desktopApp/native/audio-capture/target
+          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
 
@@ -409,14 +413,13 @@ jobs:
             --no-configuration-cache \
             --warning-mode all \
             --stacktrace \
-            -PenableNucleusDesktopPoc=true \
             -PnativeMarch=compatibility \
             -Pfuoevolve.nucleus.targetFormat=pacman \
-            :desktopNucleusPoc:packageGraalvmPacman
+            :desktopApp:packageGraalvmPacman
 
       - name: Prepare and verify Arch artifact
         run: |
-          mapfile -t artifacts < <(find desktopNucleusPoc/build -type f \( -name '*.pacman' -o -name '*.pkg.tar.zst' \) -print)
+          mapfile -t artifacts < <(find desktopApp/build -type f \( -name '*.pacman' -o -name '*.pkg.tar.zst' \) -print)
           if [[ "${#artifacts[@]}" -ne 1 ]]; then
             echo "Expected exactly one Arch/pacman package, found ${#artifacts[@]}" >&2
             printf '%s\n' "${artifacts[@]}" >&2
