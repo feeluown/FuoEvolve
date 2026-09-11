@@ -9,7 +9,7 @@ permissions:
 jobs:
   linux:
     name: Linux Nucleus runtime
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
 
     steps:
@@ -23,6 +23,12 @@ jobs:
           if ! git show-ref --verify --quiet refs/heads/master; then
             git branch master origin/master
           fi
+
+      - name: Verify Linux LTS baseline
+        run: |
+          . /etc/os-release
+          test "$ID" = "ubuntu"
+          test "$VERSION_ID" = "26.04"
 
       - name: Set up Nucleus toolchain
         uses: ./.github/actions/setup-nucleus
@@ -42,9 +48,9 @@ jobs:
             ~/.cargo/git
             desktopApp/native/web-login/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
-            nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
+            nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
 
       - name: Install Linux native dependencies
         run: |
