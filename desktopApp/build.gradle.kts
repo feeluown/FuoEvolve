@@ -29,101 +29,10 @@ sourceSets {
     }
 }
 
-fun gitOutput(vararg args: String): String? = runCatching {
-    providers.exec {
-        workingDir = rootProject.projectDir
-        commandLine("git", *args)
-    }.standardOutput.asText.get().trim().takeIf(String::isNotBlank)
-}.getOrNull()
-
-private val versionPattern = Regex("\\d+\\.\\d+\\.\\d+")
-private val exactTaggedVersion = gitOutput(
-    "describe",
-    "--tags",
-    "--exact-match",
-    "--match",
-    "[0-9]*",
-    "HEAD",
-)?.let { tag -> versionPattern.find(tag)?.value }
-private val latestTaggedVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
-    ?.let { tag -> versionPattern.find(tag)?.value }
-
 val desktopPackageVersion = providers.gradleProperty("fuoevolve.packageVersion")
     .orElse(providers.environmentVariable("FUOEVOLVE_PACKAGE_VERSION"))
-    .orNull
-    ?.takeIf(String::isNotBlank)
-    ?: exactTaggedVersion
-    ?: latestTaggedVersion
-    ?: "0.1.0"
-
-val desktopCommitSha = providers.environmentVariable("FUOEVOLVE_COMMIT_SHA")
-    .orElse(providers.environmentVariable("GITHUB_SHA"))
-    .orNull
-    ?.takeIf(String::isNotBlank)
-    ?: gitOutput("rev-parse", "HEAD")
-    ?: "unknown"
-val desktopVersionChannel = providers.environmentVariable("FUOEVOLVE_DESKTOP_CHANNEL")
-    .orNull
-    ?.trim()
-    ?.takeIf(String::isNotBlank)
-    ?: if (exactTaggedVersion != null) "stable" else "canary"
-val desktopVersionLabel = providers.environmentVariable("FUOEVOLVE_DESKTOP_VERSION_LABEL")
-    .orNull
-    ?.trim()
-    ?.takeIf(String::isNotBlank)
-    ?: if (desktopVersionChannel == "stable") {
-        desktopPackageVersion
-    } else {
-        "$desktopPackageVersion-canary+${desktopCommitSha.take(8)}"
-    }
-
-private fun kotlinStringLiteral(value: String): String = value
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
-    .replace("$", "\\$")
-
-val generatedDesktopVersionSourceDir = layout.buildDirectory.dir("generated/sources/desktopVersion/kotlin")
-val generatedDesktopVersionSource = generatedDesktopVersionSourceDir.map { directory ->
-    directory.file("org/feeluown/mobile/nucleus/DesktopBuildInfo.kt")
-}
-val generateDesktopVersionInfo by tasks.registering {
-    group = "build"
-    description = "Generate desktop version metadata embedded into the Nucleus application."
-    inputs.property("packageVersion", desktopPackageVersion)
-    inputs.property("versionLabel", desktopVersionLabel)
-    inputs.property("commitSha", desktopCommitSha)
-    inputs.property("channel", desktopVersionChannel)
-    outputs.file(generatedDesktopVersionSource)
-
-    doLast {
-        val output = generatedDesktopVersionSource.get().asFile
-        output.parentFile.mkdirs()
-        val packageVersion = kotlinStringLiteral(desktopPackageVersion)
-        val versionLabel = kotlinStringLiteral(desktopVersionLabel)
-        val commitSha = kotlinStringLiteral(desktopCommitSha)
-        val channel = kotlinStringLiteral(desktopVersionChannel)
-        output.writeText(
-            """
-            package org.feeluown.mobile.nucleus
-
-            internal object DesktopBuildInfo {
-                const val packageVersion: String = "$packageVersion"
-                const val versionLabel: String = "$versionLabel"
-                const val commitSha: String = "$commitSha"
-                const val channel: String = "$channel"
-                const val displayVersion: String = "版本 $versionLabel"
-            }
-            """.trimIndent() + "\n",
-        )
-    }
-}
-
-kotlin.sourceSets.named("main") {
-    kotlin.srcDir(generatedDesktopVersionSourceDir)
-}
-tasks.named("compileKotlin").configure {
-    dependsOn(generateDesktopVersionInfo)
-}
+    .orElse("0.1.0")
+    .get()
 
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
