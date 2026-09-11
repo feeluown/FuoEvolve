@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Desktop-only bridge implemented by the host module that owns libmpv/JNA. */
+/** Desktop-only bridge implemented by the active desktop host/runtime. */
 interface DesktopPlatformVideoController : PlatformVideoController, AutoCloseable {
     val frame: StateFlow<ImageBitmap?>
     fun setPayload(payload: VideoPlaybackPayload?)
@@ -26,7 +26,7 @@ interface DesktopPlatformVideoController : PlatformVideoController, AutoCloseabl
 }
 
 private var desktopPlatformVideoControllerFactory: () -> DesktopPlatformVideoController = {
-    UnsupportedDesktopPlatformVideoController("桌面视频播放组件未初始化")
+    DesktopJniMpvVideoController()
 }
 
 fun installDesktopPlatformVideoControllerFactory(factory: () -> DesktopPlatformVideoController) {
