@@ -11,13 +11,13 @@ data class DesktopTextFile(
  * Tao/GraalVM host never needs to initialize Swing/AWT just to import or export a local playlist.
  */
 interface DesktopTextFileDialogProvider {
-    fun openTextFile(
+    suspend fun openTextFile(
         dialogTitle: String,
         filterDescription: String,
         extensions: List<String>,
     ): DesktopTextFile?
 
-    fun saveTextFile(
+    suspend fun saveTextFile(
         dialogTitle: String,
         suggestedFileName: String,
         filterDescription: String,
@@ -36,7 +36,7 @@ fun installDesktopTextFileDialogProviderFactory(factory: () -> DesktopTextFileDi
 private fun createDesktopTextFileDialogProvider(): DesktopTextFileDialogProvider? =
     desktopTextFileDialogProviderFactory?.invoke()
 
-internal fun openDesktopTextFile(
+internal suspend fun openDesktopTextFile(
     dialogTitle: String,
     filterDescription: String,
     extensions: List<String>,
@@ -49,7 +49,7 @@ internal fun openDesktopTextFile(
     onFeedback(throwable.message ?: "无法读取文件")
 }.getOrNull()
 
-internal fun saveDesktopTextFile(
+internal suspend fun saveDesktopTextFile(
     dialogTitle: String,
     suggestedFileName: String,
     filterDescription: String,
