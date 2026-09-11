@@ -194,6 +194,16 @@ private class IosAppContainer(
             sessionRepository = providerSessionRepository,
             settingsRepository = settingsRepository,
             scope = scope,
+            onHomeRefreshNeeded = { section ->
+                when (section) {
+                    null -> homeRefreshPort.markAllStale()
+                    ProviderDisplaySection.Recommend -> homeRefreshPort.markHomeSectionStale(HomeSection.Recommend)
+                    ProviderDisplaySection.Explore -> homeRefreshPort.markHomeSectionStale(HomeSection.Music)
+                    ProviderDisplaySection.Mine -> homeRefreshPort.markHomeSectionStale(HomeSection.Mine)
+                    ProviderDisplaySection.Search,
+                    ProviderDisplaySection.Replace -> Unit
+                }
+            },
         )
     }
 
@@ -312,7 +322,7 @@ private class IosAppContainer(
                 providerCatalogFeatureController.uiState.value.availableProviders.firstOrNull { it.providerId == providerId }?.providerName
                     ?: providerId
             },
-            onSessionChanged = homeRefreshPort::refreshAll,
+            onSessionChanged = homeRefreshPort::markAllStale,
         )
     }
 
@@ -346,6 +356,7 @@ private class IosAppContainer(
             searchController = searchController,
             settingsRepository = settingsRepository,
             scope = scope,
+            onProviderConfigurationChanged = homeRefreshPort::markAllStale,
         )
     }
 

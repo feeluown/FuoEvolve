@@ -18,7 +18,8 @@ fun createTrackNavigationPort(navigator: AppNavigator): TrackNavigationPort = Tr
  */
 interface HomeRefreshPort {
     fun refreshMine()
-    fun refreshAll()
+    fun markAllStale()
+    fun markHomeSectionStale(section: HomeSection)
 }
 
 fun createHomeRefreshPort(home: () -> HomeFeatureController): HomeRefreshPort = object : HomeRefreshPort {
@@ -26,9 +27,13 @@ fun createHomeRefreshPort(home: () -> HomeFeatureController): HomeRefreshPort = 
         home().refreshMine()
     }
 
-    override fun refreshAll() {
-        home().refreshHome(HomeSection.Recommend)
-        home().refreshHome(HomeSection.Music)
-        home().refreshMine()
+    override fun markAllStale() {
+        home().markRefreshNeeded(HomeSection.Recommend)
+        home().markRefreshNeeded(HomeSection.Music)
+        home().markRefreshNeeded(HomeSection.Mine)
+    }
+
+    override fun markHomeSectionStale(section: HomeSection) {
+        home().markRefreshNeeded(section)
     }
 }

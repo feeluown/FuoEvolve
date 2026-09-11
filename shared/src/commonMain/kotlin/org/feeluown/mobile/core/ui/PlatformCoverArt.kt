@@ -5,6 +5,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 
 enum class CoverPlaceholder {
@@ -27,9 +29,11 @@ expect fun PlatformCoverArt(
 internal expect fun rememberPlatformCoverImage(imageUrl: String?): ImageBitmap?
 
 private const val PLATFORM_COVER_IMAGE_CACHE_ENTRIES = 4
+private const val PLATFORM_COVER_IMAGE_LOAD_PERMITS = 4
 
 internal object PlatformCoverImageCache {
     private val mutex = Mutex()
+    private val loadPermits = Semaphore(PLATFORM_COVER_IMAGE_LOAD_PERMITS)
     private val images = mutableMapOf<String, ImageBitmap>()
     private val imageOrder = mutableListOf<String>()
     private val inFlight = mutableMapOf<String, CompletableDeferred<ImageBitmap?>>()
@@ -54,7 +58,7 @@ internal object PlatformCoverImageCache {
         val deferred = requireNotNull(pending)
         if (ownsLoad) {
             try {
-                val image = loader()
+                val image = loadPermits.withPermit { loader() }
                 mutex.withLock {
                     inFlight.remove(key)
                     if (image != null) {

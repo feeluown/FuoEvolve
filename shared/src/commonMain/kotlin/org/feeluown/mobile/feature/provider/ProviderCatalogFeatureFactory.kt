@@ -47,6 +47,7 @@ fun createProviderCatalogFeatureController(
     sessionRepository: ProviderSessionRepository,
     settingsRepository: AppSettingsRepository,
     scope: CoroutineScope,
+    onHomeRefreshNeeded: (ProviderDisplaySection?) -> Unit = {},
 ): ProviderCatalogFeatureController {
     val owner = createProviderCatalogFeatureOwner(
         repository = ProviderCatalogRepositoryBinding(providerRegistry, providerCatalog),
@@ -56,7 +57,7 @@ fun createProviderCatalogFeatureController(
         defaultEnabledProviderIds = DEFAULT_ENABLED_PROVIDER_IDS,
         defaultProviderOrderIds = DEFAULT_PROVIDER_ORDER_IDS,
     )
-    return BoundProviderCatalogFeatureController(owner, scope)
+    return BoundProviderCatalogFeatureController(owner, scope, onHomeRefreshNeeded)
 }
 
 private class BoundProviderCatalogFeatureController(
@@ -67,6 +68,7 @@ private class BoundProviderCatalogFeatureController(
         ProviderSessionState,
     >,
     scope: CoroutineScope,
+    private val onHomeRefreshNeeded: (ProviderDisplaySection?) -> Unit,
 ) : ProviderCatalogFeatureController {
     override val uiState: StateFlow<ProviderCatalogUiState> = owner.state
         .map { state -> state.toUiState() }
@@ -77,10 +79,25 @@ private class BoundProviderCatalogFeatureController(
         )
 
     override fun refresh() = owner.refresh()
-    override fun setProviderEnabled(providerId: String, enabled: Boolean) = owner.setProviderEnabled(providerId, enabled)
-    override fun moveProvider(providerId: String, offset: Int) = owner.moveProvider(providerId, offset)
-    override fun setDisplayProviderEnabled(section: ProviderDisplaySection, providerId: String, enabled: Boolean) =
+    override fun setProviderEnabled(providerId: String, enabled: Boolean) {
+        onHomeRefreshNeeded(null)
+        owner.setProviderEnabled(providerId, enabled)
+    }
+
+    override fun moveProvider(providerId: String, offset: Int) {
+        onHomeRefreshNeeded(null)
+        owner.moveProvider(providerId, offset)
+    }
+
+    override fun setDisplayProviderEnabled(section: ProviderDisplaySection, providerId: String, enabled: Boolean) {
+        if (section == ProviderDisplaySection.Recommend ||
+            section == ProviderDisplaySection.Explore ||
+            section == ProviderDisplaySection.Mine
+        ) {
+            onHomeRefreshNeeded(section)
+        }
         owner.setDisplayProviderEnabled(section.toCore(), providerId, enabled)
+    }
 }
 
 private class ProviderCatalogRepositoryBinding(

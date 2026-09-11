@@ -28,7 +28,10 @@ fun ProviderContentHomeFeatureSection(
 ) {
     val state = home.uiState.collectAsStateWithLifecycle().value
     val graph = LocalHomeFeatureUiGraph.current
-    val gridPreviewCapacity = LocalAppLayoutInfo.current.gridColumns.coerceAtLeast(1) * 2
+    val layoutInfo = LocalAppLayoutInfo.current
+    val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
+    val gridSpacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    val gridPreviewCapacity = gridColumns * 2
     val title = if (section == HomeSection.Recommend) "推荐" else "探索"
     val sections = if (section == HomeSection.Recommend) state.recommendSections else state.exploreSections
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
@@ -94,9 +97,13 @@ fun ProviderContentHomeFeatureSection(
                             }
                         }
                         if (entrySections.isNotEmpty()) {
-                            item(key = "explore-grid") {
-                                ProviderFeatureCoverGrid(entrySections.map { it.feature }, home::openFeature)
-                            }
+                            addProviderFeatureCoverRows(
+                                features = entrySections.map { it.feature },
+                                columns = gridColumns,
+                                spacing = gridSpacing,
+                                keyPrefix = "explore-grid",
+                                onClick = home::openFeature,
+                            )
                         }
                         previewSections.forEach { contentSection ->
                             val hasMore = contentSection.errorMessage == null && when {
@@ -118,20 +125,22 @@ fun ProviderContentHomeFeatureSection(
                                 errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
                                     ProviderContentMessage(errorMessage)
                                 }
-                                contentSection.playlists.isNotEmpty() -> item(key = "playlists:${contentSection.feature.id}") {
-                                    ProviderPlaylistGrid(
-                                        playlists = contentSection.playlists,
-                                        onClick = { home.openPlaylist(it, contentSection.feature.category) },
-                                        maxRows = 2,
-                                    )
-                                }
-                                contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
-                                    ProviderMediaItemGrid(
-                                        items = contentSection.mediaItems,
-                                        onClick = home::openMediaItem,
-                                        maxRows = 2,
-                                    )
-                                }
+                                contentSection.playlists.isNotEmpty() -> addProviderPlaylistGridRows(
+                                    playlists = contentSection.playlists,
+                                    columns = gridColumns,
+                                    spacing = gridSpacing,
+                                    keyPrefix = "playlists:${contentSection.feature.id}",
+                                    onClick = { home.openPlaylist(it, contentSection.feature.category) },
+                                    maxRows = 2,
+                                )
+                                contentSection.mediaItems.isNotEmpty() -> addProviderMediaItemGridRows(
+                                    items = contentSection.mediaItems,
+                                    columns = gridColumns,
+                                    spacing = gridSpacing,
+                                    keyPrefix = "media-items:${contentSection.feature.id}",
+                                    onClick = home::openMediaItem,
+                                    maxRows = 2,
+                                )
                                 else -> item(key = "empty:${contentSection.feature.id}") { ProviderContentMessage("暂无内容") }
                             }
                         }
@@ -204,19 +213,26 @@ fun ProviderContentHomeFeatureSection(
                                     )
                                     HorizontalDivider()
                                 }
-                                contentSection.playlists.isNotEmpty() -> item(key = "playlists:${contentSection.feature.id}") {
-                                    ProviderPlaylistGrid(
-                                        playlists = contentSection.playlists,
-                                        onClick = { home.openPlaylist(it, contentSection.feature.category) },
-                                        maxRows = 2,
-                                    )
-                                }
-                                contentSection.mediaItems.isNotEmpty() -> item(key = "media-items:${contentSection.feature.id}") {
-                                    ProviderMediaItemGrid(contentSection.mediaItems, home::openMediaItem)
-                                }
-                                contentSection.videos.isNotEmpty() -> item(key = "videos:${contentSection.feature.id}") {
-                                    ProviderVideoList(contentSection.videos, home::openVideo)
-                                }
+                                contentSection.playlists.isNotEmpty() -> addProviderPlaylistGridRows(
+                                    playlists = contentSection.playlists,
+                                    columns = gridColumns,
+                                    spacing = gridSpacing,
+                                    keyPrefix = "playlists:${contentSection.feature.id}",
+                                    onClick = { home.openPlaylist(it, contentSection.feature.category) },
+                                    maxRows = 2,
+                                )
+                                contentSection.mediaItems.isNotEmpty() -> addProviderMediaItemGridRows(
+                                    items = contentSection.mediaItems,
+                                    columns = gridColumns,
+                                    spacing = gridSpacing,
+                                    keyPrefix = "media-items:${contentSection.feature.id}",
+                                    onClick = home::openMediaItem,
+                                )
+                                contentSection.videos.isNotEmpty() -> addProviderVideoItems(
+                                    videos = contentSection.videos,
+                                    keyPrefix = "videos:${contentSection.feature.id}",
+                                    onClick = home::openVideo,
+                                )
                                 else -> item(key = "empty:${contentSection.feature.id}") { ProviderContentMessage("暂无内容") }
                             }
                         }

@@ -76,6 +76,31 @@ class ProviderAuthFeatureTest {
         assertEquals("imported-secret", owner.oauthInput("ytmusic").clientSecret)
     }
 
+    @Test
+    fun refreshAllNotifiesSessionChangeAfterSuccessfulRefresh() = runTest {
+        var sessionChanged = 0
+        val owner = createProviderAuthFeatureOwner(
+            sessionPort = FakeSessionPort(),
+            deviceAuthorizationPort = FakeDeviceAuthorizationPort(),
+            deviceCodeAssistant = FakeAssistant(),
+            oauthImportPort = ProviderOAuthImportPort { ProviderOAuthImportResult.Unknown },
+            scope = backgroundScope,
+            providerId = Provider::id,
+            providerName = { it },
+            defaultAuth = { Auth(false) },
+            authProviderName = { "Provider" },
+            authIsLoggedIn = Auth::loggedIn,
+            authUserName = { null },
+            deviceOAuthProviderId = "ytmusic",
+            onSessionChanged = { sessionChanged++ },
+        )
+
+        owner.refreshAll(listOf(Provider("p1")), refreshUserInfo = true)
+        runCurrent()
+
+        assertEquals(1, sessionChanged)
+    }
+
     private data class Provider(val id: String)
     private data class Auth(val loggedIn: Boolean)
     private data class Session(
