@@ -132,6 +132,12 @@ runs:
         channel=$channel
         commitSha=$commit_sha
         EOF
+        {
+          echo "FUOEVOLVE_PACKAGE_VERSION=$package_version"
+          echo "FUOEVOLVE_DESKTOP_CHANNEL=$channel"
+          echo "FUOEVOLVE_DESKTOP_VERSION_LABEL=$version_label"
+          echo "FUOEVOLVE_COMMIT_SHA=$commit_sha"
+        } >> "$GITHUB_ENV"
         echo "Desktop version: $version_label ($channel, $commit_sha)"
 
     - name: Install packaging tools (Linux)
