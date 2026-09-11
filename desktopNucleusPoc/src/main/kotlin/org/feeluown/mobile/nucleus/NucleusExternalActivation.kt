@@ -3,7 +3,9 @@ package org.feeluown.mobile.nucleus
 import dev.nucleusframework.core.runtime.SingleInstanceManager
 import java.net.URI
 import java.nio.file.Files
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * Nucleus single-instance transport with an application payload.
@@ -13,49 +15,66 @@ import kotlinx.coroutines.flow.MutableSharedFlow
  * the secondary process arguments into the restore-request payload.
  */
 internal class NucleusExternalActivation private constructor(
-    val inputs: MutableSharedFlow<String>,
-    val focusRequests: MutableSharedFlow<Unit>,
+    private val inputChannel: Channel<String>,
+    private val focusChannel: Channel<Unit>,
 ) {
+    val inputs: Flow<String> = inputChannel.receiveAsFlow()
+    val focusRequests: Flow<Unit> = focusChannel.receiveAsFlow()
+
+    fun emitInput(value: String) {
+        value.takeIf(String::isNotBlank)?.let(inputChannel::trySend)
+    }
+
     companion object {
         fun open(args: Array<String>): NucleusExternalActivation? {
-            val inputs = MutableSharedFlow<String>(
-                replay = EXTERNAL_INPUT_REPLAY,
-                extraBufferCapacity = EXTERNAL_INPUT_REPLAY,
-            )
-            val focusRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+            val inputChannel = Channel<String>(Channel.UNLIMITED)
+            val focusChannel = Channel<Unit>(Channel.UNLIMITED)
 
             // Nucleus onDeepLink handles cold-start URI arguments itself. Seed only plain .fuo
             // paths here so file:// URIs are not delivered twice after composition starts.
-            args.asSequence()
-                .map(::normalizeArgument)
-                .filter { input -> isFuoPlaylistArgument(input) && !isUriArgument(input) }
-                .forEach { input -> inputs.tryEmit(input) }
+            nucleusColdStartFileInputs(args).forEach(inputChannel::trySend)
 
             val isPrimary = SingleInstanceManager.isSingleInstance(
                 onRestoreFileCreated = {
-                    Files.writeString(this, encodeArguments(args))
+                    Files.writeString(this, encodeNucleusActivationArguments(args))
                 },
                 onRestoreRequest = {
-                    val forwarded = runCatching { decodeArguments(Files.readString(this)) }
-                        .getOrDefault(emptyList())
-                    forwarded
-                        .map(::normalizeArgument)
-                        .filter(::isExternalInputArgument)
-                        .forEach { input -> inputs.tryEmit(input) }
-                    focusRequests.tryEmit(Unit)
+                    val forwarded = runCatching {
+                        decodeNucleusActivationArguments(Files.readString(this))
+                    }.getOrDefault(emptyList())
+                    nucleusForwardedExternalInputs(forwarded.toTypedArray()).forEach(inputChannel::trySend)
+                    focusChannel.trySend(Unit)
                 },
             )
-            return if (isPrimary) NucleusExternalActivation(inputs, focusRequests) else null
+            if (!isPrimary) {
+                inputChannel.close()
+                focusChannel.close()
+                return null
+            }
+            return NucleusExternalActivation(inputChannel, focusChannel)
         }
     }
 }
 
-private fun encodeArguments(args: Array<String>): String = args.joinToString(ARGUMENT_SEPARATOR.toString())
+internal fun nucleusColdStartFileInputs(args: Array<String>): List<String> =
+    args.asSequence()
+        .map(::normalizeNucleusActivationArgument)
+        .filter { input -> isFuoPlaylistArgument(input) && !isUriArgument(input) }
+        .toList()
 
-private fun decodeArguments(value: String): List<String> =
+internal fun nucleusForwardedExternalInputs(args: Array<String>): List<String> =
+    args.asSequence()
+        .map(::normalizeNucleusActivationArgument)
+        .filter(::isExternalInputArgument)
+        .toList()
+
+internal fun encodeNucleusActivationArguments(args: Array<String>): String =
+    args.joinToString(ARGUMENT_SEPARATOR.toString())
+
+internal fun decodeNucleusActivationArguments(value: String): List<String> =
     value.split(ARGUMENT_SEPARATOR).filter(String::isNotBlank)
 
-private fun normalizeArgument(value: String): String = value.trim().trim('"')
+private fun normalizeNucleusActivationArgument(value: String): String = value.trim().trim('"')
 
 private fun isExternalInputArgument(value: String): Boolean =
     isFuoPlaylistArgument(value) || isUriArgument(value)
@@ -69,6 +88,5 @@ private fun isUriArgument(value: String): Boolean {
     return runCatching { URI(value).scheme != null }.getOrDefault(false)
 }
 
-private const val EXTERNAL_INPUT_REPLAY = 16
 private const val ARGUMENT_SEPARATOR = '\u0000'
 private val WINDOWS_ABSOLUTE_PATH = Regex("^[A-Za-z]:[\\\\/].*")
