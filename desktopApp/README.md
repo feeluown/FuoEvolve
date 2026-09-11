@@ -39,7 +39,7 @@ Supported target formats are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is a
 | macOS arm64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | Arch Linux x64 | Pacman/Arch package | Native capture library bundled; mpv, Libsecret, PipeWire/PulseAudio, WebKitGTK and UI ABI dependencies are distribution-managed |
-| Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 24.04 LTS baseline |
+| Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 26.04 LTS baseline |
 
 No desktop artifact bundles a JVM.
 
@@ -69,7 +69,7 @@ Release tags such as `1.2.3` are embedded as the desktop package version and dis
 ## CI and release
 
 - `.github/workflows/desktop-tests.yml` validates shared desktop/runtime tests and native resource staging on Linux, Windows and macOS.
-- `.github/workflows/desktop-packaging.yml` produces MSI, both DMGs, AppImage and Arch packages.
+- `.github/workflows/desktop-packaging.yml` produces MSI, both DMGs, AppImage and Arch packages. AppImage uses the pinned Ubuntu 26.04 LTS runner baseline.
 - `master-canary.yml` publishes preview artifacts from `master`.
 - `release.yml` publishes the same desktop package matrix alongside Android for release tags and includes SHA-256 checksums.
 
