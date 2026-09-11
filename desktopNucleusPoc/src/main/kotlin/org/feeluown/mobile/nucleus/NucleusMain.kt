@@ -1,12 +1,15 @@
 package org.feeluown.mobile.nucleus
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberWindowState
@@ -41,16 +44,20 @@ import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 import org.feeluown.mobile.installDesktopTextFileDialogProviderFactory
+import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
 
 private const val SMOKE_ENV = "FUOEVOLVE_NUCLEUS_POC_SMOKE"
 private const val PLAYBACK_SMOKE_ENV = "FUOEVOLVE_NUCLEUS_PLAYBACK_SMOKE"
 private const val LINUX_TRAY_PROBE_TIMEOUT_SECONDS = 1L
 
+@Suppress("DEPRECATION")
 fun main(args: Array<String>) {
     configurePackagedNativeRuntime()
     installDesktopAppLogger()
 
     val activation = NucleusExternalActivation.open(args) ?: return
+    val oauthDeviceCodeAssistant = NucleusOAuthDeviceCodeAssistant()
+    installFallbackOAuthDeviceCodeAssistant(oauthDeviceCodeAssistant)
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     installDesktopListeningHistorySinkFactory(::createDesktopRuntimeListeningHistorySink)
     installDesktopLocalMusicRepositoryFactory(::createDesktopRuntimeLocalMusicRepository)
@@ -143,6 +150,22 @@ fun main(args: Array<String>) {
             minimumSize = DpSize(900.dp, 600.dp),
             title = "FuoEvolve",
         ) {
+            val clipboardManager = LocalClipboardManager.current
+            DisposableEffect(oauthDeviceCodeAssistant, clipboardManager) {
+                val clipboardWriter: (String) -> Unit = { value ->
+                    uiScope.launch {
+                        runCatching {
+                            clipboardManager.setText(AnnotatedString(value))
+                        }
+                    }
+                }
+                oauthDeviceCodeAssistant.bindClipboardWriter(clipboardWriter)
+                onDispose {
+                    oauthDeviceCodeAssistant.unbindClipboardWriter(clipboardWriter)
+                    oauthDeviceCodeAssistant.clearUserCodeNotification()
+                }
+            }
+
             LaunchedEffect(activationRequest) {
                 if (activationRequest > 0L) {
                     nucleusWindow.show()
