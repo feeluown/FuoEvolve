@@ -54,7 +54,7 @@ internal class FileKitDesktopTextFileDialogProvider : DesktopTextFileDialogProvi
         val picked = FileKit.openFileSaver(
             suggestedName = suggestedName,
             defaultExtension = defaultExtension,
-            allowedExtensions = normalizedExtensions.takeIf(List<String>::isNotEmpty)?.toSet(),
+            allowedExtensions = normalizedExtensions.takeIf { it.isNotEmpty() }?.toSet(),
         ) ?: return false
 
         withContext(Dispatchers.IO) {
