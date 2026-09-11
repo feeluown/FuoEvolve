@@ -12,14 +12,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberWindowState
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.NucleusBackend
-import dev.nucleusframework.application.SingleInstanceRestoreEffect
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.composenativetray.tray.api.Tray
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -29,12 +27,20 @@ import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.PlayerStatus
 import org.feeluown.mobile.TrackSourceType
+import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.desktop.DesktopMpvPlaybackEngine
+import org.feeluown.mobile.desktop.createDesktopNativeTextFileDialogProvider
+import org.feeluown.mobile.desktop.createDesktopRuntimeListeningHistorySink
+import org.feeluown.mobile.desktop.createDesktopRuntimeLocalMusicRepository
 import org.feeluown.mobile.desktop.createDesktopSecureProviderCredentialStore
+import org.feeluown.mobile.desktop.createPersistentDesktopPlaybackEngine
 import org.feeluown.mobile.installDesktopAppLogger
+import org.feeluown.mobile.installDesktopListeningHistorySinkFactory
+import org.feeluown.mobile.installDesktopLocalMusicRepositoryFactory
 import org.feeluown.mobile.installDesktopPlaybackEngineFactory
 import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
+import org.feeluown.mobile.installDesktopTextFileDialogProviderFactory
 
 private const val SMOKE_ENV = "FUOEVOLVE_NUCLEUS_POC_SMOKE"
 private const val PLAYBACK_SMOKE_ENV = "FUOEVOLVE_NUCLEUS_PLAYBACK_SMOKE"
@@ -43,23 +49,32 @@ private const val LINUX_TRAY_PROBE_TIMEOUT_SECONDS = 1L
 fun main(args: Array<String>) {
     configurePackagedNativeRuntime()
     installDesktopAppLogger()
+
+    val activation = NucleusExternalActivation.open(args) ?: return
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
+    installDesktopListeningHistorySinkFactory(::createDesktopRuntimeListeningHistorySink)
+    installDesktopLocalMusicRepositoryFactory(::createDesktopRuntimeLocalMusicRepository)
+    installDesktopTextFileDialogProviderFactory {
+        createDesktopNativeTextFileDialogProvider(requireNativeLinuxPortal = true)
+    }
     installDesktopPlaybackEngineFactory {
-        DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener) }
+        createPersistentDesktopPlaybackEngine(
+            delegate = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener) },
+            resumeStore = createDesktopPlaybackResumeStore(),
+        )
     }
 
     val smokeMode = System.getenv(SMOKE_ENV) == "1"
     val playbackSmokeFile = System.getenv(PLAYBACK_SMOKE_ENV)
         ?.takeIf(String::isNotBlank)
         ?.let(::File)
-    val externalInputs = MutableSharedFlow<String>(
-        replay = 1,
-        extraBufferCapacity = 8,
-    )
 
     nucleusApplication(
         args = args,
         backend = NucleusBackend.Tao,
+        // Keep Nucleus' public lock/watcher implementation, but own the restore payload so ordinary
+        // file-association paths can be forwarded alongside URI deep links.
+        enableSingleInstance = false,
     ) {
         val uiScope = rememberCoroutineScope()
         var windowVisible by remember { mutableStateOf(true) }
@@ -81,12 +96,12 @@ fun main(args: Array<String>) {
         }
 
         onDeepLink { uri ->
-            externalInputs.tryEmit(uri.toString())
+            activation.emitInput(uri.toString())
             uiScope.launch { showWindow() }
         }
 
-        SingleInstanceRestoreEffect {
-            showWindow()
+        LaunchedEffect(activation) {
+            activation.focusRequests.collect { showWindow() }
         }
 
         installDesktopPlaybackSessionIntegrationFactory { playbackSession ->
@@ -95,7 +110,7 @@ fun main(args: Array<String>) {
                 onRaise = { uiScope.launch { showWindow() } },
                 onQuit = { uiScope.launch { requestExit() } },
                 onOpenUri = { uri ->
-                    externalInputs.tryEmit(uri)
+                    activation.emitInput(uri)
                     uiScope.launch { showWindow() }
                 },
             )
@@ -187,7 +202,7 @@ fun main(args: Array<String>) {
                 }
             }
 
-            DesktopAppHost(externalInputs = externalInputs)
+            DesktopAppHost(externalInputs = activation.inputs)
         }
     }
 }

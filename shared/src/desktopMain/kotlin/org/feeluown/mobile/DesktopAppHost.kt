@@ -431,30 +431,34 @@ private class DesktopAppContainer {
     }
 
     fun importLocalPlaylistFile() {
-        val file = openDesktopTextFile(
-            dialogTitle = "导入本地歌单",
-            filterDescription = "FeelUOwn 歌单 (*.fuo)",
-            extensions = listOf("fuo"),
-            onFeedback = appViewModel::showFeedback,
-        ) ?: return
-        if (file.content.isBlank()) {
-            appViewModel.showFeedback("无法读取本地歌单文件")
-            return
+        scope.launch {
+            val file = openDesktopTextFile(
+                dialogTitle = "导入本地歌单",
+                filterDescription = "FeelUOwn 歌单 (*.fuo)",
+                extensions = listOf("fuo"),
+                onFeedback = appViewModel::showFeedback,
+            ) ?: return@launch
+            if (file.content.isBlank()) {
+                appViewModel.showFeedback("无法读取本地歌单文件")
+                return@launch
+            }
+            runCatching { localPlaylistFeatureController.prepareImport(file.fileName, file.content) }
+                .onFailure { appViewModel.showFeedback(it.message ?: "无法解析本地歌单文件") }
         }
-        runCatching { localPlaylistFeatureController.prepareImport(file.fileName, file.content) }
-            .onFailure { appViewModel.showFeedback(it.message ?: "无法解析本地歌单文件") }
     }
 
     fun exportLocalPlaylistFile(fileName: String, content: String) {
-        val saved = saveDesktopTextFile(
-            dialogTitle = "导出本地歌单",
-            suggestedFileName = fileName,
-            filterDescription = "FeelUOwn 歌单 (*.fuo)",
-            extensions = listOf("fuo"),
-            content = content,
-            onFeedback = appViewModel::showFeedback,
-        )
-        if (saved) appViewModel.showFeedback("本地歌单已导出")
+        scope.launch {
+            val saved = saveDesktopTextFile(
+                dialogTitle = "导出本地歌单",
+                suggestedFileName = fileName,
+                filterDescription = "FeelUOwn 歌单 (*.fuo)",
+                extensions = listOf("fuo"),
+                content = content,
+                onFeedback = appViewModel::showFeedback,
+            )
+            if (saved) appViewModel.showFeedback("本地歌单已导出")
+        }
     }
 
     fun close() {

@@ -1,81 +1,71 @@
 package org.feeluown.mobile
 
-import java.io.File
-import javax.swing.JFileChooser
-import javax.swing.JOptionPane
-import javax.swing.filechooser.FileNameExtensionFilter
-
-internal data class DesktopTextFile(
+/** File payload returned by the desktop-native file dialog boundary. */
+data class DesktopTextFile(
     val fileName: String,
     val content: String,
 )
 
 /**
- * Desktop-only file picker boundary. Common features deal only in names/content; Swing remains at
- * the platform edge and therefore cannot leak into shared feature contracts.
+ * Host-provided desktop file dialogs. Implementations are intentionally outside `shared` so the
+ * Tao/GraalVM host never needs to initialize Swing/AWT just to import or export a local playlist.
  */
-internal fun openDesktopTextFile(
+interface DesktopTextFileDialogProvider {
+    suspend fun openTextFile(
+        dialogTitle: String,
+        filterDescription: String,
+        extensions: List<String>,
+    ): DesktopTextFile?
+
+    suspend fun saveTextFile(
+        dialogTitle: String,
+        suggestedFileName: String,
+        filterDescription: String,
+        extensions: List<String>,
+        content: String,
+    ): Boolean
+}
+
+@Volatile
+private var desktopTextFileDialogProviderFactory: (() -> DesktopTextFileDialogProvider)? = null
+
+fun installDesktopTextFileDialogProviderFactory(factory: () -> DesktopTextFileDialogProvider) {
+    desktopTextFileDialogProviderFactory = factory
+}
+
+private fun createDesktopTextFileDialogProvider(): DesktopTextFileDialogProvider? =
+    desktopTextFileDialogProviderFactory?.invoke()
+
+internal suspend fun openDesktopTextFile(
     dialogTitle: String,
     filterDescription: String,
     extensions: List<String>,
     onFeedback: (String) -> Unit,
-): DesktopTextFile? {
-    val chooser = desktopTextFileChooser(filterDescription, extensions).apply {
-        this.dialogTitle = dialogTitle
-        fileSelectionMode = JFileChooser.FILES_ONLY
-    }
-    if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) return null
+): DesktopTextFile? = runCatching {
+    val provider = createDesktopTextFileDialogProvider()
+        ?: error("桌面文件选择器未初始化")
+    provider.openTextFile(dialogTitle, filterDescription, extensions)
+}.onFailure { throwable ->
+    onFeedback(throwable.message ?: "无法读取文件")
+}.getOrNull()
 
-    return runCatching {
-        val file = chooser.selectedFile
-        DesktopTextFile(file.name, file.readText(Charsets.UTF_8))
-    }.onFailure { onFeedback(it.message ?: "无法读取文件") }
-        .getOrNull()
-}
-
-internal fun saveDesktopTextFile(
+internal suspend fun saveDesktopTextFile(
     dialogTitle: String,
     suggestedFileName: String,
     filterDescription: String,
     extensions: List<String>,
     content: String,
     onFeedback: (String) -> Unit,
-): Boolean {
-    val chooser = desktopTextFileChooser(filterDescription, extensions).apply {
-        this.dialogTitle = dialogTitle
-        selectedFile = File(suggestedFileName)
-    }
-    if (chooser.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return false
-
-    val target = chooser.selectedFile.withDefaultExtension(extensions.firstOrNull())
-    if (target.exists()) {
-        val overwrite = JOptionPane.showConfirmDialog(
-            null,
-            "${target.name} 已存在，是否覆盖？",
-            dialogTitle,
-            JOptionPane.YES_NO_OPTION,
-            JOptionPane.WARNING_MESSAGE,
-        )
-        if (overwrite != JOptionPane.YES_OPTION) return false
-    }
-
-    return runCatching { target.writeText(content, Charsets.UTF_8) }
-        .onFailure { onFeedback(it.message ?: "写入文件失败") }
-        .isSuccess
-}
-
-private fun desktopTextFileChooser(
-    filterDescription: String,
-    extensions: List<String>,
-): JFileChooser = JFileChooser().apply {
-    val normalized = extensions.map { it.trim().removePrefix(".") }.filter(String::isNotBlank)
-    if (normalized.isNotEmpty()) {
-        fileFilter = FileNameExtensionFilter(filterDescription, *normalized.toTypedArray())
-    }
-}
-
-private fun File.withDefaultExtension(extension: String?): File {
-    val normalized = extension?.trim()?.removePrefix(".").orEmpty()
-    if (normalized.isBlank() || this.extension.isNotBlank()) return this
-    return File(parentFile, "$name.$normalized")
-}
+): Boolean = runCatching {
+    val provider = createDesktopTextFileDialogProvider()
+        ?: error("桌面文件选择器未初始化")
+    provider.saveTextFile(
+        dialogTitle = dialogTitle,
+        suggestedFileName = suggestedFileName,
+        filterDescription = filterDescription,
+        extensions = extensions,
+        content = content,
+    )
+}.onFailure { throwable ->
+    onFeedback(throwable.message ?: "写入文件失败")
+}.getOrDefault(false)

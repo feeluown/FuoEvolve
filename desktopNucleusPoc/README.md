@@ -56,12 +56,19 @@ The Nucleus path includes:
 - desktop settings persistence and provider HTTP cache;
 - the same OS-backed provider credential namespace used by the previous JVM host;
 - the Rust system-WebView login helper as a packaged resource;
-- the shared `desktopRuntime` libmpv playback state machine;
+- the shared `desktopRuntime` libmpv playback state machine with persistent playback-resume state;
 - direct JNI libmpv playback on Windows, macOS and Linux packaging targets;
+- local-music indexing, metadata editing and sidecar lyrics through the shared desktop runtime;
+- SQLDelight listening-history persistence;
+- Nucleus `media-control` integration for Windows SMTC, macOS Now Playing / Remote Command Center and Linux MPRIS;
+- ComposeNativeTray close-to-tray support with a safe no-tray fallback;
+- Nucleus single-instance locking plus URI and `.fuo` file activation forwarding;
+- `fuo://` protocol and `.fuo` file-association packaging;
+- FileKit OS-native Open/Save dialogs instead of Swing file choosers;
 - stale-event correlation for rapid source replacement;
 - GraalVM Native Image compilation and native installer packaging.
 
-Local music indexing, listening history, tray, external activation, video rendering, and system media integration still need to be moved from the legacy JVM host behind shared desktop runtime boundaries. They are not pulled into Nucleus implicitly by the packaging migration.
+Remaining desktop parity work is intentionally separate: video rendering, native OAuth device-code clipboard/notification assistance, desktop app updates, and dedicated Native Image runtime validation for microphone capture/audio recognition.
 
 ## CI
 
