@@ -54,7 +54,9 @@ fun main(args: Array<String>) {
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     installDesktopListeningHistorySinkFactory(::createDesktopRuntimeListeningHistorySink)
     installDesktopLocalMusicRepositoryFactory(::createDesktopRuntimeLocalMusicRepository)
-    installDesktopTextFileDialogProviderFactory(::createDesktopNativeTextFileDialogProvider)
+    installDesktopTextFileDialogProviderFactory {
+        createDesktopNativeTextFileDialogProvider(requireNativeLinuxPortal = true)
+    }
     installDesktopPlaybackEngineFactory {
         createPersistentDesktopPlaybackEngine(
             delegate = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener) },
