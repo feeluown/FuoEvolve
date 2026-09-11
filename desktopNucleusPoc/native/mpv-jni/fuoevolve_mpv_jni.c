@@ -350,7 +350,7 @@ JNIEXPORT jstring JNICALL
 Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeGetProperty(
     JNIEnv *env, jobject self, jlong handle_value, jstring name_value
 ) {
-    return Java_org_feeluown_mobile_nucleus_JniMpvVideoApi_nativeGetProperty(
+    return Java_org_feeluown_mobile_nucleus_JniMpvApi_nativeGetProperty(
         env, self, handle_value, name_value
     );
 }
