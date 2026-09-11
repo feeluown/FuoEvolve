@@ -94,7 +94,7 @@ fun main(args: Array<String>) {
         }
 
         onDeepLink { uri ->
-            activation.inputs.tryEmit(uri.toString())
+            activation.emitInput(uri.toString())
             uiScope.launch { showWindow() }
         }
 
@@ -108,7 +108,7 @@ fun main(args: Array<String>) {
                 onRaise = { uiScope.launch { showWindow() } },
                 onQuit = { uiScope.launch { requestExit() } },
                 onOpenUri = { uri ->
-                    activation.inputs.tryEmit(uri)
+                    activation.emitInput(uri)
                     uiScope.launch { showWindow() }
                 },
             )
