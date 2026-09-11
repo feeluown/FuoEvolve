@@ -347,6 +347,11 @@ nucleus.application {
         targetFormats(*nucleusTargetFormats)
         appResourcesRootDir.set(nucleusAppResources)
         protocol("FuoEvolve", "fuo")
+        fileAssociation(
+            mimeType = "application/x-fuo",
+            extension = "fuo",
+            description = "FeelUOwn Playlist",
+        )
 
         windows {
             packageName = "FuoEvolve"
