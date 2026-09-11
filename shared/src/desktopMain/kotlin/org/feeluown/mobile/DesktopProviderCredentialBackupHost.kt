@@ -5,7 +5,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun DesktopProviderCredentialBackupHost(
@@ -15,6 +17,7 @@ internal fun DesktopProviderCredentialBackupHost(
     onFeedback: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var exportTarget by remember { mutableStateOf<ProviderCredentialBackupTarget?>(null) }
     val actions = ProviderCredentialBackupActions(
         exportAll = {
@@ -30,7 +33,9 @@ internal fun DesktopProviderCredentialBackupHost(
             )
         },
         importBackup = {
-            openCredentialBackupFile(backup, onFeedback)
+            scope.launch {
+                openCredentialBackupFile(backup, onFeedback)
+            }
         },
     )
 
@@ -40,7 +45,11 @@ internal fun DesktopProviderCredentialBackupHost(
             backup = backup,
             exportTarget = exportTarget,
             onDismissExport = { exportTarget = null },
-            onExportFile = { fileName -> saveCredentialBackupFile(backup, fileName, onFeedback) },
+            onExportFile = { fileName ->
+                scope.launch {
+                    saveCredentialBackupFile(backup, fileName, onFeedback)
+                }
+            },
             onRestored = { restoredProviderIds ->
                 val restored = restoredProviderIds.toSet()
                 refreshProviders(availableProviders().filter { it.providerId in restored })
@@ -50,7 +59,7 @@ internal fun DesktopProviderCredentialBackupHost(
     }
 }
 
-private fun openCredentialBackupFile(
+private suspend fun openCredentialBackupFile(
     backup: ProviderCredentialBackup,
     onFeedback: (String) -> Unit,
 ) {
@@ -64,7 +73,7 @@ private fun openCredentialBackupFile(
     else backup.stageImport(file.content)
 }
 
-private fun saveCredentialBackupFile(
+private suspend fun saveCredentialBackupFile(
     backup: ProviderCredentialBackup,
     fileName: String,
     onFeedback: (String) -> Unit,
