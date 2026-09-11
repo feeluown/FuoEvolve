@@ -15,50 +15,69 @@ import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
 
 /**
+ * GPU-facing extension used by the Nucleus/Tao host. The host owns the GL context lifetime and
+ * calls these methods only while Tao has made that context current.
+ */
+interface DesktopOpenGlVideoController {
+    fun createOpenGlRenderContext(): Long
+    fun updateOpenGlRenderContext(renderContext: Long): Boolean
+    fun createOpenGlRenderTarget(width: Int, height: Int): Long
+    fun openGlRenderTargetFramebuffer(renderTarget: Long): Int
+    fun renderOpenGl(renderContext: Long, renderTarget: Long)
+    fun reportOpenGlSwap(renderContext: Long)
+    fun destroyOpenGlRenderTarget(renderTarget: Long)
+    fun destroyOpenGlRenderContext(renderContext: Long)
+    fun enableSoftwareRendering()
+}
+
+/**
  * GraalVM-friendly desktop video controller backed by the same libmpv JNI bridge packaged by the
  * Nucleus desktop runtime. The legacy JVM host installs its JNA controller explicitly, so this
- * controller is only used when no host-specific factory overrides the desktop default.
+ * controller is only used by the Native/Nucleus host.
+ *
+ * A render context is intentionally created lazily. Windows/Linux attach libmpv to Tao's active
+ * OpenGL/ANGLE context. macOS and any failed GPU setup explicitly enable the software fallback.
  */
-internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
+internal class DesktopJniMpvVideoController :
+    DesktopPlatformVideoController,
+    DesktopOpenGlVideoController {
     private val closed = AtomicBoolean(false)
+    private val renderContextLock = Any()
     private val mutableState = MutableStateFlow(PlatformVideoPlaybackState())
     override val state: StateFlow<PlatformVideoPlaybackState> = mutableState.asStateFlow()
     private val mutableFrame = MutableStateFlow<ImageBitmap?>(null)
     override val frame: StateFlow<ImageBitmap?> = mutableFrame.asStateFlow()
 
     private val handle: Long
-    private val renderContext: Long
     private val eventThread: Thread
     private val renderThread: Thread
 
     @Volatile private var viewportWidth = 0
     @Volatile private var viewportHeight = 0
     @Volatile private var playbackActive = false
+    @Volatile private var softwareRenderContext = 0L
+    @Volatile private var openGlRenderContext = 0L
+    @Volatile private var lastPipelineDescription: String? = null
 
     init {
         DesktopJniMpvVideoBridgeLoader.ensureLoaded()
         handle = DesktopJniMpvVideoApi.nativeCreate()
         check(handle != 0L) { "libmpv mpv_create() returned null for video" }
-        var createdRenderContext = 0L
         try {
             setOption("config", "no")
             setOption("terminal", "no")
             setOption("input-default-bindings", "no")
             setOption("ytdl", "no")
             setOption("vo", "libmpv")
-            setOption("hwdec", "no")
+            // Prefer the OS hardware decoder. libmpv automatically falls back to software when
+            // the codec, device, driver, or GPU interop path cannot satisfy the request.
+            setOption("hwdec", "auto")
             setOption("audio-display", "no")
             checkMpv(DesktopJniMpvVideoApi.nativeInitialize(handle), "mpv_initialize video")
-            createdRenderContext = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
-            check(createdRenderContext != 0L) { "libmpv software video render context creation failed" }
         } catch (throwable: Throwable) {
-            if (createdRenderContext != 0L) {
-                DesktopJniMpvVideoApi.nativeFreeRenderContext(createdRenderContext)
-            }
             DesktopJniMpvVideoApi.nativeDestroy(handle)
             throw throwable
         }
-        renderContext = createdRenderContext
         eventThread = thread(
             start = true,
             isDaemon = true,
@@ -76,6 +95,7 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
     override fun setPayload(payload: VideoPlaybackPayload?) {
         ensureOpen()
         mutableFrame.value = null
+        lastPipelineDescription = null
         if (payload == null) {
             playbackActive = false
             command("stop")
@@ -122,13 +142,106 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
         command("seek", (positionMs.coerceAtLeast(0L) / 1000.0).toString(), "absolute")
     }
 
+    override fun createOpenGlRenderContext(): Long = synchronized(renderContextLock) {
+        ensureOpen()
+        check(softwareRenderContext == 0L) {
+            "software libmpv video renderer is already active"
+        }
+        if (openGlRenderContext != 0L) return@synchronized openGlRenderContext
+        val context = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderContext(handle)
+        check(context != 0L) { "libmpv OpenGL video render context creation failed" }
+        openGlRenderContext = context
+        AppLogger.i("DesktopVideo", "attached libmpv OpenGL renderer with hwdec=auto")
+        context
+    }
+
+    override fun updateOpenGlRenderContext(renderContext: Long): Boolean {
+        ensureOpenGlContext(renderContext)
+        return DesktopJniMpvVideoApi.nativeUpdateRenderContext(renderContext) and
+            MPV_RENDER_UPDATE_FRAME != 0L
+    }
+
+    override fun createOpenGlRenderTarget(width: Int, height: Int): Long {
+        ensureOpen()
+        require(width > 0 && height > 0) { "OpenGL video render target must have positive dimensions" }
+        val target = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderTarget(width, height)
+        check(target != 0L) { "OpenGL video render target creation failed" }
+        return target
+    }
+
+    override fun openGlRenderTargetFramebuffer(renderTarget: Long): Int {
+        ensureOpen()
+        val framebuffer = DesktopJniMpvVideoApi.nativeOpenGlRenderTargetFramebuffer(renderTarget)
+        check(framebuffer > 0) { "OpenGL video render target has no framebuffer" }
+        return framebuffer
+    }
+
+    override fun renderOpenGl(renderContext: Long, renderTarget: Long) {
+        ensureOpenGlContext(renderContext)
+        check(renderTarget != 0L) { "OpenGL video render target is closed" }
+        DesktopJniMpvVideoApi.nativeRenderOpenGl(renderContext, renderTarget)
+    }
+
+    override fun reportOpenGlSwap(renderContext: Long) {
+        ensureOpenGlContext(renderContext)
+        DesktopJniMpvVideoApi.nativeReportSwap(renderContext)
+    }
+
+    override fun destroyOpenGlRenderTarget(renderTarget: Long) {
+        if (renderTarget != 0L) DesktopJniMpvVideoApi.nativeDestroyOpenGlRenderTarget(renderTarget)
+    }
+
+    override fun destroyOpenGlRenderContext(renderContext: Long) {
+        if (renderContext == 0L) return
+        synchronized(renderContextLock) {
+            if (openGlRenderContext != renderContext) return
+            DesktopJniMpvVideoApi.nativeFreeRenderContext(renderContext)
+            openGlRenderContext = 0L
+            lastPipelineDescription = null
+        }
+    }
+
+    override fun enableSoftwareRendering() {
+        synchronized(renderContextLock) {
+            ensureOpen()
+            if (softwareRenderContext != 0L) return
+            check(openGlRenderContext == 0L) {
+                "OpenGL libmpv video renderer is already active"
+            }
+            val context = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
+            check(context != 0L) { "libmpv software video render context creation failed" }
+            softwareRenderContext = context
+            AppLogger.w("DesktopVideo", "using software video rendering fallback")
+        }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         playbackActive = false
         DesktopJniMpvVideoApi.nativeWakeup(handle)
         if (Thread.currentThread() !== eventThread) runCatching { eventThread.join(2_000) }
         if (Thread.currentThread() !== renderThread) runCatching { renderThread.join(2_000) }
-        DesktopJniMpvVideoApi.nativeFreeRenderContext(renderContext)
+
+        val gpuContextStillAttached = synchronized(renderContextLock) {
+            softwareRenderContext.takeIf { it != 0L }?.let { context ->
+                DesktopJniMpvVideoApi.nativeFreeRenderContext(context)
+                softwareRenderContext = 0L
+            }
+            openGlRenderContext != 0L
+        }
+        if (gpuContextStillAttached) {
+            // The normal Compose lifecycle disposes the host GPU surface first, while its GL
+            // context can still be made current. Do not attempt OpenGL teardown without that
+            // context here; leaking only on an abnormal disposal order is safer than a driver
+            // crash. The process will reclaim it on exit.
+            AppLogger.w(
+                "DesktopVideo",
+                "OpenGL video surface still attached during controller close; deferring native teardown",
+            )
+            mutableFrame.value = null
+            return
+        }
+
         DesktopJniMpvVideoApi.nativeDestroy(handle)
         mutableFrame.value = null
     }
@@ -146,6 +259,7 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
                                 isPlaying = getProperty("pause") != "yes",
                                 errorMessage = null,
                             )
+                            publishPipelineIfChanged()
                         }
                         event.startsWith("end:") -> {
                             playbackActive = false
@@ -194,10 +308,32 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
             videoWidth = getProperty("video-params/w")?.toIntOrNull()?.coerceAtLeast(0) ?: current.videoWidth,
             videoHeight = getProperty("video-params/h")?.toIntOrNull()?.coerceAtLeast(0) ?: current.videoHeight,
         )
+        publishPipelineIfChanged()
+    }
+
+    private fun publishPipelineIfChanged() {
+        val renderer = when {
+            openGlRenderContext != 0L -> "opengl-gpu"
+            softwareRenderContext != 0L -> "software"
+            else -> "pending"
+        }
+        val hwdec = getProperty("hwdec-current")
+            ?.takeIf { it.isNotBlank() && !it.equals("no", ignoreCase = true) }
+            ?: "software"
+        val codec = getProperty("video-codec")?.takeIf(String::isNotBlank) ?: "unknown"
+        val description = "decoder=$hwdec renderer=$renderer codec=$codec"
+        if (description == lastPipelineDescription) return
+        lastPipelineDescription = description
+        AppLogger.i("DesktopVideo", description)
     }
 
     private fun renderLoop() {
         while (!closed.get()) {
+            val renderContext = softwareRenderContext
+            if (renderContext == 0L) {
+                Thread.sleep(80L)
+                continue
+            }
             val (width, height) = boundedDesktopJniVideoRenderSize(viewportWidth, viewportHeight)
             if (!playbackActive || width <= 0 || height <= 0) {
                 Thread.sleep(if (playbackActive) 30L else 80L)
@@ -228,6 +364,13 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
                 Thread.sleep(100L)
             }
             Thread.sleep(VIDEO_RENDER_INTERVAL_MS)
+        }
+    }
+
+    private fun ensureOpenGlContext(renderContext: Long) {
+        ensureOpen()
+        check(renderContext != 0L && renderContext == openGlRenderContext) {
+            "OpenGL libmpv video render context is not active"
         }
     }
 
@@ -345,6 +488,13 @@ private object DesktopJniMpvVideoApi {
     external fun nativeDestroy(handle: Long)
     external fun nativeErrorString(error: Int): String?
     external fun nativeCreateSoftwareRenderContext(handle: Long): Long
+    external fun nativeCreateOpenGlRenderContext(handle: Long): Long
+    external fun nativeUpdateRenderContext(renderContext: Long): Long
+    external fun nativeCreateOpenGlRenderTarget(width: Int, height: Int): Long
+    external fun nativeOpenGlRenderTargetFramebuffer(renderTarget: Long): Int
+    external fun nativeRenderOpenGl(renderContext: Long, renderTarget: Long)
+    external fun nativeReportSwap(renderContext: Long)
+    external fun nativeDestroyOpenGlRenderTarget(renderTarget: Long)
     external fun nativeRenderSoftware(
         renderContext: Long,
         width: Int,
@@ -395,6 +545,7 @@ private fun resolveDesktopJniMpvVideoBridge(): File? {
 private const val EVENT_WAIT_SECONDS = 0.05
 private const val STATE_POLL_INTERVAL_NANOS = 100_000_000L
 private const val MPV_END_FILE_REASON_ERROR = 4
+private const val MPV_RENDER_UPDATE_FRAME = 1L
 private const val BYTES_PER_PIXEL = 4
 private const val VIDEO_RENDER_INTERVAL_MS = 33L
 private const val MAX_SOFTWARE_RENDER_PIXELS = 1920L * 1080L
