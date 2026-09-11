@@ -16,6 +16,16 @@ kotlin {
     jvmToolchain(17)
 }
 
+private val desktopAppIcon = rootProject.file(
+    "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+)
+
+sourceSets {
+    named("main") {
+        resources.srcDir(desktopAppIcon.parentFile)
+    }
+}
+
 fun gitOutput(vararg args: String): String? = runCatching {
     providers.exec {
         workingDir = rootProject.projectDir
@@ -273,6 +283,8 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.nucleus-application:2.5.15")
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
+    implementation("dev.nucleusframework:nucleus.media-control:2.5.15")
+    implementation("dev.nucleusframework:composenativetray:2.1.6")
 
     testImplementation(kotlin("test"))
 }
@@ -334,6 +346,7 @@ nucleus.application {
         homepage = "https://feeluown.github.io/FuoEvolve/"
         targetFormats(*nucleusTargetFormats)
         appResourcesRootDir.set(nucleusAppResources)
+        protocol("FuoEvolve", "fuo")
 
         windows {
             packageName = "FuoEvolve"
