@@ -130,10 +130,10 @@ fun main(args: Array<String>) {
         ) {
             LaunchedEffect(activationRequest) {
                 if (activationRequest > 0L) {
-                    window.show()
-                    window.setMinimized(false)
-                    window.toFront()
-                    window.requestFocus()
+                    nucleusWindow.show()
+                    nucleusWindow.setMinimized(false)
+                    nucleusWindow.toFront()
+                    nucleusWindow.requestFocus()
                 }
             }
 
