@@ -26,7 +26,7 @@ interface DesktopPlatformVideoController : PlatformVideoController, AutoCloseabl
 }
 
 private var desktopPlatformVideoControllerFactory: () -> DesktopPlatformVideoController = {
-    DesktopJniMpvVideoController()
+    UnsupportedDesktopPlatformVideoController("桌面视频播放组件未初始化")
 }
 
 fun installDesktopPlatformVideoControllerFactory(factory: () -> DesktopPlatformVideoController) {
