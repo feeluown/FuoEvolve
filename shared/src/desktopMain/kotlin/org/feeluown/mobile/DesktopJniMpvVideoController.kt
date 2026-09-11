@@ -149,13 +149,13 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
                         }
                         event.startsWith("end:") -> {
                             playbackActive = false
-                            val fields = event.split(':', limit = 3)
-                            val reason = fields.getOrNull(1)?.toIntOrNull()
-                            val error = fields.getOrNull(2)?.toIntOrNull() ?: 0
+                            val endEvent = parseDesktopJniVideoEndEvent(event)
                             mutableState.value = mutableState.value.copy(
                                 isPlaying = false,
-                                errorMessage = if (reason == MPV_END_FILE_REASON_ERROR && error < 0) {
-                                    DesktopJniMpvVideoApi.nativeErrorString(error)
+                                errorMessage = if (
+                                    endEvent?.reason == MPV_END_FILE_REASON_ERROR && endEvent.error < 0
+                                ) {
+                                    DesktopJniMpvVideoApi.nativeErrorString(endEvent.error)
                                         ?.let { "视频播放失败：$it" }
                                         ?: "视频播放失败"
                                 } else {
@@ -257,6 +257,21 @@ internal class DesktopJniMpvVideoController : DesktopPlatformVideoController {
     private fun ensureOpen() {
         check(!closed.get()) { "libmpv video controller is closed" }
     }
+}
+
+internal data class DesktopJniVideoEndEvent(
+    val reason: Int,
+    val error: Int,
+)
+
+internal fun parseDesktopJniVideoEndEvent(encoded: String): DesktopJniVideoEndEvent? {
+    val fields = encoded.split(':', limit = 4)
+    if (fields.size != 4 || fields[0] != "end") return null
+    if (fields[1].toLongOrNull() == null) return null
+    return DesktopJniVideoEndEvent(
+        reason = fields[2].toIntOrNull() ?: return null,
+        error = fields[3].toIntOrNull() ?: return null,
+    )
 }
 
 internal fun boundedDesktopJniVideoRenderSize(width: Int, height: Int): Pair<Int, Int> {
