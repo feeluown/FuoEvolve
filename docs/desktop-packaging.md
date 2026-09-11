@@ -1,6 +1,6 @@
 # Desktop packaging
 
-Desktop CI packages the Nucleus/Tao + GraalVM Native Image runtime. The legacy JVM `desktopApp` remains in the repository during migration, but it is no longer a desktop CI test, packaging, or uploaded-artifact path.
+`desktopApp` is the only desktop application and packaging host. Desktop artifacts are built with Nucleus/Tao and GraalVM Native Image; there is no legacy JVM desktop distribution.
 
 ## Artifact matrix
 
@@ -12,7 +12,7 @@ Desktop CI packages the Nucleus/Tao + GraalVM Native Image runtime. The legacy J
 | Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | system-output capture library bundled; `mpv`, `libsecret`, PipeWire/PulseAudio, WebKitGTK and desktop UI dependencies are distro-managed |
 | Portable Linux x64 | AppImage | GraalVM Native Image | bundled system-output capture library/ELF closure plus libmpv/Libsecret/WebKitGTK/TLS native closures |
 
-There is no bundled JVM in these artifacts.
+No desktop artifact bundles a JVM.
 
 ## Nucleus packaging
 
@@ -20,49 +20,62 @@ The host format is selected explicitly so each CI job emits only its requested i
 
 ```bash
 ./gradlew \
-  -PenableNucleusDesktopPoc=true \
   -PnativeMarch=compatibility \
   -Pfuoevolve.nucleus.targetFormat=appimage \
-  :desktopNucleusPoc:packageGraalvmNativeDistributionForCurrentOS
+  :desktopApp:packageGraalvmNativeDistributionForCurrentOS
 ```
 
 Supported `fuoevolve.nucleus.targetFormat` values are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias).
 
+## Versioning
+
+Desktop package versions are derived from release tags (`x.y.z`) unless `fuoevolve.packageVersion` / `FUOEVOLVE_PACKAGE_VERSION` explicitly overrides them.
+
+CI also writes `fuoevolve-desktop-version.properties` into the desktop application resources:
+
+- exact release-tag builds display the tag version, for example `1.2.3`;
+- non-tagged builds display `x.y.z-canary+<short-sha>`;
+- the full commit SHA and channel are retained alongside the display version.
+
+Desktop self-update is intentionally not implemented yet. These version values are currently used for package metadata, diagnostics, and the in-app version display only.
+
 ## Native inputs
 
-Immutable Windows libmpv inputs remain recorded in `desktopApp/packaging/native-deps.lock` while the old packaging directory is shared as a dependency-input location during migration.
+- Windows libmpv input pins live in `desktopApp/packaging/native-deps.lock`. CI verifies the pinned archive, stages the public headers/import library for JNI compilation, and bundles the runtime DLLs.
+- macOS uses the architecture-specific pinned mpv input and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure.
+- Arch packages keep native libraries distribution-managed through Nucleus `pacmanDepends` metadata.
+- Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.
 
-- Windows uses the pinned `mpv-winbuild-cmake` development archive. CI verifies its SHA-256, extracts headers/import library for JNI compilation, and bundles the runtime DLLs.
-- macOS uses the architecture-specific Homebrew mpv version pinned by the existing lock, then `dylibbundler` converts it to an `@loader_path`-relative closure before Nucleus packaging.
-- Arch packages keep native libraries distro-managed through Nucleus `pacmanDepends` metadata.
-- Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source. Captured PCM remains bounded and in memory.
-- AppImage uses Ubuntu 22.04 as the lower-glibc build baseline and collects libmpv, Libsecret client, WebKitGTK subprocess, GIO TLS, and transitive ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
+## AppImage LTS baseline
+
+The portable Linux build is pinned to the **latest Ubuntu LTS baseline used by the repository, currently Ubuntu 24.04 LTS**. The workflow explicitly verifies `VERSION_ID=24.04` before building so the native executable and bundled user-space ELF closure cannot silently drift to `ubuntu-latest` or a newer glibc baseline.
+
+The AppImage bundles libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
+
+When the repository intentionally moves to a newer Ubuntu LTS, update the pinned runner, baseline verification, cache key, and this documentation in the same change.
 
 ## CI
 
-`.github/workflows/desktop-tests.yml` is the only reusable desktop test workflow. It runs shared desktop tests plus `desktopRuntime` and Nucleus tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages Nucleus resources. It does not compile or test `desktopApp`.
+`.github/workflows/desktop-tests.yml` runs shared desktop tests plus `desktopRuntime` and `desktopApp` tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages desktop native resources.
 
-Pull requests use that runtime-level validation only. They do not invoke GraalVM Native Image packaging and do not build MSI, DMG, AppImage, or Pacman artifacts.
+Pull requests use runtime-level validation and do not build the full MSI/DMG/AppImage/Pacman matrix.
 
-`.github/workflows/desktop-packaging.yml` is the only reusable desktop packaging/upload workflow. It builds:
+`.github/workflows/desktop-packaging.yml` is the single reusable desktop packaging workflow. It builds:
 
 1. Windows x64 MSI.
 2. macOS arm64 and x64 DMGs.
-3. Linux x64 AppImage with portable native closure verification.
+3. Linux x64 AppImage against the pinned Ubuntu 24.04 LTS baseline.
 4. Linux x64 Arch/Pacman package with dependency metadata verification.
 
-`master-canary.yml` calls this workflow after Android, desktop and iOS test gates, so every successful master build uploads the complete Nucleus desktop artifact matrix.
+`master-canary.yml` invokes that workflow for preview builds. `release.yml` invokes the same workflow for release tags and publishes all five desktop assets alongside the Android APK. The release job renames assets with the release tag and publishes `SHA256SUMS.txt`.
 
-The earlier standalone Linux Nucleus PoC workflow and temporary DEB artifact are retired to avoid duplicate Native Image builds.
+## Signing
 
-## Signing and release
+Desktop release artifacts currently use the same unsigned package output as Canary. Production signing/notarization remains a separate follow-up and does not require reintroducing JVM packaging:
 
-Canary desktop artifacts are unsigned. Pull requests do not produce desktop installers. Production release publication should add the platform signing layer without falling back to JVM packaging:
-
-- Windows Authenticode signing for the Native Image executable, JNI/native DLLs and MSI.
-- macOS Developer ID signing, hardened runtime, notarization and stapling for both architectures.
-- checksums for published artifacts.
+- Windows Authenticode for the Native Image executable, JNI/native DLLs, and MSI.
+- macOS Developer ID signing, hardened runtime, notarization, and stapling for both architectures.
 
 ## Linux portability
 
-The Arch package intentionally relies on the target distribution's package manager. The AppImage intentionally bundles user-space native dependency closures and uses `$ORIGIN`-relative loader paths. The WebView helper discovers its packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer and system-audio capture loader discover their packaged native libraries from the same Nucleus resource root.
+The Arch package intentionally relies on the target distribution package manager. The AppImage bundles its user-space native dependency closure and uses `$ORIGIN`-relative loader paths. The WebView helper discovers the packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer and system-audio capture loader discover their packaged native libraries from the same desktop resource root.
