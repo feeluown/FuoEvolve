@@ -8,6 +8,7 @@ import android.net.Uri
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -29,14 +30,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.net.URL
 
-private const val MAX_COVER_SIZE_PX = 768
 private const val MEMORY_CACHE_BYTES = 24 * 1024 * 1024
 private const val FAILED_CACHE_ENTRIES = 512
 
@@ -47,82 +49,103 @@ actual fun PlatformCoverArt(
     modifier: Modifier,
     placeholder: CoverPlaceholder,
 ) {
-    val bitmap = rememberPlatformCoverImage(imageUrl)
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = title,
-            modifier = modifier,
-            contentScale = ContentScale.Crop,
-        )
-    } else {
-        CoverFallback(placeholder = placeholder, modifier = modifier)
+    var isLaidOut by remember { mutableStateOf(false) }
+    BoxWithConstraints(
+        modifier = modifier.onGloballyPositioned { isLaidOut = true },
+        contentAlignment = Alignment.Center,
+    ) {
+        val targetSizePx = coverTargetSizePx(maxWidth, maxHeight, LocalDensity.current)
+        val bitmap = rememberPlatformCoverImage(imageUrl?.takeIf { isLaidOut }, targetSizePx)
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            CoverFallback(placeholder = placeholder, modifier = Modifier.fillMaxSize())
+        }
     }
 }
 
 @Composable
-internal actual fun rememberPlatformCoverImage(imageUrl: String?): ImageBitmap? {
+internal actual fun rememberPlatformCoverImage(imageUrl: String?, maxSizePx: Int): ImageBitmap? {
     val context = LocalContext.current
-    var image by remember(imageUrl) { mutableStateOf<ImageBitmap?>(null) }
+    val normalizedSizePx = normalizedCoverImageTargetSizePx(maxSizePx)
+    val requestKey = imageUrl?.let { coverImageCacheKey(it, normalizedSizePx) }
+    var image by remember(requestKey) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(imageUrl) {
+    LaunchedEffect(requestKey) {
         image = imageUrl?.takeIf { it.isNotBlank() }?.let {
             runCatching {
-                PlatformCoverImageCache.getOrLoad(it) { loadCover(context, it) }
+                PlatformCoverImageCache.getOrLoad(requireNotNull(requestKey)) {
+                    loadCover(context, it, normalizedSizePx)
+                }
             }.getOrNull()
         }
     }
     return image
 }
 
-private suspend fun loadCover(context: Context, imageUrl: String): ImageBitmap? = withContext(Dispatchers.IO) {
-    CoverArtMemoryCache.get(imageUrl)?.let { return@withContext it }
-    if (CoverArtMemoryCache.isFailed(imageUrl)) return@withContext null
+private suspend fun loadCover(
+    context: Context,
+    imageUrl: String,
+    maxSizePx: Int,
+): ImageBitmap? = withContext(Dispatchers.IO) {
+    val cacheKey = coverImageCacheKey(imageUrl, maxSizePx)
+    CoverArtMemoryCache.get(cacheKey)?.let { return@withContext it }
+    if (CoverArtMemoryCache.isFailed(cacheKey)) return@withContext null
     val uri = Uri.parse(imageUrl)
     val image = when (uri.scheme) {
         "fuo-cover" -> {
             val albumArt = uri.getQueryParameter("albumArt").orEmpty()
             val audio = uri.getQueryParameter("audio").orEmpty()
-            albumArt.takeIf { it.isNotBlank() }?.let { loadDirectCover(context, it) }
-                ?: audio.takeIf { it.isNotBlank() }?.let { loadEmbeddedCover(context, it) }
+            albumArt.takeIf { it.isNotBlank() }?.let { loadDirectCover(context, it, maxSizePx) }
+                ?: audio.takeIf { it.isNotBlank() }?.let { loadEmbeddedCover(context, it, maxSizePx) }
         }
-        "content", "file" -> loadDirectCover(context, imageUrl) ?: loadEmbeddedCover(context, imageUrl)
-        "http", "https" -> loadDirectCover(context, imageUrl)
+        "content", "file" -> loadDirectCover(context, imageUrl, maxSizePx)
+            ?: loadEmbeddedCover(context, imageUrl, maxSizePx)
+        "http", "https" -> loadDirectCover(context, imageUrl, maxSizePx)
         else -> null
     }
     if (image != null) {
-        CoverArtMemoryCache.put(imageUrl, image)
+        CoverArtMemoryCache.put(cacheKey, image)
     } else {
-        CoverArtMemoryCache.markFailed(imageUrl)
+        CoverArtMemoryCache.markFailed(cacheKey)
     }
     image
 }
 
-private fun loadDirectCover(context: Context, imageUrl: String): ImageBitmap? {
-    CoverArtMemoryCache.get(imageUrl)?.let { return it }
-    if (CoverArtMemoryCache.isFailed(imageUrl)) return null
-    val uri = Uri.parse(imageUrl)
+private fun loadDirectCover(context: Context, imageUrl: String, maxSizePx: Int): ImageBitmap? {
+    val cacheKey = coverImageCacheKey(imageUrl, maxSizePx)
+    CoverArtMemoryCache.get(cacheKey)?.let { return it }
+    if (CoverArtMemoryCache.isFailed(cacheKey)) return null
+    val requestUrls = coverImageRequestUrls(imageUrl, maxSizePx)
+    val uri = Uri.parse(requestUrls.first())
     val image = when (uri.scheme) {
-        "content" -> decodeSampledStream { context.contentResolver.openInputStream(uri) }?.asImageBitmap()
-        "file" -> uri.path?.let { decodeSampledFile(File(it)) }?.asImageBitmap()
-        "http", "https" -> loadCachedRemoteCover(context, imageUrl)
+        "content" -> decodeSampledStream({ context.contentResolver.openInputStream(uri) }, maxSizePx)?.asImageBitmap()
+        "file" -> uri.path?.let { decodeSampledFile(File(it), maxSizePx) }?.asImageBitmap()
+        "http", "https" -> requestUrls.firstNotNullOfOrNull { requestUrl ->
+            loadCachedRemoteCover(context, requestUrl, maxSizePx)
+        }
         else -> null
     }
     if (image != null) {
-        CoverArtMemoryCache.put(imageUrl, image)
+        CoverArtMemoryCache.put(cacheKey, image)
     } else {
-        CoverArtMemoryCache.markFailed(imageUrl)
+        CoverArtMemoryCache.markFailed(cacheKey)
     }
     return image
 }
 
-private fun loadCachedRemoteCover(context: Context, imageUrl: String) =
+private fun loadCachedRemoteCover(context: Context, imageUrl: String, maxSizePx: Int) =
     AndroidResourceCache.cachedImage(context, imageUrl)
         ?.takeIf { it.exists() && it.length() > 0L }
-        ?.let { decodeSampledFile(it)?.asImageBitmap() }
-        ?: loadRemoteCoverWithoutDiskCache(imageUrl)
+        ?.let { decodeSampledFile(it, maxSizePx)?.asImageBitmap() }
+        ?: loadRemoteCoverWithoutDiskCache(imageUrl, maxSizePx)
 
-private fun loadEmbeddedCover(context: Context, imageUrl: String): ImageBitmap? {
+private fun loadEmbeddedCover(context: Context, imageUrl: String, maxSizePx: Int): ImageBitmap? {
     val uri = Uri.parse(imageUrl)
     val retriever = MediaMetadataRetriever()
     return try {
@@ -132,7 +155,7 @@ private fun loadEmbeddedCover(context: Context, imageUrl: String): ImageBitmap? 
             else -> return null
         }
         val bytes = retriever.embeddedPicture ?: return null
-        decodeSampledByteArray(bytes)?.asImageBitmap()
+        decodeSampledByteArray(bytes, maxSizePx)?.asImageBitmap()
     } catch (_: Throwable) {
         null
     } finally {
@@ -140,7 +163,7 @@ private fun loadEmbeddedCover(context: Context, imageUrl: String): ImageBitmap? 
     }
 }
 
-private fun loadRemoteCoverWithoutDiskCache(imageUrl: String): ImageBitmap? {
+private fun loadRemoteCoverWithoutDiskCache(imageUrl: String, maxSizePx: Int): ImageBitmap? {
     val bytes = runCatching {
         URL(imageUrl).openConnection().run {
             connectTimeout = 15_000
@@ -148,48 +171,48 @@ private fun loadRemoteCoverWithoutDiskCache(imageUrl: String): ImageBitmap? {
             getInputStream().use { it.readBytes() }
         }
     }.getOrNull() ?: return null
-    return decodeSampledByteArray(bytes)?.asImageBitmap()
+    return decodeSampledByteArray(bytes, maxSizePx)?.asImageBitmap()
 }
 
-private fun decodeSampledFile(file: File): Bitmap? {
+private fun decodeSampledFile(file: File, maxSizePx: Int): Bitmap? {
     if (!file.isFile) return null
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.path, bounds)
-    if (!bounds.hasSize()) return BitmapFactory.decodeFile(file.path)
+    if (!bounds.hasSize()) return null
     val options = BitmapFactory.Options().apply {
-        inSampleSize = bounds.inSampleSize()
+        inSampleSize = bounds.inSampleSize(maxSizePx)
     }
     return BitmapFactory.decodeFile(file.path, options)
 }
 
-private fun decodeSampledStream(openInput: () -> InputStream?): Bitmap? {
+private fun decodeSampledStream(openInput: () -> InputStream?, maxSizePx: Int): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     openInput()?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
     if (!bounds.hasSize()) {
-        return openInput()?.use(BitmapFactory::decodeStream)
+        return null
     }
     val options = BitmapFactory.Options().apply {
-        inSampleSize = bounds.inSampleSize()
+        inSampleSize = bounds.inSampleSize(maxSizePx)
     }
     return openInput()?.use { BitmapFactory.decodeStream(it, null, options) }
 }
 
-private fun decodeSampledByteArray(bytes: ByteArray): Bitmap? {
+private fun decodeSampledByteArray(bytes: ByteArray, maxSizePx: Int): Bitmap? {
     if (bytes.isEmpty()) return null
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (!bounds.hasSize()) return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    if (!bounds.hasSize()) return null
     val options = BitmapFactory.Options().apply {
-        inSampleSize = bounds.inSampleSize()
+        inSampleSize = bounds.inSampleSize(maxSizePx)
     }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 }
 
 private fun BitmapFactory.Options.hasSize(): Boolean = outWidth > 0 && outHeight > 0
 
-private fun BitmapFactory.Options.inSampleSize(): Int {
+private fun BitmapFactory.Options.inSampleSize(maxSizePx: Int): Int {
     var sampleSize = 1
-    while (outWidth / sampleSize > MAX_COVER_SIZE_PX || outHeight / sampleSize > MAX_COVER_SIZE_PX) {
+    while (outWidth / sampleSize > maxSizePx || outHeight / sampleSize > maxSizePx) {
         sampleSize *= 2
     }
     return sampleSize

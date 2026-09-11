@@ -718,7 +718,6 @@ private fun RuntimeQueueList(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverBox(track, modifier = Modifier.size(48.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "${index + 1}. ${track.title.ifBlank { "未知歌曲" }}",

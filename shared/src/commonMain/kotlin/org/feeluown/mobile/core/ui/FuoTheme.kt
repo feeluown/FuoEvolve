@@ -293,6 +293,7 @@ private fun rememberCoverColorSeed(
     val normalizedCoverUrl = coverImageUrl?.takeIf { it.isNotBlank() }
     val coverImage = rememberPlatformCoverImage(
         if (dynamicCoverColorEnabled) normalizedCoverUrl else null,
+        maxSizePx = 128,
     )
     val coverColorSeed by produceState<Color?>(
         initialValue = null,

@@ -70,7 +70,7 @@ fun PlayerSharedCover(
     cornerRadius: androidx.compose.ui.unit.Dp = 8.dp,
     modifier: Modifier = Modifier,
 ) {
-    val targetCoverImage = rememberPlatformCoverImage(track.coverUrl)
+    val targetCoverImage = rememberPlatformCoverImage(track.coverUrl, maxSizePx = 768)
     val hasCoverUrl = !track.coverUrl.isNullOrBlank()
     var displayedTrack by remember { mutableStateOf(track) }
     LaunchedEffect(track.id, track.coverUrl, isLoading, targetCoverImage) {

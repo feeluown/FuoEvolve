@@ -296,7 +296,7 @@ private fun RuntimeMiniPlayerCover(
     cornerRadius: Dp,
     modifier: Modifier,
 ) {
-    val targetCoverImage = rememberPlatformCoverImage(track.coverUrl)
+    val targetCoverImage = rememberPlatformCoverImage(track.coverUrl, maxSizePx = 128)
     val hasCoverUrl = !track.coverUrl.isNullOrBlank()
     var displayedTrack by remember { mutableStateOf(track) }
     LaunchedEffect(track.id, track.coverUrl, isLoading, targetCoverImage) {
