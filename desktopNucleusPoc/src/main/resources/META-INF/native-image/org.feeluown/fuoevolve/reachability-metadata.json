@@ -1,0 +1,25 @@
+{
+  "reflection": [
+    {
+      "type": {
+        "proxy": [
+          "com.microsoft.credentialstorage.implementation.posix.libsecret.LibSecretLibrary"
+        ]
+      }
+    },
+    {
+      "type": {
+        "proxy": [
+          "com.microsoft.credentialstorage.implementation.posix.internal.GLibLibrary"
+        ]
+      }
+    },
+    {
+      "type": {
+        "proxy": [
+          "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32"
+        ]
+      }
+    }
+  ]
+}
