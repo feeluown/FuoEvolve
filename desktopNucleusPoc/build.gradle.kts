@@ -19,6 +19,12 @@ kotlin {
 private val desktopAppIcon = rootProject.file(
     "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
 )
+private val desktopWindowsIcon = rootProject.file(
+    "desktopApp/packaging/icons/fuoevolve.ico",
+)
+private val desktopMacIcon = rootProject.file(
+    "desktopApp/packaging/icons/fuoevolve.icns",
+)
 
 sourceSets {
     named("main") {
@@ -357,18 +363,21 @@ nucleus.application {
 
         windows {
             packageName = "FuoEvolve"
+            iconFile.set(desktopWindowsIcon)
         }
         macOS {
             packageName = "FuoEvolve"
             // Preserve the existing desktop bundle identity across the JVM -> Nucleus migration.
             bundleID = "org.feeluown.mobile.desktop"
             appCategory = "public.app-category.music"
+            iconFile.set(desktopMacIcon)
         }
         linux {
             packageName = "fuoevolve"
             shortcut = true
             appCategory = "AudioVideo"
             menuGroup = "AudioVideo"
+            iconFile.set(desktopAppIcon)
             debMaintainer = "FuoEvolve Maintainers <6873988+BruceZhang1993@users.noreply.github.com>"
             pacmanDepends = listOf(
                 "gtk3",
