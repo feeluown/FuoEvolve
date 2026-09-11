@@ -106,6 +106,7 @@ fun main(args: Array<String>) {
         enableSingleInstance = false,
     ) {
         val uiScope = rememberCoroutineScope()
+        val appIcon = painterResource("ic_launcher.png")
         var windowVisible by remember { mutableStateOf(true) }
         var activationRequest by remember { mutableStateOf(0L) }
         val trayAvailable = remember(smokeMode, playbackSmokeFile) {
@@ -147,7 +148,7 @@ fun main(args: Array<String>) {
 
         if (trayAvailable) {
             Tray(
-                icon = painterResource("ic_launcher.png"),
+                icon = appIcon,
                 tooltip = "FuoEvolve",
                 primaryAction = { uiScope.launch { showWindow() } },
             ) {
@@ -171,6 +172,7 @@ fun main(args: Array<String>) {
             state = rememberWindowState(size = DpSize(1280.dp, 800.dp)),
             minimumSize = DpSize(900.dp, 600.dp),
             title = "FuoEvolve",
+            icon = appIcon,
         ) {
             val clipboardManager = LocalClipboardManager.current
             DisposableEffect(oauthDeviceCodeAssistant, clipboardManager) {
