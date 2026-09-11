@@ -50,12 +50,8 @@ internal class NucleusSystemMediaSession(
             MediaControlEvent.Play -> playbackSession.play()
             MediaControlEvent.Pause -> playbackSession.pause()
             MediaControlEvent.Toggle -> playbackSession.toggle()
-            MediaControlEvent.Next -> {
-                if (playbackSession.state.value.canGoNext) playbackSession.next()
-            }
-            MediaControlEvent.Previous -> {
-                if (playbackSession.state.value.canGoPrevious) playbackSession.previous()
-            }
+            MediaControlEvent.Next -> skipTrack(next = true)
+            MediaControlEvent.Previous -> skipTrack(next = false)
             MediaControlEvent.Stop -> playbackSession.stop()
             is MediaControlEvent.SeekBy -> seekTo(playbackSession.state.value.positionMs + event.offsetMs)
             is MediaControlEvent.SetPosition -> seekTo(event.positionMs)
@@ -65,6 +61,29 @@ internal class NucleusSystemMediaSession(
             is MediaControlEvent.OpenUri -> onOpenUri(event.uri)
             MediaControlEvent.Raise -> onRaise()
             MediaControlEvent.Quit -> onQuit()
+        }
+    }
+
+    private fun skipTrack(next: Boolean) {
+        val before = playbackSession.state.value
+        if (next) {
+            if (!before.canGoNext) return
+            playbackSession.next()
+        } else {
+            if (!before.canGoPrevious) return
+            playbackSession.previous()
+        }
+        preserveNonPlayingStatusAfterSkip(before.status)
+    }
+
+    private fun preserveNonPlayingStatusAfterSkip(status: PlaybackSessionStatus) {
+        when (status) {
+            PlaybackSessionStatus.Paused -> playbackSession.pause()
+            PlaybackSessionStatus.Idle,
+            PlaybackSessionStatus.Loading,
+            PlaybackSessionStatus.Error,
+            PlaybackSessionStatus.Ended -> playbackSession.stop()
+            PlaybackSessionStatus.Playing -> Unit
         }
     }
 
