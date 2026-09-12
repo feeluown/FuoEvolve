@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "channel": "canary",
+  "versionCode": 481,
+  "versionName": "1.6.0-1-g5e98904",
+  "publishedAt": "2026-09-12T10:24:41Z",
+  "apk": {
+    "url": "https://raw.githubusercontent.com/feeluown/FuoEvolve/canary-dist/fuo-evolve-canary.apk",
+    "sha256": "053d62b4ff4460a828199db0aefe4fdbe1cf223c7cfcb64796fde47f9a3cd3c8",
+    "size": 9469854
+  },
+  "commitSha": "5e9890414928379ef0866650a39dd3530d137369",
+  "workflowRunId": 34688083218,
+  "releaseNotesUrl": "https://github.com/feeluown/FuoEvolve/commit/5e9890414928379ef0866650a39dd3530d137369"
+}
