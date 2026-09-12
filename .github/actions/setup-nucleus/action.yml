@@ -75,7 +75,7 @@ runs:
         echo "version=$resolved" >> "$GITHUB_OUTPUT"
         echo "Resolved GraalVM toolchain version: $resolved"
 
-    - name: Select and pin Xcode 26 toolchain
+    - name: Select Xcode 26 runner toolchain
       if: runner.os == 'macOS' && inputs.graalvm == 'true'
       shell: bash
       run: |
@@ -86,14 +86,33 @@ runs:
         export DEVELOPER_DIR="$developer_dir"
         echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
 
-        echo "Pinned Xcode toolchain:"
+        echo "Selected Xcode toolchain:"
         xcodebuild -version
         echo "xcode-select=$(xcode-select -p)"
+        echo "developer-dir-real=$(cd "$developer_dir" && pwd -P)"
+        echo "path-clang=$(command -v clang)"
+        echo "xcrun-clang=$(xcrun --find clang)"
+        echo "macos-sdk=$(xcrun --sdk macosx --show-sdk-path)"
         for tool in strip install_name_tool otool vtool; do
-          tool_path="$(xcrun --find "$tool")"
-          echo "$tool=$tool_path"
-          echo "$(dirname "$tool_path")" >> "$GITHUB_PATH"
+          echo "$tool=$(xcrun --find "$tool")"
         done
+
+        # Keep the runner PATH intact. Nucleus compileGraalvmStubs invokes `clang` directly;
+        # prepending XcodeDefault.xctoolchain/usr/bin bypasses the runner's /usr/bin developer-tool
+        # shim and can lose SDK resolution. All FuoEvolve Mach-O workaround scripts use xcrun
+        # explicitly, while DEVELOPER_DIR keeps native-image and Apple tools on the selected Xcode.
+        probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fuoevolve-clang-probe.XXXXXX")"
+        trap 'rm -rf "$probe_dir"' EXIT
+        cat > "$probe_dir/nucleus-stub-probe.c" <<'EOF'
+        #include <dlfcn.h>
+        void *fuoevolve_nucleus_stub_probe(void) {
+            return dlsym(RTLD_DEFAULT, "InitializeEncoding");
+        }
+        EOF
+        clang -c "$probe_dir/nucleus-stub-probe.c" -o "$probe_dir/nucleus-stub-probe.o"
+        file "$probe_dir/nucleus-stub-probe.o"
+        rm -rf "$probe_dir"
+        trap - EXIT
 
         mkdir -p "$HOME/.gradle/init.d"
         cp "$GITHUB_WORKSPACE/.github/gradle/macos-native-image-workaround.init.gradle" \
@@ -135,7 +154,9 @@ runs:
       uses: actions/cache@v6
       with:
         path: ~/.gradle/nucleus/graalvm
-        key: graalvm-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ inputs.graalvm-distribution }}-${{ steps.graalvm-version.outputs.version }}
+        # Terminate the version token and use a new namespace so `25` cannot prefix-match the
+        # previous `25i3` cache. The macOS A/B must provision the requested LTS line cleanly.
+        key: graalvm-toolchain-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.graalvm-distribution }}-${{ steps.graalvm-version.outputs.version }}-exact
 
     - name: Set java-home output
       id: set-java-home
