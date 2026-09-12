@@ -36,8 +36,6 @@ jobs:
     if: github.event_name == 'push'
     needs:
       - android-tests
-      - desktop-tests
-      - ios-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -126,9 +124,7 @@ jobs:
     name: Build desktop release packages
     if: github.event_name == 'push'
     needs:
-      - android-tests
       - desktop-tests
-      - ios-tests
     uses: ./.github/workflows/desktop-packaging.yml
 
   publish-release:
@@ -136,6 +132,7 @@ jobs:
     needs:
       - build-android-release
       - build-desktop-release
+      - ios-tests
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -180,6 +177,13 @@ jobs:
             ["FuoEvolve-linux-x64.deb"]="FuoEvolve-${tag}-linux-x64.deb"
             ["FuoEvolve-linux-x64.pkg.tar.zst"]="FuoEvolve-${tag}-linux-x64.pkg.tar.zst"
           )
+
+          desktop_source_count="$(find build/desktop-release -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [ "$desktop_source_count" -ne "${#desktop_assets[@]}" ]; then
+            echo "::error::Expected ${#desktop_assets[@]} desktop artifacts, found $desktop_source_count"
+            find build/desktop-release -maxdepth 1 -type f -print || true
+            exit 1
+          fi
 
           for source_name in "${!desktop_assets[@]}"; do
             source_path="build/desktop-release/$source_name"
