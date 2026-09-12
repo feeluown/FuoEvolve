@@ -6,10 +6,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +53,7 @@ import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -69,6 +80,7 @@ import org.feeluown.mobile.installDesktopPlaybackSessionIntegrationFactory
 import org.feeluown.mobile.installDesktopProviderCredentialStoreFactory
 import org.feeluown.mobile.installDesktopTextFileDialogProviderFactory
 import org.feeluown.mobile.installFallbackOAuthDeviceCodeAssistant
+import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
 private const val SMOKE_ENV = "FUOEVOLVE_NUCLEUS_POC_SMOKE"
 private const val PLAYBACK_SMOKE_ENV = "FUOEVOLVE_NUCLEUS_PLAYBACK_SMOKE"
@@ -80,6 +92,7 @@ fun main(args: Array<String>) {
     installDesktopAppLogger()
 
     val activation = NucleusExternalActivation.open(args) ?: return
+    val trayPlaybackController = NucleusTrayPlaybackController()
     val oauthDeviceCodeAssistant = NucleusOAuthDeviceCodeAssistant()
     installFallbackOAuthDeviceCodeAssistant(oauthDeviceCodeAssistant)
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
@@ -106,11 +119,12 @@ fun main(args: Array<String>) {
         args = args,
         backend = NucleusBackend.Tao,
         // Keep Nucleus' public lock/watcher implementation, but own the restore payload so ordinary
-        // file-association paths can be forwarded alongside URI deep links.
+        // file-association paths and taskbar media actions can be forwarded alongside URI deep links.
         enableSingleInstance = false,
     ) {
         val uiScope = rememberCoroutineScope()
         val appIcon = painterResource("ic_launcher.png")
+        val trayPlaybackState by trayPlaybackController.state.collectAsState()
         var windowVisible by remember { mutableStateOf(true) }
         var activationRequest by remember { mutableStateOf(0L) }
         val trayAvailable = remember(smokeMode, playbackSmokeFile) {
@@ -128,6 +142,17 @@ fun main(args: Array<String>) {
             windowVisible = true
             activationRequest += 1L
         }
+        val appExternalInputs = remember(activation, trayPlaybackController) {
+            activation.inputs.filter { input ->
+                val action = nucleusDesktopMediaAction(input)
+                if (action != null) {
+                    trayPlaybackController.handle(action)
+                    false
+                } else {
+                    true
+                }
+            }
+        }
 
         onDeepLink { uri ->
             activation.emitInput(uri.toString())
@@ -138,8 +163,14 @@ fun main(args: Array<String>) {
             activation.focusRequests.collect { showWindow() }
         }
 
+        if (!smokeMode && playbackSmokeFile == null) {
+            LaunchedEffect(Unit) {
+                installWindowsPlaybackJumpList()
+            }
+        }
+
         installDesktopPlaybackSessionIntegrationFactory { playbackSession ->
-            NucleusSystemMediaSession(
+            val systemMediaSession = NucleusSystemMediaSession(
                 playbackSession = playbackSession,
                 onRaise = { uiScope.launch { showWindow() } },
                 onQuit = { uiScope.launch { requestExit() } },
@@ -148,19 +179,68 @@ fun main(args: Array<String>) {
                     uiScope.launch { showWindow() }
                 },
             )
+            val trayBinding = trayPlaybackController.bind(playbackSession)
+            AutoCloseable {
+                trayBinding.close()
+                systemMediaSession.close()
+            }
         }
 
         if (trayAvailable) {
+            val playPauseIcon = if (trayPlaybackState.status == PlaybackSessionStatus.Playing) {
+                Icons.Default.Pause
+            } else {
+                Icons.Default.PlayArrow
+            }
             Tray(
                 icon = appIcon,
                 tooltip = "FuoEvolve",
                 primaryAction = { uiScope.launch { showWindow() } },
             ) {
-                Item(label = "显示 FuoEvolve") {
-                    uiScope.launch { showWindow() }
+                Item(
+                    label = trayPlaybackTrackLabel(trayPlaybackState),
+                    icon = Icons.Default.MusicNote,
+                    isEnabled = false,
+                )
+                Divider()
+                Item(
+                    label = trayPlaybackToggleLabel(trayPlaybackState),
+                    icon = playPauseIcon,
+                    isEnabled = trayPlaybackCanToggle(trayPlaybackState),
+                ) {
+                    uiScope.launch { trayPlaybackController.toggle() }
+                }
+                Item(
+                    label = "上一首",
+                    icon = Icons.Default.SkipPrevious,
+                    isEnabled = trayPlaybackState.canGoPrevious,
+                ) {
+                    uiScope.launch { trayPlaybackController.previous() }
+                }
+                Item(
+                    label = "下一首",
+                    icon = Icons.Default.SkipNext,
+                    isEnabled = trayPlaybackState.canGoNext,
+                ) {
+                    uiScope.launch { trayPlaybackController.next() }
                 }
                 Divider()
-                Item(label = "退出") {
+                Item(
+                    label = if (windowVisible) "隐藏主窗口" else "显示主窗口",
+                    icon = if (windowVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                ) {
+                    uiScope.launch {
+                        if (windowVisible) {
+                            windowVisible = false
+                        } else {
+                            showWindow()
+                        }
+                    }
+                }
+                Item(
+                    label = "退出",
+                    icon = Icons.Default.ExitToApp,
+                ) {
                     uiScope.launch { requestExit() }
                 }
             }
@@ -253,7 +333,7 @@ fun main(args: Array<String>) {
             }
 
             DesktopAppHost(
-                externalInputs = activation.inputs,
+                externalInputs = appExternalInputs,
                 windowContentWrapper = { content ->
                     FuoDesktopWindowContent(content)
                 },

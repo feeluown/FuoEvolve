@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import java.io.File
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -12,8 +11,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -119,25 +116,17 @@ private class DesktopDebugLogRepository : DebugLogRepository {
         val fileName = "FuoEvolve-Diagnostics-$timestamp.zip"
         val tempFile = withContext(Dispatchers.IO) { createDiagnosticsArchive() }
         return try {
-            val chooser = JFileChooser().apply {
-                dialogTitle = "导出诊断信息"
-                selectedFile = File(fileName)
-                fileFilter = FileNameExtensionFilter("FuoEvolve 诊断文件 (*.zip)", "zip")
-            }
-            if (chooser.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) {
+            val savedPath = saveDesktopFile(
+                dialogTitle = "导出诊断信息",
+                suggestedFileName = fileName,
+                filterDescription = "FuoEvolve 诊断文件 (*.zip)",
+                extensions = listOf("zip"),
+                sourceFile = tempFile,
+            )
+            if (savedPath == null) {
                 "已取消导出诊断信息"
             } else {
-                val selected = chooser.selectedFile
-                val destination = if (selected.name.endsWith(".zip", ignoreCase = true)) {
-                    selected.toPath()
-                } else {
-                    selected.toPath().resolveSibling("${selected.name}.zip")
-                }
-                withContext(Dispatchers.IO) {
-                    destination.parent?.let(Files::createDirectories)
-                    Files.copy(tempFile, destination, StandardCopyOption.REPLACE_EXISTING)
-                }
-                "诊断信息已导出：${destination.fileName}"
+                "诊断信息已导出：${Path.of(savedPath).fileName}"
             }
         } finally {
             withContext(Dispatchers.IO) { Files.deleteIfExists(tempFile) }
