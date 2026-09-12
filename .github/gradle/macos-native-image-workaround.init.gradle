@@ -44,23 +44,24 @@ gradle.beforeProject { project ->
             }
             project.file(command[-1].toString())
         }
+        def mainBackup = project.layout.buildDirectory
+            .file('tmp/fuoevolve-macos-native-image/fuoevolve.before-build-version-patch')
 
-        // Nucleus 2.5.15 patches LC_BUILD_VERSION for every Mach-O in the app bundle. Keep that
-        // normalization for companion dylibs/helpers so they retain the configured macOS minimum,
-        // but preserve the raw native-image executable: Xcode 26's vtool rewrite makes that one
-        // binary fail later strip/install_name_tool operations with an invalid __LINKEDIT layout.
-        // The backup intentionally lives outside the app bundle so Nucleus's recursive patch scan
-        // cannot patch the backup itself.
-        project.tasks.matching { it.name == 'patchGraalvmBuildVersion' }.configureEach { task ->
-            task.doFirst {
+        // Keep the main executable backup/restore as separate tasks rather than doFirst/doLast on
+        // Nucleus's patch task. Nucleus appends its own patch action after this init script is
+        // applied, so a doLast registered here can otherwise run before the actual vtool patch.
+        // Explicit task dependencies make the required order deterministic:
+        // copy main -> backup main -> patch all Mach-O -> restore raw main -> rpath/strip.
+        def backupMain = project.tasks.register('backupGraalvmMainBeforeBuildVersionPatch') { task ->
+            task.group = 'build'
+            task.description = 'Back up the raw GraalVM main executable before Nucleus patches LC_BUILD_VERSION.'
+            task.dependsOn('copyGraalvmBinaryToApp')
+            task.doLast {
                 def binary = packagedMainBinary()
                 if (!binary.isFile()) {
                     throw new GradleException("GraalVM main executable not found before build-version patch: ${binary}")
                 }
-                def backup = project.layout.buildDirectory
-                    .file('tmp/fuoevolve-macos-native-image/fuoevolve.before-build-version-patch')
-                    .get()
-                    .asFile
+                def backup = mainBackup.get().asFile
                 backup.parentFile.mkdirs()
                 Files.copy(
                     binary.toPath(),
@@ -68,19 +69,23 @@ gradle.beforeProject { project ->
                     StandardCopyOption.REPLACE_EXISTING,
                     StandardCopyOption.COPY_ATTRIBUTES,
                 )
-                task.extensions.extraProperties.set('fuoevolveMainBinary', binary.absolutePath)
-                task.extensions.extraProperties.set('fuoevolveMainBackup', backup.absolutePath)
                 project.logger.lifecycle(
-                    'FuoEvolve macOS Native Image: preserving raw main executable while Nucleus patches companion Mach-O files',
+                    'FuoEvolve macOS Native Image: backed up raw main executable before Nucleus patches companion Mach-O files',
                 )
             }
+        }
+
+        project.tasks.matching { it.name == 'patchGraalvmBuildVersion' }.configureEach { task ->
+            task.dependsOn(backupMain)
+        }
+
+        def restoreMain = project.tasks.register('restoreGraalvmMainAfterBuildVersionPatch') { task ->
+            task.group = 'build'
+            task.description = 'Restore the raw GraalVM main executable after Nucleus patches companion Mach-O files.'
+            task.dependsOn('patchGraalvmBuildVersion')
             task.doLast {
-                def binary = project.file(
-                    task.extensions.extraProperties.get('fuoevolveMainBinary').toString(),
-                )
-                def backup = project.file(
-                    task.extensions.extraProperties.get('fuoevolveMainBackup').toString(),
-                )
+                def binary = packagedMainBinary()
+                def backup = mainBackup.get().asFile
                 if (!backup.isFile()) {
                     throw new GradleException("GraalVM main executable backup missing after build-version patch: ${backup}")
                 }
@@ -90,7 +95,7 @@ gradle.beforeProject { project ->
                     StandardCopyOption.REPLACE_EXISTING,
                 )
                 project.logger.lifecycle(
-                    'FuoEvolve macOS Native Image: restored unpatched main executable; companion Mach-O patches retained',
+                    'FuoEvolve macOS Native Image: restored unpatched main executable after Nucleus companion Mach-O patches completed',
                 )
             }
         }
@@ -104,6 +109,9 @@ gradle.beforeProject { project ->
         project.tasks.withType(Exec).matching {
             it.name == 'fixGraalvmRpath' || it.name == 'stripGraalvmBinary'
         }.configureEach { task ->
+            if (task.name == 'fixGraalvmRpath') {
+                task.dependsOn(restoreMain)
+            }
             task.doFirst {
                 def originalCommand = task.commandLine as List
                 if (!originalCommand) {
