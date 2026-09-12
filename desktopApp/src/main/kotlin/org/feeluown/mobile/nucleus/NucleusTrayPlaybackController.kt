@@ -17,12 +17,14 @@ import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 /** Keeps tray and launcher playback actions bound to the current app-scoped PlaybackSession. */
 internal class NucleusTrayPlaybackController {
     private val sessionRef = AtomicReference<PlaybackSession?>()
+    private val pendingAction = AtomicReference<NucleusDesktopMediaAction?>()
     private val mutableState = MutableStateFlow(PlaybackSessionState())
     val state: StateFlow<PlaybackSessionState> = mutableState.asStateFlow()
 
     fun bind(session: PlaybackSession): AutoCloseable {
         sessionRef.set(session)
         mutableState.value = session.state.value
+        pendingAction.getAndSet(null)?.let { execute(session, it) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope.launch {
             session.state.collect { mutableState.value = it }
@@ -36,26 +38,38 @@ internal class NucleusTrayPlaybackController {
     }
 
     fun handle(action: NucleusDesktopMediaAction) {
-        when (action) {
-            NucleusDesktopMediaAction.PlayPause -> toggle()
-            NucleusDesktopMediaAction.Previous -> previous()
-            NucleusDesktopMediaAction.Next -> next()
+        val session = sessionRef.get()
+        if (session == null) {
+            pendingAction.set(action)
+        } else {
+            execute(session, action)
         }
     }
 
     fun toggle() {
-        val session = sessionRef.get() ?: return
-        if (trayPlaybackCanToggle(session.state.value)) session.toggle()
+        sessionRef.get()?.let { execute(it, NucleusDesktopMediaAction.PlayPause) }
     }
 
     fun previous() {
-        val session = sessionRef.get() ?: return
-        if (session.state.value.canGoPrevious) session.previous()
+        sessionRef.get()?.let { execute(it, NucleusDesktopMediaAction.Previous) }
     }
 
     fun next() {
-        val session = sessionRef.get() ?: return
-        if (session.state.value.canGoNext) session.next()
+        sessionRef.get()?.let { execute(it, NucleusDesktopMediaAction.Next) }
+    }
+
+    private fun execute(session: PlaybackSession, action: NucleusDesktopMediaAction) {
+        when (action) {
+            NucleusDesktopMediaAction.PlayPause -> {
+                if (trayPlaybackCanToggle(session.state.value)) session.toggle()
+            }
+            NucleusDesktopMediaAction.Previous -> {
+                if (session.state.value.canGoPrevious) session.previous()
+            }
+            NucleusDesktopMediaAction.Next -> {
+                if (session.state.value.canGoNext) session.next()
+            }
+        }
     }
 }
 
