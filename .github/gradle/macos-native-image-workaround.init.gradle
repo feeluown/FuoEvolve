@@ -1,0 +1,60 @@
+import org.gradle.api.tasks.Exec
+
+gradle.beforeProject { project ->
+    if (project.path != ':desktopApp') {
+        return
+    }
+
+    project.pluginManager.withPlugin('dev.nucleusframework') {
+        def requestedGraalvmVersion = System.getenv('FUOEVOLVE_GRAALVM_VERSION')?.trim()
+        if (requestedGraalvmVersion) {
+            def nucleus = project.extensions.getByName('nucleus')
+            nucleus.application.graalvm.toolchain.version.set(requestedGraalvmVersion)
+            project.logger.lifecycle("FuoEvolve macOS GraalVM toolchain override: ${requestedGraalvmVersion}")
+        }
+
+        def preflight = project.tasks.register('verifyGraalvmMachOPreflight', Exec) { task ->
+            task.group = 'verification'
+            task.description = 'Probe the raw macOS Native Image with Apple Mach-O mutation tools.'
+            task.dependsOn('nativeImageCompile')
+
+            def binary = project.layout.buildDirectory
+                .file('compose/tmp/main/graalvm/nativeCompile/fuoevolve')
+                .get()
+                .asFile
+            task.inputs.file(binary)
+            task.commandLine(
+                'bash',
+                project.rootProject.file('desktopApp/packaging/macos/macho-preflight.sh').absolutePath,
+                binary.absolutePath,
+            )
+        }
+
+        project.tasks.matching { it.name == 'copyGraalvmBinaryToApp' }.configureEach { task ->
+            task.dependsOn(preflight)
+        }
+
+        // Nucleus 2.5.15 already treats dylib strip failures as non-fatal, but the main executable
+        // still uses strict Exec tasks. Keep the original Native Image executable when Apple's
+        // cctools reject its __LINKEDIT layout, matching Nucleus' safe dylib behavior.
+        project.tasks.withType(Exec).matching {
+            it.name == 'fixGraalvmRpath' || it.name == 'stripGraalvmBinary'
+        }.configureEach { task ->
+            task.ignoreExitValue = true
+            task.doFirst {
+                def command = task.commandLine as List
+                if (command && command[0] != 'xcrun') {
+                    task.commandLine((['xcrun'] + command) as List)
+                }
+            }
+            task.doLast {
+                def result = task.executionResult.orNull
+                if (result != null && result.exitValue != 0) {
+                    project.logger.warn(
+                        "${task.path} failed with exit ${result.exitValue}; keeping the original Mach-O executable.",
+                    )
+                }
+            }
+        }
+    }
+}
