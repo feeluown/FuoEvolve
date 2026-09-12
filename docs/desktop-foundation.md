@@ -47,7 +47,7 @@ Desktop packages are produced only from `desktopApp`:
 - Linux x64 AppImage.
 - Linux x64 Arch/Pacman package.
 
-The AppImage is built against the pinned Ubuntu 26.04 LTS baseline and bundles its portable user-space native closure. The Arch package intentionally relies on distribution-managed native dependencies.
+The Linux AppImage and Arch package are built together on the pinned Ubuntu 26.04 LTS baseline. They share one GraalVM Native Image compilation and the same packaged user-space native closure; the Arch package additionally retains system dependency metadata through `pacmanDepends`.
 
 No desktop package contains a bundled JVM.
 
@@ -62,13 +62,13 @@ Desktop CI runs on Linux, Windows, and macOS and validates:
 - packaged native-resource staging;
 - platform-specific libmpv runtime preparation.
 
-The reusable packaging workflow additionally verifies MSI/DMG/AppImage/Arch output and their required native package contents. Release tags publish the same package matrix alongside Android.
+The reusable packaging workflow additionally verifies MSI/DMG/AppImage/Arch output and their required native package contents. The Linux packaging job verifies both outputs after one shared Native Image build. Release tags publish the same package matrix alongside Android.
 
 ## Linux Wayland requirement
 
 Linux production packages must use native Wayland windowing when launched in a Wayland session and must not require XWayland for the main application window. Tao/Nucleus is the desktop window backend; WebKitGTK is isolated to the provider-login helper.
 
-The portable AppImage keeps graphics-driver-facing libraries host-managed while bundling the user-space dependency closure required by FuoEvolve.
+The packaged Linux user-space closure keeps graphics-driver-facing libraries host-managed while bundling the runtime dependencies required by FuoEvolve helpers and playback integration.
 
 ## Deferred work
 
