@@ -1,5 +1,7 @@
 package org.feeluown.mobile
 
+import java.nio.file.Path
+
 /** File payload returned by the desktop-native file dialog boundary. */
 data class DesktopTextFile(
     val fileName: String,
@@ -8,7 +10,7 @@ data class DesktopTextFile(
 
 /**
  * Host-provided desktop file dialogs. Implementations are intentionally outside `shared` so the
- * Tao/GraalVM host never needs to initialize Swing/AWT just to import or export a local playlist.
+ * Tao/GraalVM host never needs to initialize Swing/AWT just to import or export files.
  */
 interface DesktopTextFileDialogProvider {
     suspend fun openTextFile(
@@ -24,6 +26,15 @@ interface DesktopTextFileDialogProvider {
         extensions: List<String>,
         content: String,
     ): Boolean
+
+    /** Saves an already materialized file through the same OS-native Save dialog. */
+    suspend fun saveFile(
+        dialogTitle: String,
+        suggestedFileName: String,
+        filterDescription: String,
+        extensions: List<String>,
+        sourceFile: Path,
+    ): String?
 }
 
 @Volatile
@@ -69,3 +80,21 @@ internal suspend fun saveDesktopTextFile(
 }.onFailure { throwable ->
     onFeedback(throwable.message ?: "写入文件失败")
 }.getOrDefault(false)
+
+internal suspend fun saveDesktopFile(
+    dialogTitle: String,
+    suggestedFileName: String,
+    filterDescription: String,
+    extensions: List<String>,
+    sourceFile: Path,
+): String? {
+    val provider = createDesktopTextFileDialogProvider()
+        ?: error("桌面文件选择器未初始化")
+    return provider.saveFile(
+        dialogTitle = dialogTitle,
+        suggestedFileName = suggestedFileName,
+        filterDescription = filterDescription,
+        extensions = extensions,
+        sourceFile = sourceFile,
+    )
+}
