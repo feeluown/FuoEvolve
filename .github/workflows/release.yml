@@ -173,10 +173,11 @@ jobs:
           cp "$android" build/artifacts/
 
           declare -A desktop_assets=(
-            ["FuoEvolve-windows-x64.msi"]="FuoEvolve-${tag}-windows-x64.msi"
+            ["FuoEvolve-windows-x64.exe"]="FuoEvolve-${tag}-windows-x64.exe"
             ["FuoEvolve-macos-arm64.dmg"]="FuoEvolve-${tag}-macos-arm64.dmg"
             ["FuoEvolve-macos-x64.dmg"]="FuoEvolve-${tag}-macos-x64.dmg"
             ["FuoEvolve-linux-x64.AppImage"]="FuoEvolve-${tag}-linux-x64.AppImage"
+            ["FuoEvolve-linux-x64.deb"]="FuoEvolve-${tag}-linux-x64.deb"
             ["FuoEvolve-linux-x64.pkg.tar.zst"]="FuoEvolve-${tag}-linux-x64.pkg.tar.zst"
           )
 
@@ -191,7 +192,7 @@ jobs:
             cp "$source_path" "build/artifacts/$target_name"
           done
 
-          expected_count=6
+          expected_count=7
           actual_count="$(find build/artifacts -maxdepth 1 -type f | wc -l | tr -d ' ')"
           if [ "$actual_count" -ne "$expected_count" ]; then
             echo "::error::Expected $expected_count release artifacts before checksums, found $actual_count"
@@ -257,57 +258,3 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           make_latest: true
-
-  publish-fdroid-pages:
-    name: Publish F-Droid repository to Pages
-    needs: publish-release
-    if: >-
-      always() &&
-      (github.event_name == 'workflow_dispatch' ||
-      needs.publish-release.result == 'success')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    concurrency:
-      group: fuoevolve-github-pages
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    env:
-      FUO_SIGNING_KEYSTORE_BASE64: ${{ secrets.FUO_SIGNING_KEYSTORE_BASE64 }}
-      FUO_SIGNING_STORE_PASSWORD: ${{ secrets.FUO_SIGNING_STORE_PASSWORD }}
-      FUO_SIGNING_KEY_ALIAS: ${{ secrets.FUO_SIGNING_KEY_ALIAS }}
-      FUO_SIGNING_KEY_PASSWORD: ${{ secrets.FUO_SIGNING_KEY_PASSWORD }}
-      GH_TOKEN: ${{ github.token }}
-      FDROID_DOCKER_IMAGE: registry.gitlab.com/fdroid/docker-executable-fdroidserver:master
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Build F-Droid repository and Pages site
-        run: |
-          docker pull "$FDROID_DOCKER_IMAGE"
-          bash scripts/build-fdroid-pages.sh
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v6
-
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: build/pages
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
