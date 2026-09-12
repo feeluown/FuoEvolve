@@ -23,9 +23,13 @@ inputs:
     required: false
     default: 'false'
   graalvm-version:
-    description: GraalVM toolchain version cache-key component
+    description: GraalVM toolchain version used on Windows and Linux
     required: false
     default: '25i3'
+  macos-graalvm-version:
+    description: GraalVM toolchain version used on macOS; keep separate for Native Image Mach-O A/B testing
+    required: false
+    default: '25'
   graalvm-distribution:
     description: GraalVM distribution cache-key component
     required: false
@@ -56,10 +60,44 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
 
-    - name: Select Xcode 26
+    - name: Resolve GraalVM toolchain version
+      if: inputs.graalvm == 'true'
+      id: graalvm-version
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          resolved="${{ inputs.macos-graalvm-version }}"
+          echo "FUOEVOLVE_GRAALVM_VERSION=$resolved" >> "$GITHUB_ENV"
+        else
+          resolved="${{ inputs.graalvm-version }}"
+        fi
+        echo "version=$resolved" >> "$GITHUB_OUTPUT"
+        echo "Resolved GraalVM toolchain version: $resolved"
+
+    - name: Select and pin Xcode 26 toolchain
       if: runner.os == 'macOS' && inputs.graalvm == 'true'
       shell: bash
-      run: sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+      run: |
+        set -euo pipefail
+        developer_dir=/Applications/Xcode_26.0.app/Contents/Developer
+        test -d "$developer_dir"
+        sudo xcode-select -s "$developer_dir"
+        export DEVELOPER_DIR="$developer_dir"
+        echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
+
+        echo "Pinned Xcode toolchain:"
+        xcodebuild -version
+        echo "xcode-select=$(xcode-select -p)"
+        for tool in strip install_name_tool otool vtool; do
+          tool_path="$(xcrun --find "$tool")"
+          echo "$tool=$tool_path"
+          echo "$(dirname "$tool_path")" >> "$GITHUB_PATH"
+        done
+
+        mkdir -p "$HOME/.gradle/init.d"
+        cp "$GITHUB_WORKSPACE/.github/gradle/macos-native-image-workaround.init.gradle" \
+          "$HOME/.gradle/init.d/fuoevolve-macos-native-image-workaround.gradle"
 
     # Keep the MSVC setup free of JavaScript actions so it cannot inherit an old Node runtime.
     # Capture the environment produced by VsDevCmd.bat and persist it for later Gradle/native-image steps.
@@ -97,7 +135,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: ~/.gradle/nucleus/graalvm
-        key: graalvm-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ inputs.graalvm-distribution }}-${{ inputs.graalvm-version }}
+        key: graalvm-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ inputs.graalvm-distribution }}-${{ steps.graalvm-version.outputs.version }}
 
     - name: Set java-home output
       id: set-java-home

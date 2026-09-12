@@ -1,0 +1,57 @@
+import org.gradle.api.tasks.Exec
+
+gradle.beforeProject { project ->
+    if (project.path != ':desktopApp') {
+        return
+    }
+
+    project.pluginManager.withPlugin('dev.nucleusframework') {
+        def requestedGraalvmVersion = System.getenv('FUOEVOLVE_GRAALVM_VERSION')?.trim()
+        if (requestedGraalvmVersion) {
+            def nucleus = project.extensions.getByName('nucleus')
+            nucleus.application.graalvm.toolchain.version.set(requestedGraalvmVersion)
+            project.logger.lifecycle("FuoEvolve macOS GraalVM toolchain override: ${requestedGraalvmVersion}")
+        }
+
+        def preflight = project.tasks.register('verifyGraalvmMachOPreflight', Exec) { task ->
+            task.group = 'verification'
+            task.description = 'Probe the raw macOS Native Image with Apple Mach-O mutation tools.'
+            task.dependsOn('nativeImageCompile')
+
+            def binary = project.layout.buildDirectory
+                .file('compose/tmp/main/graalvm/nativeCompile/fuoevolve')
+                .get()
+                .asFile
+            task.inputs.file(binary)
+            task.commandLine(
+                'bash',
+                project.rootProject.file('desktopApp/packaging/macos/macho-preflight.sh').absolutePath,
+                binary.absolutePath,
+            )
+        }
+
+        project.tasks.matching { it.name == 'copyGraalvmBinaryToApp' }.configureEach { task ->
+            task.dependsOn(preflight)
+        }
+
+        // Nucleus 2.5.15 already mutates dylibs through a temporary copy, but the main executable
+        // still uses in-place Exec tasks. Redirect those two operations through the same safety
+        // model: mutate a sibling copy, validate it with otool, then atomically replace on success.
+        def safeMutationScript = project.rootProject
+            .file('desktopApp/packaging/macos/safe-macho-mutate.sh')
+            .absolutePath
+        project.tasks.withType(Exec).matching {
+            it.name == 'fixGraalvmRpath' || it.name == 'stripGraalvmBinary'
+        }.configureEach { task ->
+            task.doFirst {
+                def originalCommand = task.commandLine as List
+                if (!originalCommand) {
+                    throw new GradleException("${task.path} has no configured command line")
+                }
+                def binary = originalCommand[-1].toString()
+                def operation = task.name == 'fixGraalvmRpath' ? 'rpath' : 'strip'
+                task.commandLine('bash', safeMutationScript, operation, binary)
+            }
+        }
+    }
+}
