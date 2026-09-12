@@ -375,6 +375,7 @@ dependencies {
     implementation(project(":desktopRuntime"))
     implementation(compose.desktop.currentOs)
     implementation(libs.compose.material3.expressive)
+    implementation(libs.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
 
@@ -383,6 +384,7 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
     implementation("dev.nucleusframework:nucleus.media-control:2.5.15")
     implementation("dev.nucleusframework:nucleus.notification-common:2.5.15")
+    implementation("dev.nucleusframework:nucleus.launcher-windows:2.5.15")
     implementation("dev.nucleusframework:composenativetray:2.1.6")
 
     testImplementation(kotlin("test"))
