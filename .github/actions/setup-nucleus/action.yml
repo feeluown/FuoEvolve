@@ -101,6 +101,19 @@ runs:
         # prepending XcodeDefault.xctoolchain/usr/bin bypasses the runner's /usr/bin developer-tool
         # shim and can lose SDK resolution. All FuoEvolve Mach-O workaround scripts use xcrun
         # explicitly, while DEVELOPER_DIR keeps native-image and Apple tools on the selected Xcode.
+        probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fuoevolve-clang-probe.XXXXXX")"
+        trap 'rm -rf "$probe_dir"' EXIT
+        cat > "$probe_dir/nucleus-stub-probe.c" <<'EOF'
+        #include <dlfcn.h>
+        void *fuoevolve_nucleus_stub_probe(void) {
+            return dlsym(RTLD_DEFAULT, "InitializeEncoding");
+        }
+        EOF
+        clang -c "$probe_dir/nucleus-stub-probe.c" -o "$probe_dir/nucleus-stub-probe.o"
+        file "$probe_dir/nucleus-stub-probe.o"
+        rm -rf "$probe_dir"
+        trap - EXIT
+
         mkdir -p "$HOME/.gradle/init.d"
         cp "$GITHUB_WORKSPACE/.github/gradle/macos-native-image-workaround.init.gradle" \
           "$HOME/.gradle/init.d/fuoevolve-macos-native-image-workaround.gradle"
