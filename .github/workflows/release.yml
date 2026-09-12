@@ -149,7 +149,7 @@ jobs:
       - name: Download Android release asset
         uses: actions/download-artifact@v8
         with:
-          name: fuo-evolve-android-release
+          name: fuo-evolve-${{ github.ref_name }}-android-signed.apk
           path: build/android-release
 
       - name: Download desktop release assets
@@ -239,6 +239,7 @@ jobs:
           SUMMARY_OUTCOME: ${{ steps.release_summary.outcome }}
           SUMMARY_FILE: ${{ steps.release_summary.outputs.response-file }}
         run: |
+          mkdir -p build
           : > build/release-intro.md
           if [ "$SUMMARY_OUTCOME" = "success" ] && [ -n "$SUMMARY_FILE" ] && [ -s "$SUMMARY_FILE" ]; then
             {
