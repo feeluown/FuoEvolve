@@ -29,7 +29,7 @@ Create a user-facing package for the current OS with:
   :desktopApp:packageGraalvmNativeDistributionForCurrentOS
 ```
 
-Supported target formats are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias).
+Supported target formats are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias). Linux CI requests the full current-OS distribution task so AppImage and Pacman packaging share one `packageGraalvmNative` execution instead of compiling the Native Image twice.
 
 ## Distribution matrix
 
@@ -38,7 +38,7 @@ Supported target formats are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is a
 | Windows x64 | MSI | JNI bridge, system-output capture library and pinned libmpv runtime bundled |
 | macOS arm64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
-| Arch Linux x64 | Pacman/Arch package | Native capture library bundled; mpv, Libsecret, PipeWire/PulseAudio, WebKitGTK and UI ABI dependencies are distribution-managed |
+| Arch Linux x64 | Pacman/Arch package | Built from the same Native Image and packaged Linux user-space closure as AppImage; `pacmanDepends` remain as system compatibility dependencies |
 | Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 26.04 LTS baseline |
 
 No desktop artifact bundles a JVM.
@@ -69,8 +69,8 @@ Release tags such as `1.2.3` are embedded as the desktop package version and dis
 ## CI and release
 
 - `.github/workflows/desktop-tests.yml` validates shared desktop/runtime tests and native resource staging on Linux, Windows and macOS.
-- `.github/workflows/desktop-packaging.yml` produces MSI, both DMGs, AppImage and Arch packages. AppImage uses the pinned Ubuntu 26.04 LTS runner baseline.
-- `master-canary.yml` publishes preview artifacts from `master`.
+- `.github/workflows/desktop-packaging.yml` produces MSI, both DMGs, AppImage and Arch packages. The two Linux formats are emitted from one Ubuntu 26.04 LTS job and share a single Native Image compilation.
+- `master-canary.yml` publishes preview artifacts from `master` after the matching platform test workflow succeeds.
 - `release.yml` publishes the same desktop package matrix alongside Android for release tags and includes SHA-256 checksums.
 
 Windows and macOS packages are currently published without production code signing/notarization; signing can be layered onto the same Native Image release pipeline later.
