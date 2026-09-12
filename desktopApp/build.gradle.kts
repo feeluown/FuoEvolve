@@ -377,7 +377,6 @@ dependencies {
     implementation(libs.compose.material3.expressive)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.core)
-    implementation(libs.kotlinx.coroutines.swing)
 
     implementation("dev.nucleusframework:nucleus.nucleus-application:2.5.15")
     implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
