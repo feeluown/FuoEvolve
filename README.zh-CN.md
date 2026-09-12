@@ -15,10 +15,9 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | 平台 | 正式版 | Canary / 预览版 |
 | --- | --- | --- |
 | **Android** | [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) · [F-Droid 仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | [最新 master 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **Windows x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 MSI | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 MSI |
+| **Windows x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 NSIS 安装包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 NSIS 安装包 |
 | **macOS arm64 / x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 DMG | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 DMG |
-| **Linux x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 AppImage / Arch 包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 AppImage / Arch 包 |
-| **iOS** | — | 仅提供实验性开发构建 |
+| **Linux x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 AppImage / DEB / Arch 包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 AppImage / DEB / Arch 包 |
 
 > 桌面端正式版使用 GraalVM Native Image，不再捆绑 JVM。Windows 与 macOS 安装包目前尚未完成生产签名 / 公证。
 
@@ -26,7 +25,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 - 🎵 **多音乐源**：在一个应用中使用网易云音乐、QQ 音乐、哔哩哔哩和 YouTube Music。
 - 🧭 **发现与搜索**：浏览推荐、排行榜、歌单、歌手、专辑和视频，并统一搜索已启用的音乐源。
-- ▶️ **音乐与视频播放**：支持播放队列、随机/循环、进度跳转、睡眠定时、MV / 视频和哔哩哔哩多分 P。
+- ▶️ **音乐和视频播放**：支持播放队列、随机/循环、进度跳转、睡眠定时、MV / 视频和哔哩哔哩多分 P。
 - 🎤 **丰富歌词**：支持同步歌词、翻译、罗马音、可用时的逐字歌词，以及手动匹配其他歌曲歌词。
 - 🔁 **智能换源**：当前歌曲无法播放时，自动从其他已启用来源寻找合适的替代资源。
 - 💽 **本地与离线音乐**：扫描本地音乐、编辑信息、创建本地歌单、下载在线歌曲并支持断点续传。
@@ -39,9 +38,9 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 桌面端与移动端共享 Compose 使用体验，支持 Windows、macOS 和 Linux。`desktopApp` 现在是唯一桌面宿主，使用 Nucleus/Tao + GraalVM Native Image 运行和发行，原 JVM 桌面应用已经移除。
 
-- **Windows**：支持 SMTC 系统媒体控制，正式发行 MSI。
+- **Windows**：支持 SMTC 系统媒体控制，使用 NSIS 安装包发行。
 - **macOS**：支持 Now Playing / Remote Command Center，提供 Apple Silicon 与 Intel DMG。
-- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage 与 Arch 包；便携 AppImage 固定使用 Ubuntu 26.04 LTS 构建基线。
+- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage、DEB 与 Arch 包；Linux Native Image 固定使用 Ubuntu 26.04 LTS 构建基线。
 - **音视频播放**：通过 JNI 直接接入 libmpv，视频优先使用 GPU 渲染并提供软件回退。
 - **托盘生命周期**：关闭窗口后继续播放和下载，可从托盘 / 状态栏图标恢复窗口或退出应用。
 - **安全登录存储**：使用 Windows Credential Manager、macOS Keychain 和 Linux Secret Service / Libsecret。
@@ -64,10 +63,9 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | 平台 | 状态 | 说明 |
 | --- | --- | --- |
 | Android | **稳定版** | 签名 APK 与 F-Droid 发行 |
-| Windows | **稳定版** | x64 Native Image MSI；生产签名后续补充 |
+| Windows | **稳定版** | x64 Native Image NSIS 安装包；生产签名后续补充 |
 | macOS | **稳定版** | Apple Silicon / Intel Native Image DMG；签名和公证后续补充 |
-| Linux | **稳定版** | Native Image AppImage 与 Arch 包；AppImage 基线为 Ubuntu 26.04 LTS |
-| iOS | **实验性** | 仅用于开发与 CI 验证 |
+| Linux | **稳定版** | Native Image AppImage、DEB 与 Arch 包；构建基线为 Ubuntu 26.04 LTS |
 
 ## 开发
 

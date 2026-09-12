@@ -20,25 +20,35 @@ Build the native application image with:
   :desktopApp:packageGraalvmNative
 ```
 
-Create a user-facing package for the current OS with:
+Nucleus exposes per-format Native Image packaging tasks. The release pipeline uses:
 
 ```bash
+# Windows
+./gradlew -PnativeMarch=compatibility :desktopApp:packageGraalvmNsis
+
+# macOS
+./gradlew -PnativeMarch=compatibility :desktopApp:packageGraalvmDmg
+
+# Linux: one Gradle invocation, one shared Native Image compilation
 ./gradlew \
   -PnativeMarch=compatibility \
-  -Pfuoevolve.nucleus.targetFormat=<msi|dmg|appimage|pacman> \
-  :desktopApp:packageGraalvmNativeDistributionForCurrentOS
+  -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
+  :desktopApp:packageGraalvmAppImage \
+  :desktopApp:packageGraalvmDeb \
+  :desktopApp:packageGraalvmPacman
 ```
 
-Supported target formats are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias).
+The three Linux packaging tasks share the same `packageGraalvmNative` dependency in one Gradle invocation, so AppImage, DEB, and Pacman do not trigger three full GraalVM compilations.
 
 ## Distribution matrix
 
 | Platform | Artifact | Native dependency policy |
 | --- | --- | --- |
-| Windows x64 | MSI | JNI bridge, system-output capture library and pinned libmpv runtime bundled |
+| Windows x64 | NSIS `.exe` installer | JNI bridge, system-output capture library and pinned libmpv runtime bundled |
 | macOS arm64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
-| Arch Linux x64 | Pacman/Arch package | Native capture library bundled; mpv, Libsecret, PipeWire/PulseAudio, WebKitGTK and UI ABI dependencies are distribution-managed |
+| Debian/Ubuntu Linux x64 | DEB | Built from the shared Linux Native Image and packaged user-space closure |
+| Arch Linux x64 | Pacman/Arch package | Built from the shared Linux Native Image and packaged user-space closure; `pacmanDepends` remain as system compatibility dependencies |
 | Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 26.04 LTS baseline |
 
 No desktop artifact bundles a JVM.
@@ -69,8 +79,8 @@ Release tags such as `1.2.3` are embedded as the desktop package version and dis
 ## CI and release
 
 - `.github/workflows/desktop-tests.yml` validates shared desktop/runtime tests and native resource staging on Linux, Windows and macOS.
-- `.github/workflows/desktop-packaging.yml` produces MSI, both DMGs, AppImage and Arch packages. AppImage uses the pinned Ubuntu 26.04 LTS runner baseline.
-- `master-canary.yml` publishes preview artifacts from `master`.
+- `.github/workflows/desktop-packaging.yml` produces the Windows NSIS installer, both macOS DMGs, and Linux AppImage/DEB/Arch packages. All three Linux formats are emitted from one Ubuntu 26.04 LTS job and share a single Native Image compilation.
+- `master-canary.yml` publishes preview artifacts from `master` after the matching platform test workflow succeeds. iOS remains test-only and does not produce a Canary artifact.
 - `release.yml` publishes the same desktop package matrix alongside Android for release tags and includes SHA-256 checksums.
 
 Windows and macOS packages are currently published without production code signing/notarization; signing can be layered onto the same Native Image release pipeline later.

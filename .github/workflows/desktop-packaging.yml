@@ -8,13 +8,12 @@ permissions:
 
 jobs:
   windows-x64:
-    name: Windows x64 MSI
+    name: Windows x64 NSIS
     runs-on: windows-latest
     timeout-minutes: 75
     env:
       FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR: ${{ github.workspace }}\build\nucleus-native\windows\mpv
       FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR: ${{ github.workspace }}\build\nucleus-native\windows\mpv
-      FUOEVOLVE_NUCLEUS_TARGET_FORMAT: msi
 
     steps:
       - name: Checkout
@@ -61,13 +60,16 @@ jobs:
           key: nucleus-libmpv-windows-x64-${{ hashFiles('desktopApp/packaging/native-deps.lock') }}
 
       - name: Prepare pinned Windows libmpv development bundle
-        if: steps.windows-libmpv-cache.outputs.cache-hit != 'true'
         shell: pwsh
-        run: >-
-          ./desktopApp/packaging/windows/prepare-libmpv-dev.ps1
-          -OutputDir "$env:FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"
+        env:
+          LIBMPV_CACHE_HIT: ${{ steps.windows-libmpv-cache.outputs.cache-hit }}
+        run: |
+          if ($env:LIBMPV_CACHE_HIT -ne "true") {
+            ./desktopApp/packaging/windows/prepare-libmpv-dev.ps1 `
+              -OutputDir "$env:FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"
+          }
 
-      - name: Build Nucleus Native Image MSI
+      - name: Build Nucleus Native Image NSIS installer
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -80,27 +82,28 @@ jobs:
             --warning-mode all `
             --stacktrace `
             -PnativeMarch=compatibility `
-            :desktopApp:packageGraalvmMsi
+            :desktopApp:packageGraalvmNsis
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Prepare Windows artifact
         shell: pwsh
         run: |
-          $artifacts = Get-ChildItem -Path desktopApp\build -Recurse -File -Filter *.msi
+          $artifacts = Get-ChildItem -Path desktopApp\build\compose\binaries -Recurse -File -Filter *.exe |
+            Where-Object { $_.FullName -match '[\\/]graalvm-nsis[\\/]' }
           if ($artifacts.Count -ne 1) {
-            Write-Host "Expected exactly one MSI, found $($artifacts.Count)"
+            Write-Host "Expected exactly one NSIS installer, found $($artifacts.Count)"
             $artifacts | Select-Object FullName, Length
             exit 1
           }
           New-Item -ItemType Directory -Force -Path build\artifacts | Out-Null
-          Copy-Item $artifacts[0].FullName build\artifacts\FuoEvolve-windows-x64.msi
-          Get-Item build\artifacts\FuoEvolve-windows-x64.msi | Select-Object Name, Length
+          Copy-Item $artifacts[0].FullName build\artifacts\FuoEvolve-windows-x64.exe
+          Get-Item build\artifacts\FuoEvolve-windows-x64.exe | Select-Object Name, Length
 
-      - name: Upload Windows MSI
+      - name: Upload Windows NSIS installer
         uses: actions/upload-artifact@v7
         with:
-          name: FuoEvolve-windows-x64-msi
-          path: build/artifacts/FuoEvolve-windows-x64.msi
+          name: FuoEvolve-windows-x64-nsis
+          path: build/artifacts/FuoEvolve-windows-x64.exe
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -169,10 +172,13 @@ jobs:
           key: nucleus-libmpv-macos-${{ matrix.arch }}-${{ hashFiles('desktopApp/packaging/native-deps.lock', 'desktopApp/packaging/macos/prepare-libmpv.sh') }}
 
       - name: Prepare relocatable macOS libmpv runtime
-        if: steps.macos-libmpv-cache.outputs.cache-hit != 'true'
-        run: >-
-          bash desktopApp/packaging/macos/prepare-libmpv.sh
-          "${{ github.workspace }}/build/nucleus-native/macos/mpv"
+        env:
+          LIBMPV_CACHE_HIT: ${{ steps.macos-libmpv-cache.outputs.cache-hit }}
+        run: |
+          if [[ "$LIBMPV_CACHE_HIT" != "true" ]]; then
+            bash desktopApp/packaging/macos/prepare-libmpv.sh \
+              "${{ github.workspace }}/build/nucleus-native/macos/mpv"
+          fi
 
       - name: Verify cached macOS libmpv bundle
         run: |
@@ -241,10 +247,10 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  linux-appimage:
-    name: Linux x64 AppImage (Ubuntu 26.04 LTS baseline)
+  linux-x64:
+    name: Linux x64 AppImage + DEB + Arch
     runs-on: ubuntu-26.04
-    timeout-minutes: 100
+    timeout-minutes: 110
 
     steps:
       - name: Checkout
@@ -252,12 +258,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify AppImage LTS baseline
+      - name: Verify Linux LTS baseline
         run: |
           . /etc/os-release
           test "$ID" = "ubuntu"
           test "$VERSION_ID" = "26.04"
-          echo "Building AppImage against Ubuntu $VERSION_ID LTS baseline"
+          echo "Building Linux packages against Ubuntu $VERSION_ID LTS baseline"
 
       - name: Prepare Git refs for versioning
         run: |
@@ -288,7 +294,7 @@ jobs:
           restore-keys: |
             nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
 
-      - name: Install portable Linux native dependencies
+      - name: Install Linux native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -301,10 +307,11 @@ jobs:
             libsecret-1-dev \
             libwebkit2gtk-4.1-dev \
             glib-networking \
+            libarchive-tools \
             patchelf \
             pax-utils
 
-      - name: Build Nucleus Native Image AppImage
+      - name: Build Linux Native Image once and package all formats
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -314,21 +321,40 @@ jobs:
             --warning-mode all \
             --stacktrace \
             -PnativeMarch=compatibility \
-            -Pfuoevolve.nucleus.targetFormat=appimage \
             -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
-            :desktopApp:packageGraalvmAppImage
+            :desktopApp:packageGraalvmAppImage \
+            :desktopApp:packageGraalvmDeb \
+            :desktopApp:packageGraalvmPacman
 
-      - name: Prepare and verify AppImage artifact
+      - name: Prepare and verify Linux artifacts
         run: |
-          mapfile -t artifacts < <(find desktopApp/build -type f -iname '*.AppImage' -print)
-          if [[ "${#artifacts[@]}" -ne 1 ]]; then
-            echo "Expected exactly one AppImage, found ${#artifacts[@]}" >&2
-            printf '%s\n' "${artifacts[@]}" >&2
+          mapfile -t appimages < <(find desktopApp/build -type f -iname '*.AppImage' -print)
+          if [[ "${#appimages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one AppImage, found ${#appimages[@]}" >&2
+            printf '%s\n' "${appimages[@]}" >&2
             exit 1
           fi
+
+          mapfile -t deb_packages < <(find desktopApp/build -type f -name '*.deb' -print)
+          if [[ "${#deb_packages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one DEB package, found ${#deb_packages[@]}" >&2
+            printf '%s\n' "${deb_packages[@]}" >&2
+            exit 1
+          fi
+
+          mapfile -t arch_packages < <(find desktopApp/build -type f \( -name '*.pacman' -o -name '*.pkg.tar.zst' \) -print)
+          if [[ "${#arch_packages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one Arch/pacman package, found ${#arch_packages[@]}" >&2
+            printf '%s\n' "${arch_packages[@]}" >&2
+            exit 1
+          fi
+
           mkdir -p build/artifacts build/appimage-verify
-          cp "${artifacts[0]}" build/artifacts/FuoEvolve-linux-x64.AppImage
+          cp "${appimages[0]}" build/artifacts/FuoEvolve-linux-x64.AppImage
           chmod +x build/artifacts/FuoEvolve-linux-x64.AppImage
+          cp "${deb_packages[0]}" build/artifacts/FuoEvolve-linux-x64.deb
+          cp "${arch_packages[0]}" build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
+
           (
             cd build/appimage-verify
             ../artifacts/FuoEvolve-linux-x64.AppImage --appimage-extract >/dev/null
@@ -340,7 +366,26 @@ jobs:
             find "$ROOT" -type f -name WebKitNetworkProcess -print -quit | grep -q .
             find "$ROOT" -type f -name libgiognutls.so -print -quit | grep -q .
           )
+
+          test "$(dpkg-deb -f build/artifacts/FuoEvolve-linux-x64.deb Package)" = "fuoevolve"
+          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
+          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
+          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep 'fuoevolve-web-login' >/dev/null
+
+          bsdtar -xOf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst .PKGINFO | tee build/arch-pkginfo.txt
+          grep -Eq '^depend = mpv($|[<>=])' build/arch-pkginfo.txt
+          grep -Eq '^depend = libsecret($|[<>=])' build/arch-pkginfo.txt
+          grep -Eq '^depend = webkit2gtk-4.1($|[<>=])' build/arch-pkginfo.txt
+          grep -Eq '^depend = alsa-lib($|[<>=])' build/arch-pkginfo.txt
+          grep -Eq '^depend = pipewire($|[<>=])' build/arch-pkginfo.txt
+          grep -Eq '^depend = libpulse($|[<>=])' build/arch-pkginfo.txt
+          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_mpv_jni\.(so|dll|dylib)$' >/dev/null
+          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
+          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep 'fuoevolve-web-login' >/dev/null
+
           du -h build/artifacts/FuoEvolve-linux-x64.AppImage
+          du -h build/artifacts/FuoEvolve-linux-x64.deb
+          du -h build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
 
       - name: Upload Linux AppImage
         uses: actions/upload-artifact@v7
@@ -351,95 +396,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  linux-arch:
-    name: Linux x64 Arch package
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v7
         with:
-          fetch-depth: 0
-
-      - name: Prepare Git refs for versioning
-        run: |
-          if ! git show-ref --verify --quiet refs/heads/master; then
-            git branch master origin/master
-          fi
-
-      - name: Set up Nucleus GraalVM toolchain
-        uses: ./.github/actions/setup-nucleus
-        with:
-          java-version: "17"
-          graalvm: "true"
-          packaging-tools: "true"
-          setup-node: "true"
-
-      - name: Set up Rust 1.98.1
-        uses: dtolnay/rust-toolchain@1.98.1
-
-      - name: Cache Rust native helpers
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            desktopApp/native/web-login/target
-            desktopApp/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
-          restore-keys: |
-            nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
-
-      - name: Install Linux native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libasound2-dev \
-            libmpv-dev \
-            libpipewire-0.3-dev \
-            libpulse-dev \
-            libsecret-1-dev \
-            libwebkit2gtk-4.1-dev \
-            libarchive-tools
-
-      - name: Build Nucleus Native Image Arch package
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          ./gradlew \
-            --no-daemon \
-            --no-configuration-cache \
-            --warning-mode all \
-            --stacktrace \
-            -PnativeMarch=compatibility \
-            -Pfuoevolve.nucleus.targetFormat=pacman \
-            :desktopApp:packageGraalvmPacman
-
-      - name: Prepare and verify Arch artifact
-        run: |
-          mapfile -t artifacts < <(find desktopApp/build -type f \( -name '*.pacman' -o -name '*.pkg.tar.zst' \) -print)
-          if [[ "${#artifacts[@]}" -ne 1 ]]; then
-            echo "Expected exactly one Arch/pacman package, found ${#artifacts[@]}" >&2
-            printf '%s\n' "${artifacts[@]}" >&2
-            exit 1
-          fi
-          package="${artifacts[0]}"
-          mkdir -p build
-          bsdtar -xOf "$package" .PKGINFO | tee build/arch-pkginfo.txt
-          grep -Eq '^depend = mpv($|[<>=])' build/arch-pkginfo.txt
-          grep -Eq '^depend = libsecret($|[<>=])' build/arch-pkginfo.txt
-          grep -Eq '^depend = webkit2gtk-4.1($|[<>=])' build/arch-pkginfo.txt
-          grep -Eq '^depend = alsa-lib($|[<>=])' build/arch-pkginfo.txt
-          grep -Eq '^depend = pipewire($|[<>=])' build/arch-pkginfo.txt
-          grep -Eq '^depend = libpulse($|[<>=])' build/arch-pkginfo.txt
-          bsdtar -tf "$package" | grep -E 'libfuoevolve_mpv_jni\.(so|dll|dylib)$' >/dev/null
-          bsdtar -tf "$package" | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
-          bsdtar -tf "$package" | grep 'fuoevolve-web-login' >/dev/null
-          mkdir -p build/artifacts
-          cp "$package" build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
-          du -h build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
+          name: FuoEvolve-linux-x64-deb
+          path: build/artifacts/FuoEvolve-linux-x64.deb
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
 
       - name: Upload Arch Linux package
         uses: actions/upload-artifact@v7

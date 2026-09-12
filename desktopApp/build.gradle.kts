@@ -418,13 +418,15 @@ val requestedTargetFormat = providers.gradleProperty("fuoevolve.nucleus.targetFo
     ?.lowercase()
 val nucleusTargetFormats = when (requestedTargetFormat) {
     null, "all" -> arrayOf(
-        TargetFormat.Msi,
+        TargetFormat.Nsis,
         TargetFormat.Dmg,
+        TargetFormat.Deb,
         TargetFormat.AppImage,
         TargetFormat.Pacman,
     )
-    "msi" -> arrayOf(TargetFormat.Msi)
+    "nsis" -> arrayOf(TargetFormat.Nsis)
     "dmg" -> arrayOf(TargetFormat.Dmg)
+    "deb" -> arrayOf(TargetFormat.Deb)
     "appimage" -> arrayOf(TargetFormat.AppImage)
     "pacman", "arch" -> arrayOf(TargetFormat.Pacman)
     else -> throw GradleException("Unsupported Nucleus target format: $requestedTargetFormat")
