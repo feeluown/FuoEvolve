@@ -9,15 +9,15 @@
 | Windows x64 | NSIS `.exe` installer | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + pinned libmpv DLL runtime bundled |
 | macOS arm64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
-| Debian/Ubuntu Linux x64 | DEB | GraalVM Native Image | shares the Linux Native Image and packaged user-space closure |
-| Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | shares the Linux Native Image and packaged user-space closure; `pacmanDepends` are retained as system compatibility dependencies |
+| Debian/Ubuntu Linux x64 | DEB | GraalVM Native Image | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by APT dependencies |
+| Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `pacmanDepends` |
 | Portable Linux x64 | AppImage | GraalVM Native Image | bundled system-output capture library/ELF closure plus libmpv/Libsecret/WebKitGTK/TLS native closures |
 
 No desktop artifact bundles a JVM.
 
 ## Nucleus packaging
 
-Nucleus 2.5.15 exposes one GraalVM packaging task per format. The release pipeline uses the direct tasks rather than branching the workflow with GitHub Actions conditions:
+Nucleus 2.5.15 exposes one GraalVM packaging task per format. Windows and macOS build one package branch each. Linux intentionally uses two independent branches because AppImage and distro packages have different native-dependency policies:
 
 ```bash
 # Windows
@@ -26,16 +26,21 @@ Nucleus 2.5.15 exposes one GraalVM packaging task per format. The release pipeli
 # macOS
 ./gradlew -PnativeMarch=compatibility :desktopApp:packageGraalvmDmg
 
-# Linux: all direct-distribution formats in one Gradle invocation
+# Linux AppImage: self-contained native runtime closure
 ./gradlew \
   -PnativeMarch=compatibility \
   -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
-  :desktopApp:packageGraalvmAppImage \
+  :desktopApp:packageGraalvmAppImage
+
+# Linux DEB + Pacman: use distribution-managed native dependencies
+./gradlew \
+  -PnativeMarch=compatibility \
+  -Pfuoevolve.nucleus.bundleLinuxRuntime=false \
   :desktopApp:packageGraalvmDeb \
   :desktopApp:packageGraalvmPacman
 ```
 
-All three Linux packaging tasks depend on the same `packageGraalvmNative` task. Gradle executes that dependency once per invocation, so AppImage, DEB and Pacman reuse one full GraalVM Native Image compilation instead of compiling the application three times.
+The AppImage and distro branches run in parallel in GitHub Actions. DEB and Pacman are built together inside the distro branch and therefore share one `packageGraalvmNative` dependency there. AppImage performs a separate Native Image compilation because its staged native resources intentionally include the portable dependency closure.
 
 ## Versioning
 
@@ -53,16 +58,19 @@ Desktop self-update is intentionally not implemented yet. These version values a
 
 - Windows libmpv input pins live in `desktopApp/packaging/native-deps.lock`. CI verifies the pinned archive, stages the public headers/import library for JNI compilation, and bundles the runtime DLLs into the NSIS package.
 - macOS uses the architecture-specific pinned mpv input and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure.
-- Linux AppImage, DEB and Arch packages are produced from the same staged portable user-space closure. The Arch package retains Nucleus `pacmanDepends` metadata for system-level compatibility even though runtime libraries used by the packaged helpers are staged with the application.
+- Linux AppImage stages the portable libmpv, Libsecret, WebKitGTK, TLS and audio-capture dependency closure into the application.
+- Linux DEB and Arch packages stage only the application-owned JNI bridge, audio-capture library and WebView helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
 - Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.
 
 ## Linux LTS baseline
 
-The Linux Native Image build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. The workflow uses the explicit `ubuntu-26.04` runner label and verifies `VERSION_ID=26.04` before building so the native executable and packaged user-space ELF closure cannot silently drift with `ubuntu-latest`.
+The Linux Native Image build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. Both Linux workflow branches use the explicit `ubuntu-26.04` runner label and verify `VERSION_ID=26.04` before building so the native executable ABI cannot silently drift with `ubuntu-latest`.
 
-The Linux packaged closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
+The AppImage portable closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
 
-Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the Linux Native Image policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, cache key, and this documentation in the same change.
+DEB packages instead declare the Ubuntu 26.04 runtime packages required by the application, including `libmpv2`, `libsecret-1-0`, `libwebkit2gtk-4.1-0`, ALSA, PipeWire and PulseAudio libraries. Arch packages declare the corresponding dependencies through `pacmanDepends`.
+
+Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the Linux Native Image policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, package dependency names, cache keys, and this documentation in the same change.
 
 ## CI
 
@@ -74,7 +82,10 @@ Pull requests use runtime-level validation and do not build the full NSIS/DMG/Ap
 
 1. Windows x64 NSIS installer.
 2. macOS arm64 and x64 DMGs.
-3. Linux x64 AppImage, DEB and Arch/Pacman packages in one Ubuntu 26.04 LTS job with one Native Image compilation.
+3. Linux x64 AppImage in a portable-runtime branch.
+4. Linux x64 DEB and Arch/Pacman packages together in a system-dependency branch.
+
+The two Linux branches execute in parallel. This restores the separation used by the earlier desktop packaging pipeline while keeping the current Nucleus Native Image implementation.
 
 `master-canary.yml` invokes that workflow for preview builds after desktop tests complete. Android Canary packaging starts independently after Android tests; iOS remains test-only and no Canary application artifact is produced. `release.yml` invokes the same desktop workflow for release tags and publishes all six desktop assets alongside the Android APK. The release job renames assets with the release tag and publishes `SHA256SUMS.txt`.
 
@@ -87,4 +98,4 @@ Desktop release artifacts currently use the same unsigned package output as Cana
 
 ## Linux portability
 
-All three Linux package formats use the same Native Image and packaged user-space dependency closure. The AppImage remains the explicitly portable format; DEB and Arch integrate with their distribution package managers, while the Arch package additionally carries `pacmanDepends` metadata so the target system supplies the expected desktop ABI environment. `$ORIGIN`-relative loader paths keep packaged helper libraries self-contained, while glibc and graphics-driver-facing libraries stay host-managed. The WebView helper discovers the packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer and system-audio capture loader discover their packaged native libraries from the same desktop resource root.
+The AppImage is the explicitly portable Linux format and carries the application-managed native dependency closure. DEB and Arch integrate with their distribution package managers and do not duplicate libmpv, WebKitGTK, Libsecret or the Linux audio runtime closure inside the package. `$ORIGIN`-relative loader paths are still used for application-owned native libraries, while external runtime libraries are resolved from the host through package-manager dependencies. The WebView helper uses the system WebKitGTK runtime in distro packages and the staged WebKitGTK runtime in AppImage builds.
