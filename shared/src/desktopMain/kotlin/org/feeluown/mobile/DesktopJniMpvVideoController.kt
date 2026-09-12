@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -10,6 +11,7 @@ import kotlin.math.sqrt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
@@ -76,6 +78,9 @@ internal class DesktopJniMpvVideoController :
     override val state: StateFlow<PlatformVideoPlaybackState> = mutableState.asStateFlow()
     private val mutableFrame = MutableStateFlow<ImageBitmap?>(null)
     override val frame: StateFlow<ImageBitmap?> = mutableFrame.asStateFlow()
+    private val softwareFrameLock = Any()
+    private var currentSoftwareFrame: DesktopSoftwareFrame? = null
+    private val retiredSoftwareFrames = ArrayDeque<DesktopSoftwareFrame>()
 
     private val handle: Long
     private val eventThread: Thread
@@ -335,11 +340,12 @@ internal class DesktopJniMpvVideoController :
             check(openGlRenderContext == 0L && ioSurfaceRenderContext == 0L) {
                 "GPU libmpv video renderer is already active"
             }
+            setProperty("hwdec", "no")
             val context = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
             check(context != 0L) { "libmpv software video render context creation failed" }
             softwareRenderContext = context
             softwareFrameDirty = true
-            AppLogger.w("DesktopVideo", "using software video rendering fallback")
+            AppLogger.w("DesktopVideo", "using software video rendering fallback with hwdec=no")
         }
     }
 
@@ -371,11 +377,13 @@ internal class DesktopJniMpvVideoController :
                 "OpenGL video surface still attached during controller close; deferring native teardown",
             )
             mutableFrame.value = null
+            closeSoftwareFrames()
             return
         }
 
-        DesktopJniMpvVideoApi.nativeDestroy(handle)
         mutableFrame.value = null
+        closeSoftwareFrames()
+        DesktopJniMpvVideoApi.nativeDestroy(handle)
     }
 
     private fun eventLoop() {
@@ -590,7 +598,15 @@ internal class DesktopJniMpvVideoController :
                     "render software video frame",
                 )
                 val imageInfo = ImageInfo.makeN32(width, height, ColorAlphaType.OPAQUE)
-                mutableFrame.value = Image.makeRaster(imageInfo, pixels, stride).toComposeImageBitmap()
+                val imageBitmap = Image.makeRaster(imageInfo, pixels, stride).use {
+                    it.toComposeImageBitmap()
+                }
+                publishSoftwareFrame(
+                    DesktopSoftwareFrame(
+                        imageBitmap = imageBitmap,
+                        bitmap = imageBitmap.asSkiaBitmap(),
+                    ),
+                )
                 softwareFrameDirty = false
             } catch (throwable: Throwable) {
                 if (!closed.get()) {
@@ -601,6 +617,27 @@ internal class DesktopJniMpvVideoController :
                 Thread.sleep(100L)
             }
             Thread.sleep(if (currentlyPlaying) VIDEO_RENDER_INTERVAL_MS else PAUSED_RENDER_IDLE_MS)
+        }
+    }
+
+    private fun publishSoftwareFrame(next: DesktopSoftwareFrame) {
+        synchronized(softwareFrameLock) {
+            currentSoftwareFrame?.let(retiredSoftwareFrames::addLast)
+            currentSoftwareFrame = next
+            mutableFrame.value = next.imageBitmap
+            while (retiredSoftwareFrames.size > SOFTWARE_FRAME_RETIRE_DELAY_FRAMES) {
+                retiredSoftwareFrames.removeFirst().close()
+            }
+        }
+    }
+
+    private fun closeSoftwareFrames() {
+        synchronized(softwareFrameLock) {
+            currentSoftwareFrame?.close()
+            currentSoftwareFrame = null
+            while (retiredSoftwareFrames.isNotEmpty()) {
+                retiredSoftwareFrames.removeFirst().close()
+            }
         }
     }
 
@@ -643,6 +680,15 @@ internal class DesktopJniMpvVideoController :
 
     private fun ensureOpen() {
         check(!closed.get()) { "libmpv video controller is closed" }
+    }
+}
+
+private class DesktopSoftwareFrame(
+    val imageBitmap: ImageBitmap,
+    private val bitmap: Bitmap,
+) : AutoCloseable {
+    override fun close() {
+        bitmap.close()
     }
 }
 
@@ -865,3 +911,4 @@ private const val PAUSED_RENDER_IDLE_MS = 100L
 private const val RESTART_NEAR_END_THRESHOLD_MS = 500L
 private const val MAX_VIDEO_SOURCE_CANDIDATES = 24
 private const val MAX_SOFTWARE_RENDER_PIXELS = 1920L * 1080L
+private const val SOFTWARE_FRAME_RETIRE_DELAY_FRAMES = 4

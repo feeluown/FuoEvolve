@@ -24,6 +24,7 @@ import dev.nucleusframework.window.tao.TextureView
 import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import dev.nucleusframework.window.tao.rememberTaoGpuRenderContext
 import dev.nucleusframework.window.tao.rememberTextureViewController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -153,6 +154,7 @@ private fun NucleusGpuVideoContent(
                 }
             }
         } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
             onFailure(throwable)
         }
     }
@@ -217,6 +219,7 @@ private fun NucleusIoSurfaceVideoContent(
                 withContext(Dispatchers.Default) { previous.close() }
             }
         } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
             onFailure(throwable)
         }
     }
@@ -233,6 +236,7 @@ private fun NucleusIoSurfaceVideoContent(
                 if (rendered) textureController.markFrameAvailable()
             }
         } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
             onFailure(throwable)
         }
     }
