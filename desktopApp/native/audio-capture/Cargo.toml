@@ -7,6 +7,9 @@ rust-version = "1.85"
 [lib]
 crate-type = ["cdylib"]
 
+[profile.release]
+strip = "symbols"
+
 [dependencies]
 cpal = { version = "=0.18.2", default-features = false, features = ["pipewire", "pulseaudio"] }
 jni = "=0.22.4"

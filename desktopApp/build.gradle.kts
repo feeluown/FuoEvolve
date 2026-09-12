@@ -1,3 +1,4 @@
+import dev.nucleusframework.desktop.application.dsl.CompressionLevel
 import dev.nucleusframework.desktop.application.dsl.NativeImageMarch
 import dev.nucleusframework.desktop.application.dsl.TargetFormat
 import java.io.File
@@ -446,6 +447,7 @@ nucleus.application {
         packageName = "FuoEvolve"
         packageVersion = desktopPackageVersion
         homepage = "https://feeluown.github.io/FuoEvolve/"
+        compressionLevel = CompressionLevel.Ultra
         targetFormats(*nucleusTargetFormats)
         appResourcesRootDir.set(nucleusAppResources)
         protocol("FuoEvolve", "fuo")
