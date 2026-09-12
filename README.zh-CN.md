@@ -15,12 +15,12 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | 平台 | 正式版 | Canary / 预览版 |
 | --- | --- | --- |
 | **Android** | [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) · [F-Droid 仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | [最新 master 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **Windows x64** | — | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 MSI / EXE |
-| **macOS arm64 / x64** | — | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 DMG / PKG |
-| **Linux x64** | — | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 AppImage / DEB / RPM / Arch 包 |
+| **Windows x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 MSI | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 MSI |
+| **macOS arm64 / x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 DMG | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 DMG |
+| **Linux x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 AppImage / Arch 包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 AppImage / Arch 包 |
 | **iOS** | — | 仅提供实验性开发构建 |
 
-> 桌面端 Canary 目前属于预览版本，Windows 和 macOS 安装包尚未完成正式签名 / 公证。
+> 桌面端正式版使用 GraalVM Native Image，不再捆绑 JVM。Windows 与 macOS 安装包目前尚未完成生产签名 / 公证。
 
 ## 功能
 
@@ -37,15 +37,16 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 ## 桌面端
 
-桌面端与移动端共享一致的使用体验，并提供 Windows、macOS 和 Linux 版本。
+桌面端与移动端共享 Compose 使用体验，支持 Windows、macOS 和 Linux。`desktopApp` 现在是唯一桌面宿主，使用 Nucleus/Tao + GraalVM Native Image 运行和发行，原 JVM 桌面应用已经移除。
 
-- **Windows**：支持 SMTC 系统媒体控制。
-- **macOS**：支持 Now Playing / Remote Command Center。
-- **Linux**：支持 MPRIS 媒体控制；原生 Wayland 运行是目标，目前仍在完善打包验证。
+- **Windows**：支持 SMTC 系统媒体控制，正式发行 MSI。
+- **macOS**：支持 Now Playing / Remote Command Center，提供 Apple Silicon 与 Intel DMG。
+- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage 与 Arch 包；便携 AppImage 固定使用 Ubuntu 26.04 LTS 构建基线。
+- **音视频播放**：通过 JNI 直接接入 libmpv，视频优先使用 GPU 渲染并提供软件回退。
 - **托盘生命周期**：关闭窗口后继续播放和下载，可从托盘 / 状态栏图标恢复窗口或退出应用。
 - **安全登录存储**：使用 Windows Credential Manager、macOS Keychain 和 Linux Secret Service / Libsecret。
 
-桌面端安装包目前通过 Canary 工作流提供，正式签名和稳定版发布流程仍在完善中。
+正式版本 tag 会与 Android 一起发布完整桌面安装包，并附带 SHA-256 校验文件。桌面端暂不接入应用内自动更新，需要通过 GitHub Release 或 Canary 构建手动安装新版本。
 
 ## 音乐源
 
@@ -62,10 +63,10 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 | 平台 | 状态 | 说明 |
 | --- | --- | --- |
-| Android | **稳定版** | 主要正式发布平台 |
-| Windows | **Canary** | 提供 x64 可安装桌面包 |
-| macOS | **Canary** | 支持 Apple Silicon 和 Intel |
-| Linux | **Canary** | 以原生 Wayland 为目标，提供 AppImage 和发行版安装包 |
+| Android | **稳定版** | 签名 APK 与 F-Droid 发行 |
+| Windows | **稳定版** | x64 Native Image MSI；生产签名后续补充 |
+| macOS | **稳定版** | Apple Silicon / Intel Native Image DMG；签名和公证后续补充 |
+| Linux | **稳定版** | Native Image AppImage 与 Arch 包；AppImage 基线为 Ubuntu 26.04 LTS |
 | iOS | **实验性** | 仅用于开发与 CI 验证 |
 
 ## 开发
@@ -76,11 +77,11 @@ FuoEvolve 使用 [Compose Multiplatform](https://www.jetbrains.com/compose-multi
 # 构建 Android Debug 包
 ./gradlew :androidApp:assembleDebug
 
-# 运行桌面端
+# 运行 Native 桌面端
 ./gradlew :desktopApp:run
 ```
 
-桌面端开发还需要 Rust/Cargo 工具链以及目标平台所需的原生依赖。具体环境与打包前置条件见 [docs/desktop-foundation.md](docs/desktop-foundation.md) 与 [docs/desktop-packaging.md](docs/desktop-packaging.md)。
+桌面端开发还需要 Rust/Cargo 工具链以及目标平台所需的原生依赖。具体运行与打包说明见 [desktopApp/README.md](desktopApp/README.md)、[docs/desktop-foundation.md](docs/desktop-foundation.md) 与 [docs/desktop-packaging.md](docs/desktop-packaging.md)。
 
 ## 参与贡献
 

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import java.util.Properties
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,11 +48,23 @@ fun DesktopAppHost(
                 onLogoutProvider = container::logoutProvider,
                 onImportLocalPlaylistFile = container::importLocalPlaylistFile,
                 onExportLocalPlaylistFile = container::exportLocalPlaylistFile,
-                appVersionInfo = "Desktop development build",
+                appVersionInfo = desktopAppVersionInfo(),
             ),
         )
     }
 }
+
+private fun desktopAppVersionInfo(): String? = runCatching {
+    val properties = Properties()
+    val stream = Thread.currentThread().contextClassLoader
+        ?.getResourceAsStream(DESKTOP_VERSION_RESOURCE)
+        ?: return@runCatching null
+    stream.use(properties::load)
+    properties.getProperty("versionLabel")
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { version -> "版本 $version" }
+}.getOrNull()
 
 private class DesktopAppContainer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -493,3 +506,5 @@ private class DesktopAppContainer {
         playbackEngine.close()
     }
 }
+
+private const val DESKTOP_VERSION_RESOURCE = "fuoevolve-desktop-version.properties"

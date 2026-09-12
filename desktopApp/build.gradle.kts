@@ -1,18 +1,17 @@
+import dev.nucleusframework.desktop.application.dsl.NativeImageMarch
+import dev.nucleusframework.desktop.application.dsl.TargetFormat
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
-import java.util.zip.ZipOutputStream
-import org.gradle.api.GradleException
+import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
-import org.gradle.api.tasks.testing.Test
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.api.tasks.WriteProperties
+import org.gradle.jvm.tasks.Jar
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
+    id("dev.nucleusframework") version "2.5.15"
 }
 
 kotlin {
@@ -22,170 +21,79 @@ kotlin {
 private val desktopAppIcon = rootProject.file(
     "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
 )
-private val desktopWindowsIcon = rootProject.file(
-    "desktopApp/packaging/icons/fuoevolve.ico",
-)
-private val desktopMacIcon = rootProject.file(
-    "desktopApp/packaging/icons/fuoevolve.icns",
-)
+private val desktopWindowsIcon = layout.projectDirectory.file("packaging/icons/fuoevolve.ico")
+private val desktopMacIcon = layout.projectDirectory.file("packaging/icons/fuoevolve.icns")
+
+fun gitOutput(vararg args: String): String? = providers.exec {
+    workingDir = rootProject.projectDir
+    isIgnoreExitValue = true
+    commandLine("git", *args)
+}.standardOutput.asText.get().trim().takeIf(String::isNotBlank)
+
+private val versionPattern = Regex("\\d+\\.\\d+\\.\\d+")
+private val exactTaggedVersion = gitOutput(
+    "describe",
+    "--tags",
+    "--exact-match",
+    "--match",
+    "[0-9]*",
+    "HEAD",
+)?.let { tag -> versionPattern.find(tag)?.value }
+private val latestTaggedVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
+    ?.let { tag -> versionPattern.find(tag)?.value }
+
+val desktopPackageVersion = providers.gradleProperty("fuoevolve.packageVersion")
+    .orElse(providers.environmentVariable("FUOEVOLVE_PACKAGE_VERSION"))
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?: exactTaggedVersion
+    ?: latestTaggedVersion
+    ?: "0.1.0"
+val desktopCommitSha = providers.environmentVariable("FUOEVOLVE_COMMIT_SHA")
+    .orElse(providers.environmentVariable("GITHUB_SHA"))
+    .orNull
+    ?.takeIf(String::isNotBlank)
+    ?: gitOutput("rev-parse", "HEAD")
+    ?: "unknown"
+val desktopVersionChannel = providers.environmentVariable("FUOEVOLVE_DESKTOP_CHANNEL")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+    ?: if (exactTaggedVersion != null) "stable" else "canary"
+val desktopVersionLabel = providers.environmentVariable("FUOEVOLVE_DESKTOP_VERSION_LABEL")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+    ?: if (desktopVersionChannel == "stable") {
+        desktopPackageVersion
+    } else {
+        "$desktopPackageVersion-canary+${desktopCommitSha.take(8)}"
+    }
+
+val generatedDesktopVersionResourceDir = layout.buildDirectory.dir("generated/resources/desktopVersion")
+val generateDesktopVersionInfo by tasks.registering(WriteProperties::class) {
+    group = "build"
+    description = "Generate desktop version metadata embedded into the application."
+    destinationFile.set(
+        generatedDesktopVersionResourceDir.map { directory ->
+            directory.file("fuoevolve-desktop-version.properties")
+        },
+    )
+    property("versionLabel", desktopVersionLabel)
+    property("packageVersion", desktopPackageVersion)
+    property("channel", desktopVersionChannel)
+    property("commitSha", desktopCommitSha)
+}
 
 sourceSets {
     named("main") {
         resources.srcDir(desktopAppIcon.parentFile)
+        resources.srcDir(generatedDesktopVersionResourceDir)
     }
 }
-
-fun gitOutput(vararg args: String): String? = runCatching {
-    val output = providers.exec {
-        workingDir = rootProject.projectDir
-        commandLine("git", *args)
-    }.standardOutput.asText.get().trim()
-    output.takeIf { it.isNotBlank() }
-}.getOrNull()
-
-private val credentialLibSecretClassEntry =
-    "com/microsoft/credentialstorage/implementation/posix/libsecret/LibSecretLibrary.class"
-private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
-
-private fun isJarSignatureEntry(name: String): Boolean {
-    val normalized = name.replace('\\', '/')
-    if (!normalized.startsWith("META-INF/", ignoreCase = true)) return false
-    val fileName = normalized.substringAfter("META-INF/")
-    if (fileName.isBlank() || '/' in fileName) return false
-    val extension = fileName.substringAfterLast('.', missingDelimiterValue = "")
-    return extension.uppercase() in jarSignatureExtensions
+tasks.named("processResources").configure {
+    dependsOn(generateDesktopVersionInfo)
 }
-
-private fun signatureEntries(zip: ZipFile): Set<String> = buildSet {
-    val entries = zip.entries()
-    while (entries.hasMoreElements()) {
-        val entry = entries.nextElement()
-        if (isJarSignatureEntry(entry.name)) add(entry.name)
-    }
-}
-
-private fun stripStaleCredentialJarSignatures(appRoot: File) {
-    val jars = appRoot.walkTopDown()
-        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
-        .toList()
-
-    jars.forEach { jar ->
-        val staleSignatures = ZipFile(jar).use { zip ->
-            if (zip.getEntry(credentialLibSecretClassEntry) == null) emptySet() else signatureEntries(zip)
-        }
-        if (staleSignatures.isEmpty()) return@forEach
-
-        val rewritten = File.createTempFile("${jar.nameWithoutExtension}-unsigned-", ".jar", jar.parentFile)
-        try {
-            ZipFile(jar).use { zip ->
-                ZipOutputStream(rewritten.outputStream().buffered()).use { output ->
-                    val entries = zip.entries()
-                    while (entries.hasMoreElements()) {
-                        val entry = entries.nextElement()
-                        if (entry.name in staleSignatures) continue
-
-                        val copy = ZipEntry(entry.name).apply {
-                            time = entry.time
-                            comment = entry.comment
-                            extra = entry.extra
-                        }
-                        output.putNextEntry(copy)
-                        if (!entry.isDirectory) {
-                            zip.getInputStream(entry).use { input -> input.copyTo(output) }
-                        }
-                        output.closeEntry()
-                    }
-                }
-            }
-            Files.move(
-                rewritten.toPath(),
-                jar.toPath(),
-                StandardCopyOption.REPLACE_EXISTING,
-            )
-        } finally {
-            rewritten.delete()
-        }
-    }
-}
-
-private fun verifyCredentialJarSignaturesRemoved(appRoot: File) {
-    var credentialJarFound = false
-    val staleSignatures = mutableListOf<String>()
-
-    appRoot.walkTopDown()
-        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
-        .forEach { jar ->
-            ZipFile(jar).use { zip ->
-                if (zip.getEntry(credentialLibSecretClassEntry) != null) {
-                    credentialJarFound = true
-                    signatureEntries(zip).forEach { entry ->
-                        staleSignatures += "${jar.relativeTo(appRoot)}!/$entry"
-                    }
-                }
-            }
-        }
-
-    if (!credentialJarFound) {
-        throw GradleException(
-            "Release image is missing credential storage class $credentialLibSecretClassEntry",
-        )
-    }
-    if (staleSignatures.isNotEmpty()) {
-        throw GradleException(
-            "Release image still contains stale JAR signatures for credential storage: " +
-                staleSignatures.joinToString(),
-        )
-    }
-}
-
-fun verifyServiceProviderInReleaseImage(
-    appRoot: File,
-    serviceClassName: String,
-    providerClassName: String,
-) {
-    val jars = appRoot.walkTopDown()
-        .filter { file -> file.isFile && file.extension.equals("jar", ignoreCase = true) }
-        .toList()
-    if (jars.isEmpty()) {
-        throw GradleException("No application JARs found in release image: ${appRoot.absolutePath}")
-    }
-
-    val serviceEntryName = "META-INF/services/$serviceClassName"
-    val providerEntryName = providerClassName.replace('.', '/') + ".class"
-    var serviceDeclaresProvider = false
-    var providerClassPresent = false
-
-    jars.forEach { jar ->
-        ZipFile(jar).use { zip ->
-            if (zip.getEntry(providerEntryName) != null) {
-                providerClassPresent = true
-            }
-            zip.getEntry(serviceEntryName)?.let { entry ->
-                val declaresProvider = zip.getInputStream(entry).bufferedReader().use { reader ->
-                    reader.lineSequence()
-                        .map { line -> line.substringBefore('#').trim() }
-                        .any { line -> line == providerClassName }
-                }
-                serviceDeclaresProvider = serviceDeclaresProvider || declaresProvider
-            }
-        }
-    }
-
-    if (!serviceDeclaresProvider) {
-        throw GradleException(
-            "Release image is missing ServiceLoader declaration for $providerClassName in $serviceEntryName",
-        )
-    }
-    if (!providerClassPresent) {
-        throw GradleException(
-            "Release shrink removed ServiceLoader provider class $providerClassName",
-        )
-    }
-}
-
-val desktopPackageVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
-    ?.let { tag -> Regex("\\d+\\.\\d+\\.\\d+").find(tag)?.value }
-    ?: "0.1.0"
 
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
@@ -197,349 +105,435 @@ val packageResourceOs = when {
     isLinuxHost -> "linux"
     else -> "common"
 }
+val webLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
+val webLoginProjectDir = layout.projectDirectory.dir("native/web-login")
+val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
+val audioCaptureLibraryName = when {
+    isWindowsHost -> "fuoevolve_audio_capture.dll"
+    isMacHost -> "libfuoevolve_audio_capture.dylib"
+    else -> "libfuoevolve_audio_capture.so"
+}
+val audioCaptureProjectDir = layout.projectDirectory.dir("native/audio-capture")
+val audioCaptureLibrary = audioCaptureProjectDir.file("target/release/$audioCaptureLibraryName")
+val nucleusAppResources = layout.buildDirectory.dir("nucleus-app-resources")
+val stagedNativeResourceRoot = "$packageResourceOs/native"
 
-val defaultPackageProfile = if (isLinuxHost) "system" else "bundled"
-val desktopPackageProfile = providers.environmentVariable("FUOEVOLVE_PACKAGE_PROFILE")
-    .orElse(providers.gradleProperty("fuoevolve.packageProfile"))
-    .orElse(defaultPackageProfile)
-    .map { value -> value.lowercase() }
-    .get()
-if (desktopPackageProfile !in setOf("bundled", "system")) {
-    throw GradleException(
-        "Unsupported desktop package profile '$desktopPackageProfile'. Use bundled or system.",
+val mpvJniLibraryName = when {
+    isWindowsHost -> "fuoevolve_mpv_jni.dll"
+    isMacHost -> "libfuoevolve_mpv_jni.dylib"
+    else -> "libfuoevolve_mpv_jni.so"
+}
+val mpvJniSource = layout.projectDirectory.file("native/mpv-jni/fuoevolve_mpv_jni.c")
+val mpvJniOutput = layout.buildDirectory.file("native/mpv-jni/$mpvJniLibraryName")
+val mpvDevDirPath = providers.gradleProperty("fuoevolve.nucleus.libmpvDevDir")
+    .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"))
+val mpvRuntimeDirPath = providers.gradleProperty("fuoevolve.nucleus.libmpvRuntimeDir")
+    .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR"))
+val bundleLinuxRuntime = providers.gradleProperty("fuoevolve.nucleus.bundleLinuxRuntime")
+    .map(String::toBoolean)
+    .orElse(false)
+val portableLinuxRuntime = layout.buildDirectory.dir("nucleus-portable-linux-runtime")
+
+private val jarSignatureExtensions = setOf("SF", "RSA", "DSA", "EC")
+
+private fun isJarSignatureEntry(name: String): Boolean {
+    val normalized = name.replace('\\', '/')
+    if (!normalized.startsWith("META-INF/", ignoreCase = true)) return false
+    val fileName = normalized.substringAfter("META-INF/")
+    if (fileName.isBlank() || '/' in fileName) return false
+    val extension = fileName.substringAfterLast('.', missingDelimiterValue = "")
+    return extension.uppercase() in jarSignatureExtensions
+}
+
+val buildNucleusWebLoginHelper by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the shared system-WebView login helper for the Nucleus desktop runtime."
+    workingDir(webLoginProjectDir)
+    commandLine("cargo", "build", "--release")
+}
+
+val buildNucleusAudioCaptureLibrary by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the system-output audio capture library used by the Nucleus desktop runtime."
+    workingDir(audioCaptureProjectDir)
+    inputs.files(
+        audioCaptureProjectDir.file("Cargo.toml"),
+        audioCaptureProjectDir.file("Cargo.lock"),
+        audioCaptureProjectDir.dir("src"),
     )
-}
-if (!isLinuxHost && desktopPackageProfile != "bundled") {
-    throw GradleException(
-        "Windows and macOS packages must use the bundled native dependency profile.",
-    )
-}
-val bundlesLibMpv = desktopPackageProfile == "bundled"
-
-val buildWindowsSmtcBridge by tasks.registering(Exec::class) {
-    group = "build"
-    description = "Build the Rust Windows SMTC bridge used by the desktop runtime."
-    onlyIf { isWindowsHost }
-    workingDir(layout.projectDirectory.dir("native/windows-smtc"))
+    outputs.file(audioCaptureLibrary)
     commandLine("cargo", "build", "--release")
 }
 
-val buildMacNowPlayingBridge by tasks.registering(Exec::class) {
+val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
     group = "build"
-    description = "Build the Rust macOS Now Playing bridge used by the desktop runtime."
-    onlyIf { isMacHost }
-    workingDir(layout.projectDirectory.dir("native/macos-now-playing"))
-    commandLine("cargo", "build", "--release")
-}
-
-val buildLinuxTrayBridge by tasks.registering(Exec::class) {
-    group = "build"
-    description = "Build the Rust Linux StatusNotifier tray bridge used by the desktop runtime."
-    onlyIf { isLinuxHost }
-    inputs.file(desktopAppIcon)
-    workingDir(layout.projectDirectory.dir("native/linux-tray"))
-    commandLine("cargo", "build", "--release")
-}
-
-val desktopWebLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
-val desktopWebLoginExecutable = layout.projectDirectory.file(
-    "native/web-login/target/release/$desktopWebLoginExecutableName",
-)
-val buildDesktopWebLoginHelper by tasks.registering(Exec::class) {
-    group = "build"
-    description = "Build the isolated system-WebView login helper used by the desktop runtime."
-    workingDir(layout.projectDirectory.dir("native/web-login"))
-    commandLine("cargo", "build", "--release")
-}
-
-if (isWindowsHost || isMacHost || isLinuxHost) {
-    tasks.matching { it.name == "run" }.configureEach {
-        dependsOn(buildDesktopWebLoginHelper)
-        if (isWindowsHost) dependsOn(buildWindowsSmtcBridge)
-        if (isMacHost) dependsOn(buildMacNowPlayingBridge)
-        if (isLinuxHost) dependsOn(buildLinuxTrayBridge)
-    }
-}
-
-val packageLibMpvDirPath = providers.environmentVariable("FUOEVOLVE_PACKAGE_LIBMPV_DIR")
-    .orElse(providers.gradleProperty("fuoevolve.packageLibmpvDir"))
-val packageLibMpvDir = packageLibMpvDirPath.map(::file)
-val packagedResourcesRoot = layout.buildDirectory.dir("desktop-package-resources")
-val packagedNativeRoot = "$packageResourceOs/native"
-val expectedLibMpvNames = when {
-    isWindowsHost -> listOf("mpv-2.dll", "libmpv-2.dll", "mpv.dll")
-    isMacHost -> listOf("libmpv.dylib")
-    else -> listOf("libmpv.so.2", "libmpv.so")
-}
-
-val prepareDesktopPackageResources by tasks.registering(Sync::class) {
-    group = "distribution"
-    description = "Stage desktop native bridges, web login helper and optional bundled libmpv runtime."
-    inputs.property("packageProfile", desktopPackageProfile)
-    if (bundlesLibMpv) {
-        inputs.property("libmpvBundle", packageLibMpvDirPath.orElse("<unset>"))
-        from(packageLibMpvDir) {
-            into("$packagedNativeRoot/mpv")
-        }
-    }
-    dependsOn(buildDesktopWebLoginHelper)
-    from(desktopWebLoginExecutable) {
-        into("$packagedNativeRoot/helpers")
-        if (!isWindowsHost) {
-            filePermissions {
-                unix("755")
-            }
-        }
-    }
-    into(packagedResourcesRoot)
-
-    when {
-        isWindowsHost -> {
-            dependsOn(buildWindowsSmtcBridge)
-            from(layout.projectDirectory.file("native/windows-smtc/target/release/fuoevolve_smtc_bridge.dll")) {
-                into("$packagedNativeRoot/bridges")
-            }
-        }
-
-        isMacHost -> {
-            dependsOn(buildMacNowPlayingBridge)
-            from(layout.projectDirectory.file("native/macos-now-playing/target/release/libfuoevolve_now_playing_bridge.dylib")) {
-                into("$packagedNativeRoot/bridges")
-            }
-        }
-
-        isLinuxHost -> {
-            dependsOn(buildLinuxTrayBridge)
-            from(layout.projectDirectory.file("native/linux-tray/target/release/libfuoevolve_linux_tray_bridge.so")) {
-                into("$packagedNativeRoot/bridges")
-            }
-        }
-    }
+    description = "Build the thin JNI bridge used by the Nucleus libmpv playback backend."
+    inputs.file(mpvJniSource)
+    outputs.file(mpvJniOutput)
 
     doFirst {
-        if (!desktopWebLoginExecutable.asFile.isFile) {
-            throw GradleException("Desktop web login helper was not built: ${desktopWebLoginExecutable.asFile}")
-        }
-        if (!bundlesLibMpv) return@doFirst
-        val source = packageLibMpvDir.orNull
-            ?: throw GradleException(
-                "Bundled desktop packaging requires FUOEVOLVE_PACKAGE_LIBMPV_DIR " +
-                    "(or -Pfuoevolve.packageLibmpvDir) pointing to a relocatable libmpv runtime bundle.",
-            )
-        if (!source.isDirectory) {
-            throw GradleException("libmpv bundle directory does not exist: ${source.absolutePath}")
-        }
-        if (expectedLibMpvNames.none { name -> source.resolve(name).isFile }) {
-            throw GradleException(
-                "libmpv bundle ${source.absolutePath} must contain one of " +
-                    expectedLibMpvNames.joinToString(),
-            )
-        }
-    }
-
-    doLast {
-        if (!isWindowsHost) {
-            val stagedHelper = packagedResourcesRoot.get().asFile
-                .resolve("$packagedNativeRoot/helpers/$desktopWebLoginExecutableName")
-            if (!stagedHelper.isFile || !stagedHelper.canExecute()) {
-                throw GradleException(
-                    "Staged desktop web login helper is not executable: ${stagedHelper.absolutePath}",
-                )
-            }
-        }
-    }
-}
-
-val nativePackageTaskNames = setOf(
-    "createDistributable",
-    "createReleaseDistributable",
-    "runDistributable",
-    "runReleaseDistributable",
-    "packageDistributionForCurrentOS",
-    "packageReleaseDistributionForCurrentOS",
-    "packageDmg",
-    "packageReleaseDmg",
-    "packagePkg",
-    "packageReleasePkg",
-    "packageMsi",
-    "packageReleaseMsi",
-    "packageExe",
-    "packageReleaseExe",
-)
-tasks.matching { it.name in nativePackageTaskNames }.configureEach {
-    dependsOn(prepareDesktopPackageResources)
-}
-// Compose's app resources task consumes appResourcesRootDir. Make that relationship explicit
-// so Gradle 9 task validation sees the staged native resources as a declared dependency.
-tasks.matching { it.name == "prepareAppResources" }.configureEach {
-    dependsOn(prepareDesktopPackageResources)
-}
-
-// ProGuard rewrites third-party class files while copying JAR signature resources unchanged.
-// credential-secure-storage is signed upstream, so those stale signatures make JarVerifier reject
-// the rewritten LibSecret classes at runtime. Unsign only the processed credential JAR in the
-// release image; the application/package keeps its own platform-level distribution signature.
-tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
-    doLast {
-        val appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app").get().asFile
-        stripStaleCredentialJarSignatures(appRoot)
-        verifyCredentialJarSignaturesRemoved(appRoot)
-        if (!isWindowsHost) {
-            val packagedHelper = appRoot.walkTopDown()
-                .firstOrNull { file -> file.isFile && file.name == desktopWebLoginExecutableName }
-                ?: throw GradleException(
-                    "Release image is missing desktop web login helper under ${appRoot.absolutePath}",
-                )
-            if (!packagedHelper.canExecute() && !packagedHelper.setExecutable(true, false)) {
-                throw GradleException(
-                    "Failed to mark release web login helper executable: ${packagedHelper.absolutePath}",
-                )
-            }
-            if (!packagedHelper.canExecute()) {
-                throw GradleException(
-                    "Release web login helper is not executable: ${packagedHelper.absolutePath}",
-                )
-            }
-        }
-        verifyServiceProviderInReleaseImage(
-            appRoot = appRoot,
-            serviceClassName = "io.ktor.serialization.kotlinx.KotlinxSerializationExtensionProvider",
-            providerClassName = "io.ktor.serialization.kotlinx.json.KotlinxSerializationJsonExtensionProvider",
+        mpvJniOutput.get().asFile.parentFile.mkdirs()
+        val javaHome = File(System.getProperty("java.home"))
+        val includeRoot = javaHome.resolve("include")
+        val platformInclude = includeRoot.resolve(
+            when {
+                isWindowsHost -> "win32"
+                isMacHost -> "darwin"
+                else -> "linux"
+            },
         )
-    }
-}
+        check(includeRoot.isDirectory && platformInclude.isDirectory) {
+            "JNI headers were not found below ${javaHome.absolutePath}"
+        }
 
-tasks.register("printDesktopPackageVersion") {
-    group = "distribution"
-    doLast { println(desktopPackageVersion) }
-}
+        when {
+            isWindowsHost -> {
+                val devDir = mpvDevDirPath.orNull?.let(::file)
+                    ?: throw GradleException(
+                        "Windows Nucleus JNI build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
+                    )
+                val header = devDir.resolve("include/mpv/client.h")
+                val importLibrary = devDir.resolve("libmpv.dll.a")
+                check(header.isFile && importLibrary.isFile) {
+                    "Windows libmpv development bundle is incomplete: ${devDir.absolutePath}"
+                }
+                commandLine(
+                    "clang",
+                    "-shared",
+                    "-O2",
+                    "-Wall",
+                    "-Wextra",
+                    "-fuse-ld=lld",
+                    "-I${includeRoot.absolutePath}",
+                    "-I${platformInclude.absolutePath}",
+                    "-I${devDir.resolve("include").absolutePath}",
+                    mpvJniSource.asFile.absolutePath,
+                    importLibrary.absolutePath,
+                    "-o",
+                    mpvJniOutput.get().asFile.absolutePath,
+                )
+            }
 
-tasks.register("printDesktopPackageProfile") {
-    group = "distribution"
-    doLast { println(desktopPackageProfile) }
-}
+            isMacHost -> {
+                val devDir = mpvDevDirPath.orNull?.let(::file)
+                    ?: throw GradleException(
+                        "macOS Nucleus JNI build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
+                    )
+                val runtimeDir = mpvRuntimeDirPath.orNull?.let(::file) ?: devDir.resolve("lib")
+                val header = devDir.resolve("include/mpv/client.h")
+                check(header.isFile) {
+                    "macOS libmpv development headers are missing: ${header.absolutePath}"
+                }
+                commandLine(
+                    "cc",
+                    "-dynamiclib",
+                    "-fPIC",
+                    "-O2",
+                    "-Wall",
+                    "-Wextra",
+                    "-I${includeRoot.absolutePath}",
+                    "-I${platformInclude.absolutePath}",
+                    "-I${devDir.resolve("include").absolutePath}",
+                    mpvJniSource.asFile.absolutePath,
+                    "-L${runtimeDir.absolutePath}",
+                    "-lmpv",
+                    "-Wl,-rpath,@loader_path",
+                    "-o",
+                    mpvJniOutput.get().asFile.absolutePath,
+                )
+            }
 
-tasks.named<Test>("test") {
-    filter {
-        excludeTestsMatching("org.feeluown.mobile.desktop.DesktopMpvLibmpvSmokeTest")
-    }
-}
+            isLinuxHost -> commandLine(
+                "cc",
+                "-shared",
+                "-fPIC",
+                "-O2",
+                "-Wall",
+                "-Wextra",
+                "-I${includeRoot.absolutePath}",
+                "-I${platformInclude.absolutePath}",
+                mpvJniSource.asFile.absolutePath,
+                "-Wl,-rpath,\$ORIGIN",
+                "-o",
+                mpvJniOutput.get().asFile.absolutePath,
+                "-lmpv",
+            )
 
-kover {
-    currentProject {
-        instrumentation {
-            disabledForTestTasks.add("desktopMpvSmokeTest")
+            else -> throw GradleException("Unsupported Nucleus desktop host: $hostOs")
         }
     }
 }
 
-tasks.register<Test>("desktopMpvSmokeTest") {
-    group = "verification"
-    description = "Runs the opt-in native libmpv desktop playback smoke test."
-    dependsOn("testClasses")
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    filter {
-        includeTestsMatching("org.feeluown.mobile.desktop.DesktopMpvLibmpvSmokeTest")
+val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
+    group = "distribution"
+    description = "Collect the portable Nucleus libmpv/Libsecret/WebKitGTK/audio closure used by the AppImage."
+    dependsOn(buildNucleusWebLoginHelper, buildNucleusAudioCaptureLibrary)
+    onlyIf { isLinuxHost && bundleLinuxRuntime.get() }
+    inputs.files(
+        webLoginExecutable,
+        audioCaptureLibrary,
+        layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh"),
+    )
+    outputs.dir(portableLinuxRuntime)
+    doFirst {
+        portableLinuxRuntime.get().asFile.deleteRecursively()
+    }
+    commandLine(
+        "bash",
+        layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh").asFile.absolutePath,
+        portableLinuxRuntime.get().asFile.absolutePath,
+        webLoginExecutable.asFile.absolutePath,
+        audioCaptureLibrary.asFile.absolutePath,
+    )
+}
+
+val prepareNucleusAppResources by tasks.registering(Sync::class) {
+    group = "distribution"
+    description = "Stage native resources required by the Nucleus desktop runtime."
+    dependsOn(buildNucleusWebLoginHelper, buildNucleusAudioCaptureLibrary, buildNucleusMpvJniBridge)
+    if (isLinuxHost) dependsOn(prepareNucleusPortableLinuxRuntime)
+
+    from(webLoginExecutable) {
+        into("$stagedNativeResourceRoot/helpers")
+        if (!isWindowsHost) {
+            filePermissions { unix("755") }
+        }
+    }
+    from(mpvJniOutput) {
+        into("$stagedNativeResourceRoot/lib")
+        if (!isWindowsHost) {
+            filePermissions { unix("755") }
+        }
+    }
+
+    if (!(isLinuxHost && bundleLinuxRuntime.get())) {
+        from(audioCaptureLibrary) {
+            into("$stagedNativeResourceRoot/audio")
+            if (!isWindowsHost) {
+                filePermissions { unix("755") }
+            }
+        }
+    }
+
+    mpvRuntimeDirPath.orNull?.let { configuredPath ->
+        from(file(configuredPath)) {
+            include("*.dll", "*.dylib", "*.so", "*.so.*")
+            into("$stagedNativeResourceRoot/lib")
+        }
+    }
+
+    if (isLinuxHost && bundleLinuxRuntime.get()) {
+        from(portableLinuxRuntime) {
+            into(stagedNativeResourceRoot)
+        }
+    }
+
+    into(nucleusAppResources)
+
+    doLast {
+        val platformRoot = nucleusAppResources.get().asFile.resolve(stagedNativeResourceRoot)
+        val stagedHelper = platformRoot.resolve("helpers/$webLoginExecutableName")
+        val stagedMpvBridge = platformRoot.resolve("lib/$mpvJniLibraryName")
+        val stagedAudioCapture = platformRoot.resolve("audio/$audioCaptureLibraryName")
+        if (!stagedHelper.isFile) {
+            throw GradleException("Nucleus web login helper was not staged: ${stagedHelper.absolutePath}")
+        }
+        if (!isWindowsHost && !stagedHelper.canExecute()) {
+            throw GradleException("Nucleus web login helper is not executable: ${stagedHelper.absolutePath}")
+        }
+        if (!stagedMpvBridge.isFile) {
+            throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
+        }
+        if (!stagedAudioCapture.isFile) {
+            throw GradleException("Nucleus system audio capture library was not staged: ${stagedAudioCapture.absolutePath}")
+        }
+        if (isWindowsHost || isMacHost || (isLinuxHost && bundleLinuxRuntime.get())) {
+            val runtimeNames = platformRoot.resolve("lib").listFiles().orEmpty().map(File::getName)
+            val hasLibMpv = when {
+                isWindowsHost -> runtimeNames.any {
+                    it.equals("libmpv-2.dll", true) ||
+                        it.equals("mpv-2.dll", true) ||
+                        it.equals("mpv.dll", true)
+                }
+                isMacHost -> "libmpv.dylib" in runtimeNames
+                else -> runtimeNames.any { it.startsWith("libmpv.so") }
+            }
+            if (!hasLibMpv) {
+                throw GradleException("Bundled Nucleus package is missing the libmpv runtime")
+            }
+        }
     }
 }
 
 dependencies {
     implementation(project(":shared"))
     implementation(project(":desktopRuntime"))
-    implementation(project(":playback:api"))
-    implementation(project(":persistence:listening"))
     implementation(compose.desktop.currentOs)
+    implementation(libs.compose.material3.expressive)
+    implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
-    implementation(libs.kotlinx.serialization.json)
-    implementation(libs.jna)
-    implementation(libs.jna.platform)
-    implementation(libs.jaudiotagger)
-    implementation(libs.dbus.java.core)
-    runtimeOnly(libs.dbus.java.transport.native.unixsocket)
+
+    implementation("dev.nucleusframework:nucleus.nucleus-application:2.5.15")
+    implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
+    implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
+    implementation("dev.nucleusframework:nucleus.media-control:2.5.15")
+    implementation("dev.nucleusframework:nucleus.notification-common:2.5.15")
+    implementation("dev.nucleusframework:composenativetray:2.1.6")
+
     testImplementation(kotlin("test"))
 }
 
-compose.desktop {
-    application {
-        mainClass = "org.feeluown.mobile.desktop.MainKt"
-        val appDir = "\$APPDIR"
-        jvmArgs += "-Dfuoevolve.appdir=$appDir"
-        jvmArgs += "-Djna.library.path=" + listOf(
-            "$appDir/resources/native/mpv",
-            "$appDir/resources/native/bridges",
-        ).joinToString(File.pathSeparator)
+// Nucleus feeds native-image a repackaged uber JAR rather than the original dependency JARs.
+// Upstream credential-secure-storage is signed, so its META-INF signature blocks no longer match
+// after the merge. Strip only JAR-level signatures from this Nucleus-owned uber JAR.
+tasks.withType<Jar>()
+    .matching { task -> task.name.contains("UberJar", ignoreCase = true) }
+    .configureEach {
+        exclude { element -> isJarSignatureEntry(element.path) }
 
-        buildTypes.release.proguard {
-            // Phase 1 size optimization: remove unused JVM/Compose dependency code while keeping
-            // obfuscation disabled so stack traces and native/reflection boundaries stay readable.
-            optimize.set(true)
-            obfuscate.set(false)
-            configurationFiles.from(project.file("compose-desktop.pro"))
-        }
-
-        nativeDistributions {
-            // These dependencies are reached reflectively by desktop-only libraries and are not
-            // always discovered by jdeps: JNA/credential storage uses sun.misc.Unsafe, dbus-java
-            // uses UnixSystem, and SQLDelight's desktop driver reaches JDBC through DriverManager.
-            modules("jdk.unsupported", "jdk.security.auth", "java.sql")
-
-            fileAssociation(
-                mimeType = "application/x-fuoevolve-playlist",
-                extension = "fuo",
-                description = "FeelUOwn playlist",
-            )
-
-            when {
-                isWindowsHost -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
-                isMacHost -> targetFormats(TargetFormat.Dmg, TargetFormat.Pkg)
-                // Linux distro packages are produced from createReleaseDistributable by dedicated
-                // scripts so dependency metadata can use each distribution's package manager.
-                isLinuxHost -> Unit
-            }
-            packageName = "FuoEvolve"
-            packageVersion = desktopPackageVersion
-            description = "A cross-platform multi-source music player based on FeelUOwn"
-            vendor = "FeelUOwn"
-            licenseFile.set(rootProject.file("LICENSE"))
-            appResourcesRootDir.set(packagedResourcesRoot)
-
-            windows {
-                perUserInstall = true
-                dirChooser = true
-                menuGroup = "FuoEvolve"
-                upgradeUuid = "2c663b22-3837-4f6b-a5d0-74cba65a6c31"
-                iconFile.set(desktopWindowsIcon)
-            }
-            macOS {
-                bundleID = "org.feeluown.mobile.desktop"
-                dockName = "FuoEvolve"
-                appCategory = "public.app-category.music"
-                iconFile.set(desktopMacIcon)
-                infoPlist {
-                    extraKeysRawXml = """
-                        <key>NSMicrophoneUsageDescription</key>
-                        <string>FuoEvolve 使用麦克风进行听歌识曲。</string>
-                        <key>CFBundleURLTypes</key>
-                        <array>
-                            <dict>
-                                <key>CFBundleURLName</key>
-                                <string>org.feeluown.mobile.desktop</string>
-                                <key>CFBundleURLSchemes</key>
-                                <array>
-                                    <string>fuo</string>
-                                </array>
-                            </dict>
-                        </array>
-                    """.trimIndent()
+        doLast {
+            val uberJar = archiveFile.get().asFile
+            val staleSignatures = ZipFile(uberJar).use { zip ->
+                buildList {
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        if (isJarSignatureEntry(entry.name)) add(entry.name)
+                    }
                 }
             }
-            linux {
-                packageName = "fuoevolve"
-                menuGroup = "AudioVideo"
-                appCategory = "sound"
-                iconFile.set(desktopAppIcon)
+            if (staleSignatures.isNotEmpty()) {
+                throw GradleException(
+                    "Nucleus uber JAR still contains invalid dependency signatures: " +
+                        staleSignatures.joinToString(),
+                )
             }
         }
     }
+
+val requestedTargetFormat = providers.gradleProperty("fuoevolve.nucleus.targetFormat")
+    .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_TARGET_FORMAT"))
+    .orNull
+    ?.trim()
+    ?.lowercase()
+val nucleusTargetFormats = when (requestedTargetFormat) {
+    null, "all" -> arrayOf(
+        TargetFormat.Msi,
+        TargetFormat.Dmg,
+        TargetFormat.AppImage,
+        TargetFormat.Pacman,
+    )
+    "msi" -> arrayOf(TargetFormat.Msi)
+    "dmg" -> arrayOf(TargetFormat.Dmg)
+    "appimage" -> arrayOf(TargetFormat.AppImage)
+    "pacman", "arch" -> arrayOf(TargetFormat.Pacman)
+    else -> throw GradleException("Unsupported Nucleus target format: $requestedTargetFormat")
+}
+
+nucleus.application {
+    mainClass = "org.feeluown.mobile.nucleus.NucleusMainKt"
+
+    nativeDistributions {
+        appName = "FuoEvolve"
+        packageName = "FuoEvolve"
+        packageVersion = desktopPackageVersion
+        homepage = "https://feeluown.github.io/FuoEvolve/"
+        targetFormats(*nucleusTargetFormats)
+        appResourcesRootDir.set(nucleusAppResources)
+        protocol("FuoEvolve", "fuo")
+        fileAssociation(
+            mimeType = "application/x-fuo",
+            extension = "fuo",
+            description = "FeelUOwn Playlist",
+        )
+
+        windows {
+            packageName = "FuoEvolve"
+            iconFile.set(desktopWindowsIcon)
+        }
+        macOS {
+            packageName = "FuoEvolve"
+            bundleID = "org.feeluown.mobile.desktop"
+            appCategory = "public.app-category.music"
+            iconFile.set(desktopMacIcon)
+        }
+        linux {
+            packageName = "fuoevolve"
+            shortcut = true
+            appCategory = "AudioVideo"
+            menuGroup = "AudioVideo"
+            iconFile.set(desktopAppIcon)
+            debMaintainer = "FuoEvolve Maintainers <6873988+BruceZhang1993@users.noreply.github.com>"
+            pacmanDepends = listOf(
+                "gtk3",
+                "libx11",
+                "libxkbcommon",
+                "libsecret",
+                "mpv",
+                "webkit2gtk-4.1",
+                "alsa-lib",
+                "pipewire",
+                "libpulse",
+            )
+        }
+    }
+
+    graalvm {
+        isEnabled.set(true)
+        imageName.set("fuoevolve")
+        march.set(NativeImageMarch.COMPATIBILITY)
+    }
+}
+
+// Nucleus 2.5.15 does not apply macOS.infoPlist.extraKeysRawXml to its GraalVM bundle.
+// Patch the plist immediately after Nucleus copies it into Contents; the bundle codesign task
+// depends on this Copy task, so the final signature covers the patched permission metadata.
+if (isMacHost) {
+    tasks.withType<Copy>()
+        .matching { task -> task.name.contains("graalvmInfoPlist", ignoreCase = true) }
+        .configureEach {
+            doLast {
+                val plist = destinationDir.resolve("Info.plist")
+                check(plist.isFile) { "Nucleus GraalVM Info.plist was not copied: ${plist.absolutePath}" }
+                listOf(
+                    "NSMicrophoneUsageDescription" to "FuoEvolve 使用麦克风进行听歌识曲。",
+                    "NSAudioCaptureUsageDescription" to "FuoEvolve 使用系统音频进行听歌识曲。",
+                ).forEach { (key, value) ->
+                    val setCommand = "Set :$key $value"
+                    val setResult = providers.exec {
+                        isIgnoreExitValue = true
+                        commandLine("/usr/libexec/PlistBuddy", "-c", setCommand, plist.absolutePath)
+                    }.result.get()
+                    if (setResult.exitValue != 0) {
+                        providers.exec {
+                            commandLine(
+                                "/usr/libexec/PlistBuddy",
+                                "-c",
+                                "Add :$key string $value",
+                                plist.absolutePath,
+                            )
+                        }.result.get().assertNormalExitValue()
+                    }
+                }
+            }
+        }
+}
+
+// Compose/Nucleus consume appResources through prepareAppResources. Make the staging dependency
+// explicit so Gradle validation and JVM/GraalVM pipelines see native resources deterministically.
+tasks.matching { it.name == "prepareAppResources" }.configureEach {
+    dependsOn(prepareNucleusAppResources)
+}
+tasks.matching { task ->
+    task.name == "run" ||
+        task.name.startsWith("runGraalvm") ||
+        task.name.startsWith("packageGraalvm") ||
+        task.name.startsWith("createGraalvm")
+}.configureEach {
+    dependsOn(prepareNucleusAppResources)
+}
+
+tasks.register("printDesktopPackageVersion") {
+    group = "distribution"
+    doLast { println(desktopPackageVersion) }
 }

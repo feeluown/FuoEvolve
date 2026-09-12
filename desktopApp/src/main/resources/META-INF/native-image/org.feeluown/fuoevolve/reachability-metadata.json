@@ -52,5 +52,10 @@
         }
       ]
     }
+  ],
+  "resources": [
+    {
+      "glob": "fuoevolve-desktop-version.properties"
+    }
   ]
 }

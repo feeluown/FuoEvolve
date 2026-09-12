@@ -42,8 +42,8 @@ internal fun resolveDesktopAudioCaptureLibrary(): File? {
     val userDir = File(System.getProperty("user.dir").orEmpty().ifBlank { "." })
     return buildList {
         resourcesDir?.let { add(File(it, "native/audio/$libraryName")) }
-        add(File(userDir, "desktopNucleusPoc/native/audio-capture/target/release/$libraryName"))
-        add(File(userDir, "desktopNucleusPoc/build/native/audio-capture/$libraryName"))
+        add(File(userDir, "desktopApp/native/audio-capture/target/release/$libraryName"))
+        add(File(userDir, "desktopApp/build/native/audio-capture/$libraryName"))
         add(File(userDir, "build/native/audio-capture/$libraryName"))
     }.firstOrNull(File::isFile)
 }

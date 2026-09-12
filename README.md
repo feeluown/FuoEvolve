@@ -15,12 +15,12 @@ FuoEvolve is an open-source, cross-platform music player built around the [FeelU
 | Platform | Stable | Canary / Preview |
 | --- | --- | --- |
 | **Android** | [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) · [F-Droid repository](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | [Latest master build](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **Windows x64** | — | MSI / EXE from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **macOS arm64 / x64** | — | DMG / PKG from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **Linux x64** | — | AppImage / DEB / RPM / Arch package from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **Windows x64** | MSI from [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | MSI from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **macOS arm64 / x64** | DMG from [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | DMG from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **Linux x64** | AppImage / Arch package from [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | AppImage / Arch package from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
 | **iOS** | — | Experimental development builds only |
 
-> Desktop Canary packages are preview builds. Windows and macOS packages are not yet production-signed/notarized.
+> Desktop releases are GraalVM Native Image applications and do not bundle a JVM. Windows and macOS packages are not yet production-signed/notarized.
 
 ## Features
 
@@ -37,15 +37,16 @@ FuoEvolve is an open-source, cross-platform music player built around the [FeelU
 
 ## Desktop
 
-The desktop app shares the same experience as mobile and is available for Windows, macOS, and Linux.
+The desktop app shares the Compose experience with mobile and is available for Windows, macOS, and Linux. `desktopApp` is the only desktop host and is distributed through Nucleus/Tao + GraalVM Native Image; the legacy JVM desktop application has been removed.
 
-- **Windows:** system media controls through SMTC.
-- **macOS:** Now Playing / Remote Command Center integration.
-- **Linux:** MPRIS media controls; native Wayland is the target, with packaging validation still in progress.
+- **Windows:** SMTC system media controls and MSI packaging.
+- **macOS:** Now Playing / Remote Command Center integration with Apple Silicon and Intel DMGs.
+- **Linux:** MPRIS media controls, native Wayland/Tao support, AppImage and Arch packages. The portable AppImage is built against the pinned Ubuntu 26.04 LTS baseline.
+- **Audio and video:** direct JNI libmpv playback with GPU video presentation and software fallback.
 - **Tray lifecycle:** closing the window keeps playback and downloads running; the tray/status item can restore or exit the app.
 - **Secure login storage:** Windows Credential Manager, macOS Keychain, and Linux Secret Service/Libsecret.
 
-Desktop packages currently ship through the Canary workflow while release signing and final distribution are still being completed.
+Stable release tags publish the complete desktop package matrix alongside Android and include SHA-256 checksums. Desktop self-update is intentionally not enabled yet; install newer desktop builds from GitHub Releases or Canary artifacts.
 
 ## Music Sources
 
@@ -62,10 +63,10 @@ Available content depends on the source, region, login state, and upstream servi
 
 | Platform | Status | Notes |
 | --- | --- | --- |
-| Android | **Stable** | Primary release platform |
-| Windows | **Canary** | Installable x64 desktop packages |
-| macOS | **Canary** | Apple Silicon and Intel packages |
-| Linux | **Canary** | Native Wayland target; AppImage and distribution packages |
+| Android | **Stable** | Signed APK and F-Droid distribution |
+| Windows | **Stable** | x64 Native Image MSI; production signing is pending |
+| macOS | **Stable** | Native Image DMGs for Apple Silicon and Intel; signing/notarization is pending |
+| Linux | **Stable** | Native Image AppImage and Arch package; AppImage baseline is Ubuntu 26.04 LTS |
 | iOS | **Experimental** | Development and CI validation only |
 
 ## Development
@@ -76,11 +77,11 @@ FuoEvolve uses [Compose Multiplatform](https://www.jetbrains.com/compose-multipl
 # Android debug build
 ./gradlew :androidApp:assembleDebug
 
-# Run the desktop app
+# Run the native desktop app
 ./gradlew :desktopApp:run
 ```
 
-Desktop development also requires a Rust/Cargo toolchain and the native dependencies for the target platform. See [docs/desktop-foundation.md](docs/desktop-foundation.md) and [docs/desktop-packaging.md](docs/desktop-packaging.md) for setup and packaging prerequisites.
+Desktop development also requires a Rust/Cargo toolchain and the native dependencies for the target platform. See [desktopApp/README.md](desktopApp/README.md), [docs/desktop-foundation.md](docs/desktop-foundation.md), and [docs/desktop-packaging.md](docs/desktop-packaging.md) for runtime and packaging details.
 
 ## Contributing
 

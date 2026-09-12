@@ -117,13 +117,25 @@ jobs:
       - name: Upload release APK asset
         uses: actions/upload-artifact@v7
         with:
+          name: fuo-evolve-android-release
           path: ${{ steps.asset.outputs.path }}
           archive: false
           if-no-files-found: error
 
+  build-desktop-release:
+    name: Build desktop release packages
+    if: github.event_name == 'push'
+    needs:
+      - android-tests
+      - desktop-tests
+      - ios-tests
+    uses: ./.github/workflows/desktop-packaging.yml
+
   publish-release:
-    name: Publish Android release
-    needs: build-android-release
+    name: Publish release
+    needs:
+      - build-android-release
+      - build-desktop-release
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -137,27 +149,61 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download release APK assets
+      - name: Download Android release asset
         uses: actions/download-artifact@v8
         with:
-          pattern: fuo-evolve-*-android-signed.apk
-          path: build/artifacts
+          name: fuo-evolve-android-release
+          path: build/android-release
+
+      - name: Download desktop release assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: FuoEvolve-*
+          path: build/desktop-release
           merge-multiple: true
 
-      - name: Verify release APK assets
+      - name: Prepare and verify release assets
         run: |
+          set -euo pipefail
           tag="${GITHUB_REF_NAME//\//-}"
-          asset="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
-          if [ ! -f "$asset" ]; then
-            echo "::error::Missing release APK asset: $asset"
+          mkdir -p build/artifacts
+
+          android="build/android-release/fuo-evolve-${tag}-android-signed.apk"
+          test -f "$android"
+          cp "$android" build/artifacts/
+
+          declare -A desktop_assets=(
+            ["FuoEvolve-windows-x64.msi"]="FuoEvolve-${tag}-windows-x64.msi"
+            ["FuoEvolve-macos-arm64.dmg"]="FuoEvolve-${tag}-macos-arm64.dmg"
+            ["FuoEvolve-macos-x64.dmg"]="FuoEvolve-${tag}-macos-x64.dmg"
+            ["FuoEvolve-linux-x64.AppImage"]="FuoEvolve-${tag}-linux-x64.AppImage"
+            ["FuoEvolve-linux-x64.pkg.tar.zst"]="FuoEvolve-${tag}-linux-x64.pkg.tar.zst"
+          )
+
+          for source_name in "${!desktop_assets[@]}"; do
+            source_path="build/desktop-release/$source_name"
+            target_name="${desktop_assets[$source_name]}"
+            if [ ! -f "$source_path" ]; then
+              echo "::error::Missing desktop release asset: $source_name"
+              find build/desktop-release -maxdepth 1 -type f -print || true
+              exit 1
+            fi
+            cp "$source_path" "build/artifacts/$target_name"
+          done
+
+          expected_count=6
+          actual_count="$(find build/artifacts -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [ "$actual_count" -ne "$expected_count" ]; then
+            echo "::error::Expected $expected_count release artifacts before checksums, found $actual_count"
+            find build/artifacts -maxdepth 1 -type f -print
             exit 1
           fi
-          mapfile -t apks < <(find build/artifacts -maxdepth 1 -type f -name '*.apk' -print)
-          if [ "${#apks[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one release APK asset, found ${#apks[@]}"
-            printf '%s\n' "${apks[@]}"
-            exit 1
-          fi
+
+          (
+            cd build/artifacts
+            sha256sum * | sort -k2 > SHA256SUMS.txt
+          )
+          cat build/artifacts/SHA256SUMS.txt
 
       - name: Collect release context
         env:
@@ -206,7 +252,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: build/artifacts/*.apk
+          files: build/artifacts/*
           body_path: build/release-intro.md
           fail_on_unmatched_files: true
           generate_release_notes: true
