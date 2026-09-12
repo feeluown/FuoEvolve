@@ -117,7 +117,6 @@ jobs:
         with:
           name: fuo-evolve-android-release
           path: ${{ steps.asset.outputs.path }}
-          archive: false
           if-no-files-found: error
 
   build-desktop-release:
@@ -239,6 +238,7 @@ jobs:
           SUMMARY_OUTCOME: ${{ steps.release_summary.outcome }}
           SUMMARY_FILE: ${{ steps.release_summary.outputs.response-file }}
         run: |
+          mkdir -p build
           : > build/release-intro.md
           if [ "$SUMMARY_OUTCOME" = "success" ] && [ -n "$SUMMARY_FILE" ] && [ -s "$SUMMARY_FILE" ]; then
             {
