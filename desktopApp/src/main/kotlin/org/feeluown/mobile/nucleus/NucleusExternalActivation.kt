@@ -52,8 +52,13 @@ internal class NucleusExternalActivation private constructor(
                     val forwarded = runCatching {
                         decodeNucleusActivationArguments(Files.readString(this))
                     }.getOrDefault(emptyList())
-                    nucleusForwardedExternalInputs(forwarded.toTypedArray()).forEach(inputChannel::trySend)
-                    focusChannel.trySend(Unit)
+                    val inputs = nucleusForwardedExternalInputs(forwarded.toTypedArray())
+                    inputs.forEach(inputChannel::trySend)
+                    // Media actions should behave like background transport controls; ordinary app
+                    // launches, files, and URIs still restore the main window.
+                    if (inputs.isEmpty() || inputs.any { nucleusDesktopMediaAction(it) == null }) {
+                        focusChannel.trySend(Unit)
+                    }
                 },
             )
             if (!isPrimary) {
