@@ -84,17 +84,23 @@ static jstring utf8_to_jstring(JNIEnv *env, const char *value) {
         if (first < 0x80u) {
             codepoint = first;
         } else if ((first & 0xE0u) == 0xC0u && in < byte_length) {
+            unsigned char second = (unsigned char)value[in++];
             codepoint = ((uint32_t)(first & 0x1Fu) << 6u) |
-                        ((uint32_t)value[in++] & 0x3Fu);
+                        ((uint32_t)second & 0x3Fu);
         } else if ((first & 0xF0u) == 0xE0u && in + 1u < byte_length) {
+            unsigned char second = (unsigned char)value[in++];
+            unsigned char third = (unsigned char)value[in++];
             codepoint = ((uint32_t)(first & 0x0Fu) << 12u) |
-                        (((uint32_t)value[in++] & 0x3Fu) << 6u) |
-                        ((uint32_t)value[in++] & 0x3Fu);
+                        (((uint32_t)second & 0x3Fu) << 6u) |
+                        ((uint32_t)third & 0x3Fu);
         } else if ((first & 0xF8u) == 0xF0u && in + 2u < byte_length) {
+            unsigned char second = (unsigned char)value[in++];
+            unsigned char third = (unsigned char)value[in++];
+            unsigned char fourth = (unsigned char)value[in++];
             codepoint = ((uint32_t)(first & 0x07u) << 18u) |
-                        (((uint32_t)value[in++] & 0x3Fu) << 12u) |
-                        (((uint32_t)value[in++] & 0x3Fu) << 6u) |
-                        ((uint32_t)value[in++] & 0x3Fu);
+                        (((uint32_t)second & 0x3Fu) << 12u) |
+                        (((uint32_t)third & 0x3Fu) << 6u) |
+                        ((uint32_t)fourth & 0x3Fu);
         } else {
             codepoint = 0xFFFDu;
         }
