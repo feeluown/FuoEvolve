@@ -31,8 +31,6 @@ jobs:
     name: Build signed Android Canary APK
     needs:
       - android-tests
-      - desktop-tests
-      - ios-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -194,82 +192,5 @@ jobs:
   desktop-canary:
     name: Desktop Canary packages
     needs:
-      - android-tests
       - desktop-tests
-      - ios-tests
     uses: ./.github/workflows/desktop-packaging.yml
-
-  ios-canary:
-    name: Build iOS simulator Canary app
-    needs:
-      - android-tests
-      - desktop-tests
-      - ios-tests
-    runs-on: macos-26
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          build-scan-publish: true
-          build-scan-terms-of-use-url: https://gradle.com/terms-of-service
-          build-scan-terms-of-use-agree: "yes"
-          add-job-summary: never
-
-      - name: Cache Kotlin/Native toolchain
-        uses: actions/cache@v6
-        with:
-          path: ~/.konan
-          key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
-
-      - name: Resolve Swift package dependencies
-        run: |
-          defaults write com.apple.dt.Xcode IDEPackageSupportUseBuiltinSCM YES
-          xcodebuild \
-            -resolvePackageDependencies \
-            -project iosApp/FuoEvolve.xcodeproj \
-            -scheme FuoEvolve \
-            -derivedDataPath build/ios-ci \
-            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages
-
-      - name: Build debug simulator app
-        run: |
-          xcodebuild \
-            -project iosApp/FuoEvolve.xcodeproj \
-            -scheme FuoEvolve \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -derivedDataPath build/ios-ci \
-            -clonedSourcePackagesDirPath build/ios-ci/SourcePackages \
-            ARCHS=arm64 \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-
-      - name: Package debug app bundle
-        run: |
-          mkdir -p build/artifacts
-          tar -cf build/artifacts/FuoEvolve-debug-ios-simulator.tar \
-            -C build/ios-ci/Build/Products/Debug-iphonesimulator \
-            FuoEvolve.app
-
-      - name: Upload iOS simulator Canary app
-        uses: actions/upload-artifact@v7
-        with:
-          name: FuoEvolve-debug-ios-simulator
-          path: build/artifacts/FuoEvolve-debug-ios-simulator.tar
-          archive: false
-          if-no-files-found: error
