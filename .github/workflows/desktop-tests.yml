@@ -68,6 +68,14 @@ jobs:
             patchelf \
             pax-utils
 
+      - name: Validate Nucleus resource metadata task graph
+        run: |
+          ./gradlew \
+            --no-daemon \
+            --no-configuration-cache \
+            --warning-mode all \
+            :desktopApp:generateGraalvmProjectResourceMetadata
+
       - name: Test shared desktop and Nucleus runtime
         run: |
           ./gradlew \

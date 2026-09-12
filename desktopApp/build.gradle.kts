@@ -94,6 +94,11 @@ sourceSets {
 tasks.named("processResources").configure {
     dependsOn(generateDesktopVersionInfo)
 }
+// Nucleus scans main source-set resources before native-image packaging instead of consuming
+// processResources, so wire the generated version resource into that task graph explicitly.
+tasks.matching { it.name == "generateGraalvmProjectResourceMetadata" }.configureEach {
+    dependsOn(generateDesktopVersionInfo)
+}
 
 val hostOs = System.getProperty("os.name").orEmpty().lowercase()
 val isWindowsHost = hostOs.contains("windows")
