@@ -41,13 +41,14 @@ The Native Image host preserves the existing desktop data locations, bundle/appl
 
 Desktop packages are produced only from `desktopApp`:
 
-- Windows x64 MSI.
+- Windows x64 NSIS installer.
 - macOS arm64 DMG.
 - macOS x64 DMG.
 - Linux x64 AppImage.
+- Linux x64 DEB.
 - Linux x64 Arch/Pacman package.
 
-The Linux AppImage and Arch package are built together on the pinned Ubuntu 26.04 LTS baseline. They share one GraalVM Native Image compilation and the same packaged user-space native closure; the Arch package additionally retains system dependency metadata through `pacmanDepends`.
+The three Linux package formats are built together on the pinned Ubuntu 26.04 LTS baseline. They share one GraalVM Native Image compilation and the same packaged user-space native closure; the Arch package additionally retains system dependency metadata through `pacmanDepends`.
 
 No desktop package contains a bundled JVM.
 
@@ -62,7 +63,7 @@ Desktop CI runs on Linux, Windows, and macOS and validates:
 - packaged native-resource staging;
 - platform-specific libmpv runtime preparation.
 
-The reusable packaging workflow additionally verifies MSI/DMG/AppImage/Arch output and their required native package contents. The Linux packaging job verifies both outputs after one shared Native Image build. Release tags publish the same package matrix alongside Android.
+The reusable packaging workflow additionally verifies NSIS/DMG/AppImage/DEB/Arch output and their required native package contents. The Linux packaging job verifies all three Linux outputs after one shared Native Image build. Release tags publish the same package matrix alongside Android.
 
 ## Linux Wayland requirement
 
