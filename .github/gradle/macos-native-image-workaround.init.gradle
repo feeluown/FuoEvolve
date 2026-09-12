@@ -15,7 +15,7 @@ gradle.beforeProject { project ->
 
         def preflight = project.tasks.register('verifyGraalvmMachOPreflight', Exec) { task ->
             task.group = 'verification'
-            task.description = 'Probe the raw macOS Native Image with Apple Mach-O mutation tools.'
+            task.description = 'Require the raw macOS Native Image to support Apple Mach-O mutation tools.'
             task.dependsOn('nativeImageCompile')
 
             def binary = project.layout.buildDirectory
@@ -34,9 +34,19 @@ gradle.beforeProject { project ->
             task.dependsOn(preflight)
         }
 
-        // Nucleus 2.5.15 already mutates dylibs through a temporary copy, but the main executable
-        // still uses in-place Exec tasks. Redirect those two operations through the same safety
-        // model: mutate a sibling copy, validate it with otool, then atomically replace on success.
+        // Nucleus 2.5.15 rewrites LC_BUILD_VERSION with vtool after native-image has produced a
+        // healthy executable. With Xcode 26 that rewrite leaves the main Mach-O in a state that
+        // strip/install_name_tool reject because __LINKEDIT no longer fills the segment. The raw
+        // GraalVM 25 executable is already linked by the selected Xcode 26 toolchain, so keep its
+        // linker-produced build version instead of rewriting the packaged image in place.
+        project.tasks.matching { it.name == 'patchGraalvmBuildVersion' }.configureEach { task ->
+            task.enabled = false
+            project.logger.lifecycle('FuoEvolve macOS Native Image: disabled Nucleus LC_BUILD_VERSION patch')
+        }
+
+        // Keep the temporary-copy mutation model so a failed Apple tool never corrupts the package,
+        // but failures are now fatal. With the Nucleus build-version patch disabled, rpath and strip
+        // are expected to work exactly as they do in the raw preflight.
         def safeMutationScript = project.rootProject
             .file('desktopApp/packaging/macos/safe-macho-mutate.sh')
             .absolutePath
@@ -52,6 +62,30 @@ gradle.beforeProject { project ->
                 def operation = task.name == 'fixGraalvmRpath' ? 'rpath' : 'strip'
                 task.commandLine('bash', safeMutationScript, operation, binary)
             }
+        }
+
+        // Do not allow a successful DMG to hide a missing main-executable rpath. Validate the exact
+        // binary Nucleus stripped before codesigning starts.
+        def verifyExecutableScript = project.rootProject
+            .file('desktopApp/packaging/macos/verify-macho-executable.sh')
+            .absolutePath
+        def verifyExecutable = project.tasks.register('verifyGraalvmExecutableMachO', Exec) { task ->
+            task.group = 'verification'
+            task.description = 'Verify the packaged GraalVM executable Mach-O layout and rpath.'
+            task.dependsOn('stripGraalvmBinary')
+            task.doFirst {
+                def stripTask = project.tasks.named('stripGraalvmBinary', Exec).get()
+                def stripCommand = stripTask.commandLine as List
+                if (!stripCommand) {
+                    throw new GradleException("${stripTask.path} has no configured command line")
+                }
+                def binary = stripCommand[-1].toString()
+                task.commandLine('bash', verifyExecutableScript, binary)
+            }
+        }
+
+        project.tasks.matching { it.name == 'codesignGraalvmBundle' }.configureEach { task ->
+            task.dependsOn(verifyExecutable)
         }
     }
 }

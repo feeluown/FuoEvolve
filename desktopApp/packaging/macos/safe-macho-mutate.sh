@@ -33,13 +33,13 @@ case "$operation" in
 esac
 
 if ! "${command[@]}"; then
-  echo "::warning::Safe Mach-O $operation rejected for $base; original executable kept"
-  exit 0
+  echo "::error::Safe Mach-O $operation rejected for $base; original executable kept" >&2
+  exit 1
 fi
 
 if ! xcrun otool -l "$tmp" >/dev/null; then
-  echo "::warning::Safe Mach-O $operation produced an unreadable file for $base; original executable kept"
-  exit 0
+  echo "::error::Safe Mach-O $operation produced an unreadable file for $base; original executable kept" >&2
+  exit 1
 fi
 
 mv -f "$tmp" "$binary"
