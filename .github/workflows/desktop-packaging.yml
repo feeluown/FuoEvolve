@@ -104,7 +104,6 @@ jobs:
         with:
           name: FuoEvolve-windows-x64-nsis
           path: build/artifacts/FuoEvolve-windows-x64.exe
-          archive: false
           retention-days: 14
           if-no-files-found: error
 
@@ -243,7 +242,6 @@ jobs:
         with:
           name: FuoEvolve-macos-${{ matrix.arch }}-dmg
           path: build/artifacts/FuoEvolve-macos-${{ matrix.arch }}.dmg
-          archive: false
           retention-days: 14
           if-no-files-found: error
 
@@ -435,7 +433,6 @@ jobs:
         with:
           name: FuoEvolve-linux-x64-appimage
           path: build/artifacts/FuoEvolve-linux-x64.AppImage
-          archive: false
           retention-days: 14
           if-no-files-found: error
 
@@ -445,7 +442,6 @@ jobs:
         with:
           name: FuoEvolve-linux-x64-deb
           path: build/artifacts/FuoEvolve-linux-x64.deb
-          archive: false
           retention-days: 14
           if-no-files-found: error
 
@@ -455,6 +451,5 @@ jobs:
         with:
           name: FuoEvolve-linux-x64-arch
           path: build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
-          archive: false
           retention-days: 14
           if-no-files-found: error
