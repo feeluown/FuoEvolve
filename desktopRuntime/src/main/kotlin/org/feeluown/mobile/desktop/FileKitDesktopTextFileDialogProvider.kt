@@ -9,6 +9,7 @@ import io.github.vinceglb.filekit.name
 import io.github.vinceglb.filekit.path
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -58,23 +59,45 @@ internal class FileKitDesktopTextFileDialogProvider(
         extensions: List<String>,
         content: String,
     ): Boolean {
+        val destination = pickSavePath(dialogTitle, suggestedFileName, extensions) ?: return false
+        withContext(Dispatchers.IO) {
+            Files.writeString(destination, content, Charsets.UTF_8)
+        }
+        return true
+    }
+
+    override suspend fun saveFile(
+        dialogTitle: String,
+        suggestedFileName: String,
+        filterDescription: String,
+        extensions: List<String>,
+        sourceFile: Path,
+    ): String? {
+        val destination = pickSavePath(dialogTitle, suggestedFileName, extensions) ?: return null
+        withContext(Dispatchers.IO) {
+            Files.copy(sourceFile, destination, StandardCopyOption.REPLACE_EXISTING)
+        }
+        return destination.toString()
+    }
+
+    private suspend fun pickSavePath(
+        dialogTitle: String,
+        suggestedFileName: String,
+        extensions: List<String>,
+    ): Path? {
         ensureNativeDialogAvailable()
         val normalizedExtensions = normalizeExtensions(extensions)
         val defaultExtension = normalizedExtensions.firstOrNull()
         val suggestedName = suggestedFileName
             .removeSuffix(defaultExtension?.let { ".$it" }.orEmpty())
-            .ifBlank { "playlist" }
+            .ifBlank { "file" }
         val picked = FileKit.openFileSaver(
             suggestedName = suggestedName,
             defaultExtension = defaultExtension,
             allowedExtensions = normalizedExtensions.takeIf { it.isNotEmpty() }?.toSet(),
             dialogSettings = FileKitDialogSettings(title = dialogTitle),
-        ) ?: return false
-
-        withContext(Dispatchers.IO) {
-            Files.writeString(Path.of(picked.path), content, Charsets.UTF_8)
-        }
-        return true
+        ) ?: return null
+        return Path.of(picked.path)
     }
 
     private fun ensureNativeDialogAvailable() {
