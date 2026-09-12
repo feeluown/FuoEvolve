@@ -15,10 +15,10 @@ tmp="$(mktemp "$dir/.${base}.fuoevolve-macho.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 cp -p "$binary" "$tmp"
 
-# The bundle is ad-hoc signed later. Removing an existing signature from the temporary copy keeps
-# Apple's mutation tools from preserving stale signature data if an upstream task starts signing earlier.
-xcrun codesign --remove-signature "$tmp" >/dev/null 2>&1 || true
-
+# Keep this path identical to the raw Native Image preflight. The GraalVM executable is not signed
+# yet, and removing its ad-hoc/linker signature before install_name_tool/strip can itself rewrite
+# __LINKEDIT into a layout rejected by the next Apple tool. The completed app bundle is codesigned
+# later by Nucleus, so there is no stale package signature to preserve here.
 case "$operation" in
   strip)
     command=(xcrun strip -x "$tmp")
