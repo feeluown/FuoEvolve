@@ -9,14 +9,14 @@
 | Windows x64 | MSI | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + pinned libmpv DLL runtime bundled |
 | macOS arm64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
-| Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | system-output capture library bundled; `mpv`, `libsecret`, PipeWire/PulseAudio, WebKitGTK and desktop UI dependencies are distro-managed |
+| Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | shares the AppImage Native Image and packaged Linux user-space closure; `pacmanDepends` are retained as system compatibility dependencies |
 | Portable Linux x64 | AppImage | GraalVM Native Image | bundled system-output capture library/ELF closure plus libmpv/Libsecret/WebKitGTK/TLS native closures |
 
 No desktop artifact bundles a JVM.
 
 ## Nucleus packaging
 
-The host format is selected explicitly so each CI job emits only its requested installer:
+The host format is selected explicitly for single-format local builds:
 
 ```bash
 ./gradlew \
@@ -25,7 +25,7 @@ The host format is selected explicitly so each CI job emits only its requested i
   :desktopApp:packageGraalvmNativeDistributionForCurrentOS
 ```
 
-Supported `fuoevolve.nucleus.targetFormat` values are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias).
+Supported `fuoevolve.nucleus.targetFormat` values are `msi`, `dmg`, `appimage`, and `pacman` (`arch` is accepted as an alias). In Linux CI the target format remains `all` and `packageGraalvmNativeDistributionForCurrentOS` emits both AppImage and Pacman packages from the same `packageGraalvmNative` dependency. This keeps one full GraalVM Native Image compilation per Linux workflow run rather than one per installer format.
 
 ## Versioning
 
@@ -43,16 +43,16 @@ Desktop self-update is intentionally not implemented yet. These version values a
 
 - Windows libmpv input pins live in `desktopApp/packaging/native-deps.lock`. CI verifies the pinned archive, stages the public headers/import library for JNI compilation, and bundles the runtime DLLs.
 - macOS uses the architecture-specific pinned mpv input and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure.
-- Arch packages keep native libraries distribution-managed through Nucleus `pacmanDepends` metadata.
+- Linux AppImage and Arch packages are produced from the same staged portable user-space closure. The Arch package retains Nucleus `pacmanDepends` metadata for system-level compatibility even though runtime libraries used by the packaged helpers are staged with the application.
 - Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.
 
-## AppImage LTS baseline
+## Linux LTS baseline
 
-The portable Linux build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. The workflow uses the explicit `ubuntu-26.04` runner label and verifies `VERSION_ID=26.04` before building so the native executable and bundled user-space ELF closure cannot silently drift with `ubuntu-latest`.
+The Linux Native Image build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. The workflow uses the explicit `ubuntu-26.04` runner label and verifies `VERSION_ID=26.04` before building so the native executable and packaged user-space ELF closure cannot silently drift with `ubuntu-latest`.
 
-The AppImage bundles libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
+The Linux packaged closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
 
-Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the AppImage policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, cache key, and this documentation in the same change.
+Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the Linux Native Image policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, cache key, and this documentation in the same change.
 
 ## CI
 
@@ -64,10 +64,9 @@ Pull requests use runtime-level validation and do not build the full MSI/DMG/App
 
 1. Windows x64 MSI.
 2. macOS arm64 and x64 DMGs.
-3. Linux x64 AppImage against the pinned Ubuntu 26.04 LTS baseline.
-4. Linux x64 Arch/Pacman package with dependency metadata verification.
+3. Linux x64 AppImage and Arch/Pacman packages in one Ubuntu 26.04 LTS job with one Native Image compilation.
 
-`master-canary.yml` invokes that workflow for preview builds. `release.yml` invokes the same workflow for release tags and publishes all five desktop assets alongside the Android APK. The release job renames assets with the release tag and publishes `SHA256SUMS.txt`.
+`master-canary.yml` invokes that workflow for preview builds after desktop tests complete. Android Canary packaging starts independently after Android tests; iOS remains test-only and no Canary application artifact is produced. `release.yml` invokes the same desktop workflow for release tags and publishes all five desktop assets alongside the Android APK. The release job renames assets with the release tag and publishes `SHA256SUMS.txt`.
 
 ## Signing
 
@@ -78,4 +77,4 @@ Desktop release artifacts currently use the same unsigned package output as Cana
 
 ## Linux portability
 
-The Arch package intentionally relies on the target distribution package manager. The AppImage bundles its user-space native dependency closure and uses `$ORIGIN`-relative loader paths. The WebView helper discovers the packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer and system-audio capture loader discover their packaged native libraries from the same desktop resource root.
+Both Linux package formats use the same Native Image and packaged user-space dependency closure. The AppImage remains the explicitly portable format; the Arch package additionally carries `pacmanDepends` metadata so the target system supplies the expected desktop ABI environment. `$ORIGIN`-relative loader paths keep packaged helper libraries self-contained, while glibc and graphics-driver-facing libraries stay host-managed. The WebView helper discovers the packaged WebKitGTK runtime from `compose.application.resources.dir`, while the credential layer and system-audio capture loader discover their packaged native libraries from the same desktop resource root.
