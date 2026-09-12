@@ -18,7 +18,6 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | **Windows x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 MSI | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 MSI |
 | **macOS arm64 / x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 DMG | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 DMG |
 | **Linux x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 AppImage / Arch 包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 AppImage / Arch 包 |
-| **iOS** | — | 仅提供实验性开发构建 |
 
 > 桌面端正式版使用 GraalVM Native Image，不再捆绑 JVM。Windows 与 macOS 安装包目前尚未完成生产签名 / 公证。
 
@@ -67,7 +66,6 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | Windows | **稳定版** | x64 Native Image MSI；生产签名后续补充 |
 | macOS | **稳定版** | Apple Silicon / Intel Native Image DMG；签名和公证后续补充 |
 | Linux | **稳定版** | Native Image AppImage 与 Arch 包；AppImage 基线为 Ubuntu 26.04 LTS |
-| iOS | **实验性** | 仅用于开发与 CI 验证 |
 
 ## 开发
 
