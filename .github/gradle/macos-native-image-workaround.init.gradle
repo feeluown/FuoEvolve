@@ -34,26 +34,23 @@ gradle.beforeProject { project ->
             task.dependsOn(preflight)
         }
 
-        // Nucleus 2.5.15 already treats dylib strip failures as non-fatal, but the main executable
-        // still uses strict Exec tasks. Keep the original Native Image executable when Apple's
-        // cctools reject its __LINKEDIT layout, matching Nucleus' safe dylib behavior.
+        // Nucleus 2.5.15 already mutates dylibs through a temporary copy, but the main executable
+        // still uses in-place Exec tasks. Redirect those two operations through the same safety
+        // model: mutate a sibling copy, validate it with otool, then atomically replace on success.
+        def safeMutationScript = project.rootProject
+            .file('desktopApp/packaging/macos/safe-macho-mutate.sh')
+            .absolutePath
         project.tasks.withType(Exec).matching {
             it.name == 'fixGraalvmRpath' || it.name == 'stripGraalvmBinary'
         }.configureEach { task ->
-            task.ignoreExitValue = true
             task.doFirst {
-                def command = task.commandLine as List
-                if (command && command[0] != 'xcrun') {
-                    task.commandLine((['xcrun'] + command) as List)
+                def originalCommand = task.commandLine as List
+                if (!originalCommand) {
+                    throw new GradleException("${task.path} has no configured command line")
                 }
-            }
-            task.doLast {
-                def result = task.executionResult.orNull
-                if (result != null && result.exitValue != 0) {
-                    project.logger.warn(
-                        "${task.path} failed with exit ${result.exitValue}; keeping the original Mach-O executable.",
-                    )
-                }
+                def binary = originalCommand[-1].toString()
+                def operation = task.name == 'fixGraalvmRpath' ? 'rpath' : 'strip'
+                task.commandLine('bash', safeMutationScript, operation, binary)
             }
         }
     }
