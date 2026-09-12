@@ -248,9 +248,21 @@ jobs:
           if-no-files-found: error
 
   linux-x64:
-    name: Linux x64 AppImage + DEB + Arch
+    name: Linux x64 ${{ matrix.label }}
     runs-on: ubuntu-26.04
     timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: appimage
+            label: AppImage
+            bundle_runtime: "true"
+            gradle_tasks: ":desktopApp:packageGraalvmAppImage"
+          - variant: distro
+            label: DEB + Arch
+            bundle_runtime: "false"
+            gradle_tasks: ":desktopApp:packageGraalvmDeb :desktopApp:packageGraalvmPacman"
 
     steps:
       - name: Checkout
@@ -263,7 +275,7 @@ jobs:
           . /etc/os-release
           test "$ID" = "ubuntu"
           test "$VERSION_ID" = "26.04"
-          echo "Building Linux packages against Ubuntu $VERSION_ID LTS baseline"
+          echo "Building Linux ${{ matrix.label }} against Ubuntu $VERSION_ID LTS baseline"
 
       - name: Prepare Git refs for versioning
         run: |
@@ -290,8 +302,9 @@ jobs:
             ~/.cargo/git
             desktopApp/native/web-login/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
+            nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-
             nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
 
       - name: Install Linux native dependencies
@@ -311,7 +324,7 @@ jobs:
             patchelf \
             pax-utils
 
-      - name: Build Linux Native Image once and package all formats
+      - name: Build Linux Native Image and package ${{ matrix.label }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -321,12 +334,11 @@ jobs:
             --warning-mode all \
             --stacktrace \
             -PnativeMarch=compatibility \
-            -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
-            :desktopApp:packageGraalvmAppImage \
-            :desktopApp:packageGraalvmDeb \
-            :desktopApp:packageGraalvmPacman
+            -Pfuoevolve.nucleus.bundleLinuxRuntime=${{ matrix.bundle_runtime }} \
+            ${{ matrix.gradle_tasks }}
 
-      - name: Prepare and verify Linux artifacts
+      - name: Prepare and verify AppImage
+        if: matrix.variant == 'appimage'
         run: |
           mapfile -t appimages < <(find desktopApp/build -type f -iname '*.AppImage' -print)
           if [[ "${#appimages[@]}" -ne 1 ]]; then
@@ -335,6 +347,27 @@ jobs:
             exit 1
           fi
 
+          mkdir -p build/artifacts build/appimage-verify
+          cp "${appimages[0]}" build/artifacts/FuoEvolve-linux-x64.AppImage
+          chmod +x build/artifacts/FuoEvolve-linux-x64.AppImage
+
+          (
+            cd build/appimage-verify
+            ../artifacts/FuoEvolve-linux-x64.AppImage --appimage-extract >/dev/null
+            ROOT=squashfs-root
+            find "$ROOT" -type f -name libfuoevolve_mpv_jni.so -print -quit | grep -q .
+            find "$ROOT" -type f -name libfuoevolve_audio_capture.so -print -quit | grep -q .
+            find "$ROOT" -type f -name 'libmpv.so*' -print -quit | grep -q .
+            find "$ROOT" -type f -name fuoevolve-web-login -print -quit | grep -q .
+            find "$ROOT" -type f -name WebKitNetworkProcess -print -quit | grep -q .
+            find "$ROOT" -type f -name libgiognutls.so -print -quit | grep -q .
+          )
+
+          du -h build/artifacts/FuoEvolve-linux-x64.AppImage
+
+      - name: Prepare and verify DEB and Arch packages
+        if: matrix.variant == 'distro'
+        run: |
           mapfile -t deb_packages < <(find desktopApp/build -type f -name '*.deb' -print)
           if [[ "${#deb_packages[@]}" -ne 1 ]]; then
             echo "Expected exactly one DEB package, found ${#deb_packages[@]}" >&2
@@ -349,28 +382,34 @@ jobs:
             exit 1
           fi
 
-          mkdir -p build/artifacts build/appimage-verify
-          cp "${appimages[0]}" build/artifacts/FuoEvolve-linux-x64.AppImage
-          chmod +x build/artifacts/FuoEvolve-linux-x64.AppImage
+          mkdir -p build/artifacts
           cp "${deb_packages[0]}" build/artifacts/FuoEvolve-linux-x64.deb
           cp "${arch_packages[0]}" build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
 
-          (
-            cd build/appimage-verify
-            ../artifacts/FuoEvolve-linux-x64.AppImage --appimage-extract >/dev/null
-            ROOT=squashfs-root
-            find "$ROOT" -type f -name libfuoevolve_mpv_jni.so -print -quit | grep -q .
-            find "$ROOT" -type f -name libfuoevolve_audio_capture.so -print -quit | grep -q .
-            find "$ROOT" -type f -name 'libmpv.so*' -print -quit | grep -q .
-            find "$ROOT" -type f -name fuoevolve-web-login -print -quit | grep -q .
-            find "$ROOT" -type f -name WebKitNetworkProcess -print -quit | grep -q .
-            find "$ROOT" -type f -name libgiognutls.so -print -quit | grep -q .
-          )
-
           test "$(dpkg-deb -f build/artifacts/FuoEvolve-linux-x64.deb Package)" = "fuoevolve"
+          dpkg-deb -f build/artifacts/FuoEvolve-linux-x64.deb Depends | tee build/deb-depends.txt
+          for dep in \
+            libgtk-3-0t64 \
+            libx11-6 \
+            libxkbcommon0 \
+            libsecret-1-0 \
+            libmpv2 \
+            libwebkit2gtk-4.1-0 \
+            libasound2t64 \
+            libpipewire-0.3-0t64 \
+            libpulse0; do
+            grep -Fq "$dep" build/deb-depends.txt || {
+              echo "DEB dependency metadata is missing $dep" >&2
+              exit 1
+            }
+          done
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep 'fuoevolve-web-login' >/dev/null
+          if dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
+            echo "DEB unexpectedly bundles portable Linux runtime libraries" >&2
+            exit 1
+          fi
 
           bsdtar -xOf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst .PKGINFO | tee build/arch-pkginfo.txt
           grep -Eq '^depend = mpv($|[<>=])' build/arch-pkginfo.txt
@@ -382,12 +421,16 @@ jobs:
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_mpv_jni\.(so|dll|dylib)$' >/dev/null
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep 'fuoevolve-web-login' >/dev/null
+          if bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
+            echo "Arch package unexpectedly bundles portable Linux runtime libraries" >&2
+            exit 1
+          fi
 
-          du -h build/artifacts/FuoEvolve-linux-x64.AppImage
           du -h build/artifacts/FuoEvolve-linux-x64.deb
           du -h build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
 
       - name: Upload Linux AppImage
+        if: matrix.variant == 'appimage'
         uses: actions/upload-artifact@v7
         with:
           name: FuoEvolve-linux-x64-appimage
@@ -397,6 +440,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Debian package
+        if: matrix.variant == 'distro'
         uses: actions/upload-artifact@v7
         with:
           name: FuoEvolve-linux-x64-deb
@@ -406,6 +450,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Arch Linux package
+        if: matrix.variant == 'distro'
         uses: actions/upload-artifact@v7
         with:
           name: FuoEvolve-linux-x64-arch

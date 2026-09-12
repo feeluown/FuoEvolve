@@ -472,6 +472,17 @@ nucleus.application {
             menuGroup = "AudioVideo"
             iconFile.set(desktopAppIcon)
             debMaintainer = "FuoEvolve Maintainers <6873988+BruceZhang1993@users.noreply.github.com>"
+            debDepends = listOf(
+                "libgtk-3-0t64",
+                "libx11-6",
+                "libxkbcommon0",
+                "libsecret-1-0",
+                "libmpv2",
+                "libwebkit2gtk-4.1-0",
+                "libasound2t64",
+                "libpipewire-0.3-0t64",
+                "libpulse0",
+            )
             pacmanDepends = listOf(
                 "gtk3",
                 "libx11",
