@@ -18,7 +18,6 @@ FuoEvolve is an open-source, cross-platform music player built around the [FeelU
 | **Windows x64** | MSI from [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | MSI from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
 | **macOS arm64 / x64** | DMG from [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | DMG from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
 | **Linux x64** | AppImage / Arch package from [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) | AppImage / Arch package from [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **iOS** | — | Experimental development builds only |
 
 > Desktop releases are GraalVM Native Image applications and do not bundle a JVM. Windows and macOS packages are not yet production-signed/notarized.
 
@@ -67,7 +66,6 @@ Available content depends on the source, region, login state, and upstream servi
 | Windows | **Stable** | x64 Native Image MSI; production signing is pending |
 | macOS | **Stable** | Native Image DMGs for Apple Silicon and Intel; signing/notarization is pending |
 | Linux | **Stable** | Native Image AppImage and Arch package; AppImage baseline is Ubuntu 26.04 LTS |
-| iOS | **Experimental** | Development and CI validation only |
 
 ## Development
 
