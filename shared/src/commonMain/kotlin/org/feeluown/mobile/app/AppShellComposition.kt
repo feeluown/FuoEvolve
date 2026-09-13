@@ -26,6 +26,7 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
         else -> AppHeightSizeClass.Expanded
     }
     val hasExpandedWidth = widthSizeClass >= AppWidthSizeClass.Expanded
+    val hasMediumWidth = widthSizeClass >= AppWidthSizeClass.Medium
     val hasUsableWideHeight = heightSizeClass != AppHeightSizeClass.Compact
     val gridColumns = if (heightSizeClass == AppHeightSizeClass.Compact) {
         // Short landscape windows are usually phones. Keep cards large enough to remain tappable
@@ -47,6 +48,9 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
         heightSizeClass = heightSizeClass,
         isLandscape = maxWidth > maxHeight,
         useWideLayout = hasExpandedWidth && hasUsableWideHeight,
+        // Material list-detail scenes are useful from medium width upward, but short phone
+        // landscape windows remain single-pane even when their raw width crosses 600dp.
+        useListDetailNavigation = hasMediumWidth && hasUsableWideHeight,
         // Keep enough room for the destination's own wide pane after reserving the 64dp rail.
         usePersistentNavigation = maxWidth >= PersistentNavigationMinWidth && hasUsableWideHeight,
         useFullPlayerTwoPane = hasExpandedWidth && maxHeight >= FullPlayerTwoPaneMinHeight,
