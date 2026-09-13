@@ -19,21 +19,59 @@ class FuoDesignSystemTest {
     }
 
     @Test
-    fun layoutBreakpointsSeparateCompactLandscapeAndWideModes() {
-        val compact = appLayoutInfoFor(maxWidth = 360.dp, maxHeight = 800.dp)
-        val landscapePhone = appLayoutInfoFor(maxWidth = 600.dp, maxHeight = 360.dp)
-        val wide = appLayoutInfoFor(maxWidth = 840.dp, maxHeight = 600.dp)
-        val desktop = appLayoutInfoFor(maxWidth = 1200.dp, maxHeight = 800.dp)
+    fun layoutBreakpointsUseWindowSpaceInsteadOfOrientationAlone() {
+        val phonePortrait = appLayoutInfoFor(maxWidth = 360.dp, maxHeight = 800.dp)
+        val phoneLandscape = appLayoutInfoFor(maxWidth = 800.dp, maxHeight = 360.dp)
+        val tabletPortrait = appLayoutInfoFor(maxWidth = 800.dp, maxHeight = 1280.dp)
+        val shortExpanded = appLayoutInfoFor(maxWidth = 900.dp, maxHeight = 520.dp)
+        val tabletLandscape = appLayoutInfoFor(maxWidth = 1280.dp, maxHeight = 800.dp)
+        val desktopPortrait = appLayoutInfoFor(maxWidth = 900.dp, maxHeight = 1000.dp)
+        val desktopWide = appLayoutInfoFor(maxWidth = 1600.dp, maxHeight = 1000.dp)
 
-        assertFalse(compact.isLandscape)
-        assertFalse(compact.useWideLayout)
-        assertEquals(3, compact.gridColumns)
-        assertTrue(landscapePhone.isLandscape)
-        assertFalse(landscapePhone.useWideLayout)
-        assertEquals(3, landscapePhone.gridColumns)
-        assertTrue(wide.useWideLayout)
-        assertEquals(5, wide.gridColumns)
-        assertEquals(6, desktop.gridColumns)
+        assertEquals(AppWidthSizeClass.Compact, phonePortrait.widthSizeClass)
+        assertEquals(AppHeightSizeClass.Medium, phonePortrait.heightSizeClass)
+        assertFalse(phonePortrait.isLandscape)
+        assertFalse(phonePortrait.useWideLayout)
+        assertFalse(phonePortrait.usePersistentNavigation)
+        assertFalse(phonePortrait.useFullPlayerTwoPane)
+        assertEquals(3, phonePortrait.gridColumns)
+
+        assertEquals(AppWidthSizeClass.Medium, phoneLandscape.widthSizeClass)
+        assertEquals(AppHeightSizeClass.Compact, phoneLandscape.heightSizeClass)
+        assertTrue(phoneLandscape.isLandscape)
+        assertFalse(phoneLandscape.useWideLayout)
+        assertFalse(phoneLandscape.usePersistentNavigation)
+        assertFalse(phoneLandscape.useFullPlayerTwoPane)
+        assertEquals(3, phoneLandscape.gridColumns)
+
+        assertEquals(AppWidthSizeClass.Medium, tabletPortrait.widthSizeClass)
+        assertEquals(AppHeightSizeClass.Expanded, tabletPortrait.heightSizeClass)
+        assertFalse(tabletPortrait.useWideLayout)
+        assertFalse(tabletPortrait.usePersistentNavigation)
+        assertFalse(tabletPortrait.useFullPlayerTwoPane)
+        assertEquals(5, tabletPortrait.gridColumns)
+
+        assertEquals(AppWidthSizeClass.Expanded, shortExpanded.widthSizeClass)
+        assertTrue(shortExpanded.useWideLayout)
+        assertTrue(shortExpanded.usePersistentNavigation)
+        assertFalse(shortExpanded.useFullPlayerTwoPane)
+
+        assertEquals(AppWidthSizeClass.Large, tabletLandscape.widthSizeClass)
+        assertTrue(tabletLandscape.isLandscape)
+        assertTrue(tabletLandscape.useWideLayout)
+        assertTrue(tabletLandscape.usePersistentNavigation)
+        assertTrue(tabletLandscape.useFullPlayerTwoPane)
+        assertEquals(7, tabletLandscape.gridColumns)
+
+        assertEquals(AppWidthSizeClass.Expanded, desktopPortrait.widthSizeClass)
+        assertFalse(desktopPortrait.isLandscape)
+        assertTrue(desktopPortrait.useWideLayout)
+        assertTrue(desktopPortrait.usePersistentNavigation)
+        assertTrue(desktopPortrait.useFullPlayerTwoPane)
+
+        assertEquals(AppWidthSizeClass.ExtraLarge, desktopWide.widthSizeClass)
+        assertTrue(desktopWide.useWideLayout)
+        assertEquals(8, desktopWide.gridColumns)
     }
 
     @Test
