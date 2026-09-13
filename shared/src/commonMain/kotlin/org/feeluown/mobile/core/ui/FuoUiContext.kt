@@ -8,6 +8,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
  */
 val LocalShareHandler = staticCompositionLocalOf<(SharePayload) -> Unit> { {} }
 val LocalAppLayoutInfo = staticCompositionLocalOf { AppLayoutInfo() }
+/** True only when the current entry is the visible detail pane of an adaptive list-detail scene. */
+val LocalAppIsAdaptiveDetailPane = staticCompositionLocalOf { false }
 
 enum class AppWidthSizeClass {
     Compact,
