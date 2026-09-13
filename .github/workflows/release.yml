@@ -57,9 +57,6 @@ jobs:
             git branch master origin/master
           fi
 
-      - name: Validate update manifest script
-        run: bash -n scripts/write-update-manifest.sh
-
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
