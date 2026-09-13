@@ -98,7 +98,7 @@ fun OnboardingFeatureScreen(
         providerAuth.authStateFor(provider).isLoggedIn
     }
     val actionEnabled = when {
-        sourcePage -> availableProviders.isNotEmpty() && onboardingState.selectedProviderIds.isNotEmpty() && catalogState.errorMessage == null
+        sourcePage -> availableProviders.isNotEmpty() && onboardingState.selectedProviderIds.isNotEmpty()
         replacementPage -> onboardingState.contentProviderIds.isNotEmpty() &&
             (!onboardingState.smartReplacementEnabled || onboardingState.replacementProviderIds.isNotEmpty())
         else -> true
@@ -146,7 +146,7 @@ fun OnboardingFeatureScreen(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize().padding(padding),
-            userScrollEnabled = !busy && !sourcePage,
+            userScrollEnabled = false,
             verticalAlignment = Alignment.Top,
         ) { page ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -216,7 +216,7 @@ private fun OnboardingProviderSelectionPage(
                     ) {
                         Text("音源初始化失败", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
                         Text(
-                            catalogState.errorMessage,
+                            catalogState.errorMessage.orEmpty(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
