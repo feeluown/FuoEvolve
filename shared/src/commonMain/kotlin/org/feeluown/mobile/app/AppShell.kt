@@ -4,8 +4,10 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
@@ -25,6 +27,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
+private val AppShellHomeSections = listOf(
+    HomeSection.Recommend to "推荐",
+    HomeSection.Music to "探索",
+    HomeSection.Mine to "我的",
+)
+
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun AppShell(
@@ -34,6 +42,7 @@ internal fun AppShell(
     platform: AppPlatformBindings,
 ) {
     val videoDetailState by uiGraph.providerDetail.owners.video.uiState.collectAsStateWithLifecycle()
+    val homeState by uiGraph.home.home.uiState.collectAsStateWithLifecycle()
     val playback = uiGraph.playback
     val isPlaybackLoading by remember(uiGraph.playbackSession) {
         uiGraph.playbackSession.state
@@ -46,12 +55,20 @@ internal fun AppShell(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val layoutInfo = remember(maxWidth, maxHeight) { appLayoutInfoFor(maxWidth, maxHeight) }
+        val activeRoute = appUiState.backStack.lastOrNull()
         val miniPlayerVisible = !playback.isFullPlayerOpen &&
-            appUiState.backStack.lastOrNull()?.showsMiniPlayer(
+            activeRoute?.showsMiniPlayer(
                 hasCurrentTrack = playback.currentTrack != null,
                 hasQueueTrack = playback.queue.currentQueueTrack != null,
                 isVideoFullscreen = videoDetailState.isFullscreen,
             ) == true
+        val showShellNavigationRail = layoutInfo.usePersistentNavigation &&
+            activeRoute != AppRoute.Home &&
+            !playback.isFullPlayerOpen &&
+            !videoDetailState.isFullscreen
+        val selectedHomeSectionIndex = AppShellHomeSections
+            .indexOfFirst { it.first == homeState.homeSection }
+            .coerceAtLeast(0)
         val snackbarBottomPadding = if (miniPlayerVisible) {
             if (layoutInfo.useWideLayout) 80.dp else 96.dp
         } else {
@@ -97,53 +114,79 @@ internal fun AppShell(
                             LocalAppSharedTransitionScope provides appSharedTransitionScope,
                             LocalResourceHeroCoordinator provides resourceHeroCoordinator,
                         ) {
-                            Box(Modifier.fillMaxSize()) {
-                                AppNavHost(
-                                    backStack = appUiState.backStack,
-                                    appViewModel = appViewModel,
-                                    uiGraph = uiGraph,
-                                    platform = platform,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                                if (miniPlayerVisible) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .windowInsetsPadding(bottomOverlayInsets),
-                                    ) {
-                                        PlaybackMiniPlayerOverlay()
-                                    }
-                                }
-                                AppGlobalOverlays(uiGraph)
-                                val feedbackModifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .windowInsetsPadding(bottomOverlayInsets)
-                                    .padding(
-                                        start = 16.dp,
-                                        top = 16.dp,
-                                        end = 16.dp,
-                                        bottom = snackbarBottomPadding,
-                                    )
-                                if (playback.isFullPlayerOpen || miniPlayerVisible) {
-                                    PlaybackDynamicColorTheme(
-                                        emphasis = if (playback.isFullPlayerOpen) {
-                                            PlaybackColorEmphasis.Immersive
-                                        } else {
-                                            PlaybackColorEmphasis.Ambient
+                            Row(Modifier.fillMaxSize()) {
+                                if (showShellNavigationRail) {
+                                    HomeSectionRail(
+                                        sections = AppShellHomeSections,
+                                        selectedIndex = selectedHomeSectionIndex,
+                                        onSettings = uiGraph.home.home::openSettings,
+                                        onRefresh = {
+                                            when (homeState.homeSection) {
+                                                HomeSection.Mine -> uiGraph.home.home.refreshMine()
+                                                HomeSection.Recommend,
+                                                HomeSection.Music -> uiGraph.home.home.refreshHome(homeState.homeSection)
+                                            }
                                         },
-                                    ) {
+                                        onSearch = uiGraph.home.home::openSearch,
+                                        onRecognition = appViewModel::openRecognition,
+                                        onClick = { _, section ->
+                                            uiGraph.home.home.setHomeSection(section)
+                                            appViewModel.openHome()
+                                        },
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                ) {
+                                    AppNavHost(
+                                        backStack = appUiState.backStack,
+                                        appViewModel = appViewModel,
+                                        uiGraph = uiGraph,
+                                        platform = platform,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                    if (miniPlayerVisible) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .windowInsetsPadding(bottomOverlayInsets),
+                                        ) {
+                                            PlaybackMiniPlayerOverlay()
+                                        }
+                                    }
+                                    AppGlobalOverlays(uiGraph)
+                                    val feedbackModifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .windowInsetsPadding(bottomOverlayInsets)
+                                        .padding(
+                                            start = 16.dp,
+                                            top = 16.dp,
+                                            end = 16.dp,
+                                            bottom = snackbarBottomPadding,
+                                        )
+                                    if (playback.isFullPlayerOpen || miniPlayerVisible) {
+                                        PlaybackDynamicColorTheme(
+                                            emphasis = if (playback.isFullPlayerOpen) {
+                                                PlaybackColorEmphasis.Immersive
+                                            } else {
+                                                PlaybackColorEmphasis.Ambient
+                                            },
+                                        ) {
+                                            AppFeedbackHost(
+                                                appViewModel = appViewModel,
+                                                uiGraph = uiGraph,
+                                                modifier = feedbackModifier,
+                                            )
+                                        }
+                                    } else {
                                         AppFeedbackHost(
                                             appViewModel = appViewModel,
                                             uiGraph = uiGraph,
                                             modifier = feedbackModifier,
                                         )
                                     }
-                                } else {
-                                    AppFeedbackHost(
-                                        appViewModel = appViewModel,
-                                        uiGraph = uiGraph,
-                                        modifier = feedbackModifier,
-                                    )
                                 }
                             }
                         }
