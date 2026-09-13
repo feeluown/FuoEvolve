@@ -1,7 +1,14 @@
 import dev.nucleusframework.desktop.application.dsl.CompressionLevel
 import dev.nucleusframework.desktop.application.dsl.NativeImageMarch
 import dev.nucleusframework.desktop.application.dsl.TargetFormat
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
 import java.util.zip.ZipFile
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
@@ -415,6 +422,14 @@ tasks.withType<Jar>()
                         staleSignatures.joinToString(),
                 )
             }
+            targetNativeResourcePrefixes()?.let { targetPrefixes ->
+                val removedCount = filterTargetNativeResourcesInUberJar(uberJar, targetPrefixes)
+                if (removedCount > 0) {
+                    logger.lifecycle(
+                        "Filtered $removedCount non-target native resources from ${uberJar.name}",
+                    )
+                }
+            }
         }
     }
 
@@ -503,6 +518,239 @@ nucleus.application {
         isEnabled.set(true)
         imageName.set("fuoevolve")
         march.set(NativeImageMarch.COMPATIBILITY)
+    }
+}
+
+private val nativeResourceRoots = listOf(
+    "com/sun/jna/",
+    "composetray/native/",
+    "jni/",
+    "nucleus/native/",
+    "org/sqlite/native/",
+)
+
+private val linuxX64SkikoLibrary = "libskiko-linux-x64.so"
+
+private fun isLinuxX64NativeTarget(): Boolean {
+    val osName = System.getProperty("os.name").lowercase()
+    val architecture = System.getProperty("os.arch").lowercase()
+    return osName.contains("linux") &&
+        (architecture == "amd64" || architecture == "x86_64" || architecture == "x64")
+}
+
+private fun targetNativeResourcePrefixes(): List<String>? {
+    val osName = System.getProperty("os.name").lowercase()
+    val architecture = System.getProperty("os.arch").lowercase()
+    val isX64 = architecture == "amd64" || architecture == "x86_64" || architecture == "x64"
+    val isArm64 = architecture == "aarch64" || architecture == "arm64"
+
+    return when {
+        osName.contains("linux") && isX64 -> listOf(
+            "com/sun/jna/linux-x86-64/",
+            "composetray/native/linux-x64/",
+            "jni/linux_x64/",
+            "nucleus/native/linux-x64/",
+            "org/sqlite/native/Linux/x86_64/",
+        )
+        osName.contains("linux") && isArm64 -> listOf(
+            "com/sun/jna/linux-aarch64/",
+            "composetray/native/linux-aarch64/",
+            "jni/linux_aarch64/",
+            "nucleus/native/linux-aarch64/",
+            "org/sqlite/native/Linux/aarch64/",
+        )
+        osName.contains("mac") && isX64 -> listOf(
+            "com/sun/jna/darwin-x86-64/",
+            "composetray/native/darwin-x64/",
+            "jni/macos_x64/",
+            "nucleus/native/darwin-x64/",
+            "org/sqlite/native/Mac/x86_64/",
+        )
+        osName.contains("mac") && isArm64 -> listOf(
+            "com/sun/jna/darwin-aarch64/",
+            "composetray/native/darwin-aarch64/",
+            "jni/macos_aarch64/",
+            "nucleus/native/darwin-aarch64/",
+            "org/sqlite/native/Mac/aarch64/",
+        )
+        osName.contains("windows") && isX64 -> listOf(
+            "com/sun/jna/win32-x86-64/",
+            "composetray/native/win32-x64/",
+            "jni/windows_x64/",
+            "nucleus/native/win32-x64/",
+            "org/sqlite/native/Windows/x86_64/",
+        )
+        else -> null
+    }
+}
+
+@Suppress("UNCHECKED_CAST")
+private fun filterTargetNativeResourceText(
+    metadataText: String,
+    targetPrefixes: List<String>,
+): Pair<String, Int> {
+    val metadata = JsonSlurper().parseText(metadataText) as? MutableMap<String, Any?>
+        ?: return metadataText to 0
+    val resources = metadata["resources"] as? MutableList<MutableMap<String, Any?>>
+        ?: return metadataText to 0
+    val originalCount = resources.size
+    resources.removeAll { resource ->
+        val glob = (resource["glob"] ?: resource["pattern"]) as? String
+            ?: return@removeAll false
+        glob == "nucleus/**" ||
+            (isLinuxX64NativeTarget() && glob == linuxX64SkikoLibrary) ||
+            (nativeResourceRoots.any(glob::startsWith) && targetPrefixes.none(glob::startsWith))
+    }
+    val removedCount = originalCount - resources.size
+    if (removedCount == 0) return metadataText to 0
+    return JsonOutput.prettyPrint(JsonOutput.toJson(metadata)) + "\n" to removedCount
+}
+
+private fun filterTargetNativeResources(metadataFile: File, targetPrefixes: List<String>): Int {
+    if (!metadataFile.isFile) return 0
+
+    val originalText = metadataFile.readText()
+    val (filteredText, removedCount) = filterTargetNativeResourceText(originalText, targetPrefixes)
+    if (removedCount > 0) metadataFile.writeText(filteredText)
+    return removedCount
+}
+
+private fun filterTargetNativeResourcesInUberJar(uberJar: File, targetPrefixes: List<String>): Int {
+    if (!uberJar.isFile) return 0
+
+    val temporaryJar = File.createTempFile("${uberJar.name}.filtered-", ".jar", uberJar.parentFile)
+    var changed = false
+    var removedCount = 0
+    val composableTrayPrefix = targetPrefixes.first { it.startsWith("composetray/native/") }
+
+    try {
+        JarFile(uberJar).use { sourceJar ->
+            JarOutputStream(temporaryJar.outputStream().buffered()).use { targetJar ->
+                val entries = sourceJar.entries()
+                while (entries.hasMoreElements()) {
+                    val sourceEntry = entries.nextElement()
+                    val targetEntry = JarEntry(sourceEntry.name)
+                    if (sourceEntry.time >= 0) targetEntry.time = sourceEntry.time
+                    targetJar.putNextEntry(targetEntry)
+
+                    when {
+                        sourceEntry.isDirectory -> Unit
+                        sourceEntry.name.endsWith("reachability-metadata.json") ||
+                            sourceEntry.name.endsWith("resource-config.json") -> {
+                            val originalText = sourceJar.getInputStream(sourceEntry).bufferedReader().use { it.readText() }
+                            val (filteredText, removed) = filterTargetNativeResourceText(
+                                originalText,
+                                targetPrefixes,
+                            )
+                            targetJar.write(filteredText.toByteArray())
+                            removedCount += removed
+                            changed = changed || removed > 0
+                        }
+                        sourceEntry.name.endsWith("native-image.properties") -> {
+                            val originalText = sourceJar.getInputStream(sourceEntry).bufferedReader().use { it.readText() }
+                            val filteredText = originalText.replace(
+                                "-H:IncludeResources=composetray/native/.*",
+                                "-H:IncludeResources=${composableTrayPrefix}.*",
+                            )
+                            targetJar.write(filteredText.toByteArray())
+                            changed = changed || filteredText != originalText
+                        }
+                        else -> sourceJar.getInputStream(sourceEntry).use { it.copyTo(targetJar) }
+                    }
+                    targetJar.closeEntry()
+                }
+            }
+        }
+
+        if (changed) {
+            Files.move(
+                temporaryJar.toPath(),
+                uberJar.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } else {
+            Files.deleteIfExists(temporaryJar.toPath())
+        }
+    } catch (exception: Exception) {
+        Files.deleteIfExists(temporaryJar.toPath())
+        throw exception
+    }
+    return removedCount
+}
+
+private fun filterTargetNativeResourcesInDirectory(
+    metadataRoot: File,
+    targetPrefixes: List<String>,
+): Int {
+    if (!metadataRoot.isDirectory) return 0
+
+    var removedCount = 0
+    metadataRoot.walkTopDown()
+        .filter { file ->
+            file.isFile &&
+                (file.name == "reachability-metadata.json" || file.name == "resource-config.json")
+        }
+        .forEach { metadataFile ->
+            removedCount += filterTargetNativeResources(metadataFile, targetPrefixes)
+        }
+    return removedCount
+}
+
+tasks.configureEach {
+    val metadataKind = when (name) {
+        "analyzeGraalvmStaticMetadata" -> "staticAnalysis"
+        "filterGraalvmLibraryMetadata" -> "libraryMetadata"
+        "generateGraalvmProjectResourceMetadata" -> "projectResources"
+        else -> null
+    }
+    if (metadataKind != null) {
+        doLast {
+            val targetPrefixes = targetNativeResourcePrefixes()
+            if (targetPrefixes == null) {
+                logger.lifecycle(
+                    "Native resource filtering skipped for unsupported target: " +
+                        "${System.getProperty("os.name")} ${System.getProperty("os.arch")}",
+                )
+            } else {
+                val metadataRoot = layout.buildDirectory
+                    .dir("compose/tmp/main/graalvm")
+                    .get()
+                    .asFile
+                val metadataFile = metadataRoot.resolve(
+                    "$metadataKind/reachability-metadata.json",
+                )
+                val removedCount = filterTargetNativeResources(metadataFile, targetPrefixes)
+                if (removedCount > 0) {
+                    logger.lifecycle(
+                        "Filtered $removedCount non-target native resources from " +
+                            metadataFile.absolutePath,
+                    )
+                }
+            }
+        }
+    }
+    if (name == "resolveGraalvmReachabilityMetadata") {
+        doLast {
+            val targetPrefixes = targetNativeResourcePrefixes()
+            if (targetPrefixes == null) {
+                logger.lifecycle(
+                    "Native resource filtering skipped for unsupported target: " +
+                        "${System.getProperty("os.name")} ${System.getProperty("os.arch")}",
+                )
+            } else {
+                val metadataRoot = layout.buildDirectory
+                    .dir("compose/tmp/main/graalvm/metadataRepository")
+                    .get()
+                    .asFile
+                val removedCount = filterTargetNativeResourcesInDirectory(metadataRoot, targetPrefixes)
+                if (removedCount > 0) {
+                    logger.lifecycle(
+                        "Filtered $removedCount non-target native resources from " +
+                            metadataRoot.absolutePath,
+                    )
+                }
+            }
+        }
     }
 }
 
