@@ -46,9 +46,10 @@ Desktop packages are produced only from `desktopApp`:
 - macOS x64 DMG.
 - Linux x64 AppImage.
 - Linux x64 DEB.
+- Linux x64 RPM.
 - Linux x64 Arch/Pacman package.
 
-The three Linux package formats are built together on the pinned Ubuntu 26.04 LTS baseline. They share one GraalVM Native Image compilation and the same packaged user-space native closure; the Arch package additionally retains system dependency metadata through `pacmanDepends`.
+The four Linux package formats use the pinned Ubuntu 26.04 LTS Native Image baseline. AppImage is built in its own portable-runtime branch. DEB, RPM and Arch/Pacman are built together in the distro branch, share one GraalVM Native Image compilation, package only application-owned native helpers, and declare their external native runtime dependencies through their respective package-manager metadata (`debDepends`, `rpmRequires`, and `pacmanDepends`).
 
 No desktop package contains a bundled JVM.
 
@@ -63,7 +64,7 @@ Desktop CI runs on Linux, Windows, and macOS and validates:
 - packaged native-resource staging;
 - platform-specific libmpv runtime preparation.
 
-The reusable packaging workflow additionally verifies NSIS/DMG/AppImage/DEB/Arch output and their required native package contents. The Linux packaging job verifies all three Linux outputs after one shared Native Image build. Release tags publish the same package matrix alongside Android.
+The reusable packaging workflow additionally verifies NSIS/DMG/AppImage/DEB/RPM/Arch output and their required native package contents. The Linux distro packaging job verifies DEB, RPM and Arch after one shared Native Image build, while AppImage uses its separate portable-runtime build. Release tags publish the same package matrix alongside Android.
 
 ## Linux Wayland requirement
 
