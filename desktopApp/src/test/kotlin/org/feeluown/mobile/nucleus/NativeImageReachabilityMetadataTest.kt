@@ -25,6 +25,49 @@ class NativeImageReachabilityMetadataTest {
             )
         }
 
+        val requiredWindowsCredentialFields = mapOf(
+            "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32\$PCREDENTIAL" to
+                listOf("credential"),
+            "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32\$CREDENTIAL" to
+                listOf(
+                    "Flags",
+                    "Type",
+                    "TargetName",
+                    "Comment",
+                    "LastWritten",
+                    "CredentialBlobSize",
+                    "CredentialBlob",
+                    "Persist",
+                    "AttributeCount",
+                    "Attributes",
+                    "TargetAlias",
+                    "UserName",
+                ),
+            "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32\$CREDENTIAL_ATTRIBUTE" to
+                listOf("Keyword", "Flags", "ValueSize", "Value"),
+            "com.sun.jna.platform.win32.WinBase\$FILETIME" to
+                listOf("dwLowDateTime", "dwHighDateTime"),
+        )
+        requiredWindowsCredentialFields.forEach { (typeName, fieldNames) ->
+            assertTrue(
+                metadata.contains("\"$typeName\""),
+                "Missing Native Image Windows credential structure metadata for $typeName",
+            )
+            fieldNames.forEach { fieldName ->
+                assertTrue(
+                    metadata.contains("\"$fieldName\""),
+                    "Missing Native Image Windows credential field metadata for $typeName.$fieldName",
+                )
+            }
+        }
+        assertTrue(
+            metadata.contains(
+                "\"com.microsoft.credentialstorage.implementation.windows." +
+                    "CredAdvapi32\$CREDENTIAL_ATTRIBUTE\$ByReference\"",
+            ),
+            "Missing Native Image Windows credential attribute reference metadata",
+        )
+
         val requiredDatastoreFields = listOf(
             "androidx.datastore.preferences.PreferencesProto\$PreferenceMap" to "preferences_",
             "androidx.datastore.preferences.PreferencesProto\$Value" to "valueCase_",
