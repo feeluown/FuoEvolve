@@ -118,12 +118,41 @@ private fun appUiState(settingsState: SettingsState, backStack: List<AppRoute>):
     )
 }
 
-class FuoAppViewModel(
+class FuoAppViewModel private constructor(
     private val settingsRepository: AppSettingsRepository,
     private val navigator: AppNavigator,
-    private val recognitionController: RecognitionFeatureController,
-    private val backCoordinator: AppBackCoordinator,
+    private val recognitionControllerFactory: () -> RecognitionFeatureController,
+    private val backCoordinatorFactory: () -> AppBackCoordinator,
+    @Suppress("UNUSED_PARAMETER") marker: Unit,
 ) : ViewModel() {
+    constructor(
+        settingsRepository: AppSettingsRepository,
+        navigator: AppNavigator,
+        recognitionController: RecognitionFeatureController,
+        backCoordinator: AppBackCoordinator,
+    ) : this(
+        settingsRepository = settingsRepository,
+        navigator = navigator,
+        recognitionControllerFactory = { recognitionController },
+        backCoordinatorFactory = { backCoordinator },
+        marker = Unit,
+    )
+
+    constructor(
+        settingsRepository: AppSettingsRepository,
+        navigator: AppNavigator,
+        recognitionControllerFactory: () -> RecognitionFeatureController,
+        backCoordinatorFactory: () -> AppBackCoordinator,
+    ) : this(
+        settingsRepository = settingsRepository,
+        navigator = navigator,
+        recognitionControllerFactory = recognitionControllerFactory,
+        backCoordinatorFactory = backCoordinatorFactory,
+        marker = Unit,
+    )
+
+    private val recognitionController: RecognitionFeatureController by lazy(recognitionControllerFactory)
+    private val backCoordinator: AppBackCoordinator by lazy(backCoordinatorFactory)
     private val mutableAppFeedback = MutableStateFlow<String?>(null)
     val appFeedback: StateFlow<String?> = mutableAppFeedback
 
@@ -137,11 +166,13 @@ class FuoAppViewModel(
         initialValue = appUiState(settingsRepository.state.value, navigator.backStack.value),
     )
 
-    val handlesTransientBack: StateFlow<Boolean> = backCoordinator.hasTransientBack.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = backCoordinator.hasTransientBackNow,
-    )
+    val handlesTransientBack: StateFlow<Boolean> by lazy {
+        backCoordinator.hasTransientBack.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = backCoordinator.hasTransientBackNow,
+        )
+    }
 
     fun openRecognition() {
         recognitionController.dispatch(RecognitionAction.Reset)

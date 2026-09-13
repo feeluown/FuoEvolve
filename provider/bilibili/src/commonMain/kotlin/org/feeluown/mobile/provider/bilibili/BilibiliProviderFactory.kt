@@ -8,6 +8,7 @@ import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 /** Compile-time plugin entry for the Bilibili provider module. */
 object BilibiliProviderFactory : KotlinProviderFactory {
     override val providerId: String = "bilibili"
+    override val info = BilibiliProviderDefinition.info
 
     override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
         val base = BilibiliProvider(

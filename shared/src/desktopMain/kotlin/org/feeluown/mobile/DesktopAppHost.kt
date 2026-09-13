@@ -26,7 +26,7 @@ fun DesktopAppHost(
         externalInputs?.collect(container::openExternalInput)
     }
     DesktopProviderCredentialBackupHost(
-        backup = container.providerCredentialBackup,
+        backupFactory = { container.providerCredentialBackup },
         availableProviders = { container.appUiGraph.providerCatalog.uiState.value.availableProviders },
         refreshProviders = { providers ->
             container.appUiGraph.providerAuth.refreshAll(providers, refreshUserInfo = true)
@@ -70,11 +70,13 @@ private class DesktopAppContainer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val webLoginLauncher = DesktopWebLoginLauncher()
     private val providerCredentialStore = createDesktopProviderCredentialStore()
-    private val providerGraph = createFuoProviderGraph(
-        credentials = providerCredentialStore,
-        persistentCache = createDesktopProviderCacheStore(),
-        isCellularConnection = { false },
-    )
+    private val providerGraph by lazy {
+        createFuoProviderGraph(
+            credentials = providerCredentialStore,
+            persistentCache = createDesktopProviderCacheStore(),
+            isCellularConnection = { false },
+        )
+    }
     val providerCredentialBackup by lazy {
         DesktopProviderCredentialBackup(
             credentialStore = providerCredentialStore,
@@ -82,12 +84,14 @@ private class DesktopAppContainer {
             providerAuth = providerGraph.auth,
         )
     }
-    private val playbackProvider = createAppPlaybackProviderPort(
-        providerRegistry = providerGraph.registry,
-        providerSearch = providerGraph.search,
-        providerCatalog = providerGraph.content,
-        providerPlaybackSource = providerGraph.playbackSource,
-    )
+    private val playbackProvider by lazy {
+        createAppPlaybackProviderPort(
+            providerRegistry = providerGraph.registry,
+            providerSearch = providerGraph.search,
+            providerCatalog = providerGraph.content,
+            providerPlaybackSource = providerGraph.playbackSource,
+        )
+    }
     private val localRepository: LocalMusicRepository = DesktopUnsupportedLocalMusicRepository
     private val localPlaylistRepository: LocalPlaylistRepository = createDesktopLocalPlaylistRepository()
     private val desktopDownloadRepository = DesktopDownloadRepository(
@@ -103,7 +107,9 @@ private class DesktopAppContainer {
         )
     }
     private val playbackEngine = DesktopUnsupportedPlaybackEngine()
-    private val providerSessionRepository = DefaultProviderSessionRepository(providerGraph.auth)
+    private val providerSessionRepository by lazy {
+        DefaultProviderSessionRepository(providerGraph.auth)
+    }
     private val navigator = AppNavigator()
     private val trackNavigationPort: TrackNavigationPort = createTrackNavigationPort(navigator)
     private val homeRefreshPort: HomeRefreshPort by lazy { createHomeRefreshPort { homeFeatureController } }
@@ -376,36 +382,78 @@ private class DesktopAppContainer {
         )
     }
 
-    val appUiGraph: AppUiGraph by lazy {
+    private val playbackUiGraph by lazy {
         playbackSessionIntegration.value
-        createAppUiGraph(
-            playbackSession = playbackSession,
-            playbackNavigationPort = playbackFeatureOwner.navigation,
-            playbackPresentationPort = playbackPresentationPort,
-            playbackQueueUiPort = playbackFeatureOwner.transport,
-            playbackSleepTimerPort = playbackFeatureOwner.sleepTimer,
-            downloadActionPort = downloadActionPort,
-            playlistActionPort = playlistActionPort,
-            providerTrackActionPort = providerTrackActionPort,
-            localMusicActionPort = localMusicFeatureController,
-            playbackLyricsPort = playbackFeatureOwner.lyrics,
-            replacementActionPort = playbackFeatureOwner.replacement,
-            debugLogFeatureController = debugLogFeatureController,
-            providerCatalogFeatureController = providerCatalogFeatureController,
-            providerAuthFeatureController = providerAuthFeatureController,
-            settingsFeatureController = settingsFeatureController,
-            onboardingFeatureController = onboardingFeatureController,
-            providerDetailOwners = providerDetailOwners,
-            localMusicFeatureController = localMusicFeatureController,
-            localPlaylistFeatureController = localPlaylistFeatureController,
-            homeFeatureController = homeFeatureController,
-            sharedResourceActionPort = sharedResourceActionPort,
-            searchController = searchController,
-            searchAppPort = searchAppPort,
-            recognitionController = recognitionController,
-            recognitionAppPort = recognitionAppPort,
+        PlaybackUiGraph(
+            navigation = playbackFeatureOwner.navigation,
+            presentation = playbackPresentationPort,
+            queue = playbackFeatureOwner.transport,
+            sleepTimer = playbackFeatureOwner.sleepTimer,
+            downloads = downloadActionPort,
+            playlists = playlistActionPort,
+            providerTrackActions = providerTrackActionPort,
+            localMusicActions = localMusicFeatureController,
+            lyrics = playbackFeatureOwner.lyrics,
+            replacement = playbackFeatureOwner.replacement,
         )
     }
+
+    private val listeningHistoryRepository by lazy {
+        ListeningHistoryPlaylistMetadataRepository(
+            delegate = playbackFeatureOwner.transport.listeningHistoryRepository ?: NoOpListeningHistoryRepository,
+            home = homeFeatureController,
+        )
+    }
+
+    private val providerDetailUiGraph by lazy {
+        ProviderDetailUiGraph(
+            owners = providerDetailOwners,
+            playbackQueue = playbackFeatureOwner.transport,
+            downloads = downloadActionPort,
+            playlists = playlistActionPort,
+            providerTrackActions = providerTrackActionPort,
+        )
+    }
+
+    private val homeUiGraph by lazy {
+        HomeFeatureUiGraph(
+            home = homeFeatureController,
+            providerCatalog = providerCatalogFeatureController,
+            playbackQueue = playbackFeatureOwner.transport,
+            listeningHistory = listeningHistoryRepository,
+            downloads = downloadActionPort,
+            playlists = playlistActionPort,
+            providerTrackActions = providerTrackActionPort,
+            localPlaylist = localPlaylistFeatureController,
+            localMusic = localMusicFeatureController,
+        )
+    }
+
+    private val searchRouteGraph by lazy { SearchRouteGraph(searchController, searchAppPort) }
+
+    private val recognitionRouteGraph by lazy {
+        RecognitionRouteGraph(recognitionController, recognitionAppPort)
+    }
+
+    val appUiGraph: AppUiGraph = createLazyAppUiGraph(
+        playbackSession = {
+            playbackSessionIntegration.value
+            playbackSession
+        },
+        playback = { playbackUiGraph },
+        providerDetail = { providerDetailUiGraph },
+        home = { homeUiGraph },
+        search = { searchRouteGraph },
+        recognition = { recognitionRouteGraph },
+        debugLogs = { debugLogFeatureController },
+        providerCatalog = { providerCatalogFeatureController },
+        providerAuth = { providerAuthFeatureController },
+        settings = { settingsFeatureController },
+        onboarding = { onboardingFeatureController },
+        localMusic = { localMusicFeatureController },
+        localPlaylist = { localPlaylistFeatureController },
+        sharedResources = { sharedResourceActionPort },
+    )
 
     private val appBackCoordinator: AppBackCoordinator by lazy {
         createAppBackCoordinator(
@@ -425,8 +473,8 @@ private class DesktopAppContainer {
     val appViewModel = FuoAppViewModel(
         settingsRepository = settingsRepository,
         navigator = navigator,
-        recognitionController = recognitionController,
-        backCoordinator = appBackCoordinator,
+        recognitionControllerFactory = { recognitionController },
+        backCoordinatorFactory = { appBackCoordinator },
     )
 
     fun openProviderWebLogin(provider: ProviderInfo) {

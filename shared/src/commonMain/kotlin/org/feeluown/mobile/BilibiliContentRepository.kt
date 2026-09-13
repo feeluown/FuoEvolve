@@ -2,16 +2,19 @@ package org.feeluown.mobile
 
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
+import org.feeluown.mobile.provider.core.network.ProviderHttpClient
 import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
 
 /** Adds Bilibili browsing surfaces at the content edge only. */
 internal class BilibiliContentRepository(
     private val catalogDelegate: ProviderCatalogRepository,
     private val libraryDelegate: ProviderLibraryRepository,
-    private val bilibili: KotlinMusicProvider,
+    bilibiliFactory: () -> KotlinMusicProvider,
 ) : ProviderContentRepository,
     ProviderCatalogRepository by catalogDelegate,
     ProviderLibraryRepository by libraryDelegate {
+    private val bilibili: KotlinMusicProvider by lazy(bilibiliFactory)
+
     override suspend fun features(): List<ProviderFeature> {
         val base = catalogDelegate.features()
         if (base.none { it.providerId == BILIBILI_PROVIDER_ID }) return base
@@ -125,9 +128,11 @@ fun createFuoProviderGraph(
     persistentCache: ProviderPersistentCache? = null,
     isCellularConnection: () -> Boolean = { false },
 ): FuoProviderGraph {
-    val base = createKotlinProviderRepository(credentials, persistentCache, isCellularConnection)
-    val bilibili = ProviderComposition.createBilibiliContentProvider(credentials, persistentCache)
-    val content = BilibiliContentRepository(base, base, bilibili)
+    val http = ProviderHttpClient(persistentCache = persistentCache)
+    val base = createKotlinProviderRepository(http, credentials, isCellularConnection)
+    val content = BilibiliContentRepository(base, base) {
+        ProviderComposition.createBilibiliContentProvider(http, credentials)
+    }
     return FuoProviderGraph(
         registry = base,
         search = base,

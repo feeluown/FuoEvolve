@@ -16,6 +16,7 @@ import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 /** Compile-time plugin entry for the YouTube Music provider module. */
 object YtMusicProviderFactory : KotlinProviderFactory {
     override val providerId: String = "ytmusic"
+    override val info = YtMusicProviderDefinition.info
 
     override fun create(dependencies: ProviderRuntimeDependencies): KotlinMusicProvider {
         val base = YtMusicProvider(dependencies.http, dependencies.credentials)

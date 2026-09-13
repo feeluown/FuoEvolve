@@ -6,7 +6,6 @@ import org.feeluown.mobile.provider.core.KotlinProviderFactory
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
 import org.feeluown.mobile.provider.core.network.ProviderHttpClient
-import org.feeluown.mobile.provider.core.network.ProviderPersistentCache
 import org.feeluown.mobile.provider.netease.NeteaseProviderFactory
 import org.feeluown.mobile.provider.qqmusic.QQMusicProviderFactory
 import org.feeluown.mobile.provider.ytmusic.YtMusicProviderFactory
@@ -20,22 +19,24 @@ internal object ProviderComposition {
         YtMusicProviderFactory,
     )
 
-    fun createProviders(
+    fun providerInfos(): List<ProviderInfo> = factories.map { it.info }
+
+    fun createProviderFactories(
         http: ProviderHttpClient,
         credentials: ProviderCredentialStore,
-    ): Map<String, KotlinMusicProvider> {
+    ): Map<String, () -> KotlinMusicProvider> {
         val dependencies = ProviderRuntimeDependencies(http = http, credentials = credentials)
         return factories.associate { factory ->
-            factory.providerId to factory.create(dependencies)
+            factory.providerId to { factory.create(dependencies) }
         }
     }
 
     fun createBilibiliContentProvider(
+        http: ProviderHttpClient,
         credentials: ProviderCredentialStore,
-        persistentCache: ProviderPersistentCache?,
     ): KotlinMusicProvider = BilibiliProviderFactory.createContentProvider(
         ProviderRuntimeDependencies(
-            http = ProviderHttpClient(persistentCache = persistentCache),
+            http = http,
             credentials = credentials,
         ),
     )

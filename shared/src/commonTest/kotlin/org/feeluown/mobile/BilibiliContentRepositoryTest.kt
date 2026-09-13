@@ -42,7 +42,7 @@ class BilibiliContentRepositoryTest {
         val repository = BilibiliContentRepository(
             catalogDelegate = delegate,
             libraryDelegate = delegate,
-            bilibili = BilibiliContentProvider(client, credentials),
+            bilibiliFactory = { BilibiliContentProvider(client, credentials) },
         )
 
         val features = repository.features()

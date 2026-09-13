@@ -1025,7 +1025,7 @@ class NeteaseProvider(
 
     private fun rawIdentifier(value: String): String = splitResourceId(value).second.ifBlank { value.substringAfterLast(':') }
 
-    private companion object {
+    internal companion object {
         const val ID = "netease"
         const val NAME = "网易云音乐"
         const val BASE = "https://music.163.com"

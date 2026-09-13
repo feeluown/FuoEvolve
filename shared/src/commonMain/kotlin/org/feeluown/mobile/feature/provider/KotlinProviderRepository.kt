@@ -28,7 +28,7 @@ class KotlinProviderRepository :
     private val http: ProviderHttpClient
     private val credentials: ProviderCredentialStore
     private val isCellularConnection: () -> Boolean
-    private val providerMap: Map<String, KotlinMusicProvider>
+    private val providerMap: Map<String, Lazy<KotlinMusicProvider>>
     private var enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS
     private var initialized = false
     private var wifiAudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY
@@ -38,7 +38,7 @@ class KotlinProviderRepository :
         http = ProviderHttpClient()
         credentials = InMemoryProviderCredentialStore()
         isCellularConnection = { false }
-        providerMap = ProviderComposition.createProviders(http, credentials)
+        providerMap = createProviderMap(http, credentials)
     }
 
     internal constructor(
@@ -49,19 +49,19 @@ class KotlinProviderRepository :
         this.http = http
         this.credentials = credentials
         this.isCellularConnection = isCellularConnection
-        providerMap = ProviderComposition.createProviders(http, credentials)
+        providerMap = createProviderMap(http, credentials)
     }
 
     override suspend fun initialize() {
         stateMutex.withLock {
             if (initialized) return
             credentials.migrateLegacyIfNeeded()
-            enabledProviderIds.forEach { providerMap[it]?.initialize() }
+            enabledProviderIds.forEach { providerMap[it]?.value?.initialize() }
             initialized = true
         }
     }
 
-    override suspend fun availableProviders(): List<ProviderInfo> = providerMap.values.map { it.info }
+    override suspend fun availableProviders(): List<ProviderInfo> = ProviderComposition.providerInfos()
 
     override suspend fun updateEnabledProviders(providerIds: Set<String>) {
         val next = providerIds
@@ -76,12 +76,12 @@ class KotlinProviderRepository :
 
     override suspend fun providers(): List<ProviderInfo> {
         initialize()
-        return enabledProviderIds.mapNotNull { providerMap[it]?.info }
+        return enabledProviderIds.mapNotNull { providerMap[it]?.value?.info }
     }
 
     override suspend fun providerCapabilities(): List<ProviderCapabilities> {
         initialize()
-        return enabledProviderIds.mapNotNull { providerMap[it]?.capabilities }
+        return enabledProviderIds.mapNotNull { providerMap[it]?.value?.capabilities }
     }
 
     override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> =
@@ -116,7 +116,7 @@ class KotlinProviderRepository :
         val providerId = track.source.ifBlank {
             splitResourceId(track.providerId ?: track.id).first
         }
-        return providerMap[providerId]?.resolve(track, quality)
+        return providerMap[providerId]?.value?.resolve(track, quality)
     }
 
     override suspend fun lyrics(track: MusicTrack): String? {
@@ -125,7 +125,7 @@ class KotlinProviderRepository :
         val providerId = track.source.ifBlank {
             splitResourceId(track.providerId ?: track.id).first
         }
-        return providerMap[providerId]?.lyrics(track)?.takeIf { it.isNotBlank() }
+        return providerMap[providerId]?.value?.lyrics(track)?.takeIf { it.isNotBlank() }
     }
 
     override suspend fun lyricsSearchKeyword(track: MusicTrack): String? {
@@ -133,7 +133,7 @@ class KotlinProviderRepository :
         val providerId = track.source.ifBlank {
             splitResourceId(track.providerId ?: track.id).first
         }
-        return providerMap[providerId]?.lyricsSearchKeyword(track)?.takeIf { it.isNotBlank() }
+        return providerMap[providerId]?.value?.lyricsSearchKeyword(track)?.takeIf { it.isNotBlank() }
     }
 
     override suspend fun authState(providerId: String): ProviderAuthState = requireProvider(providerId).authState()
@@ -201,14 +201,14 @@ class KotlinProviderRepository :
 
     override suspend fun reportPlayback(providerId: String, report: ProviderPlaybackReport) {
         initialize()
-        val capability = providerMap[providerId] as? ProviderPlaybackReportingCapability ?: return
+        val capability = providerMap[providerId]?.value as? ProviderPlaybackReportingCapability ?: return
         capability.reportPlayback(report)
     }
 
     override suspend fun features(): List<ProviderFeature> {
         initialize()
         return enabledProviderIds
-            .flatMap { providerMap[it]?.features.orEmpty() }
+            .flatMap { providerMap[it]?.value?.features.orEmpty() }
             .filterNot { feature ->
                 feature.providerId == NETEASE_PROVIDER_ID && feature.id == NETEASE_LEGACY_TOP_ARTISTS_FEATURE_ID
             }
@@ -281,7 +281,7 @@ class KotlinProviderRepository :
 
     override suspend fun resourceState(resourceType: String, resourceId: String): ProviderResourceState {
         val providerId = providerIdForResource(resourceType, resourceId)
-        return providerMap[providerId]?.resourceState(resourceType, resourceId)
+        return providerMap[providerId]?.value?.resourceState(resourceType, resourceId)
             ?: ProviderResourceState(providerId = providerId, resourceId = resourceId)
     }
 
@@ -291,17 +291,17 @@ class KotlinProviderRepository :
         favorite: Boolean,
     ): ProviderMutationResult {
         val providerId = providerIdForResource(resourceType, resourceId)
-        return providerMap[providerId]?.setResourceFavorite(resourceType, resourceId, favorite)
+        return providerMap[providerId]?.value?.setResourceFavorite(resourceType, resourceId, favorite)
             ?: ProviderMutationResult(false, "当前音源不支持该收藏操作")
     }
 
     private fun selectedProviders(providerId: String?): List<KotlinMusicProvider> {
         if (!providerId.isNullOrBlank()) return listOf(requireProvider(providerId))
-        return enabledProviderIds.mapNotNull { providerMap[it] }
+        return enabledProviderIds.mapNotNull { providerMap[it]?.value }
     }
 
     private fun requireProvider(providerId: String): KotlinMusicProvider =
-        providerMap[providerId] ?: error("unknown provider: $providerId")
+        providerMap[providerId]?.value ?: error("unknown provider: $providerId")
 
     private fun requireDeviceAuthorizationProvider(providerId: String): ProviderDeviceAuthorizationCapability =
         requireProvider(providerId) as? ProviderDeviceAuthorizationCapability
@@ -319,6 +319,13 @@ class KotlinProviderRepository :
     }
 }
 
+private fun createProviderMap(
+    http: ProviderHttpClient,
+    credentials: ProviderCredentialStore,
+): Map<String, Lazy<KotlinMusicProvider>> = ProviderComposition
+    .createProviderFactories(http, credentials)
+    .mapValues { (_, factory) -> lazy(factory) }
+
 private fun searchHitKey(hit: ProviderSearchHit): String = when (hit) {
     is ProviderSearchHit.Track -> "track:${hit.value.id}"
     is ProviderSearchHit.Artist -> "artist:${hit.value.id}"
@@ -334,8 +341,18 @@ fun createKotlinProviderRepository(
     credentials: ProviderCredentialStore,
     persistentCache: ProviderPersistentCache? = null,
     isCellularConnection: () -> Boolean = { false },
-): KotlinProviderRepository = KotlinProviderRepository(
+): KotlinProviderRepository = createKotlinProviderRepository(
     http = ProviderHttpClient(persistentCache = persistentCache),
+    credentials = credentials,
+    isCellularConnection = isCellularConnection,
+)
+
+internal fun createKotlinProviderRepository(
+    http: ProviderHttpClient,
+    credentials: ProviderCredentialStore,
+    isCellularConnection: () -> Boolean = { false },
+): KotlinProviderRepository = KotlinProviderRepository(
+    http = http,
     credentials = credentials,
     isCellularConnection = isCellularConnection,
 )

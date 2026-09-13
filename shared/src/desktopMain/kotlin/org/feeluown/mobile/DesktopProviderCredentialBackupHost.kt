@@ -11,22 +11,28 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun DesktopProviderCredentialBackupHost(
-    backup: ProviderCredentialBackup,
+    backupFactory: () -> ProviderCredentialBackup,
     availableProviders: () -> List<ProviderInfo>,
     refreshProviders: (List<ProviderInfo>) -> Unit,
     onFeedback: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    var backup by remember { mutableStateOf<ProviderCredentialBackup?>(null) }
     var exportTarget by remember { mutableStateOf<ProviderCredentialBackupTarget?>(null) }
+
+    fun ensureBackup(): ProviderCredentialBackup = backup ?: backupFactory().also { backup = it }
+
     val actions = ProviderCredentialBackupActions(
         exportAll = {
+            ensureBackup()
             exportTarget = ProviderCredentialBackupTarget(
                 providerId = null,
                 providerName = "全部已登录音源",
             )
         },
         exportProvider = { provider ->
+            ensureBackup()
             exportTarget = ProviderCredentialBackupTarget(
                 providerId = provider.providerId,
                 providerName = provider.providerName,
@@ -34,28 +40,30 @@ internal fun DesktopProviderCredentialBackupHost(
         },
         importBackup = {
             scope.launch {
-                openCredentialBackupFile(backup, onFeedback)
+                openCredentialBackupFile(ensureBackup(), onFeedback)
             }
         },
     )
 
     CompositionLocalProvider(LocalProviderCredentialBackupActions provides actions) {
         content()
-        ProviderCredentialBackupDialogs(
-            backup = backup,
-            exportTarget = exportTarget,
-            onDismissExport = { exportTarget = null },
-            onExportFile = { fileName ->
-                scope.launch {
-                    saveCredentialBackupFile(backup, fileName, onFeedback)
-                }
-            },
-            onRestored = { restoredProviderIds ->
-                val restored = restoredProviderIds.toSet()
-                refreshProviders(availableProviders().filter { it.providerId in restored })
-            },
-            onFeedback = onFeedback,
-        )
+        backup?.let { activeBackup ->
+            ProviderCredentialBackupDialogs(
+                backup = activeBackup,
+                exportTarget = exportTarget,
+                onDismissExport = { exportTarget = null },
+                onExportFile = { fileName ->
+                    scope.launch {
+                        saveCredentialBackupFile(activeBackup, fileName, onFeedback)
+                    }
+                },
+                onRestored = { restoredProviderIds ->
+                    val restored = restoredProviderIds.toSet()
+                    refreshProviders(availableProviders().filter { it.providerId in restored })
+                },
+                onFeedback = onFeedback,
+            )
+        }
     }
 }
 
