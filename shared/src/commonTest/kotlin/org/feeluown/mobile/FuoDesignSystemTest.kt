@@ -23,6 +23,7 @@ class FuoDesignSystemTest {
         val phonePortrait = appLayoutInfoFor(maxWidth = 360.dp, maxHeight = 800.dp)
         val phoneLandscape = appLayoutInfoFor(maxWidth = 800.dp, maxHeight = 360.dp)
         val tabletPortrait = appLayoutInfoFor(maxWidth = 800.dp, maxHeight = 1280.dp)
+        val expandedBoundary = appLayoutInfoFor(maxWidth = 840.dp, maxHeight = 600.dp)
         val shortExpanded = appLayoutInfoFor(maxWidth = 900.dp, maxHeight = 520.dp)
         val tabletLandscape = appLayoutInfoFor(maxWidth = 1280.dp, maxHeight = 800.dp)
         val desktopPortrait = appLayoutInfoFor(maxWidth = 900.dp, maxHeight = 1000.dp)
@@ -50,6 +51,11 @@ class FuoDesignSystemTest {
         assertFalse(tabletPortrait.usePersistentNavigation)
         assertFalse(tabletPortrait.useFullPlayerTwoPane)
         assertEquals(5, tabletPortrait.gridColumns)
+
+        assertEquals(AppWidthSizeClass.Expanded, expandedBoundary.widthSizeClass)
+        assertTrue(expandedBoundary.useWideLayout)
+        assertFalse(expandedBoundary.usePersistentNavigation)
+        assertTrue(expandedBoundary.useFullPlayerTwoPane)
 
         assertEquals(AppWidthSizeClass.Expanded, shortExpanded.widthSizeClass)
         assertTrue(shortExpanded.useWideLayout)
