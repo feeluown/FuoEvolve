@@ -360,6 +360,10 @@ private class DesktopAppContainer {
             playlists = playlistActionPort,
             providerTrackActions = providerTrackActionPort,
             navigator = navigator,
+            onSearchClosed = {
+                PlatformCoverImageCache.clearAsync()
+                scope.launch { providerGraph.clearMemoryCache() }
+            },
         )
     }
 

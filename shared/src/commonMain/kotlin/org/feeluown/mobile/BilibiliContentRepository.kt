@@ -115,13 +115,16 @@ internal class BilibiliContentRepository(
 
 /** Composition-only holder; only platform composition roots should see this type. */
 class FuoProviderGraph internal constructor(
+    private val http: ProviderHttpClient,
     val registry: ProviderRegistryRepository,
     val search: ProviderSearchRepository,
     val auth: ProviderAuthRepository,
     val content: ProviderContentRepository,
     val playbackSource: PlaybackProviderSourcePort,
     val audioQuality: ProviderAudioQualityPort,
-)
+) {
+    internal suspend fun clearMemoryCache() = http.clearMemoryCache()
+}
 
 fun createFuoProviderGraph(
     credentials: ProviderCredentialStore,
@@ -134,6 +137,7 @@ fun createFuoProviderGraph(
         ProviderComposition.createBilibiliContentProvider(http, credentials)
     }
     return FuoProviderGraph(
+        http = http,
         registry = base,
         search = base,
         auth = base,

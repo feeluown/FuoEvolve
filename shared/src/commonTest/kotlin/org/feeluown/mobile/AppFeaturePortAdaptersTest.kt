@@ -33,6 +33,7 @@ class AppFeaturePortAdaptersTest {
 
         assertEquals(listOf(first, second), queue.playedTracks)
         assertEquals(1, queue.playedIndex)
+        assertEquals(1, search.clearCount)
         assertEquals(AppRoute.Home, navigator.currentEntry)
     }
 
@@ -155,8 +156,12 @@ class AppFeaturePortAdaptersTest {
     ) : SearchFeatureController {
         private val state = MutableStateFlow(initialState)
         override val uiState: StateFlow<SearchUiState> = state
+        var clearCount = 0
 
         override fun dispatch(action: SearchAction) = Unit
+        override fun clearResults() {
+            clearCount += 1
+        }
         override fun applyPreferences(searchScope: SearchScope, selectedSearchProviderId: String?) = Unit
         override fun normalizeProviderSelection(providerIds: Set<String>) = Unit
         override fun searchRecognitionResult(title: String, artists: List<String>) = Unit

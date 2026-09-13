@@ -19,6 +19,7 @@ class DefaultSearchAppPort(
     private val playlists: PlaylistActionPort,
     private val providerTrackActions: ProviderTrackActionPort,
     private val navigator: AppNavigator,
+    private val onSearchClosed: () -> Unit = {},
 ) : SearchAppPort {
     override val providers: List<ProviderInfo>
         get() = providerSessions().providers
@@ -27,6 +28,8 @@ class DefaultSearchAppPort(
         get() = downloads.downloadStates
 
     override fun closeSearch() {
+        searchController.clearResults()
+        onSearchClosed()
         navigator.pop(AppRoute.Search)
     }
 

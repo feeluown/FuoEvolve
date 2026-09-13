@@ -6,6 +6,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -105,13 +109,17 @@ internal object PlatformCoverImageCache {
     private val images = mutableMapOf<String, ImageBitmap>()
     private val imageOrder = mutableListOf<String>()
     private val inFlight = mutableMapOf<String, CompletableDeferred<ImageBitmap?>>()
+    private val maintenanceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var imageBytes = 0L
+    private var cacheGeneration = 0L
 
     suspend fun getOrLoad(key: String, loader: suspend () -> ImageBitmap?): ImageBitmap? {
         var cached: ImageBitmap? = null
         var pending: CompletableDeferred<ImageBitmap?>? = null
         var ownsLoad = false
+        var generation = 0L
         mutex.withLock {
+            generation = cacheGeneration
             cached = images[key]
             if (cached == null) {
                 pending = inFlight[key]
@@ -136,7 +144,7 @@ internal object PlatformCoverImageCache {
                 val image = loadPermits.withPermit { loader() }
                 mutex.withLock {
                     inFlight.remove(key)
-                    if (image != null) {
+                    if (image != null && generation == cacheGeneration) {
                         images.remove(key)?.let { imageBytes -= imageWeight(it) }
                         imageOrder.remove(key)
                         val weight = imageWeight(image)
@@ -158,6 +166,27 @@ internal object PlatformCoverImageCache {
             }
         }
         return deferred.await()
+    }
+
+    internal fun evictAsync(key: String) {
+        maintenanceScope.launch {
+            mutex.withLock {
+                cacheGeneration += 1L
+                images.remove(key)?.let { imageBytes -= imageWeight(it) }
+                imageOrder.remove(key)
+            }
+        }
+    }
+
+    internal fun clearAsync() {
+        maintenanceScope.launch {
+            mutex.withLock {
+                cacheGeneration += 1L
+                images.clear()
+                imageOrder.clear()
+                imageBytes = 0L
+            }
+        }
     }
 
     private fun imageWeight(image: ImageBitmap): Long =

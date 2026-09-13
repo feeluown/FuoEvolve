@@ -4,7 +4,6 @@ import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.cache.HttpCache
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.request
@@ -112,44 +111,87 @@ private fun httpFailureMessage(statusCode: Int, responseBody: String): String {
     }
 }
 
+private const val PROVIDER_RESPONSE_CACHE_MAX_BYTES = 8L * 1024L * 1024L
+
 private data class CacheRecord(
     val value: String,
     val storedAtMillis: Long,
+    val staleUntilMillis: Long,
+    val memoryBytes: Long,
 )
 
 class ProviderResponseCache(
     private val nowMillis: () -> Long = { currentTimeMillis() },
+    private val maxBytes: Long = PROVIDER_RESPONSE_CACHE_MAX_BYTES,
 ) {
     private val mutex = Mutex()
     private val records = LinkedHashMap<String, CacheRecord>()
+    private var currentBytes = 0L
 
     suspend fun get(key: String, policy: ProviderCachePolicy): CachedText? {
         if (policy.ttlMillis <= 0) return null
-        val record = mutex.withLock { records[key] } ?: return null
-        val age = (nowMillis() - record.storedAtMillis).coerceAtLeast(0)
-        return when {
-            age <= policy.ttlMillis -> CachedText(record.value, CacheFreshness.Fresh, record.storedAtMillis)
-            age <= policy.ttlMillis + policy.staleMillis -> CachedText(record.value, CacheFreshness.Stale, record.storedAtMillis)
-            else -> {
-                mutex.withLock { records.remove(key) }
-                null
+        return mutex.withLock {
+            val now = nowMillis()
+            purgeExpiredLocked(now)
+            val record = records[key] ?: return@withLock null
+            val age = (now - record.storedAtMillis).coerceAtLeast(0)
+            when {
+                age <= policy.ttlMillis -> CachedText(record.value, CacheFreshness.Fresh, record.storedAtMillis)
+                age <= policy.ttlMillis + policy.staleMillis -> CachedText(record.value, CacheFreshness.Stale, record.storedAtMillis)
+                else -> {
+                    removeLocked(key)
+                    null
+                }
             }
         }
     }
 
-    suspend fun put(key: String, value: String) {
+    suspend fun put(key: String, value: String, policy: ProviderCachePolicy) {
+        if (policy.ttlMillis <= 0) return
         mutex.withLock {
-            records.remove(key)
-            records[key] = CacheRecord(value, nowMillis())
-            while (records.size > 256) records.remove(records.keys.first())
+            val now = nowMillis()
+            purgeExpiredLocked(now)
+            removeLocked(key)
+            val memoryBytes = value.length.toLong() * 2L
+            if (maxBytes <= 0L || memoryBytes > maxBytes) return@withLock
+            records[key] = CacheRecord(
+                value = value,
+                storedAtMillis = now,
+                staleUntilMillis = now + policy.ttlMillis + policy.staleMillis,
+                memoryBytes = memoryBytes,
+            )
+            currentBytes += memoryBytes
+            while (currentBytes > maxBytes && records.isNotEmpty()) {
+                removeLocked(records.keys.first())
+            }
         }
     }
 
     suspend fun invalidate(prefix: String) {
-        mutex.withLock { records.keys.removeAll { it.startsWith(prefix) } }
+        mutex.withLock {
+            records.keys.filter { it.startsWith(prefix) }.forEach(::removeLocked)
+        }
     }
 
-    suspend fun clear() = mutex.withLock { records.clear() }
+    suspend fun clear() = mutex.withLock {
+        records.clear()
+        currentBytes = 0L
+    }
+
+    private fun purgeExpiredLocked(now: Long) {
+        val iterator = records.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (now > entry.value.staleUntilMillis) {
+                currentBytes -= entry.value.memoryBytes
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun removeLocked(key: String) {
+        records.remove(key)?.let { currentBytes -= it.memoryBytes }
+    }
 }
 
 class ProviderHttpClient(
@@ -221,6 +263,8 @@ class ProviderHttpClient(
         persistentCache?.invalidate(prefix)
     }
 
+    suspend fun clearMemoryCache() = cache.clear()
+
     fun close() = httpClient.close()
 
     private suspend fun execute(
@@ -257,7 +301,7 @@ class ProviderHttpClient(
                 val responseBody = response.bodyAsText()
                 if (response.status.isSuccess()) {
                     effectiveCacheKey?.let { key ->
-                        cache.put(key, responseBody)
+                        cache.put(key, responseBody, cachePolicy)
                         persistentCache?.write(key, PersistedProviderCacheEntry(responseBody, nowMillis()))
                     }
                     return CachedText(responseBody, CacheFreshness.Network, nowMillis())
@@ -342,7 +386,8 @@ internal fun HttpClientConfig<*>.installProviderClientDefaults() {
             explicitNulls = false
         })
     }
-    install(HttpCache)
+    // ProviderHttpClient owns the explicit response cache below. Do not install Ktor's automatic
+    // in-memory cache as it would retain the same response body a second time.
     install(HttpTimeout) {
         connectTimeoutMillis = 10_000
         requestTimeoutMillis = 30_000

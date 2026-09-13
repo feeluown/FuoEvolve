@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import org.feeluown.mobile.provider.core.network.ProviderResponseCache
 import org.feeluown.mobile.provider.core.network.CacheFreshness
 import org.feeluown.mobile.provider.core.network.PersistedProviderCacheEntry
 import org.feeluown.mobile.provider.core.network.ProviderCachePolicy
@@ -19,6 +20,24 @@ import org.feeluown.mobile.provider.core.network.ProviderRequestKind
 import org.feeluown.mobile.provider.core.network.ProviderRetryPolicy
 
 class ProviderNetworkTest {
+    @Test
+    fun responseCacheEvictsByMemoryBudgetAndExpiredEntries() = runTest {
+        var now = 1_000L
+        val cache = ProviderResponseCache(nowMillis = { now }, maxBytes = 10L)
+        val policy = ProviderCachePolicy(ttlMillis = 10_000)
+
+        cache.put("first", "12345", policy)
+        cache.put("second", "67890", policy)
+        cache.put("too-large", "123456", policy)
+
+        assertEquals(null, cache.get("first", policy))
+        assertEquals("67890", cache.get("second", policy)?.value)
+        assertEquals(null, cache.get("too-large", policy))
+
+        now = 11_001L
+        assertEquals(null, cache.get("second", policy))
+    }
+
     @Test
     fun safeReadsRetryTransientResponses() = runTest {
         var calls = 0

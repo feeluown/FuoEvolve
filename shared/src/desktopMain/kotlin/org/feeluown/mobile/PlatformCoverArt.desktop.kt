@@ -14,6 +14,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +85,11 @@ internal actual fun rememberPlatformCoverImage(imageUrl: String?, maxSizePx: Int
     val normalizedSizePx = normalizedCoverImageTargetSizePx(maxSizePx)
     val requestKey = imageUrl?.let { coverImageCacheKey(it, normalizedSizePx) }
     var image by remember(requestKey) { mutableStateOf<ImageBitmap?>(null) }
+    DisposableEffect(requestKey) {
+        onDispose {
+            requestKey?.let(PlatformCoverImageCache::evictAsync)
+        }
+    }
     LaunchedEffect(requestKey) {
         image = imageUrl?.takeIf { it.isNotBlank() }?.let { url ->
             runCatching {

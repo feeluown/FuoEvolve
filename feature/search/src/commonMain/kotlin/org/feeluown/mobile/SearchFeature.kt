@@ -1,6 +1,9 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -78,6 +81,8 @@ interface SearchFeatureOwner<Track, ProviderResults> {
 
     fun dispatch(action: SearchAction)
 
+    fun clearResults()
+
     fun applyPreferences(
         searchScope: SearchScope,
         selectedSearchProviderId: String?,
@@ -140,6 +145,9 @@ private class SearchController<Track, ProviderResults>(
 ) : SearchFeatureOwner<Track, ProviderResults> {
     override val uiState: StateFlow<SearchFeatureState<Track, ProviderResults>> = state.uiState
 
+    private var searchJob: Job? = null
+    private var searchGeneration = 0L
+
     override fun dispatch(action: SearchAction) {
         when (action) {
             is SearchAction.QueryChanged -> onQueryChange(action.value)
@@ -158,6 +166,20 @@ private class SearchController<Track, ProviderResults>(
             current.copy(
                 searchScope = searchScope,
                 selectedSearchProviderId = selectedSearchProviderId,
+            )
+        }
+    }
+
+    override fun clearResults() {
+        searchGeneration += 1L
+        searchJob?.cancel()
+        searchJob = null
+        state.update {
+            it.copy(
+                searchResults = emptyList(),
+                providerSearchResults = resultOperations.empty(),
+                isLoading = false,
+                message = null,
             )
         }
     }
@@ -253,6 +275,9 @@ private class SearchController<Track, ProviderResults>(
     }
 
     private fun search() {
+        val generation = ++searchGeneration
+        searchJob?.cancel()
+        searchJob = null
         val keyword = state.uiState.value.query.trim()
         if (keyword.isEmpty()) {
             state.update {
@@ -266,21 +291,26 @@ private class SearchController<Track, ProviderResults>(
             return
         }
 
-        scope.launch {
+        searchJob = scope.launch {
+            if (generation != searchGeneration) return@launch
             state.update { it.copy(isLoading = true, message = "正在搜索：$keyword") }
-            runCatching {
-                withTimeout(25_000) {
+            try {
+                val results = withTimeout(25_000) {
                     when (state.uiState.value.searchScope) {
                         SearchScope.Local -> {
                             val local = localRepository.search(keyword)
-                            state.update { it.copy(providerSearchResults = resultOperations.empty()) }
+                            if (generation == searchGeneration) {
+                                state.update { it.copy(providerSearchResults = resultOperations.empty()) }
+                            }
                             local
                         }
 
                         SearchScope.Provider -> {
                             val current = state.uiState.value
                             val provider = providerRepository.searchAll(keyword, current.selectedSearchProviderId)
-                            state.update { it.copy(providerSearchResults = provider) }
+                            if (generation == searchGeneration) {
+                                state.update { it.copy(providerSearchResults = provider) }
+                            }
                             resultOperations.tracks(provider)
                         }
 
@@ -291,45 +321,68 @@ private class SearchController<Track, ProviderResults>(
                             }
                             val local = localDeferred.await()
                             val provider = resultOperations.merge(providerDeferreds.awaitAll())
-                            state.update { it.copy(providerSearchResults = provider) }
+                            if (generation == searchGeneration) {
+                                state.update { it.copy(providerSearchResults = provider) }
+                            }
                             mergeResults(local, resultOperations.tracks(provider))
                         }
                     }
                 }
-            }.onSuccess { results ->
-                state.update { current ->
-                    val total = when (current.searchScope) {
-                        SearchScope.Local -> results.size
-                        SearchScope.Provider,
-                        SearchScope.All -> resultOperations.totalCount(current.providerSearchResults) +
-                            if (current.searchScope == SearchScope.All) {
-                                localOnlyCount(results, resultOperations.tracks(current.providerSearchResults))
-                            } else {
-                                0
+                if (generation == searchGeneration) {
+                    state.update { current ->
+                        val total = when (current.searchScope) {
+                            SearchScope.Local -> results.size
+                            SearchScope.Provider,
+                            SearchScope.All -> resultOperations.totalCount(current.providerSearchResults) +
+                                if (current.searchScope == SearchScope.All) {
+                                    localOnlyCount(results, resultOperations.tracks(current.providerSearchResults))
+                                } else {
+                                    0
+                                }
+                        }
+                        val providerError = resultOperations.errorMessage(current.providerSearchResults)
+                        current.copy(
+                            searchResults = results,
+                            message = when {
+                                total == 0 && providerError != null -> providerError
+                                total == 0 -> "没有搜索结果"
+                                else -> "搜索到 $total 项"
                             }
+                        )
                     }
-                    val providerError = resultOperations.errorMessage(current.providerSearchResults)
-                    current.copy(
-                        searchResults = results,
-                        message = when {
-                            total == 0 && providerError != null -> providerError
-                            total == 0 -> "没有搜索结果"
-                            else -> "搜索到 $total 项"
-                        },
-                    )
                 }
-            }.onFailure { throwable ->
-                val current = state.uiState.value
-                val failure = failureMessage(throwable, current.selectedSearchProviderId)
-                state.update {
-                    it.copy(
-                        searchResults = emptyList(),
-                        providerSearchResults = resultOperations.empty(errorMessage = failure),
-                        message = failure,
-                    )
+            } catch (timeout: TimeoutCancellationException) {
+                if (generation == searchGeneration) {
+                    val current = state.uiState.value
+                    val failure = failureMessage(timeout, current.selectedSearchProviderId)
+                    state.update {
+                        it.copy(
+                            searchResults = emptyList(),
+                            providerSearchResults = resultOperations.empty(errorMessage = failure),
+                            message = failure,
+                        )
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (exception: Exception) {
+                if (generation == searchGeneration) {
+                    val current = state.uiState.value
+                    val failure = failureMessage(exception, current.selectedSearchProviderId)
+                    state.update {
+                        it.copy(
+                            searchResults = emptyList(),
+                            providerSearchResults = resultOperations.empty(errorMessage = failure),
+                            message = failure,
+                        )
+                    }
+                }
+            } finally {
+                if (generation == searchGeneration) {
+                    searchJob = null
+                    state.update { it.copy(isLoading = false) }
                 }
             }
-            state.update { it.copy(isLoading = false) }
         }
     }
 

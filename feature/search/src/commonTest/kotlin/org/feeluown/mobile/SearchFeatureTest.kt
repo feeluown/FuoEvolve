@@ -3,11 +3,14 @@
 package org.feeluown.mobile
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class SearchFeatureTest {
     @Test
@@ -73,6 +76,49 @@ class SearchFeatureTest {
         assertEquals(listOf("local:1", "shared", "netease:2"), owner.uiState.value.searchResults.map { it.id })
         assertEquals(provider, owner.uiState.value.providerSearchResults)
         assertEquals("搜索到 4 项", owner.uiState.value.message)
+        assertFalse(owner.uiState.value.isLoading)
+    }
+
+    @Test
+    fun clearResultsDropsLoadedResults() = runTest {
+        val owner = createOwner(
+            scope = this,
+            localSearch = { listOf(TestTrack("local:1")) },
+            providerSearch = { _, _ -> TestProviderResults(listOf(TestTrack("provider:1"))) },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+
+        owner.clearResults()
+
+        assertEquals(emptyList(), owner.uiState.value.searchResults)
+        assertEquals(TestProviderResults(), owner.uiState.value.providerSearchResults)
+        assertFalse(owner.uiState.value.isLoading)
+    }
+
+    @Test
+    fun clearResultsPreventsCancelledSearchFromRepublishing() = runTest {
+        var started = false
+        val owner = createOwner(
+            scope = this,
+            providerSearch = { _, _ ->
+                started = true
+                awaitCancellation()
+            },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        runCurrent()
+        assertTrue(started)
+
+        owner.clearResults()
+        advanceUntilIdle()
+
+        assertEquals(emptyList(), owner.uiState.value.searchResults)
+        assertEquals(TestProviderResults(), owner.uiState.value.providerSearchResults)
         assertFalse(owner.uiState.value.isLoading)
     }
 
