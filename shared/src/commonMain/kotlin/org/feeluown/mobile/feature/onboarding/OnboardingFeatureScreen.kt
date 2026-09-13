@@ -92,7 +92,11 @@ fun OnboardingFeatureScreen(
     val sourcePage = pagerState.currentPage == 0
     val replacementPage = pagerState.currentPage == 1
     val accountPage = pagerState.currentPage == 2
-    val authBusy = accountPage && selectedProviders.any { providerAuth.isBusy(it.providerId) }
+    val ytmusicOAuthFlowActive = authState.ytmusicOAuthFlow != null
+    val authBusy = accountPage && selectedProviders.any { provider ->
+        providerAuth.isBusy(provider.providerId) &&
+            !(provider.providerId == "ytmusic" && ytmusicOAuthFlowActive)
+    }
     val busy = onboardingState.isBusy || catalogState.isLoading || authBusy
     val allLoggedIn = selectedProviders.isNotEmpty() && selectedProviders.all { provider ->
         providerAuth.authStateFor(provider).isLoggedIn
@@ -112,7 +116,12 @@ fun OnboardingFeatureScreen(
                     if (!sourcePage) {
                         IconButton(
                             enabled = !busy,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
+                            onClick = {
+                                if (accountPage && ytmusicOAuthFlowActive) {
+                                    providerAuth.cancelYtmusicTvOAuthLogin()
+                                }
+                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                            },
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一步")
                         }
@@ -137,7 +146,12 @@ fun OnboardingFeatureScreen(
                         replacementPage -> onboarding.applyProviderConfiguration { success ->
                             if (success) scope.launch { pagerState.animateScrollToPage(2) }
                         }
-                        else -> onboarding.complete()
+                        else -> {
+                            if (ytmusicOAuthFlowActive) {
+                                providerAuth.cancelYtmusicTvOAuthLogin()
+                            }
+                            onboarding.complete()
+                        }
                     }
                 },
             )
@@ -461,8 +475,10 @@ private fun OnboardingProviderAccountCard(
     onStartYtmusicOAuth: (() -> Unit)?,
 ) {
     val currentAuth = authController.authStateFor(provider)
+    val oauthFlowActive = provider.providerId == "ytmusic" && authState.ytmusicOAuthFlow != null
     val busy = authController.isBusy(provider.providerId)
-    val interactive = enabled && !busy
+    val operationInteractive = enabled && !busy
+    val cardInteractive = operationInteractive || (enabled && oauthFlowActive)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = if (currentAuth.isLoggedIn) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
@@ -492,13 +508,13 @@ private fun OnboardingProviderAccountCard(
                 if (currentAuth.isLoggedIn) {
                     Icon(Icons.Filled.CheckCircle, contentDescription = "已连接", tint = MaterialTheme.colorScheme.primary)
                 } else {
-                    OutlinedButton(onClick = { onExpandedChange(!expanded) }, enabled = interactive) {
+                    OutlinedButton(onClick = { onExpandedChange(!expanded) }, enabled = cardInteractive) {
                         Text(if (expanded) "收起" else "登录")
                     }
                 }
             }
             if (currentAuth.isLoggedIn) {
-                TextButton(onClick = { onLogoutProvider(provider) }, enabled = interactive) { Text("退出登录") }
+                TextButton(onClick = { onLogoutProvider(provider) }, enabled = operationInteractive) { Text("退出登录") }
             } else if (expanded) {
                 OnboardingProviderLoginControls(
                     provider = provider,
@@ -528,12 +544,13 @@ private fun OnboardingProviderLoginControls(
 ) {
     val uriHandler = LocalUriHandler.current
     val busy = authController.isBusy(provider.providerId)
-    val interactive = enabled && !busy
+    val operationInteractive = enabled && !busy
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
     var selectedMode by rememberSaveable(provider.providerId) { mutableStateOf(modes.first()) }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
     val oauthFlow = authState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
+    val oauthFlowInteractive = enabled && oauthFlow != null
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (modes.size > 1) {
@@ -541,7 +558,7 @@ private fun OnboardingProviderLoginControls(
                 modes.forEach { mode ->
                     FilterChip(
                         selected = selectedMode == mode,
-                        enabled = interactive,
+                        enabled = operationInteractive,
                         onClick = { selectedMode = mode },
                         label = { Text(onboardingLoginModeLabel(mode)) },
                     )
@@ -551,7 +568,7 @@ private fun OnboardingProviderLoginControls(
         when (selectedMode) {
             ProviderLoginMode.WebView -> Button(
                 onClick = { onOpenProviderWebLogin(provider) },
-                enabled = provider.loginConfig != null && interactive,
+                enabled = provider.loginConfig != null && operationInteractive,
             ) { Text("网页登录") }
             ProviderLoginMode.Cookie -> {
                 OutlinedTextField(
@@ -559,12 +576,12 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onCookiesChange(provider.providerId, it) },
                     label = { Text("Cookie / Cookie JSON") },
                     minLines = 3,
-                    enabled = interactive,
+                    enabled = operationInteractive,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
                     onClick = { authController.loginWithCookies(provider.providerId, authController.cookieInput(provider.providerId)) },
-                    enabled = interactive,
+                    enabled = operationInteractive,
                 ) { Text("使用 Cookie 登录") }
             }
             ProviderLoginMode.Headers -> {
@@ -573,7 +590,7 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onHeaderAuthorizationChange(provider.providerId, it) },
                     label = { Text("Authorization") },
                     visualTransformation = PasswordVisualTransformation(),
-                    enabled = interactive,
+                    enabled = operationInteractive,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -581,15 +598,15 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onHeaderCookieChange(provider.providerId, it) },
                     label = { Text("Cookie") },
                     minLines = 2,
-                    enabled = interactive,
+                    enabled = operationInteractive,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button(onClick = { authController.loginWithHeaders(provider.providerId) }, enabled = interactive) {
+                Button(onClick = { authController.loginWithHeaders(provider.providerId) }, enabled = operationInteractive) {
                     Text("使用 Headers 登录")
                 }
                 if (provider.providerId == "ytmusic") {
                     onImportYtmusicHeaderFile?.let { action ->
-                        TextButton(onClick = action, enabled = interactive) { Text("导入 ytmusic_header.json") }
+                        TextButton(onClick = action, enabled = operationInteractive) { Text("导入 ytmusic_header.json") }
                     }
                 }
             }
@@ -603,7 +620,7 @@ private fun OnboardingProviderLoginControls(
                     value = oauth.clientId,
                     onValueChange = { authController.onOAuthClientIdChange(provider.providerId, it) },
                     label = { Text("client_id") },
-                    enabled = interactive && oauthFlow == null,
+                    enabled = operationInteractive && oauthFlow == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -611,14 +628,14 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onOAuthClientSecretChange(provider.providerId, it) },
                     label = { Text("client_secret") },
                     visualTransformation = PasswordVisualTransformation(),
-                    enabled = interactive && oauthFlow == null,
+                    enabled = operationInteractive && oauthFlow == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (oauthFlow == null) {
                     val startAction = onStartYtmusicOAuth ?: authController::startYtmusicTvOAuthLogin
-                    Button(onClick = startAction, enabled = interactive) { Text("使用 Google 登录（TV）") }
+                    Button(onClick = startAction, enabled = operationInteractive) { Text("使用 Google 登录（TV）") }
                     onImportYtmusicOAuthFile?.let { action ->
-                        TextButton(onClick = action, enabled = interactive) { Text("导入 client_secret.json / oauth.json") }
+                        TextButton(onClick = action, enabled = operationInteractive) { Text("导入 client_secret.json / oauth.json") }
                     }
                 } else {
                     val verificationUrl = oauthFlow.verificationUrlWithCode.ifBlank { oauthFlow.verificationUrl }
@@ -641,9 +658,12 @@ private fun OnboardingProviderLoginControls(
                             Text("设备验证码", style = MaterialTheme.typography.labelMedium)
                             Text(oauthFlow.userCode, style = MaterialTheme.typography.headlineMedium)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = authController::copyYtmusicOAuthUserCode, enabled = interactive) { Text("复制验证码") }
                                 OutlinedButton(
-                                    enabled = interactive && verificationUrl.isNotBlank(),
+                                    onClick = authController::copyYtmusicOAuthUserCode,
+                                    enabled = oauthFlowInteractive,
+                                ) { Text("复制验证码") }
+                                OutlinedButton(
+                                    enabled = oauthFlowInteractive && verificationUrl.isNotBlank(),
                                     onClick = {
                                         runCatching { uriHandler.openUri(verificationUrl) }
                                             .onSuccess { authController.markYtmusicOAuthBrowserOpened() }
@@ -653,7 +673,10 @@ private fun OnboardingProviderLoginControls(
                         }
                     }
                     Text(verificationUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = authController::cancelYtmusicTvOAuthLogin, enabled = interactive) { Text("取消授权") }
+                    TextButton(
+                        onClick = authController::cancelYtmusicTvOAuthLogin,
+                        enabled = oauthFlowInteractive,
+                    ) { Text("取消授权") }
                 }
             }
         }
