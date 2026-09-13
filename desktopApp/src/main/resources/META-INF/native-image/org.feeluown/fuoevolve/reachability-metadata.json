@@ -67,6 +67,18 @@
       ]
     },
     {
+      "type": "com.sun.jna.LastErrorException",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        }
+      ]
+    },
+    {
       "type": "androidx.datastore.preferences.PreferencesProto$PreferenceMap",
       "fields": [
         {
