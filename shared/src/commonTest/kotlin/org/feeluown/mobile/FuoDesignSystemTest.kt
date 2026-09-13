@@ -33,6 +33,7 @@ class FuoDesignSystemTest {
         assertEquals(AppHeightSizeClass.Medium, phonePortrait.heightSizeClass)
         assertFalse(phonePortrait.isLandscape)
         assertFalse(phonePortrait.useWideLayout)
+        assertFalse(phonePortrait.useListDetailNavigation)
         assertFalse(phonePortrait.usePersistentNavigation)
         assertFalse(phonePortrait.useFullPlayerTwoPane)
         assertEquals(3, phonePortrait.gridColumns)
@@ -41,6 +42,7 @@ class FuoDesignSystemTest {
         assertEquals(AppHeightSizeClass.Compact, phoneLandscape.heightSizeClass)
         assertTrue(phoneLandscape.isLandscape)
         assertFalse(phoneLandscape.useWideLayout)
+        assertFalse(phoneLandscape.useListDetailNavigation)
         assertFalse(phoneLandscape.usePersistentNavigation)
         assertFalse(phoneLandscape.useFullPlayerTwoPane)
         assertEquals(3, phoneLandscape.gridColumns)
@@ -48,23 +50,27 @@ class FuoDesignSystemTest {
         assertEquals(AppWidthSizeClass.Medium, tabletPortrait.widthSizeClass)
         assertEquals(AppHeightSizeClass.Expanded, tabletPortrait.heightSizeClass)
         assertFalse(tabletPortrait.useWideLayout)
+        assertTrue(tabletPortrait.useListDetailNavigation)
         assertFalse(tabletPortrait.usePersistentNavigation)
         assertFalse(tabletPortrait.useFullPlayerTwoPane)
         assertEquals(5, tabletPortrait.gridColumns)
 
         assertEquals(AppWidthSizeClass.Expanded, expandedBoundary.widthSizeClass)
         assertTrue(expandedBoundary.useWideLayout)
+        assertTrue(expandedBoundary.useListDetailNavigation)
         assertFalse(expandedBoundary.usePersistentNavigation)
         assertTrue(expandedBoundary.useFullPlayerTwoPane)
 
         assertEquals(AppWidthSizeClass.Expanded, shortExpanded.widthSizeClass)
         assertTrue(shortExpanded.useWideLayout)
+        assertTrue(shortExpanded.useListDetailNavigation)
         assertTrue(shortExpanded.usePersistentNavigation)
         assertFalse(shortExpanded.useFullPlayerTwoPane)
 
         assertEquals(AppWidthSizeClass.Large, tabletLandscape.widthSizeClass)
         assertTrue(tabletLandscape.isLandscape)
         assertTrue(tabletLandscape.useWideLayout)
+        assertTrue(tabletLandscape.useListDetailNavigation)
         assertTrue(tabletLandscape.usePersistentNavigation)
         assertTrue(tabletLandscape.useFullPlayerTwoPane)
         assertEquals(7, tabletLandscape.gridColumns)
@@ -72,12 +78,28 @@ class FuoDesignSystemTest {
         assertEquals(AppWidthSizeClass.Expanded, desktopPortrait.widthSizeClass)
         assertFalse(desktopPortrait.isLandscape)
         assertTrue(desktopPortrait.useWideLayout)
+        assertTrue(desktopPortrait.useListDetailNavigation)
         assertTrue(desktopPortrait.usePersistentNavigation)
         assertTrue(desktopPortrait.useFullPlayerTwoPane)
 
         assertEquals(AppWidthSizeClass.ExtraLarge, desktopWide.widthSizeClass)
         assertTrue(desktopWide.useWideLayout)
+        assertTrue(desktopWide.useListDetailNavigation)
         assertEquals(8, desktopWide.gridColumns)
+    }
+
+    @Test
+    fun adaptiveNavigationRolesKeepFullscreenAndHomeSinglePane() {
+        assertFalse(AppRoute.Home.supportsAdaptiveListPane())
+        assertFalse(AppRoute.Home.supportsAdaptiveDetailPane())
+        assertTrue(AppRoute.Search.supportsAdaptiveListPane())
+        assertFalse(AppRoute.Search.supportsAdaptiveDetailPane())
+        assertTrue(AppRoute.LocalPlaylist.supportsAdaptiveListPane())
+        assertTrue(AppRoute.LocalPlaylist.supportsAdaptiveDetailPane())
+        assertTrue(AppRoute.LocalMusicCollection.supportsAdaptiveListPane())
+        assertTrue(AppRoute.LocalMusicCollection.supportsAdaptiveDetailPane())
+        assertFalse(AppRoute.Video.supportsAdaptiveListPane())
+        assertFalse(AppRoute.Video.supportsAdaptiveDetailPane())
     }
 
     @Test
