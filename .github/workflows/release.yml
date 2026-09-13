@@ -57,6 +57,9 @@ jobs:
             git branch master origin/master
           fi
 
+      - name: Validate update manifest script
+        run: bash -n scripts/write-update-manifest.sh
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -175,6 +178,7 @@ jobs:
             ["FuoEvolve-macos-x64.dmg"]="FuoEvolve-${tag}-macos-x64.dmg"
             ["FuoEvolve-linux-x64.AppImage"]="FuoEvolve-${tag}-linux-x64.AppImage"
             ["FuoEvolve-linux-x64.deb"]="FuoEvolve-${tag}-linux-x64.deb"
+            ["FuoEvolve-linux-x64.rpm"]="FuoEvolve-${tag}-linux-x64.rpm"
             ["FuoEvolve-linux-x64.pkg.tar.zst"]="FuoEvolve-${tag}-linux-x64.pkg.tar.zst"
           )
 
@@ -196,7 +200,7 @@ jobs:
             cp "$source_path" "build/artifacts/$target_name"
           done
 
-          expected_count=7
+          expected_count=8
           actual_count="$(find build/artifacts -maxdepth 1 -type f | wc -l | tr -d ' ')"
           if [ "$actual_count" -ne "$expected_count" ]; then
             echo "::error::Expected $expected_count release artifacts before checksums, found $actual_count"
