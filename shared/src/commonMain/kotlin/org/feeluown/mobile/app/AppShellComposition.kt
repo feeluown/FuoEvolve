@@ -3,12 +3,40 @@ package org.feeluown.mobile
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+private val CompactWidthUpperBound = 600.dp
+private val MediumWidthUpperBound = 840.dp
+private val ExpandedWidthUpperBound = 1200.dp
+private val LargeWidthUpperBound = 1600.dp
+private val CompactHeightUpperBound = 480.dp
+private val MediumHeightUpperBound = 900.dp
+private val FullPlayerTwoPaneMinHeight = 600.dp
+
 internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
-    val isLandscape = maxWidth > maxHeight
+    val widthSizeClass = when {
+        maxWidth < CompactWidthUpperBound -> AppWidthSizeClass.Compact
+        maxWidth < MediumWidthUpperBound -> AppWidthSizeClass.Medium
+        maxWidth < ExpandedWidthUpperBound -> AppWidthSizeClass.Expanded
+        maxWidth < LargeWidthUpperBound -> AppWidthSizeClass.Large
+        else -> AppWidthSizeClass.ExtraLarge
+    }
+    val heightSizeClass = when {
+        maxHeight < CompactHeightUpperBound -> AppHeightSizeClass.Compact
+        maxHeight < MediumHeightUpperBound -> AppHeightSizeClass.Medium
+        else -> AppHeightSizeClass.Expanded
+    }
+    val hasExpandedWidth = widthSizeClass >= AppWidthSizeClass.Expanded
+    val hasUsableWideHeight = heightSizeClass != AppHeightSizeClass.Compact
+
     return AppLayoutInfo(
-        isLandscape = isLandscape,
-        useWideLayout = isLandscape && maxWidth >= 640.dp,
+        widthSizeClass = widthSizeClass,
+        heightSizeClass = heightSizeClass,
+        isLandscape = maxWidth > maxHeight,
+        useWideLayout = hasExpandedWidth && hasUsableWideHeight,
+        usePersistentNavigation = hasExpandedWidth && hasUsableWideHeight,
+        useFullPlayerTwoPane = hasExpandedWidth && maxHeight >= FullPlayerTwoPaneMinHeight,
         gridColumns = when {
+            maxWidth >= 1600.dp -> 8
+            maxWidth >= 1200.dp -> 7
             maxWidth >= 980.dp -> 6
             maxWidth >= 760.dp -> 5
             maxWidth >= 640.dp -> 4
