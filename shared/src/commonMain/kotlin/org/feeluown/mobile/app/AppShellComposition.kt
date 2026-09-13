@@ -9,6 +9,7 @@ private val ExpandedWidthUpperBound = 1200.dp
 private val LargeWidthUpperBound = 1600.dp
 private val CompactHeightUpperBound = 480.dp
 private val MediumHeightUpperBound = 900.dp
+private val PersistentNavigationMinWidth = 900.dp
 private val FullPlayerTwoPaneMinHeight = 600.dp
 
 internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
@@ -46,7 +47,8 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
         heightSizeClass = heightSizeClass,
         isLandscape = maxWidth > maxHeight,
         useWideLayout = hasExpandedWidth && hasUsableWideHeight,
-        usePersistentNavigation = hasExpandedWidth && hasUsableWideHeight,
+        // Keep enough room for the destination's own wide pane after reserving the 64dp rail.
+        usePersistentNavigation = maxWidth >= PersistentNavigationMinWidth && hasUsableWideHeight,
         useFullPlayerTwoPane = hasExpandedWidth && maxHeight >= FullPlayerTwoPaneMinHeight,
         gridColumns = gridColumns,
     )
