@@ -54,7 +54,7 @@ CI runs the AppImage and distro-package branches in parallel. DEB, RPM and Pacma
 | macOS arm64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | Debian/Ubuntu Linux x64 | DEB | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by APT dependencies |
-| Fedora/RHEL-family Linux x64 | RPM | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `rpmRequires` |
+| Fedora Linux x64 | RPM | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `rpmRequires` |
 | Arch Linux x64 | Pacman/Arch package | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `pacmanDepends` |
 | Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 26.04 LTS baseline |
 
