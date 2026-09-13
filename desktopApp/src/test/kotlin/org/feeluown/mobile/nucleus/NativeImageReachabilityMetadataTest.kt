@@ -68,6 +68,26 @@ class NativeImageReachabilityMetadataTest {
             "Missing Native Image Windows credential attribute reference metadata",
         )
 
+        val lastErrorType = "\"type\": \"com.sun.jna.LastErrorException\""
+        val lastErrorIndex = metadata.indexOf(lastErrorType)
+        assertTrue(
+            lastErrorIndex >= 0,
+            "Missing Native Image JNI metadata for com.sun.jna.LastErrorException",
+        )
+        val lastErrorMetadata = metadata.substring(
+            lastErrorIndex,
+            minOf(metadata.length, lastErrorIndex + 320),
+        )
+        assertTrue(
+            lastErrorMetadata.contains("\"jniAccessible\": true"),
+            "JNA LastErrorException must be JNI accessible",
+        )
+        assertTrue(
+            lastErrorMetadata.contains("\"name\": \"<init>\"") &&
+                lastErrorMetadata.contains("\"java.lang.String\""),
+            "JNA LastErrorException String constructor must be available to JNI",
+        )
+
         val requiredDatastoreFields = listOf(
             "androidx.datastore.preferences.PreferencesProto\$PreferenceMap" to "preferences_",
             "androidx.datastore.preferences.PreferencesProto\$Value" to "valueCase_",
