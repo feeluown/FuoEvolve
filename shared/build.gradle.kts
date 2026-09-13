@@ -418,6 +418,7 @@ tasks.register("checkP4ContractBoundaries") {
                 "Shared.framework must re-export lower public contracts for Swift ABI compatibility: ${missingIosExports.joinToString()}",
             )
         }
+
         val declarationPattern = Regex(
             "\\b(?:data\\s+class|enum\\s+class|class)\\s+(?:${p4MovedContractNames.joinToString("|")})\\b",
         )
