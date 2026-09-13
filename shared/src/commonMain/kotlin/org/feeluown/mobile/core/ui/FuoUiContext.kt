@@ -30,6 +30,8 @@ data class AppLayoutInfo(
     val isLandscape: Boolean = false,
     /** Enables existing two-column / denser feature layouts when the window has enough usable space. */
     val useWideLayout: Boolean = false,
+    /** Enables Navigation 3 list-detail scenes for medium-or-larger, non-short windows. */
+    val useListDetailNavigation: Boolean = false,
     /** Hosts persistent wide-window navigation at the app-shell level. */
     val usePersistentNavigation: Boolean = false,
     /** Full player may use its side-by-side lyrics / artwork composition. */
