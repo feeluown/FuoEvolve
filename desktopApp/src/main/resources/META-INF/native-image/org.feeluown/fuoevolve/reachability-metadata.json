@@ -22,6 +22,51 @@
       }
     },
     {
+      "type": "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32$PCREDENTIAL",
+      "fields": [
+        { "name": "credential" }
+      ]
+    },
+    {
+      "type": "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32$CREDENTIAL",
+      "fields": [
+        { "name": "Flags" },
+        { "name": "Type" },
+        { "name": "TargetName" },
+        { "name": "Comment" },
+        { "name": "LastWritten" },
+        { "name": "CredentialBlobSize" },
+        { "name": "CredentialBlob" },
+        { "name": "Persist" },
+        { "name": "AttributeCount" },
+        { "name": "Attributes" },
+        { "name": "TargetAlias" },
+        { "name": "UserName" }
+      ]
+    },
+    {
+      "type": "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32$CREDENTIAL_ATTRIBUTE",
+      "allPublicConstructors": true,
+      "fields": [
+        { "name": "Keyword" },
+        { "name": "Flags" },
+        { "name": "ValueSize" },
+        { "name": "Value" }
+      ]
+    },
+    {
+      "type": "com.microsoft.credentialstorage.implementation.windows.CredAdvapi32$CREDENTIAL_ATTRIBUTE$ByReference",
+      "allPublicConstructors": true
+    },
+    {
+      "type": "com.sun.jna.platform.win32.WinBase$FILETIME",
+      "allPublicConstructors": true,
+      "fields": [
+        { "name": "dwLowDateTime" },
+        { "name": "dwHighDateTime" }
+      ]
+    },
+    {
       "type": "androidx.datastore.preferences.PreferencesProto$PreferenceMap",
       "fields": [
         {
