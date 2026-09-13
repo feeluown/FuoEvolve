@@ -170,6 +170,8 @@ fun OnboardingFeatureScreen(
                     )
                     else -> OnboardingAccountsPage(
                         providers = selectedProviders,
+                        state = onboardingState,
+                        enabled = !busy,
                         authController = providerAuth,
                         authState = authState,
                         onOpenProviderWebLogin = onOpenProviderWebLogin,
@@ -399,6 +401,8 @@ private fun OnboardingRoleRow(
 @Composable
 private fun OnboardingAccountsPage(
     providers: List<ProviderInfo>,
+    state: OnboardingUiState,
+    enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
@@ -423,6 +427,7 @@ private fun OnboardingAccountsPage(
             val loggedIn = authController.authStateFor(provider).isLoggedIn
             OnboardingProviderAccountCard(
                 provider = provider,
+                enabled = enabled,
                 authController = authController,
                 authState = authState,
                 expanded = !loggedIn && expandedProviderId == provider.providerId,
@@ -437,12 +442,14 @@ private fun OnboardingAccountsPage(
         authState.feedback?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        OnboardingFeedbackText(state)
     }
 }
 
 @Composable
 private fun OnboardingProviderAccountCard(
     provider: ProviderInfo,
+    enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
     expanded: Boolean,
@@ -455,6 +462,7 @@ private fun OnboardingProviderAccountCard(
 ) {
     val currentAuth = authController.authStateFor(provider)
     val busy = authController.isBusy(provider.providerId)
+    val interactive = enabled && !busy
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = if (currentAuth.isLoggedIn) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
@@ -484,16 +492,17 @@ private fun OnboardingProviderAccountCard(
                 if (currentAuth.isLoggedIn) {
                     Icon(Icons.Filled.CheckCircle, contentDescription = "已连接", tint = MaterialTheme.colorScheme.primary)
                 } else {
-                    OutlinedButton(onClick = { onExpandedChange(!expanded) }, enabled = !busy) {
+                    OutlinedButton(onClick = { onExpandedChange(!expanded) }, enabled = interactive) {
                         Text(if (expanded) "收起" else "登录")
                     }
                 }
             }
             if (currentAuth.isLoggedIn) {
-                TextButton(onClick = { onLogoutProvider(provider) }, enabled = !busy) { Text("退出登录") }
+                TextButton(onClick = { onLogoutProvider(provider) }, enabled = interactive) { Text("退出登录") }
             } else if (expanded) {
                 OnboardingProviderLoginControls(
                     provider = provider,
+                    enabled = enabled,
                     authController = authController,
                     authState = authState,
                     onOpenProviderWebLogin = onOpenProviderWebLogin,
@@ -509,6 +518,7 @@ private fun OnboardingProviderAccountCard(
 @Composable
 private fun OnboardingProviderLoginControls(
     provider: ProviderInfo,
+    enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
@@ -518,6 +528,7 @@ private fun OnboardingProviderLoginControls(
 ) {
     val uriHandler = LocalUriHandler.current
     val busy = authController.isBusy(provider.providerId)
+    val interactive = enabled && !busy
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
     var selectedMode by rememberSaveable(provider.providerId) { mutableStateOf(modes.first()) }
     val header = authController.headerInput(provider.providerId)
@@ -530,7 +541,7 @@ private fun OnboardingProviderLoginControls(
                 modes.forEach { mode ->
                     FilterChip(
                         selected = selectedMode == mode,
-                        enabled = !busy,
+                        enabled = interactive,
                         onClick = { selectedMode = mode },
                         label = { Text(onboardingLoginModeLabel(mode)) },
                     )
@@ -540,7 +551,7 @@ private fun OnboardingProviderLoginControls(
         when (selectedMode) {
             ProviderLoginMode.WebView -> Button(
                 onClick = { onOpenProviderWebLogin(provider) },
-                enabled = provider.loginConfig != null && !busy,
+                enabled = provider.loginConfig != null && interactive,
             ) { Text("网页登录") }
             ProviderLoginMode.Cookie -> {
                 OutlinedTextField(
@@ -548,12 +559,12 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onCookiesChange(provider.providerId, it) },
                     label = { Text("Cookie / Cookie JSON") },
                     minLines = 3,
-                    enabled = !busy,
+                    enabled = interactive,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
                     onClick = { authController.loginWithCookies(provider.providerId, authController.cookieInput(provider.providerId)) },
-                    enabled = !busy,
+                    enabled = interactive,
                 ) { Text("使用 Cookie 登录") }
             }
             ProviderLoginMode.Headers -> {
@@ -562,7 +573,7 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onHeaderAuthorizationChange(provider.providerId, it) },
                     label = { Text("Authorization") },
                     visualTransformation = PasswordVisualTransformation(),
-                    enabled = !busy,
+                    enabled = interactive,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -570,15 +581,15 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onHeaderCookieChange(provider.providerId, it) },
                     label = { Text("Cookie") },
                     minLines = 2,
-                    enabled = !busy,
+                    enabled = interactive,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button(onClick = { authController.loginWithHeaders(provider.providerId) }, enabled = !busy) {
+                Button(onClick = { authController.loginWithHeaders(provider.providerId) }, enabled = interactive) {
                     Text("使用 Headers 登录")
                 }
                 if (provider.providerId == "ytmusic") {
                     onImportYtmusicHeaderFile?.let { action ->
-                        TextButton(onClick = action, enabled = !busy) { Text("导入 ytmusic_header.json") }
+                        TextButton(onClick = action, enabled = interactive) { Text("导入 ytmusic_header.json") }
                     }
                 }
             }
@@ -592,7 +603,7 @@ private fun OnboardingProviderLoginControls(
                     value = oauth.clientId,
                     onValueChange = { authController.onOAuthClientIdChange(provider.providerId, it) },
                     label = { Text("client_id") },
-                    enabled = !busy && oauthFlow == null,
+                    enabled = interactive && oauthFlow == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -600,14 +611,14 @@ private fun OnboardingProviderLoginControls(
                     onValueChange = { authController.onOAuthClientSecretChange(provider.providerId, it) },
                     label = { Text("client_secret") },
                     visualTransformation = PasswordVisualTransformation(),
-                    enabled = !busy && oauthFlow == null,
+                    enabled = interactive && oauthFlow == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (oauthFlow == null) {
                     val startAction = onStartYtmusicOAuth ?: authController::startYtmusicTvOAuthLogin
-                    Button(onClick = startAction, enabled = !busy) { Text("使用 Google 登录（TV）") }
+                    Button(onClick = startAction, enabled = interactive) { Text("使用 Google 登录（TV）") }
                     onImportYtmusicOAuthFile?.let { action ->
-                        TextButton(onClick = action, enabled = !busy) { Text("导入 client_secret.json / oauth.json") }
+                        TextButton(onClick = action, enabled = interactive) { Text("导入 client_secret.json / oauth.json") }
                     }
                 } else {
                     val verificationUrl = oauthFlow.verificationUrlWithCode.ifBlank { oauthFlow.verificationUrl }
@@ -630,9 +641,9 @@ private fun OnboardingProviderLoginControls(
                             Text("设备验证码", style = MaterialTheme.typography.labelMedium)
                             Text(oauthFlow.userCode, style = MaterialTheme.typography.headlineMedium)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = authController::copyYtmusicOAuthUserCode) { Text("复制验证码") }
+                                OutlinedButton(onClick = authController::copyYtmusicOAuthUserCode, enabled = interactive) { Text("复制验证码") }
                                 OutlinedButton(
-                                    enabled = verificationUrl.isNotBlank(),
+                                    enabled = interactive && verificationUrl.isNotBlank(),
                                     onClick = {
                                         runCatching { uriHandler.openUri(verificationUrl) }
                                             .onSuccess { authController.markYtmusicOAuthBrowserOpened() }
@@ -642,7 +653,7 @@ private fun OnboardingProviderLoginControls(
                         }
                     }
                     Text(verificationUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消授权") }
+                    TextButton(onClick = authController::cancelYtmusicTvOAuthLogin, enabled = interactive) { Text("取消授权") }
                 }
             }
         }
