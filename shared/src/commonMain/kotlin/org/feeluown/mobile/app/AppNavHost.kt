@@ -137,7 +137,11 @@ internal fun AppRoute.supportsAdaptiveDetailPane(): Boolean = when (this) {
 }
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
-private fun AppRoute.adaptivePaneMetadata(activeRoute: AppRoute?): Map<String, Any> = when {
+private fun AppRoute.adaptivePaneMetadata(
+    activeRoute: AppRoute?,
+    adaptivePairActive: Boolean,
+): Map<String, Any> = when {
+    !adaptivePairActive -> emptyMap()
     this == activeRoute && supportsAdaptiveDetailPane() -> ListDetailSceneStrategy.detailPane()
     supportsAdaptiveListPane() -> ListDetailSceneStrategy.listPane()
     else -> emptyMap()
@@ -194,9 +198,9 @@ internal fun AppNavHost(
             NavEntry(
                 key = route,
                 // listPane/detailPane share one role metadata key. Assign exactly one role per
-                // entry: the active resource is the detail pane, while previous resource details
-                // become list panes when navigation drills deeper (playlist -> track, artist -> album).
-                metadata = route.adaptivePaneMetadata(activeRoute),
+                // entry only while a real list-detail pair exists. The active resource is detail;
+                // previous resource details become list panes when navigation drills deeper.
+                metadata = route.adaptivePaneMetadata(activeRoute, adaptivePairActive),
             ) {
                 PredictiveBackRouteSurface(
                     active = predictiveRoute == route,
