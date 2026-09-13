@@ -174,6 +174,10 @@ class FuoAppViewModel private constructor(
         )
     }
 
+    fun openHome() {
+        navigator.navigate(AppRoute.Home)
+    }
+
     fun openRecognition() {
         recognitionController.dispatch(RecognitionAction.Reset)
         navigator.navigate(AppRoute.AudioRecognition)
