@@ -2,6 +2,7 @@
 
 package org.feeluown.mobile.feature.onboarding
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -13,85 +14,76 @@ import kotlin.test.assertTrue
 
 class OnboardingFeatureTest {
     @Test
-    fun initializesSelectionAndReplacementOnlyFromNarrowPreferences() = runTest {
+    fun initializesRolesAndReplacementPolicyFromPreferences() = runTest {
         val preferences = FakePreferences(
             initial = providerPreferences(
                 enabled = setOf("netease", "bilibili"),
-                search = setOf("netease"),
+                content = setOf("netease"),
                 replacement = setOf("bilibili"),
+                policy = "smart",
+                score = 0.70,
             ),
         )
-        val owner = createOnboardingFeatureOwner(
-            preferences = preferences,
-            providerRuntime = FakeProviderRuntime(),
-            smartReplacePolicy = "smart",
-            scope = this,
-        )
+        val owner = owner(preferences, this)
 
         owner.initialize(listOf("netease", "bilibili"))
 
         assertEquals(setOf("netease", "bilibili"), owner.state.value.selectedProviderIds)
-        assertTrue(owner.state.value.bilibiliReplacementOnly)
+        assertEquals(setOf("netease"), owner.state.value.contentProviderIds)
+        assertEquals(setOf("bilibili"), owner.state.value.replacementProviderIds)
+        assertTrue(owner.state.value.smartReplacementEnabled)
+        assertEquals(0.70, owner.state.value.smartReplacementMinScore)
     }
 
     @Test
-    fun initializationFallsBackToFirstAvailableProvider() = runTest {
-        val owner = createOnboardingFeatureOwner(
-            preferences = FakePreferences(providerPreferences(enabled = setOf("removed"))),
-            providerRuntime = FakeProviderRuntime(),
-            smartReplacePolicy = "smart",
-            scope = this,
-        )
+    fun initializationFallsBackToFirstAvailableProviderWithExplicitRoles() = runTest {
+        val owner = owner(FakePreferences(providerPreferences(enabled = setOf("removed"))), this)
 
         owner.initialize(listOf("netease", "qqmusic"))
 
         assertEquals(setOf("netease"), owner.state.value.selectedProviderIds)
+        assertEquals(setOf("netease"), owner.state.value.contentProviderIds)
+        assertEquals(setOf("netease"), owner.state.value.replacementProviderIds)
     }
 
     @Test
-    fun validatesProviderSelectionBeforeMutatingRuntime() = runTest {
-        val runtime = FakeProviderRuntime()
-        val owner = createOnboardingFeatureOwner(
-            preferences = FakePreferences(providerPreferences(enabled = setOf("netease"))),
-            providerRuntime = runtime,
-            smartReplacePolicy = "smart",
-            scope = this,
-        )
+    fun newlySelectedBilibiliDefaultsToReplacementOnlyWhenRegularProviderExists() = runTest {
+        val owner = owner(FakePreferences(providerPreferences(enabled = setOf("netease"))), this)
         owner.initialize(listOf("netease", "bilibili"))
-        owner.setProviderSelected("netease", false)
-        var success: Boolean? = null
-
-        owner.applyProviderSelection(setOf("netease", "bilibili")) { success = it }
-
-        assertEquals(false, success)
-        assertEquals("请至少选择一个音源", owner.state.value.feedback)
-        assertTrue(runtime.updates.isEmpty())
 
         owner.setProviderSelected("bilibili", true)
-        owner.setBilibiliReplacementOnly(true)
-        owner.applyProviderSelection(setOf("netease", "bilibili")) { success = it }
 
-        assertEquals(false, success)
-        assertEquals("Bilibili 仅作为替换音源时，请再选择一个常规音源", owner.state.value.feedback)
-        assertTrue(runtime.updates.isEmpty())
+        assertEquals(setOf("netease", "bilibili"), owner.state.value.selectedProviderIds)
+        assertEquals(setOf("netease"), owner.state.value.contentProviderIds)
+        assertEquals(setOf("netease", "bilibili"), owner.state.value.replacementProviderIds)
     }
 
     @Test
-    fun appliesReplacementOnlyPolicyAndRefreshesCatalog() = runTest {
+    fun roleGuardsKeepConfigurationValid() = runTest {
+        val owner = owner(FakePreferences(providerPreferences(enabled = setOf("netease"))), this)
+        owner.initialize(listOf("netease", "qqmusic"))
+
+        owner.setContentProviderEnabled("netease", false)
+        assertEquals(setOf("netease"), owner.state.value.contentProviderIds)
+        assertEquals("请至少保留一个常规音源", owner.state.value.feedback?.message)
+
+        owner.setReplacementProviderEnabled("netease", false)
+        assertEquals(setOf("netease"), owner.state.value.replacementProviderIds)
+        assertEquals("启用智能替换时，请至少保留一个替代音源", owner.state.value.feedback?.message)
+    }
+
+    @Test
+    fun appliesProviderRolesPolicyAndScoreThenRefreshesCatalog() = runTest {
         val preferences = FakePreferences(providerPreferences(enabled = setOf("netease")))
         val runtime = FakeProviderRuntime()
-        val owner = createOnboardingFeatureOwner(
-            preferences = preferences,
-            providerRuntime = runtime,
-            smartReplacePolicy = "smart",
-            scope = this,
-        )
+        val owner = owner(preferences, this, runtime)
         owner.initialize(listOf("netease", "bilibili"))
         owner.setProviderSelected("bilibili", true)
-        owner.setBilibiliReplacementOnly(true)
+        owner.setReplacementProviderEnabled("netease", false)
+        owner.setSmartReplacementMinScore(0.70)
         var success = false
 
-        owner.applyProviderSelection(setOf("netease", "bilibili")) { success = it }
+        owner.applyProviderConfiguration(setOf("netease", "bilibili")) { success = it }
         advanceUntilIdle()
 
         assertTrue(success)
@@ -105,26 +97,39 @@ class OnboardingFeatureTest {
         assertEquals(setOf("netease"), stored.mineProviderIds)
         assertEquals(setOf("bilibili"), stored.smartReplacementProviderIds)
         assertEquals("smart", stored.unavailablePlaybackPolicy)
+        assertEquals(0.70, stored.smartReplacementMinScore)
         assertFalse(owner.state.value.isBusy)
-        assertEquals("音源初始化完成", owner.state.value.feedback)
+        assertEquals("音源初始化完成", owner.state.value.feedback?.message)
     }
 
     @Test
-    fun rollsBackRuntimeAndPreferencesWhenSelectionPersistenceFails() = runTest {
+    fun skipPolicyPersistsWithoutDiscardingReplacementSelection() = runTest {
+        val preferences = FakePreferences(providerPreferences(enabled = setOf("netease")))
+        val owner = owner(preferences, this)
+        owner.initialize(listOf("netease"))
+        owner.setSmartReplacementEnabled(false)
+        var success = false
+
+        owner.applyProviderConfiguration(setOf("netease")) { success = it }
+        advanceUntilIdle()
+
+        assertTrue(success)
+        val stored = preferences.providerPreferences.value
+        assertEquals("skip", stored.unavailablePlaybackPolicy)
+        assertEquals(setOf("netease"), stored.smartReplacementProviderIds)
+    }
+
+    @Test
+    fun rollsBackRuntimeAndPreferencesWhenConfigurationPersistenceFails() = runTest {
         val initial = providerPreferences(enabled = setOf("netease"))
         val preferences = FakePreferences(initial, failNextUpdate = true)
         val runtime = FakeProviderRuntime()
-        val owner = createOnboardingFeatureOwner(
-            preferences = preferences,
-            providerRuntime = runtime,
-            smartReplacePolicy = "smart",
-            scope = this,
-        )
+        val owner = owner(preferences, this, runtime)
         owner.initialize(listOf("netease", "qqmusic"))
         owner.setProviderSelected("qqmusic", true)
         var success = true
 
-        owner.applyProviderSelection(setOf("netease", "qqmusic")) { success = it }
+        owner.applyProviderConfiguration(setOf("netease", "qqmusic")) { success = it }
         advanceUntilIdle()
 
         assertFalse(success)
@@ -134,42 +139,68 @@ class OnboardingFeatureTest {
         )
         assertEquals(initial, preferences.providerPreferences.value)
         assertEquals(1, runtime.refreshCount)
-        assertEquals("persist failed", owner.state.value.feedback)
+        assertEquals("persist failed", owner.state.value.feedback?.message)
+        assertEquals(OnboardingFeedbackKind.Error, owner.state.value.feedback?.kind)
     }
 
     @Test
-    fun completionUsesNarrowPreferencePort() = runTest {
-        val preferences = FakePreferences(providerPreferences(enabled = setOf("netease")))
-        val owner = createOnboardingFeatureOwner(
-            preferences = preferences,
-            providerRuntime = FakeProviderRuntime(),
-            smartReplacePolicy = "smart",
-            scope = this,
+    fun completionReportsFailureAndCanBeRetried() = runTest {
+        val preferences = FakePreferences(
+            initial = providerPreferences(enabled = setOf("netease")),
+            failCompletion = true,
         )
+        val owner = owner(preferences, this)
+        var success = true
 
-        owner.complete()
+        owner.complete { success = it }
         advanceUntilIdle()
 
+        assertFalse(success)
+        assertFalse(owner.state.value.isBusy)
+        assertEquals("complete failed", owner.state.value.feedback?.message)
+
+        preferences.failCompletion = false
+        owner.complete { success = it }
+        advanceUntilIdle()
+
+        assertTrue(success)
         assertTrue(preferences.completed)
     }
 
+    private fun owner(
+        preferences: FakePreferences,
+        scope: CoroutineScope,
+        runtime: FakeProviderRuntime = FakeProviderRuntime(),
+    ) = createOnboardingFeatureOwner(
+        preferences = preferences,
+        providerRuntime = runtime,
+        smartReplacePolicy = "smart",
+        skipPolicy = "skip",
+        defaultSmartReplacementMinScore = 0.55,
+        scope = scope,
+    )
+
     private fun providerPreferences(
         enabled: Set<String>,
-        search: Set<String> = emptySet(),
+        content: Set<String> = emptySet(),
         replacement: Set<String> = emptySet(),
+        policy: String = "smart",
+        score: Double = 0.55,
     ) = OnboardingProviderPreferences(
         enabledProviderIds = enabled,
-        searchProviderIds = search,
-        recommendProviderIds = search,
-        exploreProviderIds = search,
-        mineProviderIds = search,
+        searchProviderIds = content,
+        recommendProviderIds = content,
+        exploreProviderIds = content,
+        mineProviderIds = content,
         smartReplacementProviderIds = replacement,
-        unavailablePlaybackPolicy = "stop",
+        unavailablePlaybackPolicy = policy,
+        smartReplacementMinScore = score,
     )
 
     private class FakePreferences(
         initial: OnboardingProviderPreferences<String>,
         private var failNextUpdate: Boolean = false,
+        var failCompletion: Boolean = false,
     ) : OnboardingPreferencesPort<String> {
         private val mutablePreferences = MutableStateFlow(initial)
         override val providerPreferences: StateFlow<OnboardingProviderPreferences<String>> = mutablePreferences
@@ -184,6 +215,7 @@ class OnboardingFeatureTest {
         }
 
         override suspend fun markCompleted() {
+            if (failCompletion) throw IllegalStateException("complete failed")
             completed = true
         }
     }
