@@ -26,6 +26,20 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
     }
     val hasExpandedWidth = widthSizeClass >= AppWidthSizeClass.Expanded
     val hasUsableWideHeight = heightSizeClass != AppHeightSizeClass.Compact
+    val gridColumns = if (heightSizeClass == AppHeightSizeClass.Compact) {
+        // Short landscape windows are usually phones. Keep cards large enough to remain tappable
+        // instead of deriving an aggressive desktop-like column count from width alone.
+        if (maxWidth >= MediumWidthUpperBound) 4 else 3
+    } else {
+        when {
+            maxWidth >= 1600.dp -> 8
+            maxWidth >= 1200.dp -> 7
+            maxWidth >= 980.dp -> 6
+            maxWidth >= 760.dp -> 5
+            maxWidth >= 640.dp -> 4
+            else -> 3
+        }
+    }
 
     return AppLayoutInfo(
         widthSizeClass = widthSizeClass,
@@ -34,14 +48,7 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
         useWideLayout = hasExpandedWidth && hasUsableWideHeight,
         usePersistentNavigation = hasExpandedWidth && hasUsableWideHeight,
         useFullPlayerTwoPane = hasExpandedWidth && maxHeight >= FullPlayerTwoPaneMinHeight,
-        gridColumns = when {
-            maxWidth >= 1600.dp -> 8
-            maxWidth >= 1200.dp -> 7
-            maxWidth >= 980.dp -> 6
-            maxWidth >= 760.dp -> 5
-            maxWidth >= 640.dp -> 4
-            else -> 3
-        },
+        gridColumns = gridColumns,
     )
 }
 
