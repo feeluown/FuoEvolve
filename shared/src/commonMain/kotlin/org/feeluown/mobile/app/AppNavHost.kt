@@ -137,6 +137,13 @@ internal fun AppRoute.supportsAdaptiveDetailPane(): Boolean = when (this) {
 }
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
+private fun AppRoute.adaptivePaneMetadata(activeRoute: AppRoute?): Map<String, Any> = when {
+    this == activeRoute && supportsAdaptiveDetailPane() -> ListDetailSceneStrategy.detailPane()
+    supportsAdaptiveListPane() -> ListDetailSceneStrategy.listPane()
+    else -> emptyMap()
+}
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 internal fun AppNavHost(
     backStack: List<AppRoute>,
@@ -150,7 +157,7 @@ internal fun AppNavHost(
     val rootLayoutInfo = LocalAppLayoutInfo.current
     val adaptivePairActive = rootLayoutInfo.useListDetailNavigation &&
         activeRoute?.supportsAdaptiveDetailPane() == true &&
-        backStack.dropLast(1).any(AppRoute::supportsAdaptiveListPane)
+        backStack.dropLast(1).any { it.supportsAdaptiveListPane() }
     val predictiveBackPreference = rememberPredictiveBackPreference()
     val density = LocalDensity.current
     val pageSpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
@@ -186,14 +193,10 @@ internal fun AppNavHost(
         entryProvider = { route ->
             NavEntry(
                 key = route,
-                metadata = buildMap {
-                    if (route.supportsAdaptiveListPane()) {
-                        putAll(ListDetailSceneStrategy.listPane())
-                    }
-                    if (route.supportsAdaptiveDetailPane()) {
-                        putAll(ListDetailSceneStrategy.detailPane())
-                    }
-                },
+                // listPane/detailPane share one role metadata key. Assign exactly one role per
+                // entry: the active resource is the detail pane, while previous resource details
+                // become list panes when navigation drills deeper (playlist -> track, artist -> album).
+                metadata = route.adaptivePaneMetadata(activeRoute),
             ) {
                 PredictiveBackRouteSurface(
                     active = predictiveRoute == route,
@@ -232,7 +235,13 @@ internal fun AppNavHost(
                                 measured
                             }
                         }
-                        CompositionLocalProvider(LocalAppLayoutInfo provides paneLayoutInfo) {
+                        val isAdaptiveDetailPane = adaptivePairActive &&
+                            route == activeRoute &&
+                            route.supportsAdaptiveDetailPane()
+                        CompositionLocalProvider(
+                            LocalAppLayoutInfo provides paneLayoutInfo,
+                            LocalAppIsAdaptiveDetailPane provides isAdaptiveDetailPane,
+                        ) {
                             when (route) {
                                 AppRoute.Home -> HomeScreen(
                                     home = uiGraph.home.home,
