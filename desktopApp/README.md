@@ -35,15 +35,16 @@ Nucleus exposes per-format Native Image packaging tasks. The release pipeline us
   -Pfuoevolve.nucleus.bundleLinuxRuntime=true \
   :desktopApp:packageGraalvmAppImage
 
-# Linux DEB + Pacman: distribution-managed native dependencies
+# Linux DEB + RPM + Pacman: distribution-managed native dependencies
 ./gradlew \
   -PnativeMarch=compatibility \
   -Pfuoevolve.nucleus.bundleLinuxRuntime=false \
   :desktopApp:packageGraalvmDeb \
+  :desktopApp:packageGraalvmRpm \
   :desktopApp:packageGraalvmPacman
 ```
 
-CI runs the AppImage and distro-package branches in parallel. DEB and Pacman share one Native Image compilation inside the distro branch, while AppImage has its own compilation because it stages a different native runtime closure.
+CI runs the AppImage and distro-package branches in parallel. DEB, RPM and Pacman share one Native Image compilation inside the distro branch, while AppImage has its own compilation because it stages a different native runtime closure.
 
 ## Distribution matrix
 
@@ -53,6 +54,7 @@ CI runs the AppImage and distro-package branches in parallel. DEB and Pacman sha
 | macOS arm64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | JNI bridge, system-output capture library and relocatable libmpv dylib closure bundled |
 | Debian/Ubuntu Linux x64 | DEB | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by APT dependencies |
+| Fedora Linux x64 | RPM | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `rpmRequires` |
 | Arch Linux x64 | Pacman/Arch package | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `pacmanDepends` |
 | Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 26.04 LTS baseline |
 
@@ -84,7 +86,7 @@ Release tags such as `1.2.3` are embedded as the desktop package version and dis
 ## CI and release
 
 - `.github/workflows/desktop-tests.yml` validates shared desktop/runtime tests and native resource staging on Linux, Windows and macOS.
-- `.github/workflows/desktop-packaging.yml` produces the Windows NSIS installer, both macOS DMGs, and Linux AppImage/DEB/Arch packages. Linux AppImage and distro packages run in parallel on Ubuntu 26.04; DEB and Arch share one distro-package Native Image compilation.
+- `.github/workflows/desktop-packaging.yml` produces the Windows NSIS installer, both macOS DMGs, and Linux AppImage/DEB/RPM/Arch packages. Linux AppImage and distro packages run in parallel on Ubuntu 26.04; DEB, RPM and Arch share one distro-package Native Image compilation.
 - `master-canary.yml` publishes preview artifacts from `master` after the matching platform test workflow succeeds. iOS remains test-only and does not produce a Canary artifact.
 - `release.yml` publishes the same desktop package matrix alongside Android for release tags and includes SHA-256 checksums.
 

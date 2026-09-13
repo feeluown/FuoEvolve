@@ -260,9 +260,9 @@ jobs:
             bundle_runtime: "true"
             gradle_tasks: ":desktopApp:packageGraalvmAppImage"
           - variant: distro
-            label: DEB + Arch
+            label: DEB + RPM + Arch
             bundle_runtime: "false"
-            gradle_tasks: ":desktopApp:packageGraalvmDeb :desktopApp:packageGraalvmPacman"
+            gradle_tasks: ":desktopApp:packageGraalvmDeb :desktopApp:packageGraalvmRpm :desktopApp:packageGraalvmPacman"
 
     steps:
       - name: Checkout
@@ -365,13 +365,20 @@ jobs:
 
           du -h build/artifacts/FuoEvolve-linux-x64.AppImage
 
-      - name: Prepare and verify DEB and Arch packages
+      - name: Prepare and verify DEB, RPM and Arch packages
         if: matrix.variant == 'distro'
         run: |
           mapfile -t deb_packages < <(find desktopApp/build -type f -name '*.deb' -print)
           if [[ "${#deb_packages[@]}" -ne 1 ]]; then
             echo "Expected exactly one DEB package, found ${#deb_packages[@]}" >&2
             printf '%s\n' "${deb_packages[@]}" >&2
+            exit 1
+          fi
+
+          mapfile -t rpm_packages < <(find desktopApp/build -type f -name '*.rpm' -print)
+          if [[ "${#rpm_packages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one RPM package, found ${#rpm_packages[@]}" >&2
+            printf '%s\n' "${rpm_packages[@]}" >&2
             exit 1
           fi
 
@@ -384,6 +391,7 @@ jobs:
 
           mkdir -p build/artifacts
           cp "${deb_packages[0]}" build/artifacts/FuoEvolve-linux-x64.deb
+          cp "${rpm_packages[0]}" build/artifacts/FuoEvolve-linux-x64.rpm
           cp "${arch_packages[0]}" build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
 
           test "$(dpkg-deb -f build/artifacts/FuoEvolve-linux-x64.deb Package)" = "fuoevolve"
@@ -411,6 +419,31 @@ jobs:
             exit 1
           fi
 
+          test "$(rpm -qp --queryformat '%{NAME}\n' build/artifacts/FuoEvolve-linux-x64.rpm)" = "fuoevolve"
+          rpm -qpR build/artifacts/FuoEvolve-linux-x64.rpm | tee build/rpm-requires.txt
+          for dep in \
+            gtk3 \
+            libX11 \
+            libxkbcommon \
+            libsecret \
+            mpv-libs \
+            webkit2gtk4.1 \
+            alsa-lib \
+            pipewire-libs \
+            pulseaudio-libs; do
+            grep -Eq "^${dep}($|[[:space:]<>=])" build/rpm-requires.txt || {
+              echo "RPM dependency metadata is missing $dep" >&2
+              exit 1
+            }
+          done
+          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
+          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
+          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep 'fuoevolve-web-login' >/dev/null
+          if rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
+            echo "RPM unexpectedly bundles portable Linux runtime libraries" >&2
+            exit 1
+          fi
+
           bsdtar -xOf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst .PKGINFO | tee build/arch-pkginfo.txt
           grep -Eq '^depend = mpv($|[<>=])' build/arch-pkginfo.txt
           grep -Eq '^depend = libsecret($|[<>=])' build/arch-pkginfo.txt
@@ -427,6 +460,7 @@ jobs:
           fi
 
           du -h build/artifacts/FuoEvolve-linux-x64.deb
+          du -h build/artifacts/FuoEvolve-linux-x64.rpm
           du -h build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
 
       - name: Upload Linux AppImage
@@ -445,6 +479,16 @@ jobs:
         with:
           name: FuoEvolve-linux-x64-deb
           path: build/artifacts/FuoEvolve-linux-x64.deb
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload RPM package
+        if: matrix.variant == 'distro'
+        uses: actions/upload-artifact@v7
+        with:
+          name: FuoEvolve-linux-x64-rpm
+          path: build/artifacts/FuoEvolve-linux-x64.rpm
           archive: false
           retention-days: 14
           if-no-files-found: error
