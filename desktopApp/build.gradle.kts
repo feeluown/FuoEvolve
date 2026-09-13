@@ -443,12 +443,14 @@ val nucleusTargetFormats = when (requestedTargetFormat) {
         TargetFormat.Nsis,
         TargetFormat.Dmg,
         TargetFormat.Deb,
+        TargetFormat.Rpm,
         TargetFormat.AppImage,
         TargetFormat.Pacman,
     )
     "nsis" -> arrayOf(TargetFormat.Nsis)
     "dmg" -> arrayOf(TargetFormat.Dmg)
     "deb" -> arrayOf(TargetFormat.Deb)
+    "rpm" -> arrayOf(TargetFormat.Rpm)
     "appimage" -> arrayOf(TargetFormat.AppImage)
     "pacman", "arch" -> arrayOf(TargetFormat.Pacman)
     else -> throw GradleException("Unsupported Nucleus target format: $requestedTargetFormat")
@@ -499,6 +501,18 @@ nucleus.application {
                 "libasound2t64",
                 "libpipewire-0.3-0t64",
                 "libpulse0",
+            )
+            rpmLicenseType = "GPL-3.0-or-later"
+            rpmRequires = listOf(
+                "gtk3",
+                "libX11",
+                "libxkbcommon",
+                "libsecret",
+                "mpv-libs",
+                "webkit2gtk4.1",
+                "alsa-lib",
+                "pipewire-libs",
+                "pulseaudio-libs",
             )
             pacmanDepends = listOf(
                 "gtk3",
