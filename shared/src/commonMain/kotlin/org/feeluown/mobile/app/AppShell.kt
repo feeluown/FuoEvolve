@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.tappableElement
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -63,7 +64,6 @@ internal fun AppShell(
                 isVideoFullscreen = videoDetailState.isFullscreen,
             ) == true
         val showShellNavigationRail = layoutInfo.usePersistentNavigation &&
-            activeRoute != AppRoute.Home &&
             !playback.isFullPlayerOpen &&
             !videoDetailState.isFullscreen
         val selectedHomeSectionIndex = AppShellHomeSections
@@ -77,6 +77,8 @@ internal fun AppShell(
         val bottomOverlayInsets = WindowInsets.navigationBars
             .union(WindowInsets.tappableElement)
             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+        val shellRailInsets = WindowInsets.safeDrawing
+            .only(WindowInsetsSides.Start + WindowInsetsSides.Vertical)
 
         CompositionLocalProvider(
             LocalPlaybackSession provides uiGraph.playbackSession,
@@ -116,24 +118,26 @@ internal fun AppShell(
                         ) {
                             Row(Modifier.fillMaxSize()) {
                                 if (showShellNavigationRail) {
-                                    HomeSectionRail(
-                                        sections = AppShellHomeSections,
-                                        selectedIndex = selectedHomeSectionIndex,
-                                        onSettings = uiGraph.home.home::openSettings,
-                                        onRefresh = {
-                                            when (homeState.homeSection) {
-                                                HomeSection.Mine -> uiGraph.home.home.refreshMine()
-                                                HomeSection.Recommend,
-                                                HomeSection.Music -> uiGraph.home.home.refreshHome(homeState.homeSection)
-                                            }
-                                        },
-                                        onSearch = uiGraph.home.home::openSearch,
-                                        onRecognition = appViewModel::openRecognition,
-                                        onClick = { _, section ->
-                                            uiGraph.home.home.setHomeSection(section)
-                                            appViewModel.openHome()
-                                        },
-                                    )
+                                    Box(Modifier.windowInsetsPadding(shellRailInsets)) {
+                                        HomeSectionRail(
+                                            sections = AppShellHomeSections,
+                                            selectedIndex = selectedHomeSectionIndex,
+                                            onSettings = uiGraph.home.home::openSettings,
+                                            onRefresh = {
+                                                when (homeState.homeSection) {
+                                                    HomeSection.Mine -> uiGraph.home.home.refreshMine()
+                                                    HomeSection.Recommend,
+                                                    HomeSection.Music -> uiGraph.home.home.refreshHome(homeState.homeSection)
+                                                }
+                                            },
+                                            onSearch = uiGraph.home.home::openSearch,
+                                            onRecognition = appViewModel::openRecognition,
+                                            onClick = { _, section ->
+                                                uiGraph.home.home.setHomeSection(section)
+                                                appViewModel.openHome()
+                                            },
+                                        )
+                                    }
                                 }
                                 Box(
                                     modifier = Modifier
