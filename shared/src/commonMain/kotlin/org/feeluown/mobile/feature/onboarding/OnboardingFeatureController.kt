@@ -5,6 +5,7 @@ package org.feeluown.mobile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.StateFlow
+import org.feeluown.mobile.feature.onboarding.OnboardingFeedback as CoreOnboardingFeedback
 import org.feeluown.mobile.feature.onboarding.OnboardingFeatureOwner as CoreOnboardingOwner
 import org.feeluown.mobile.feature.onboarding.OnboardingFeatureState as CoreOnboardingState
 import org.feeluown.mobile.feature.onboarding.OnboardingPreferencesPort as CorePreferencesPort
@@ -13,15 +14,19 @@ import org.feeluown.mobile.feature.onboarding.OnboardingProviderRuntimePort as C
 import org.feeluown.mobile.feature.onboarding.createOnboardingFeatureOwner
 
 typealias OnboardingUiState = CoreOnboardingState
+typealias OnboardingFeedback = CoreOnboardingFeedback
 
 interface OnboardingFeatureController {
     val uiState: StateFlow<OnboardingUiState>
     fun initialize(catalog: ProviderCatalogUiState)
     fun setProviderSelected(providerId: String, selected: Boolean)
-    fun setBilibiliReplacementOnly(enabled: Boolean)
-    fun applyProviderSelection(onComplete: (Boolean) -> Unit)
-    fun complete()
-    fun dismissFeedback(feedback: String)
+    fun setContentProviderEnabled(providerId: String, enabled: Boolean)
+    fun setReplacementProviderEnabled(providerId: String, enabled: Boolean)
+    fun setSmartReplacementEnabled(enabled: Boolean)
+    fun setSmartReplacementMinScore(value: Double)
+    fun applyProviderConfiguration(onComplete: (Boolean) -> Unit)
+    fun complete(onComplete: (Boolean) -> Unit = {})
+    fun dismissFeedback(feedback: OnboardingFeedback)
 }
 
 fun createOnboardingFeatureController(
@@ -34,6 +39,8 @@ fun createOnboardingFeatureController(
         preferences = BoundOnboardingPreferencesPort(settingsRepository),
         providerRuntime = BoundOnboardingProviderRuntimePort(providerRegistry, providerCatalog),
         smartReplacePolicy = UnavailablePlaybackPolicy.SmartReplace,
+        skipPolicy = UnavailablePlaybackPolicy.Skip,
+        defaultSmartReplacementMinScore = DEFAULT_SMART_REPLACEMENT_MIN_SCORE,
         scope = scope,
     )
     return BoundOnboardingFeatureController(owner, providerCatalog)
@@ -46,13 +53,16 @@ private class BoundOnboardingFeatureController(
     override val uiState: StateFlow<OnboardingUiState> = owner.state
     override fun initialize(catalog: ProviderCatalogUiState) = owner.initialize(catalog.availableProviders.map(ProviderInfo::providerId))
     override fun setProviderSelected(providerId: String, selected: Boolean) = owner.setProviderSelected(providerId, selected)
-    override fun setBilibiliReplacementOnly(enabled: Boolean) = owner.setBilibiliReplacementOnly(enabled)
-    override fun applyProviderSelection(onComplete: (Boolean) -> Unit) {
+    override fun setContentProviderEnabled(providerId: String, enabled: Boolean) = owner.setContentProviderEnabled(providerId, enabled)
+    override fun setReplacementProviderEnabled(providerId: String, enabled: Boolean) = owner.setReplacementProviderEnabled(providerId, enabled)
+    override fun setSmartReplacementEnabled(enabled: Boolean) = owner.setSmartReplacementEnabled(enabled)
+    override fun setSmartReplacementMinScore(value: Double) = owner.setSmartReplacementMinScore(value)
+    override fun applyProviderConfiguration(onComplete: (Boolean) -> Unit) {
         val availableProviderIds = providerCatalog.uiState.value.availableProviders.mapTo(mutableSetOf(), ProviderInfo::providerId)
-        owner.applyProviderSelection(availableProviderIds, onComplete)
+        owner.applyProviderConfiguration(availableProviderIds, onComplete)
     }
-    override fun complete() = owner.complete()
-    override fun dismissFeedback(feedback: String) = owner.dismissFeedback(feedback)
+    override fun complete(onComplete: (Boolean) -> Unit) = owner.complete(onComplete)
+    override fun dismissFeedback(feedback: OnboardingFeedback) = owner.dismissFeedback(feedback)
 }
 
 private typealias BoundProviderPreferences = CoreProviderPreferences<UnavailablePlaybackPolicy>
@@ -73,6 +83,7 @@ private class BoundOnboardingPreferencesPort(
                 mineProviderIds = value.mineProviderIds,
                 smartReplacementProviderIds = value.smartReplacementProviderIds,
                 unavailablePlaybackPolicy = value.unavailablePlaybackPolicy,
+                smartReplacementMinScore = value.smartReplacementMinScore,
             )
         }
     }
@@ -96,6 +107,7 @@ private fun AppSettings.toOnboardingProviderPreferences(): BoundProviderPreferen
     mineProviderIds = mineProviderIds,
     smartReplacementProviderIds = smartReplacementProviderIds,
     unavailablePlaybackPolicy = unavailablePlaybackPolicy,
+    smartReplacementMinScore = smartReplacementMinScore,
 )
 
 private class OnboardingMappedStateFlow<Source, Target>(

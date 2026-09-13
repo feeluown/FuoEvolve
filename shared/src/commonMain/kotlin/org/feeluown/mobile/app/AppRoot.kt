@@ -28,7 +28,6 @@ fun AppRoot(
                     }
                     OnboardingFeatureScreen(
                         onboarding = onboarding,
-                        settings = uiGraph.settings,
                         providerCatalog = uiGraph.providerCatalog,
                         providerAuth = uiGraph.providerAuth,
                         onOpenProviderWebLogin = platform.onOpenProviderWebLogin,
