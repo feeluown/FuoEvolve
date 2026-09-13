@@ -10,7 +10,7 @@
 | macOS arm64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
 | macOS x64 | DMG | GraalVM Native Image | JNI libmpv bridge + native system-output capture library + relocatable libmpv dylib closure bundled |
 | Debian/Ubuntu Linux x64 | DEB | GraalVM Native Image | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by APT dependencies |
-| Fedora/RHEL-family Linux x64 | RPM | GraalVM Native Image | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `rpmRequires` |
+| Fedora Linux x64 | RPM | GraalVM Native Image | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `rpmRequires` |
 | Arch Linux x64 | Pacman/Arch package | GraalVM Native Image | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `pacmanDepends` |
 | Portable Linux x64 | AppImage | GraalVM Native Image | bundled system-output capture library/ELF closure plus libmpv/Libsecret/WebKitGTK/TLS native closures |
 
@@ -70,7 +70,7 @@ The Linux Native Image build is pinned to the **latest Ubuntu LTS, currently Ubu
 
 The AppImage portable closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
 
-DEB packages declare the Ubuntu 26.04 runtime packages required by the application, including `libmpv2`, `libsecret-1-0`, `libwebkit2gtk-4.1-0`, ALSA, PipeWire and PulseAudio libraries. RPM packages declare the Fedora/RHEL-family equivalents through `rpmRequires`, including `mpv-libs`, `libsecret`, `webkit2gtk4.1`, `alsa-lib`, `pipewire-libs` and `pulseaudio-libs`. Arch packages declare their equivalents through `pacmanDepends`.
+DEB packages declare the Ubuntu 26.04 runtime packages required by the application, including `libmpv2`, `libsecret-1-0`, `libwebkit2gtk-4.1-0`, ALSA, PipeWire and PulseAudio libraries. RPM packages currently target Fedora package naming through `rpmRequires`, including `mpv-libs`, `libsecret`, `webkit2gtk4.1`, `alsa-lib`, `pipewire-libs` and `pulseaudio-libs`. Arch packages declare their equivalents through `pacmanDepends`.
 
 Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the Linux Native Image policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, package dependency names, cache keys, and this documentation in the same change.
 
