@@ -331,7 +331,9 @@ jobs:
             glib-networking \
             libarchive-tools \
             patchelf \
-            pax-utils
+            pax-utils \
+            xz-utils \
+            zstd
 
       - name: Build Linux Native Image and package ${{ matrix.label }}
         env:
@@ -401,7 +403,7 @@ jobs:
             exit 1
           fi
 
-          mapfile -t arch_packages < <(find desktopApp/build -type f \( -name '*.pacman' -o -name '*.pkg.tar.zst' \) -print)
+          mapfile -t arch_packages < <(find desktopApp/build -type f \( -name '*.pacman' -o -name '*.pkg.tar.xz' -o -name '*.pkg.tar.zst' \) -print)
           if [[ "${#arch_packages[@]}" -ne 1 ]]; then
             echo "Expected exactly one Arch/pacman package, found ${#arch_packages[@]}" >&2
             printf '%s\n' "${arch_packages[@]}" >&2
@@ -411,7 +413,19 @@ jobs:
           mkdir -p build/artifacts
           cp "${deb_packages[0]}" build/artifacts/FuoEvolve-linux-x64.deb
           cp "${rpm_packages[0]}" build/artifacts/FuoEvolve-linux-x64.rpm
-          cp "${arch_packages[0]}" build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
+
+          arch_package="${arch_packages[0]}"
+          arch_artifact=build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst
+          if zstd -t "$arch_package" >/dev/null 2>&1; then
+            cp "$arch_package" "$arch_artifact"
+          elif xz -t "$arch_package" >/dev/null 2>&1; then
+            xz -dc "$arch_package" | zstd -q -T0 -19 -c > "$arch_artifact"
+          else
+            echo "Unsupported Arch package compression: $arch_package" >&2
+            file "$arch_package" >&2 || true
+            exit 1
+          fi
+          zstd -t "$arch_artifact"
 
           test "$(dpkg-deb -f build/artifacts/FuoEvolve-linux-x64.deb Package)" = "fuoevolve"
           dpkg-deb -f build/artifacts/FuoEvolve-linux-x64.deb Depends | tee build/deb-depends.txt
