@@ -129,8 +129,8 @@ fi
 ln -sfn "$(basename "$BUNDLED_LIBMPV")" "$MPV_LIB_DIR/libmpv.so"
 ln -sfn "$(basename "$BUNDLED_LIBSECRET")" "$LIBSECRET_LIB_DIR/libsecret-1.so"
 
-# Provider login uses the Nucleus WebView. The audio-fingerprint helper is now a static,
-# headless Go binary, so collect WebKitGTK explicitly instead of inferring it from the helper.
+# Provider login uses the Nucleus WebView. The audio-fingerprint helper is now a headless
+# Rust/Wasmi binary, so collect WebKitGTK explicitly instead of inferring it from the helper.
 copy_library_to "$LIBWEBKIT" "$WEBVIEW_LIB_DIR"
 copy_elf_closure "$LIBWEBKIT" "$WEBVIEW_LIB_DIR"
 SYSTEM_WEBKIT_RUNTIME_DIR="$(dirname "$(find /usr/lib /lib -type f -path '*/webkit2gtk-4.1/WebKitNetworkProcess' -print -quit 2>/dev/null || true)")"
