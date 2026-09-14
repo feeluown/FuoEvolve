@@ -424,7 +424,8 @@ fun HomeSectionPager(
     modifier: Modifier,
     contentHorizontalPadding: Dp,
 ) {
-    if (LocalAppLayoutInfo.current.useWideLayout) {
+    val layoutInfo = LocalAppLayoutInfo.current
+    if (layoutInfo.useWideLayout && !layoutInfo.usePersistentNavigation) {
         Row(
             modifier = modifier.fillMaxWidth().padding(horizontal = contentHorizontalPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

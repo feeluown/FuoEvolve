@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -90,85 +88,37 @@ fun ProviderFeatureDetailRoute(feature: ProviderFeature) {
         },
         bottomBar = { if (graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer() },
     ) { paddingValues ->
-        val body = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp)
-        if (LocalAppLayoutInfo.current.useWideLayout) {
-            Row(
-                modifier = body.padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-            ) {
-                Column(
-                    modifier = Modifier.weight(0.36f).widthIn(min = 240.dp, max = 360.dp).fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    if (!displayFeature.isBilibiliWeeklyFeature()) {
-                        CoverBox(
-                            track = displayFeature.toDisplayTrack(),
-                            modifier = Modifier.size(160.dp),
-                            placeholder = if (displayFeature.isDailySongsFeature()) {
-                                CoverPlaceholder.DailyRecommendation
-                            } else {
-                                CoverPlaceholder.Song
-                            },
-                        )
-                    }
-                    Text(displayFeature.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "${displayFeature.providerName} · $contentCount 项",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
-                }
-                ProviderFeatureDetailBody(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    feature = displayFeature,
-                    state = state,
+        AdaptiveDetailLayout(
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            header = { stacked ->
+                ProviderDetailHeader(
+                    track = displayFeature.toDisplayTrack(),
+                    title = displayFeature.title.ifBlank { "推荐" },
+                    subtitle = "${displayFeature.providerName} · $contentCount 项",
+                    description = "",
+                    placeholder = if (displayFeature.isDailySongsFeature()) {
+                        CoverPlaceholder.DailyRecommendation
+                    } else {
+                        CoverPlaceholder.Song
+                    },
+                    stacked = stacked,
+                    action = if (state.tracks.isNotEmpty()) {
+                        { PlayAllButton(onClick = owner::playAll) }
+                    } else {
+                        null
+                    },
                 )
-            }
-        } else {
-            Column(modifier = body, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            },
+            content = {
                 LoadingIndicator(state.isLoading)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        modifier = Modifier.weight(1f),
-                        text = "${displayFeature.providerName} · $contentCount 项",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (state.tracks.isNotEmpty()) PlayAllButton(onClick = owner::playAll)
-                }
-                ProviderFeatureFilterBar(displayFeature, content, owner::open)
                 state.errorMessage?.let { ProviderContentMessage(it) }
+                ProviderFeatureFilterBar(displayFeature, content, owner::open)
                 ProviderFeatureDetailContent(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     feature = displayFeature,
                     state = state,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProviderFeatureDetailBody(
-    modifier: Modifier,
-    feature: ProviderFeature,
-    state: ProviderFeatureDetailUiState,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        LoadingIndicator(state.isLoading)
-        state.errorMessage?.let { ProviderContentMessage(it) }
-        ProviderFeatureFilterBar(feature, state.content, LocalProviderDetailUiGraph.current.owners.feature::open)
-        ProviderFeatureDetailContent(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            feature = feature,
-            state = state,
+            },
         )
     }
 }
@@ -291,12 +241,9 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
         },
         bottomBar = { if (graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer() },
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                LoadingIndicator(state.isLoading)
+        AdaptiveDetailLayout(
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            header = { stacked ->
                 ProviderDetailHeader(
                     track = displayPlaylist.toDisplayTrack(),
                     title = displayPlaylist.title.ifBlank { "未命名歌单" },
@@ -308,6 +255,7 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                     description = displayPlaylist.description,
                     placeholder = CoverPlaceholder.Playlist,
                     heroKey = playlist.coverHeroKey(),
+                    stacked = stacked,
                     action = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (
@@ -329,6 +277,9 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                         }
                     },
                 )
+            },
+            content = {
+                LoadingIndicator(state.isLoading)
                 state.errorMessage?.let { ProviderContentMessage(it) }
                 ProviderDetailTrackList(
                     tracks = state.tracks,
@@ -340,8 +291,8 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                     canRemove = owner::canRemove,
                     onRemove = owner::remove,
                 )
-            }
-        }
+            },
+        )
     }
     if (showDeleteDialog) {
         AlertDialog(
@@ -388,66 +339,76 @@ fun ProviderTrackDetailRoute(track: MusicTrack) {
         },
         bottomBar = { if (graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer() },
     ) { paddingValues ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            LoadingIndicator(state.isLoading)
-            ProviderDetailHeader(
-                track = displayTrack,
-                title = displayTrack.title.ifBlank { "未知歌曲" },
-                subtitle = buildList {
-                    if (displayTrack.artists.isNotBlank()) add(displayTrack.artists)
-                    if (displayTrack.album.isNotBlank()) add("《${displayTrack.album}》")
-                    add(displayTrack.providerName ?: displayTrack.source)
-                }.joinToString(" · "),
-                description = "",
-                action = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = owner::play) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(4.dp))
-                            Text("播放")
-                        }
-                        if (state.video != null) {
-                            TextButton(onClick = owner::openVideo) {
+        AdaptiveDetailLayout(
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            header = { stacked ->
+                ProviderDetailHeader(
+                    track = displayTrack,
+                    title = displayTrack.title.ifBlank { "未知歌曲" },
+                    subtitle = buildList {
+                        if (displayTrack.artists.isNotBlank()) add(displayTrack.artists)
+                        if (displayTrack.album.isNotBlank()) add("《${displayTrack.album}》")
+                        add(displayTrack.providerName ?: displayTrack.source)
+                    }.joinToString(" · "),
+                    description = "",
+                    stacked = stacked,
+                    action = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = owner::play) {
                                 Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(4.dp))
-                                Text("播放 MV")
+                                Text("播放")
                             }
-                        }
-                        if (graph.playlists.canAddTrackToPlaylist(displayTrack)) {
-                            TextButton(onClick = { graph.playlists.openPlaylistTargetPicker(displayTrack) }) {
-                                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null)
-                                Spacer(Modifier.size(4.dp))
-                                Text("添加到歌单")
+                            if (state.video != null) {
+                                TextButton(onClick = owner::openVideo) {
+                                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.size(4.dp))
+                                    Text("播放 MV")
+                                }
                             }
+                            if (graph.playlists.canAddTrackToPlaylist(displayTrack)) {
+                                TextButton(onClick = { graph.playlists.openPlaylistTargetPicker(displayTrack) }) {
+                                    Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null)
+                                    Spacer(Modifier.size(4.dp))
+                                    Text("添加到歌单")
+                                }
+                            }
+                            ShareTextButton(sharePayload)
                         }
-                        ShareTextButton(sharePayload)
+                    },
+                )
+            },
+            content = {
+                LoadingIndicator(state.isLoading)
+                state.errorMessage?.let { ProviderContentMessage(it) }
+                state.relatedErrorMessage?.let { ProviderContentMessage(it) }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (state.similarTracks.isNotEmpty()) {
+                        Text("相似歌曲", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        state.similarTracks.take(6).forEachIndexed { index, related ->
+                            ProviderDetailTrackRow(related, onClick = { owner.playSimilar(index) })
+                            HorizontalDivider()
+                        }
                     }
-                },
-            )
-            state.errorMessage?.let { ProviderContentMessage(it) }
-            state.relatedErrorMessage?.let { ProviderContentMessage(it) }
-            if (state.similarTracks.isNotEmpty()) {
-                Text("相似歌曲", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                state.similarTracks.take(6).forEachIndexed { index, related ->
-                    ProviderDetailTrackRow(related, onClick = { owner.playSimilar(index) })
-                    HorizontalDivider()
-                }
-            }
-            if (state.comments.isNotEmpty()) {
-                Text("热评", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                state.comments.take(5).forEach { comment ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(comment.userName.ifBlank { "匿名用户" }, color = MaterialTheme.colorScheme.primary)
-                        Text(comment.content, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    if (state.comments.isNotEmpty()) {
+                        Text("热评", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        state.comments.take(5).forEach { comment ->
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(comment.userName.ifBlank { "匿名用户" }, color = MaterialTheme.colorScheme.primary)
+                                Text(comment.content, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            }
+                            HorizontalDivider()
+                        }
                     }
-                    HorizontalDivider()
                 }
-            }
-        }
+            },
+        )
     }
 }
 
@@ -482,12 +443,9 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
         },
         bottomBar = { if (graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer() },
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                LoadingIndicator(state.isLoading)
+        AdaptiveDetailLayout(
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            header = { stacked ->
                 ProviderDetailHeader(
                     track = displayItem.toDisplayTrack(),
                     title = displayItem.title.ifBlank { if (isArtist) "未知歌手" else "未知专辑" },
@@ -500,6 +458,7 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                     description = displayItem.description,
                     placeholder = if (isArtist) CoverPlaceholder.Artist else CoverPlaceholder.Album,
                     heroKey = item.coverHeroKey(),
+                    stacked = stacked,
                     action = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (
@@ -521,6 +480,9 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                         }
                     },
                 )
+            },
+            content = {
+                LoadingIndicator(state.isLoading)
                 state.errorMessage?.let { ProviderContentMessage(it) }
                 if (isArtist) {
                     PrimaryTabRow(selectedTabIndex = selectedTabIndex) {
@@ -557,8 +519,8 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                         onItemVisible = owner::prefetchTracksIfNeeded,
                     )
                 }
-            }
-        }
+            },
+        )
     }
 }
 

@@ -32,6 +32,7 @@ import kotlin.math.abs
 @Composable
 internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
     val playback = uiGraph.playback
+    val layoutInfo = LocalAppLayoutInfo.current
     val predictiveBackPreference = rememberPredictiveBackPreference()
     val density = LocalDensity.current
     val overlaySpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
@@ -145,7 +146,13 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
         // The predictive surface behaves like a restrained window: it recedes slightly, gains
         // rounded corners as it detaches from fullscreen, and follows vertical finger movement only
         // within a small bounded range rather than tracking the pointer 1:1.
-        CompositionLocalProvider(LocalAppSharedTransitionScope provides null) {
+        // RuntimeFullPlayer still switches its legacy branch from isLandscape. Override that value
+        // only inside the full-player overlay so the branch follows usable pane space instead of raw
+        // device orientation, while the rest of the app keeps the physical orientation signal.
+        CompositionLocalProvider(
+            LocalAppSharedTransitionScope provides null,
+            LocalAppLayoutInfo provides layoutInfo.copy(isLandscape = layoutInfo.useFullPlayerTwoPane),
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,12 +21,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 
 data class LocalPlaylistFileActions(
     val importFile: (() -> Unit)? = null,
@@ -117,85 +115,85 @@ fun LocalPlaylistScreen(
             if (playbackUiPort.currentTrack != null) PlaybackMiniPlayer()
         },
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ProviderDetailHeader(
-                track = displayPlaylist.toDisplayTrack(),
-                title = displayPlaylist.title.ifBlank { "未命名歌单" },
-                subtitle = "本地文件 · ${uiState.selectedTracks.size} 首",
-                description = displayPlaylist.description,
-                placeholder = CoverPlaceholder.Playlist,
-                action = {
-                    PlayAllButton(
-                        onClick = {
-                            if (uiState.selectedTracks.isNotEmpty()) {
-                                playbackQueue.playAllPlaylistTracks(
-                                    uiState.selectedTracks,
-                                    displayPlaylist.id,
-                                    listeningContext,
-                                )
-                            }
-                        },
-                        enabled = uiState.selectedTracks.isNotEmpty(),
-                    )
-                },
-            )
-            LoadingIndicator(uiState.isLoading)
-            uiState.selectedError?.let { ProviderContentMessage(it) }
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                if (uiState.selectedTracks.isEmpty() && !uiState.isLoading) {
-                    item { ProviderContentMessage("歌单暂无歌曲") }
-                } else {
-                    itemsIndexed(
-                        uiState.selectedTracks,
-                        key = { _, track -> track.id },
-                    ) { index, track ->
-                        TrackRow(
-                            track = track,
-                            downloadState = downloads.downloadStates[track.id],
+        AdaptiveDetailLayout(
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            header = { stacked ->
+                ProviderDetailHeader(
+                    track = displayPlaylist.toDisplayTrack(),
+                    title = displayPlaylist.title.ifBlank { "未命名歌单" },
+                    subtitle = "本地文件 · ${uiState.selectedTracks.size} 首",
+                    description = displayPlaylist.description,
+                    placeholder = CoverPlaceholder.Playlist,
+                    stacked = stacked,
+                    action = {
+                        PlayAllButton(
                             onClick = {
-                                playbackQueue.playPlaylistTracks(
-                                    uiState.selectedTracks,
-                                    index,
-                                    displayPlaylist.id,
-                                    listeningContext,
-                                )
+                                if (uiState.selectedTracks.isNotEmpty()) {
+                                    playbackQueue.playAllPlaylistTracks(
+                                        uiState.selectedTracks,
+                                        displayPlaylist.id,
+                                        listeningContext,
+                                    )
+                                }
                             },
-                            onAddToUpNext = { playbackQueue.addToUpNext(track) },
-                            onDownload = { downloads.download(track) },
-                            onDeleteDownload = { downloads.deleteDownload(track) },
-                            onOpenArtist = { providerTrackActions.openTrackArtist(track) },
-                            onOpenAlbum = { providerTrackActions.openTrackAlbum(track) },
-                            onOpenDetail = if (track.sourceType == TrackSourceType.Provider) {
-                                { providerTrackActions.openOriginalTrackDetail(track) }
-                            } else {
-                                null
-                            },
-                            onAddToPlaylist = if (playlistActions.canAddTrackToPlaylist(track)) {
-                                { playlistActions.openPlaylistTargetPicker(track) }
-                            } else {
-                                null
-                            },
-                            onRemoveFromProviderPlaylist = if (actions.canRemove(track)) {
-                                { actions.remove(track) }
-                            } else {
-                                null
-                            },
+                            enabled = uiState.selectedTracks.isNotEmpty(),
                         )
-                        HorizontalDivider()
+                    },
+                )
+            },
+            content = {
+                LoadingIndicator(uiState.isLoading)
+                uiState.selectedError?.let { ProviderContentMessage(it) }
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    if (uiState.selectedTracks.isEmpty() && !uiState.isLoading) {
+                        item { ProviderContentMessage("歌单暂无歌曲") }
+                    } else {
+                        itemsIndexed(
+                            uiState.selectedTracks,
+                            key = { _, track -> track.id },
+                        ) { index, track ->
+                            TrackRow(
+                                track = track,
+                                downloadState = downloads.downloadStates[track.id],
+                                onClick = {
+                                    playbackQueue.playPlaylistTracks(
+                                        uiState.selectedTracks,
+                                        index,
+                                        displayPlaylist.id,
+                                        listeningContext,
+                                    )
+                                },
+                                onAddToUpNext = { playbackQueue.addToUpNext(track) },
+                                onDownload = { downloads.download(track) },
+                                onDeleteDownload = { downloads.deleteDownload(track) },
+                                onOpenArtist = { providerTrackActions.openTrackArtist(track) },
+                                onOpenAlbum = { providerTrackActions.openTrackAlbum(track) },
+                                onOpenDetail = if (track.sourceType == TrackSourceType.Provider) {
+                                    { providerTrackActions.openOriginalTrackDetail(track) }
+                                } else {
+                                    null
+                                },
+                                onAddToPlaylist = if (playlistActions.canAddTrackToPlaylist(track)) {
+                                    { playlistActions.openPlaylistTargetPicker(track) }
+                                } else {
+                                    null
+                                },
+                                onRemoveFromProviderPlaylist = if (actions.canRemove(track)) {
+                                    { actions.remove(track) }
+                                } else {
+                                    null
+                                },
+                            )
+                            HorizontalDivider()
+                        }
                     }
                 }
-            }
-        }
+            },
+        )
     }
 
     if (showDeleteDialog) {

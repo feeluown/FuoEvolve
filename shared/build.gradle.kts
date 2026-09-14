@@ -69,6 +69,7 @@ kotlin {
             implementation(libs.compose.foundation)
             implementation(libs.compose.animation)
             implementation(libs.compose.material3.expressive)
+            implementation(libs.compose.material3.adaptive.navigation3)
             implementation(libs.material.kolor)
             implementation(libs.compose.material.icons.extended)
             implementation(libs.kotlinx.coroutines.core)

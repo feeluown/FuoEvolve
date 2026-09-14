@@ -5,13 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -45,7 +43,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -168,7 +165,6 @@ fun LocalMusicCollectionScreen() {
             graph.feature.closeCollection()
         }
     }
-    val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
     val playbackUiPort = LocalPlaybackUiPort.current
     Scaffold(
         topBar = {
@@ -201,21 +197,16 @@ fun LocalMusicCollectionScreen() {
                 .fillMaxSize()
                 .padding(paddingValues),
         ) {
-            LoadingIndicator(uiState.isLoading)
-            uiState.errorMessage?.let { ProviderContentMessage(it) }
             selectedCollection?.let { collection ->
                 LocalMusicCollectionDetail(
                     graph = graph,
                     collection = collection,
                     mode = selection.mode,
+                    isLoading = uiState.isLoading,
+                    errorMessage = uiState.errorMessage,
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = if (isWideLayout) 20.dp else 16.dp,
-                            vertical = if (isWideLayout) 12.dp else 0.dp,
-                        ),
-                    isWideLayout = isWideLayout,
+                        .fillMaxWidth(),
                 )
             }
         }
@@ -285,8 +276,9 @@ private fun LocalMusicCollectionDetail(
     graph: LocalMusicUiGraph,
     collection: LocalMusicCollection,
     mode: LocalMusicViewMode,
+    isLoading: Boolean,
+    errorMessage: String?,
     modifier: Modifier,
-    isWideLayout: Boolean,
 ) {
     val displayTrack = collection.toDisplayTrack(mode)
     val placeholder = mode.localMusicCollectionPlaceholder()
@@ -296,60 +288,16 @@ private fun LocalMusicCollectionDetail(
             graph.playbackQueue.playTracks(collection.tracks, 0)
         }
     }
-    if (isWideLayout) {
-        Row(
-            modifier = modifier,
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(0.36f)
-                    .widthIn(min = 240.dp, max = 360.dp)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CoverBox(
-                    track = displayTrack,
-                    modifier = Modifier.size(168.dp),
-                    placeholder = placeholder,
-                )
-                Text(
-                    text = collection.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (collection.tracks.isNotEmpty()) {
-                    PlayAllButton(onClick = playAll)
-                }
-            }
-            LocalMusicTrackList(
-                graph = graph,
-                tracks = collection.tracks,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                isWideLayout = true,
-            )
-        }
-    } else {
-        Column(
-            modifier = modifier,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    AdaptiveDetailLayout(
+        modifier = modifier,
+        header = { stacked ->
             ProviderDetailHeader(
                 track = displayTrack,
                 title = collection.title,
                 subtitle = subtitle,
                 description = "",
                 placeholder = placeholder,
+                stacked = stacked,
                 action = {
                     PlayAllButton(
                         onClick = playAll,
@@ -357,16 +305,20 @@ private fun LocalMusicCollectionDetail(
                     )
                 },
             )
+        },
+        content = {
+            LoadingIndicator(isLoading)
+            errorMessage?.let { ProviderContentMessage(it) }
             LocalMusicTrackList(
                 graph = graph,
                 tracks = collection.tracks,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                isWideLayout = false,
+                isWideLayout = LocalAppLayoutInfo.current.useWideLayout,
             )
-        }
-    }
+        },
+    )
 }
 
 @Composable
