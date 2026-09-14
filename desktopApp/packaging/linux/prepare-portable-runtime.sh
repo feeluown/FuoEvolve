@@ -2,12 +2,12 @@
 set -euo pipefail
 
 if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <output-dir> <web-login-helper> <audio-capture-library>" >&2
+  echo "usage: $0 <output-dir> <audio-fingerprint-helper> <audio-capture-library>" >&2
   exit 2
 fi
 
 OUTPUT_DIR="$(mkdir -p "$1" && realpath "$1")"
-WEB_LOGIN_HELPER="$(realpath "$2")"
+FINGERPRINT_HELPER="$(realpath "$2")"
 AUDIO_CAPTURE_LIBRARY="$(realpath "$3")"
 
 for command in lddtree patchelf ldconfig find; do
@@ -16,8 +16,8 @@ for command in lddtree patchelf ldconfig find; do
     exit 1
   }
 done
-if [[ ! -x "$WEB_LOGIN_HELPER" ]]; then
-  echo "WebView login helper is missing or not executable: $WEB_LOGIN_HELPER" >&2
+if [[ ! -x "$FINGERPRINT_HELPER" ]]; then
+  echo "Audio fingerprint helper is missing or not executable: $FINGERPRINT_HELPER" >&2
   exit 1
 fi
 if [[ ! -f "$AUDIO_CAPTURE_LIBRARY" ]]; then
@@ -98,12 +98,17 @@ mkdir -p "$MPV_LIB_DIR" "$LIBSECRET_LIB_DIR" "$WEBVIEW_LIB_DIR" "$WEBKIT_RUNTIME
 
 LIBMPV="$(find_shared_library 'libmpv[.]so' 'libmpv.so.*')"
 LIBSECRET="$(find_shared_library 'libsecret-1[.]so[.]0' 'libsecret-1.so.0*')"
+LIBWEBKIT="$(find_shared_library 'libwebkit2gtk-4[.]1[.]so' 'libwebkit2gtk-4.1.so.*')"
 if [[ -z "$LIBMPV" || ! -f "$LIBMPV" ]]; then
   echo "libmpv is required before collecting the portable runtime" >&2
   exit 1
 fi
 if [[ -z "$LIBSECRET" || ! -f "$LIBSECRET" ]]; then
   echo "libsecret is required before collecting the portable runtime" >&2
+  exit 1
+fi
+if [[ -z "$LIBWEBKIT" || ! -f "$LIBWEBKIT" ]]; then
+  echo "WebKitGTK 4.1 is required by the Nucleus provider-login WebView" >&2
   exit 1
 fi
 
@@ -124,9 +129,10 @@ fi
 ln -sfn "$(basename "$BUNDLED_LIBMPV")" "$MPV_LIB_DIR/libmpv.so"
 ln -sfn "$(basename "$BUNDLED_LIBSECRET")" "$LIBSECRET_LIB_DIR/libsecret-1.so"
 
-# wry links against WebKitGTK. Bundle the helper's ELF closure and WebKit's separately executed
-# subprocesses because those processes do not appear in the helper's DT_NEEDED graph.
-copy_elf_closure "$WEB_LOGIN_HELPER" "$WEBVIEW_LIB_DIR"
+# Provider login uses the Nucleus WebView. The audio-fingerprint helper is now a static,
+# headless Go binary, so collect WebKitGTK explicitly instead of inferring it from the helper.
+copy_library_to "$LIBWEBKIT" "$WEBVIEW_LIB_DIR"
+copy_elf_closure "$LIBWEBKIT" "$WEBVIEW_LIB_DIR"
 SYSTEM_WEBKIT_RUNTIME_DIR="$(dirname "$(find /usr/lib /lib -type f -path '*/webkit2gtk-4.1/WebKitNetworkProcess' -print -quit 2>/dev/null || true)")"
 if [[ -z "$SYSTEM_WEBKIT_RUNTIME_DIR" || ! -x "$SYSTEM_WEBKIT_RUNTIME_DIR/WebKitNetworkProcess" ]]; then
   echo "WebKitGTK 4.1 subprocess runtime was not found" >&2
