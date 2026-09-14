@@ -318,7 +318,8 @@ internal class JniMpvBackend(
     private fun getPropertyString(name: String): String? = JniMpvApi.nativeGetProperty(handle, name)
 
     private fun command(vararg args: String) {
-        checkMpv(JniMpvApi.nativeCommand(handle, args), "command ${args.firstOrNull().orEmpty()}")
+        checkMpv(JniMpvApi.nativeCommand(handle, args), "command ${args.firstOrNull().orEmpty()}"
+        )
     }
 
     private fun checkMpv(result: Int, operation: String) {
@@ -357,6 +358,9 @@ private object JniMpvBridgeLoader {
                 ?: throw UnsatisfiedLinkError(
                     "Nucleus libmpv JNI bridge not found in packaged resources or development build output",
                 )
+            if (isWindows()) {
+                preloadPackagedWindowsMpvRuntime(bridge)
+            }
             System.load(bridge.absolutePath)
             loaded = true
             AppLogger.i(LOG_TAG, "loaded JNI bridge ${bridge.absolutePath}")
@@ -364,9 +368,66 @@ private object JniMpvBridgeLoader {
     }
 }
 
+private fun preloadPackagedWindowsMpvRuntime(bridge: File) {
+    val runtimeDir = bridge.parentFile ?: return
+    val runtimeFiles = runtimeDir.listFiles().orEmpty()
+        .filter { file -> file.isFile && file.extension.equals("dll", ignoreCase = true) }
+    val loadPlan = windowsMpvRuntimeLoadPlan(runtimeFiles.map(File::getName))
+    if (loadPlan.isEmpty()) return
+
+    val filesByName = runtimeFiles.associateBy { file -> file.name.lowercase() }
+    val mpvRuntimeName = loadPlan.last()
+    val supportNames = loadPlan.dropLast(1)
+    val pendingSupport = supportNames.toMutableList()
+    var madeProgress: Boolean
+    do {
+        madeProgress = false
+        val iterator = pendingSupport.iterator()
+        while (iterator.hasNext()) {
+            val name = iterator.next()
+            val file = filesByName[name.lowercase()] ?: run {
+                iterator.remove()
+                continue
+            }
+            if (runCatching { System.load(file.absolutePath) }.isSuccess) {
+                iterator.remove()
+                madeProgress = true
+                AppLogger.i(LOG_TAG, "preloaded Windows runtime dependency ${file.name}")
+            }
+        }
+    } while (madeProgress && pendingSupport.isNotEmpty())
+
+    val mpvRuntime = filesByName[mpvRuntimeName.lowercase()] ?: return
+    try {
+        System.load(mpvRuntime.absolutePath)
+    } catch (error: UnsatisfiedLinkError) {
+        val unresolved = pendingSupport.takeIf(List<String>::isNotEmpty)?.joinToString()
+        val detail = buildString {
+            append("Failed to load packaged Windows libmpv runtime: ${mpvRuntime.absolutePath}")
+            if (unresolved != null) append("; unresolved sibling DLLs: $unresolved")
+        }
+        throw UnsatisfiedLinkError(detail).also { it.initCause(error) }
+    }
+    AppLogger.i(LOG_TAG, "preloaded Windows libmpv runtime ${mpvRuntime.absolutePath}")
+}
+
+internal fun windowsMpvRuntimeLoadPlan(libraryNames: List<String>): List<String> {
+    val dllNames = libraryNames.filter { name -> name.endsWith(".dll", ignoreCase = true) }
+    val mpvRuntime = WINDOWS_MPV_RUNTIME_NAMES.firstNotNullOfOrNull { expected ->
+        dllNames.firstOrNull { name -> name.equals(expected, ignoreCase = true) }
+    } ?: return emptyList()
+    val support = dllNames
+        .filterNot { name ->
+            name.equals(WINDOWS_MPV_BRIDGE_NAME, ignoreCase = true) ||
+                name.equals(mpvRuntime, ignoreCase = true)
+        }
+        .sortedBy(String::lowercase)
+    return support + mpvRuntime
+}
+
 private fun resolveJniMpvBridge(): File? {
     val libraryName = when {
-        isWindows() -> "fuoevolve_mpv_jni.dll"
+        isWindows() -> WINDOWS_MPV_BRIDGE_NAME
         isMac() -> "libfuoevolve_mpv_jni.dylib"
         else -> "libfuoevolve_mpv_jni.so"
     }
@@ -441,6 +502,8 @@ private const val STATE_POLL_INTERVAL_NANOS = 250_000_000L
 private const val MPV_VOLUME_SCALE = 100.0
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val LOG_TAG = "NucleusMpvJni"
+private const val WINDOWS_MPV_BRIDGE_NAME = "fuoevolve_mpv_jni.dll"
+private val WINDOWS_MPV_RUNTIME_NAMES = listOf("libmpv-2.dll", "mpv-2.dll", "mpv.dll")
 
 private val POLLED_PROPERTIES = listOf(
     "pause",
