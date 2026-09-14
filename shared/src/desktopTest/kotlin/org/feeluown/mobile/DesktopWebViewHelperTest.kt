@@ -9,19 +9,12 @@ import kotlin.test.assertNotNull
 
 class DesktopAudioFingerprintHelperTest {
     @Test
-    fun resolvesRuntimeFromComposeApplicationResourcesDirectory() {
+    fun resolvesHelperFromComposeApplicationResourcesDirectory() {
         val resourcesDir = Files.createTempDirectory("fuoevolve-compose-resources-")
-        val helperName = if (isDesktopWindows()) {
-            "fuoevolve-audio-fingerprint.exe"
-        } else {
-            "fuoevolve-audio-fingerprint"
-        }
-        val runtimeDir = resourcesDir.resolve("native/fingerprint")
-        val helper = runtimeDir.resolve(helperName)
-        val wasm = runtimeDir.resolve("afp.wasm")
-        runtimeDir.createDirectories()
+        val helperName = if (isDesktopWindows()) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
+        val helper = resourcesDir.resolve("native/helpers/$helperName")
+        helper.parent.createDirectories()
         helper.createFile()
-        wasm.createFile()
         if (!isDesktopWindows()) {
             helper.toFile().setExecutable(true, false)
         }
@@ -30,9 +23,8 @@ class DesktopAudioFingerprintHelperTest {
         val previous = System.getProperty(propertyName)
         try {
             System.setProperty(propertyName, resourcesDir.toString())
-            val resolved = assertNotNull(resolveDesktopAudioFingerprintRuntime())
-            assertEquals(helper.toRealPath(), resolved.executable.toPath().toRealPath())
-            assertEquals(wasm.toRealPath(), resolved.wasm.toPath().toRealPath())
+            val resolved = assertNotNull(resolveDesktopAudioFingerprintHelper())
+            assertEquals(helper.toRealPath(), resolved.toPath().toRealPath())
         } finally {
             if (previous == null) {
                 System.clearProperty(propertyName)
