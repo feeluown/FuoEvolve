@@ -32,6 +32,17 @@ interface DesktopOpenGlVideoController {
     fun enableSoftwareRendering()
 }
 
+/**
+ * Windows GPU extension. The render target is a plain shared D3D11 texture owned by ANGLE;
+ * libmpv renders directly into its EGL pbuffer and Nucleus TextureView imports the shared handle.
+ */
+interface DesktopWindowsD3D11VideoController : DesktopOpenGlVideoController {
+    fun createD3D11RenderTarget(renderContext: Long, width: Int, height: Int): Long
+    fun d3D11RenderTargetSharedHandle(renderTarget: Long): Long
+    fun renderD3D11(renderContext: Long, renderTarget: Long): Boolean
+    fun destroyD3D11RenderTarget(renderTarget: Long)
+}
+
 /** Native handles owned by the active Tao OpenGL context. */
 data class DesktopOpenGlRenderContextParameters(
     val nativeDisplayKind: Int,
@@ -81,7 +92,7 @@ internal class DesktopJniMpvVideoController(
     private val openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) :
     DesktopPlatformVideoController,
-    DesktopOpenGlVideoController,
+    DesktopWindowsD3D11VideoController,
     DesktopIoSurfaceVideoController {
     private val closed = AtomicBoolean(false)
     private val renderContextLock = Any()
@@ -112,6 +123,7 @@ internal class DesktopJniMpvVideoController(
     @Volatile private var softwareRenderContext = 0L
     @Volatile private var openGlRenderContext = 0L
     @Volatile private var ioSurfaceRenderContext = 0L
+    @Volatile private var d3D11DirectTargetCount = 0
     @Volatile private var lastPipelineDescription: String? = null
 
     init {
@@ -135,6 +147,12 @@ internal class DesktopJniMpvVideoController(
             }
             setOption("audio-display", "no")
             checkMpv(DesktopJniMpvVideoApi.nativeInitialize(handle), "mpv_initialize video")
+            VIDEO_OBSERVED_PROPERTIES.forEachIndexed { index, property ->
+                checkMpv(
+                    DesktopJniMpvVideoApi.nativeObserveProperty(handle, index.toLong() + 1L, property),
+                    "observe video property $property",
+                )
+            }
         } catch (throwable: Throwable) {
             DesktopJniMpvVideoApi.nativeDestroy(handle)
             throw throwable
@@ -308,12 +326,43 @@ internal class DesktopJniMpvVideoController(
         if (renderTarget != 0L) DesktopJniMpvVideoApi.nativeDestroyOpenGlRenderTarget(renderTarget)
     }
 
+    override fun createD3D11RenderTarget(renderContext: Long, width: Int, height: Int): Long {
+        ensureOpenGlContext(renderContext)
+        require(width > 0 && height > 0) { "D3D11 video render target must have positive dimensions" }
+        val target = DesktopJniMpvVideoApi.nativeCreateD3D11RenderTarget(renderContext, width, height)
+        check(target != 0L) { "D3D11 shared libmpv render target creation failed" }
+        d3D11DirectTargetCount += 1
+        lastPipelineDescription = null
+        return target
+    }
+
+    override fun d3D11RenderTargetSharedHandle(renderTarget: Long): Long {
+        ensureOpen()
+        val sharedHandle = DesktopJniMpvVideoApi.nativeD3D11RenderTargetSharedHandle(renderTarget)
+        check(sharedHandle != 0L) { "D3D11 libmpv render target has no shared handle" }
+        return sharedHandle
+    }
+
+    override fun renderD3D11(renderContext: Long, renderTarget: Long): Boolean {
+        ensureOpenGlContext(renderContext)
+        check(renderTarget != 0L) { "D3D11 libmpv render target is closed" }
+        return DesktopJniMpvVideoApi.nativeRenderD3D11(renderContext, renderTarget)
+    }
+
+    override fun destroyD3D11RenderTarget(renderTarget: Long) {
+        if (renderTarget == 0L) return
+        DesktopJniMpvVideoApi.nativeDestroyD3D11RenderTarget(renderTarget)
+        d3D11DirectTargetCount = (d3D11DirectTargetCount - 1).coerceAtLeast(0)
+        lastPipelineDescription = null
+    }
+
     override fun destroyOpenGlRenderContext(renderContext: Long) {
         if (renderContext == 0L) return
         synchronized(renderContextLock) {
             if (openGlRenderContext != renderContext) return@synchronized
             DesktopJniMpvVideoApi.nativeFreeOpenGlRenderContext(renderContext)
             openGlRenderContext = 0L
+            d3D11DirectTargetCount = 0
             lastPipelineDescription = null
         }
         destroyNativeHandleIfReady()
@@ -424,17 +473,10 @@ internal class DesktopJniMpvVideoController(
 
     private fun eventLoop() {
         try {
-            var nextPollAtNanos = System.nanoTime()
             while (!closed.get()) {
-                val event = DesktopJniMpvVideoApi.nativeWaitEvent(handle, EVENT_WAIT_SECONDS)
+                val event = DesktopJniMpvVideoApi.nativeWaitObservedEvent(handle, EVENT_WAIT_SECONDS)
                 if (event == "shutdown") return
                 if (event != null) handleEvent(event)
-
-                val now = System.nanoTime()
-                if (playbackActive && now >= nextPollAtNanos) {
-                    publishPolledState()
-                    nextPollAtNanos = now + STATE_POLL_INTERVAL_NANOS
-                }
             }
         } catch (throwable: Throwable) {
             if (!closed.get()) {
@@ -448,6 +490,8 @@ internal class DesktopJniMpvVideoController(
 
     private fun handleEvent(event: String) {
         when {
+            event == "queue-overflow" -> refreshObservedState()
+            event.startsWith("property:") -> handleObservedProperty(event)
             event.startsWith("start:") -> {
                 activePlaylistEntryId = parseDesktopJniVideoStartEvent(event)
                 softwareFrameDirty = true
@@ -457,13 +501,73 @@ internal class DesktopJniMpvVideoController(
                 playbackActive = true
                 reachedEof = false
                 softwareFrameDirty = true
-                mutableState.value = mutableState.value.copy(
-                    isPlaying = getProperty("pause") != "yes",
-                    errorMessage = null,
-                )
+                mutableState.value = mutableState.value.copy(errorMessage = null)
+                refreshObservedState()
                 publishPipelineIfChanged()
             }
             event.startsWith("end:") -> handleEndEvent(event)
+        }
+    }
+
+    private fun handleObservedProperty(encoded: String) {
+        val idSeparator = encoded.indexOf(':')
+        val valueSeparator = encoded.indexOf(':', startIndex = idSeparator + 1)
+        if (idSeparator < 0 || valueSeparator < 0) return
+        val id = encoded.substring(idSeparator + 1, valueSeparator).toIntOrNull() ?: return
+        val property = VIDEO_OBSERVED_PROPERTIES.getOrNull(id - 1) ?: return
+        val value = encoded.substring(valueSeparator + 1)
+        applyObservedProperty(property, value)
+    }
+
+    private fun applyObservedProperty(property: String, value: String) {
+        val current = mutableState.value
+        val updated = when (property) {
+            "pause" -> current.copy(
+                isPlaying = value != "yes" && value != "true" && value != "1",
+            )
+            "time-pos" -> current.copy(
+                positionMs = value.secondsToMsOrNull()?.coerceAtLeast(0L) ?: current.positionMs,
+            )
+            "duration" -> {
+                val duration = value.secondsToMsOrNull()?.coerceAtLeast(0L) ?: current.durationMs
+                current.copy(
+                    durationMs = duration,
+                    bufferedMs = if (duration > 0L) {
+                        current.bufferedMs.coerceIn(0L, duration)
+                    } else {
+                        current.bufferedMs.coerceAtLeast(0L)
+                    },
+                )
+            }
+            "demuxer-cache-time" -> {
+                val buffered = value.secondsToMsOrNull()?.coerceAtLeast(0L) ?: current.bufferedMs
+                current.copy(
+                    bufferedMs = if (current.durationMs > 0L) {
+                        buffered.coerceIn(0L, current.durationMs)
+                    } else {
+                        buffered
+                    },
+                )
+            }
+            "video-params/w" -> current.copy(
+                videoWidth = value.toIntOrNull()?.coerceAtLeast(0) ?: current.videoWidth,
+            )
+            "video-params/h" -> current.copy(
+                videoHeight = value.toIntOrNull()?.coerceAtLeast(0) ?: current.videoHeight,
+            )
+            else -> current
+        }
+        if (updated != current) mutableState.value = updated
+
+        if (property == "hwdec-current") {
+            if (!ensureHardwareDecoder()) return
+        }
+        if (property in VIDEO_PIPELINE_PROPERTIES) publishPipelineIfChanged()
+    }
+
+    private fun refreshObservedState() {
+        VIDEO_OBSERVED_PROPERTIES.forEach { property ->
+            getProperty(property)?.let { value -> applyObservedProperty(property, value) }
         }
     }
 
@@ -556,24 +660,9 @@ internal class DesktopJniMpvVideoController(
         return true
     }
 
-    private fun publishPolledState() {
-        if (!ensureHardwareDecoder()) return
-        val current = mutableState.value
-        val duration = getProperty("duration").secondsToMsOrNull() ?: current.durationMs
-        val buffered = getProperty("demuxer-cache-time").secondsToMsOrNull() ?: current.bufferedMs
-        mutableState.value = current.copy(
-            isPlaying = getProperty("pause")?.let { it != "yes" && it != "true" } ?: current.isPlaying,
-            positionMs = getProperty("time-pos").secondsToMsOrNull()?.coerceAtLeast(0L) ?: current.positionMs,
-            durationMs = duration.coerceAtLeast(0L),
-            bufferedMs = if (duration > 0L) buffered.coerceIn(0L, duration) else buffered.coerceAtLeast(0L),
-            videoWidth = getProperty("video-params/w")?.toIntOrNull()?.coerceAtLeast(0) ?: current.videoWidth,
-            videoHeight = getProperty("video-params/h")?.toIntOrNull()?.coerceAtLeast(0) ?: current.videoHeight,
-        )
-        publishPipelineIfChanged()
-    }
-
     private fun publishPipelineIfChanged() {
         val renderer = when {
+            d3D11DirectTargetCount > 0 -> "d3d11-shared-zero-copy"
             ioSurfaceRenderContext != 0L -> "iosurface-metal"
             openGlRenderContext != 0L -> "opengl-gpu"
             softwareRenderContext != 0L -> "software"
@@ -910,7 +999,8 @@ private object DesktopJniMpvVideoApi {
     external fun nativeSetProperty(handle: Long, name: String, value: String): Int
     external fun nativeGetProperty(handle: Long, name: String): String?
     external fun nativeCommand(handle: Long, args: Array<out String>): Int
-    external fun nativeWaitEvent(handle: Long, timeoutSeconds: Double): String?
+    external fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int
+    external fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String?
     external fun nativeWakeup(handle: Long)
     external fun nativeDestroy(handle: Long)
     external fun nativeErrorString(error: Int): String?
@@ -929,6 +1019,10 @@ private object DesktopJniMpvVideoApi {
     external fun nativeRenderOpenGl(renderContext: Long, renderTarget: Long)
     external fun nativeReportSwap(renderContext: Long)
     external fun nativeDestroyOpenGlRenderTarget(renderTarget: Long)
+    external fun nativeCreateD3D11RenderTarget(renderContext: Long, width: Int, height: Int): Long
+    external fun nativeD3D11RenderTargetSharedHandle(renderTarget: Long): Long
+    external fun nativeRenderD3D11(renderContext: Long, renderTarget: Long): Boolean
+    external fun nativeDestroyD3D11RenderTarget(renderTarget: Long)
     external fun nativeFreeOpenGlRenderContext(renderContext: Long)
     external fun nativeCreateIoSurfaceRenderContext(handle: Long): Long
     external fun nativeCreateIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long
@@ -1008,7 +1102,6 @@ internal fun desktopVideoNativeDisplayDescription(kind: Int): String {
 }
 
 private const val EVENT_WAIT_SECONDS = 0.05
-private const val STATE_POLL_INTERVAL_NANOS = 100_000_000L
 private const val MPV_END_FILE_REASON_EOF = 0
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val MPV_RENDER_UPDATE_FRAME = 1L
@@ -1019,3 +1112,21 @@ private const val RESTART_NEAR_END_THRESHOLD_MS = 500L
 private const val MAX_VIDEO_SOURCE_CANDIDATES = 24
 private const val MAX_SOFTWARE_RENDER_PIXELS = 1920L * 1080L
 private const val SOFTWARE_FRAME_RETIRE_DELAY_FRAMES = 4
+
+private val VIDEO_OBSERVED_PROPERTIES = listOf(
+    "pause",
+    "time-pos",
+    "duration",
+    "demuxer-cache-time",
+    "video-params/w",
+    "video-params/h",
+    "hwdec-current",
+    "hwdec-interop",
+    "video-codec",
+)
+
+private val VIDEO_PIPELINE_PROPERTIES = setOf(
+    "hwdec-current",
+    "hwdec-interop",
+    "video-codec",
+)
