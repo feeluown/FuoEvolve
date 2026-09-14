@@ -32,6 +32,13 @@ interface DesktopOpenGlVideoController {
     fun enableSoftwareRendering()
 }
 
+/** Native handles owned by the active Tao OpenGL context. */
+data class DesktopOpenGlRenderContextParameters(
+    val nativeDisplayKind: Int,
+    val nativeDisplay: Long,
+    val taoGetProcAddress: Long,
+)
+
 /**
  * macOS GPU extension. libmpv renders on a private accelerated CGL context into an
  * IOSurface-backed FBO; Nucleus imports that IOSurface into its Metal scene via TextureView.
@@ -71,6 +78,7 @@ internal data class DesktopJniVideoSourceCandidate(
  */
 internal class DesktopJniMpvVideoController(
     private val videoDecodeMode: DesktopVideoDecodeMode,
+    private val openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) :
     DesktopPlatformVideoController,
     DesktopOpenGlVideoController,
@@ -245,6 +253,9 @@ internal class DesktopJniMpvVideoController(
         val context = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderContext(
             handle = handle,
             directHardware = videoDecodeMode == DesktopVideoDecodeMode.HardwareDirect,
+            nativeDisplayKind = openGlRenderContextParameters?.nativeDisplayKind ?: 0,
+            nativeDisplay = openGlRenderContextParameters?.nativeDisplay ?: 0L,
+            taoGetProcAddress = openGlRenderContextParameters?.taoGetProcAddress ?: 0L,
         )
         check(context != 0L) { "libmpv OpenGL video render context creation failed" }
         openGlRenderContext = context
@@ -901,7 +912,13 @@ private object DesktopJniMpvVideoApi {
     external fun nativeDestroy(handle: Long)
     external fun nativeErrorString(error: Int): String?
     external fun nativeCreateSoftwareRenderContext(handle: Long): Long
-    external fun nativeCreateOpenGlRenderContext(handle: Long, directHardware: Boolean): Long
+    external fun nativeCreateOpenGlRenderContext(
+        handle: Long,
+        directHardware: Boolean,
+        nativeDisplayKind: Int,
+        nativeDisplay: Long,
+        taoGetProcAddress: Long,
+    ): Long
     external fun nativeOpenGlRenderContextDisplayKind(renderContext: Long): Int
     external fun nativeUpdateRenderContext(renderContext: Long): Long
     external fun nativeCreateOpenGlRenderTarget(width: Int, height: Int): Long
@@ -979,8 +996,8 @@ internal fun desktopVideoHwdecInteropOption(
 
 internal fun desktopVideoNativeDisplayDescription(kind: Int): String {
     val protocol = when (kind and 0x0F) {
-        1 -> "wayland"
-        2 -> "x11"
+        1 -> "x11"
+        2 -> "wayland"
         else -> "none"
     }
     return if (kind and 0x10 != 0) "$protocol-exact" else protocol

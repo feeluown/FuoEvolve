@@ -532,6 +532,8 @@ nucleus.application {
         isEnabled.set(true)
         imageName.set("fuoevolve")
         march.set(NativeImageMarch.COMPATIBILITY)
+        // Keep native-image builds bounded on developer machines with other desktop apps running.
+        buildArgs.addAll("-J-Xmx6g", "--parallelism=2")
     }
 }
 

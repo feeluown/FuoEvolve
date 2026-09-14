@@ -435,180 +435,29 @@ typedef void (FUO_GL_APIENTRY *fuo_gl_flush_fn)(void);
 
 typedef struct fuo_gl_render_context fuo_gl_render_context;
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-typedef void *(*fuo_egl_get_current_display_fn)(void);
-typedef void *(*fuo_egl_get_proc_address_for_display_fn)(const char *);
-typedef int (*fuo_egl_query_native_display_nv_fn)(void *, void **);
-typedef void *(*fuo_wayland_connect_fn)(const char *);
-typedef void (*fuo_wayland_disconnect_fn)(void *);
-typedef void *(*fuo_x11_open_display_fn)(const char *);
-typedef int (*fuo_x11_close_display_fn)(void *);
+#if defined(_WIN32)
+typedef void *(WINAPI *fuo_gl_get_proc_address_fn)(const char *);
+#else
+typedef void *(*fuo_gl_get_proc_address_fn)(const char *);
+#endif
 
+#if !defined(_WIN32) && !defined(__APPLE__)
 enum {
     FUO_NATIVE_DISPLAY_NONE = 0,
-    FUO_NATIVE_DISPLAY_WAYLAND = 1,
-    FUO_NATIVE_DISPLAY_X11 = 2,
+    FUO_NATIVE_DISPLAY_X11 = 1,
+    FUO_NATIVE_DISPLAY_WAYLAND = 2,
     FUO_NATIVE_DISPLAY_EXACT = 0x10,
 };
 
 typedef struct fuo_native_display {
     void *value;
-    void *module;
     int kind;
-    fuo_wayland_disconnect_fn wayland_disconnect;
-    fuo_x11_close_display_fn x11_close_display;
 } fuo_native_display;
-
-static void *resolve_egl_proc_for_display(const char *name) {
-    static void *egl_module = NULL;
-    static fuo_egl_get_proc_address_for_display_fn egl_get_proc_address = NULL;
-
-    if (egl_module == NULL) {
-        egl_module = dlopen("libEGL.so.1", RTLD_LAZY | RTLD_LOCAL);
-        if (egl_module != NULL) {
-            egl_get_proc_address = (fuo_egl_get_proc_address_for_display_fn)dlsym(
-                egl_module,
-                "eglGetProcAddress"
-            );
-        }
-    }
-
-    void *resolved = egl_module == NULL ? NULL : dlsym(egl_module, name);
-    if (resolved == NULL && egl_get_proc_address != NULL) {
-        resolved = egl_get_proc_address(name);
-    }
-    return resolved;
-}
-
-static int preferred_native_display_kind(void) {
-    const char *session_type = getenv("XDG_SESSION_TYPE");
-    if (session_type != NULL && strcmp(session_type, "wayland") == 0) {
-        return FUO_NATIVE_DISPLAY_WAYLAND;
-    }
-    if (session_type != NULL && strcmp(session_type, "x11") == 0) {
-        return FUO_NATIVE_DISPLAY_X11;
-    }
-    if (getenv("WAYLAND_DISPLAY") != NULL) return FUO_NATIVE_DISPLAY_WAYLAND;
-    if (getenv("DISPLAY") != NULL) return FUO_NATIVE_DISPLAY_X11;
-    return FUO_NATIVE_DISPLAY_NONE;
-}
-
-static fuo_native_display query_current_native_display(int kind) {
-    fuo_native_display result = {0};
-    if (kind == FUO_NATIVE_DISPLAY_NONE) return result;
-
-    fuo_egl_get_current_display_fn egl_get_current_display =
-        (fuo_egl_get_current_display_fn)resolve_egl_proc_for_display("eglGetCurrentDisplay");
-    fuo_egl_query_native_display_nv_fn egl_query_native_display =
-        (fuo_egl_query_native_display_nv_fn)resolve_egl_proc_for_display(
-            "eglQueryNativeDisplayNV"
-        );
-    if (egl_get_current_display == NULL || egl_query_native_display == NULL) return result;
-
-    void *egl_display = egl_get_current_display();
-    void *native_display = NULL;
-    if (egl_display == NULL ||
-        !egl_query_native_display(egl_display, &native_display) ||
-        native_display == NULL) {
-        return result;
-    }
-
-    result.value = native_display;
-    result.kind = kind | FUO_NATIVE_DISPLAY_EXACT;
-    return result;
-}
-
-static fuo_native_display open_wayland_display(void) {
-    fuo_native_display result = {0};
-    void *module = dlopen("libwayland-client.so.0", RTLD_LAZY | RTLD_LOCAL);
-    if (module == NULL) return result;
-
-    fuo_wayland_connect_fn connect = (fuo_wayland_connect_fn)dlsym(module, "wl_display_connect");
-    fuo_wayland_disconnect_fn disconnect =
-        (fuo_wayland_disconnect_fn)dlsym(module, "wl_display_disconnect");
-    if (connect == NULL || disconnect == NULL) {
-        dlclose(module);
-        return result;
-    }
-
-    void *display = connect(NULL);
-    if (display == NULL) {
-        dlclose(module);
-        return result;
-    }
-
-    result.value = display;
-    result.module = module;
-    result.kind = FUO_NATIVE_DISPLAY_WAYLAND;
-    result.wayland_disconnect = disconnect;
-    return result;
-}
-
-static fuo_native_display open_x11_display(void) {
-    fuo_native_display result = {0};
-    void *module = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL);
-    if (module == NULL) return result;
-
-    fuo_x11_open_display_fn open_display =
-        (fuo_x11_open_display_fn)dlsym(module, "XOpenDisplay");
-    fuo_x11_close_display_fn close_display =
-        (fuo_x11_close_display_fn)dlsym(module, "XCloseDisplay");
-    if (open_display == NULL || close_display == NULL) {
-        dlclose(module);
-        return result;
-    }
-
-    void *display = open_display(NULL);
-    if (display == NULL) {
-        dlclose(module);
-        return result;
-    }
-
-    result.value = display;
-    result.module = module;
-    result.kind = FUO_NATIVE_DISPLAY_X11;
-    result.x11_close_display = close_display;
-    return result;
-}
-
-static fuo_native_display open_native_display(void) {
-    // EGL_NV_native_query is the only portable reverse lookup for the native display.
-    // When it is unavailable, keep a connection to the current session's protocol alive for
-    // libmpv; direct mode exposes the distinction through nativeOpenGlRenderContextDisplayKind.
-    const int preferred = preferred_native_display_kind();
-    fuo_native_display result = query_current_native_display(preferred);
-    if (result.value != NULL) return result;
-
-    if (preferred == FUO_NATIVE_DISPLAY_WAYLAND) {
-        result = open_wayland_display();
-        return result;
-    }
-    if (preferred == FUO_NATIVE_DISPLAY_X11) {
-        result = open_x11_display();
-        return result;
-    }
-
-    result = open_wayland_display();
-    if (result.value != NULL) return result;
-    return open_x11_display();
-}
-
-static void release_native_display(fuo_native_display *display) {
-    if (display == NULL || display->value == NULL) return;
-
-    const int kind = display->kind & 0x0F;
-    if (kind == FUO_NATIVE_DISPLAY_WAYLAND && display->wayland_disconnect != NULL) {
-        display->wayland_disconnect(display->value);
-    } else if (kind == FUO_NATIVE_DISPLAY_X11 && display->x11_close_display != NULL) {
-        display->x11_close_display(display->value);
-    }
-    if (display->module != NULL) dlclose(display->module);
-    *display = (fuo_native_display){0};
-}
 #endif
 
 struct fuo_gl_render_context {
     mpv_render_context *mpv;
+    fuo_gl_get_proc_address_fn tao_get_proc_address;
 #if !defined(_WIN32) && !defined(__APPLE__)
     fuo_native_display native_display;
 #endif
@@ -642,6 +491,7 @@ typedef struct fuo_gl_target {
 
 static fuo_gl_api global_gl_api;
 static int global_gl_api_loaded = 0;
+static fuo_gl_get_proc_address_fn global_tao_get_proc_address = NULL;
 
 #define FUO_GL_TEXTURE_2D 0x0DE1u
 #define FUO_GL_RGBA 0x1908u
@@ -663,7 +513,16 @@ static int global_gl_api_loaded = 0;
 typedef void *(WINAPI *fuo_egl_get_proc_address_fn)(const char *);
 
 static void *resolve_gl_proc(void *context, const char *name) {
-    (void)context;
+    fuo_gl_get_proc_address_fn tao_get_proc_address = global_tao_get_proc_address;
+    if (context != NULL) {
+        fuo_gl_render_context *renderer = (fuo_gl_render_context *)context;
+        tao_get_proc_address = renderer->tao_get_proc_address;
+    }
+    if (tao_get_proc_address != NULL) {
+        void *resolved = tao_get_proc_address(name);
+        if (resolved != NULL) return resolved;
+    }
+
     static HMODULE egl_module = NULL;
     static HMODULE gles_module = NULL;
     static fuo_egl_get_proc_address_fn egl_get_proc_address = NULL;
@@ -695,9 +554,15 @@ static void *resolve_gl_proc(void *context, const char *name) {
 typedef void *(*fuo_egl_get_proc_address_fn)(const char *);
 
 static void *resolve_gl_proc(void *context, const char *name) {
-    (void)context;
-    void *resolved = dlsym(RTLD_DEFAULT, name);
-    if (resolved != NULL) return resolved;
+    fuo_gl_get_proc_address_fn tao_get_proc_address = global_tao_get_proc_address;
+    if (context != NULL) {
+        fuo_gl_render_context *renderer = (fuo_gl_render_context *)context;
+        tao_get_proc_address = renderer->tao_get_proc_address;
+    }
+    if (tao_get_proc_address != NULL) {
+        void *resolved = tao_get_proc_address(name);
+        if (resolved != NULL) return resolved;
+    }
 
 #if !defined(__APPLE__)
     static void *egl_module = NULL;
@@ -716,11 +581,17 @@ static void *resolve_gl_proc(void *context, const char *name) {
         gles_module = dlopen("libGLESv2.so.2", RTLD_LAZY | RTLD_LOCAL);
     }
     if (egl_get_proc_address != NULL) {
-        resolved = egl_get_proc_address(name);
+        void *resolved = egl_get_proc_address(name);
         if (resolved != NULL) return resolved;
     }
-    if (gles_module != NULL) return dlsym(gles_module, name);
+    if (gles_module != NULL) {
+        void *resolved = dlsym(gles_module, name);
+        if (resolved != NULL) return resolved;
+    }
 #endif
+
+    void *resolved = dlsym(RTLD_DEFAULT, name);
+    if (resolved != NULL) return resolved;
     return NULL;
 }
 #endif
@@ -795,7 +666,10 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCreateOpenGlRenderContext(
     JNIEnv *env,
     jobject self,
     jlong handle_value,
-    jboolean direct_hardware
+    jboolean direct_hardware,
+    jint native_display_kind,
+    jlong native_display_value,
+    jlong tao_get_proc_address_value
 ) {
     (void)env;
     (void)self;
@@ -806,19 +680,34 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCreateOpenGlRenderContext(
         (fuo_gl_render_context *)calloc(1u, sizeof(fuo_gl_render_context));
     if (renderer == NULL) return 0;
 
+    renderer->tao_get_proc_address =
+        (fuo_gl_get_proc_address_fn)(intptr_t)tao_get_proc_address_value;
+    if (global_tao_get_proc_address != renderer->tao_get_proc_address) {
+        global_tao_get_proc_address = renderer->tao_get_proc_address;
+        global_gl_api_loaded = 0;
+    }
+
 #if !defined(_WIN32) && !defined(__APPLE__)
-    renderer->native_display = open_native_display();
+    const int native_display_protocol = native_display_kind & 0x0F;
+    if ((native_display_protocol == FUO_NATIVE_DISPLAY_WAYLAND ||
+         native_display_protocol == FUO_NATIVE_DISPLAY_X11) &&
+        native_display_value != 0) {
+        renderer->native_display.value = (void *)(intptr_t)native_display_value;
+        renderer->native_display.kind = native_display_protocol | FUO_NATIVE_DISPLAY_EXACT;
+    }
     if (direct_hardware && renderer->native_display.value == NULL) {
         free(renderer);
         return 0;
     }
 #else
     (void)direct_hardware;
+    (void)native_display_kind;
+    (void)native_display_value;
 #endif
 
     mpv_opengl_init_params gl_init = {
         .get_proc_address = resolve_gl_proc,
-        .get_proc_address_ctx = NULL,
+        .get_proc_address_ctx = renderer,
     };
     mpv_render_param params[4];
     int param_count = 0;
@@ -827,11 +716,11 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCreateOpenGlRenderContext(
     params[param_count++] =
         (mpv_render_param){MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init};
 #if !defined(_WIN32) && !defined(__APPLE__)
-    const int native_display_kind = renderer->native_display.kind & 0x0F;
-    if (native_display_kind == FUO_NATIVE_DISPLAY_WAYLAND) {
+    const int native_display_param_protocol = renderer->native_display.kind & 0x0F;
+    if (native_display_param_protocol == FUO_NATIVE_DISPLAY_WAYLAND) {
         params[param_count++] =
             (mpv_render_param){MPV_RENDER_PARAM_WL_DISPLAY, renderer->native_display.value};
-    } else if (native_display_kind == FUO_NATIVE_DISPLAY_X11) {
+    } else if (native_display_param_protocol == FUO_NATIVE_DISPLAY_X11) {
         params[param_count++] =
             (mpv_render_param){MPV_RENDER_PARAM_X11_DISPLAY, renderer->native_display.value};
     }
@@ -839,18 +728,7 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeCreateOpenGlRenderContext(
     params[param_count] = (mpv_render_param){MPV_RENDER_PARAM_INVALID, NULL};
 
     int result = mpv_render_context_create(&renderer->mpv, handle, params);
-#if !defined(_WIN32) && !defined(__APPLE__)
-    if (result < 0 && !direct_hardware && renderer->native_display.value != NULL) {
-        release_native_display(&renderer->native_display);
-        param_count = 2;
-        params[param_count] = (mpv_render_param){MPV_RENDER_PARAM_INVALID, NULL};
-        result = mpv_render_context_create(&renderer->mpv, handle, params);
-    }
-#endif
     if (result < 0 || renderer->mpv == NULL) {
-#if !defined(_WIN32) && !defined(__APPLE__)
-        release_native_display(&renderer->native_display);
-#endif
         free(renderer);
         return 0;
     }
@@ -1075,9 +953,10 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeFreeOpenGlRenderContext(
     fuo_gl_render_context *renderer = gl_render_context_from_jlong(render_context_value);
     if (renderer == NULL) return;
     if (renderer->mpv != NULL) mpv_render_context_free(renderer->mpv);
-#if !defined(_WIN32) && !defined(__APPLE__)
-    release_native_display(&renderer->native_display);
-#endif
+    if (global_tao_get_proc_address == renderer->tao_get_proc_address) {
+        global_tao_get_proc_address = NULL;
+        global_gl_api_loaded = 0;
+    }
     free(renderer);
 }
 

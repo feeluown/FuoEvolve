@@ -8,7 +8,7 @@
 ./gradlew :desktopApp:run
 ```
 
-The desktop app reuses the shared UI and desktop runtime services. Provider login uses the Rust system-WebView helper. Audio and video playback use the shared Kotlin playback state machine with a thin JNI libmpv backend.
+The desktop app reuses the shared UI and desktop runtime services. Provider login uses the Nucleus Tao WebView; the Rust system-WebView helper remains for the hidden audio-fingerprint runtime. Audio and video playback use the shared Kotlin playback state machine with a thin JNI libmpv backend.
 
 ## Native Image
 
@@ -74,7 +74,7 @@ The desktop app includes:
 - Windows Credential Manager, macOS Keychain and Linux Secret Service/Libsecret credential storage;
 - system-output audio recognition using the native CPAL/JNI capture library;
 - local music indexing, metadata editing, sidecar lyrics and SQLDelight listening history;
-- Rust system-WebView provider login helper;
+- Nucleus Tao WebView provider login and the Rust system-WebView audio-fingerprint helper;
 - GraalVM Native Image packaging for all supported desktop targets.
 
 Desktop self-update is intentionally not implemented yet. Stable and Canary packages are delivered by GitHub Actions / GitHub Releases.
