@@ -5,9 +5,13 @@ use std::io::{self, Read};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use wasmi::{Caller, Engine, Error as WasmiError, Extern, ExternType, Func, Instance, Linker, Memory, Module, Store, Table, Val, ValType};
+use wasmi::{
+    Caller, Engine, Error as WasmiError, Extern, ExternType, Func, Instance, Linker, Memory,
+    Module, Store, Table, Val, ValType,
+};
 
-const AFP_WASM: &[u8] = include_bytes!("../../../../shared/src/commonMain/resources/audio_recognition/afp.wasm");
+const AFP_WASM: &[u8] =
+    include_bytes!("../../../../shared/src/commonMain/resources/audio_recognition/afp.wasm");
 const EXPECTED_SELF_TEST_FINGERPRINT: &str = "Oxx8fV/EFTodkOd6OGfINlloG4c6o/Pl/brdhHqA/CD/u/mJHB/w7MHuD7isMM5qQHPDgkTSuB5ibZmJuLbl5UIpsOf/RwaY3JYBIH/WviQGnAEo3+0WfrOAtljkY4X9T95hnU5gv/fVE4Tsx9Kybjv1wORt1HIG3X0NzvS8PPfj3/RylFOTa2ADTOAkuA5nNOJZaHjd36dExYZy5Uuo8QvyJhbycR/XgOqEjQuegHA23iIeZgjsKt82VjlCJSB5uwaJ6ukC//LFmAGBEqw/n2n7gLLeUa0USNEFGQVBccw=";
 
 #[derive(Debug, Deserialize)]
@@ -48,7 +52,7 @@ struct HostState {
 
 struct FingerprintRuntime {
     store: Store<HostState>,
-    instance: Instance,
+    _instance: Instance,
     table: Table,
     memory: Memory,
     malloc: wasmi::TypedFunc<i32, i32>,
@@ -92,7 +96,10 @@ fn run() -> Result<(), String> {
         fingerprint: Some(&fingerprint),
         message: None,
     };
-    println!("{}", serde_json::to_string(&response).map_err(|error| error.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string(&response).map_err(|error| error.to_string())?
+    );
     Ok(())
 }
 
@@ -102,9 +109,10 @@ fn emit_error(error: &str) {
         fingerprint: None,
         message: Some(error),
     };
-    match serde_json::to_string(&response) {
-        Ok(json) => println!("{json}"),
-        Err(_) => println!("{\"status\":\"error\",\"message\":\"audio fingerprint runtime failed\"}"),
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{json}");
+    } else {
+        println!("{}", r#"{"status":"error","message":"audio fingerprint runtime failed"}"#);
     }
 }
 
@@ -128,9 +136,14 @@ impl FingerprintRuntime {
             let name = import.name().to_string();
             let dispatch_name = name.clone();
             linker
-                .func_new("a", &name, func_type.clone(), move |caller, params, results| {
-                    dispatch_import(&dispatch_name, caller, params, results)
-                })
+                .func_new(
+                    "a",
+                    &name,
+                    func_type.clone(),
+                    move |caller, params, results| {
+                        dispatch_import(&dispatch_name, caller, params, results)
+                    },
+                )
                 .map_err(|error| format!("unable to link wasm import {name}: {error}"))?;
         }
 
@@ -164,7 +177,7 @@ impl FingerprintRuntime {
 
         Ok(Self {
             store,
-            instance,
+            _instance: instance,
             table,
             memory,
             malloc,
@@ -193,10 +206,9 @@ impl FingerprintRuntime {
 
         let input_ptr = self.alloc_embind_string(float_bytes)?;
         let result = self.call_invoker(&registration, &[input_ptr]);
-        let free_result = self.free.call(&mut self.store, input_ptr as i32);
-        if let Err(error) = free_result {
-            return Err(format!("unable to release fingerprint input: {error}"));
-        }
+        self.free
+            .call(&mut self.store, input_ptr as i32)
+            .map_err(|error| format!("unable to release fingerprint input: {error}"))?;
         let object_ptr = result?;
 
         let return_type = registration.arg_types[0];
@@ -224,7 +236,11 @@ impl FingerprintRuntime {
         }
     }
 
-    fn read_fingerprint_vector(&mut self, class_type: u32, object_ptr: u32) -> Result<Vec<u8>, String> {
+    fn read_fingerprint_vector(
+        &mut self,
+        class_type: u32,
+        object_ptr: u32,
+    ) -> Result<Vec<u8>, String> {
         let size_registration = self.method(class_type, "size")?;
         let size = self.call_method(&size_registration, object_ptr, &[])?;
         if size > 16 * 1024 {
@@ -276,6 +292,7 @@ impl FingerprintRuntime {
                 wire_args.len()
             ));
         }
+
         let mut params = Vec::with_capacity(ty.params().len());
         params.push(value_for_type(ty.params()[0], registration.context)?);
         for (value_type, value) in ty.params()[1..].iter().zip(wire_args) {
@@ -289,13 +306,13 @@ impl FingerprintRuntime {
             .collect::<Vec<_>>();
         func.call(&mut self.store, &params, &mut results)
             .map_err(|error| format!("Embind invoker {} failed: {error}", registration.invoker))?;
+
         match results.as_slice() {
             [value] => value
                 .i32()
                 .map(|value| value as u32)
                 .ok_or_else(|| "Embind invoker returned a non-i32 value".to_string()),
-            [] => Ok(0),
-            _ => Err("Embind invoker returned multiple values".to_string()),
+            _ => Err("Embind invoker returned an unexpected result signature".to_string()),
         }
     }
 
@@ -304,13 +321,20 @@ impl FingerprintRuntime {
             .len()
             .checked_add(5)
             .ok_or_else(|| "audio sample buffer is too large".to_string())?;
+        if total > i32::MAX as usize {
+            return Err("audio sample buffer is too large".to_string());
+        }
         let ptr = self
             .malloc
             .call(&mut self.store, total as i32)
             .map_err(|error| format!("unable to allocate fingerprint input: {error}"))?
             as u32;
         self.memory
-            .write(&mut self.store, ptr as usize, &(bytes.len() as u32).to_le_bytes())
+            .write(
+                &mut self.store,
+                ptr as usize,
+                &(bytes.len() as u32).to_le_bytes(),
+            )
             .map_err(|error| format!("unable to write fingerprint input length: {error}"))?;
         self.memory
             .write(&mut self.store, ptr as usize + 4, bytes)
@@ -358,9 +382,9 @@ fn table_func(table: &Table, store: &Store<HostState>, index: u32) -> Result<Fun
     let value = table
         .get(store, index as u64)
         .ok_or_else(|| format!("WASM function table index {index} is out of range"))?;
-    let function_ref = value
-        .funcref()
-        .ok_or_else(|| format!("WASM table entry {index} is not a function reference"))?;
+    let Val::FuncRef(function_ref) = value else {
+        return Err(format!("WASM table entry {index} is not a function reference"));
+    };
     function_ref
         .val()
         .copied()
@@ -382,46 +406,25 @@ fn dispatch_import(
     results: &mut [Val],
 ) -> Result<(), WasmiError> {
     match name {
-        "a" => register_simple_type(&mut caller, params),
-        "b" => register_simple_type(&mut caller, params),
+        "a" | "b" | "e" | "j" | "p" | "x" | "y" | "z" => Ok(()),
         "c" => register_class_function(&mut caller, params),
         "d" => Err(WasmiError::new(format!(
             "audio fingerprint wasm assertion failed: {}",
             read_c_string(&caller, param_u32(params, 0)?)?
         ))),
-        "e" => register_simple_type(&mut caller, params),
         "f" => Err(WasmiError::new("audio fingerprint wasm threw a C++ exception")),
         "g" => allocate_exception(&mut caller, params, results),
         "h" => Err(WasmiError::new("audio fingerprint wasm aborted")),
         "i" => fd_write(&mut caller, params, results),
-        "j" => register_simple_type(&mut caller, params),
         "k" => register_std_string(&mut caller, params),
         "l" => register_function(&mut caller, params),
-        "m" | "n" => Ok(()),
-        "o" => {
+        "m" | "n" | "q" | "w" => Ok(()),
+        "o" | "s" | "t" | "u" => {
             set_first_i32(results, 0);
             Ok(())
         }
-        "p" => register_simple_type(&mut caller, params),
-        "q" => Ok(()),
         "r" => memcpy(&mut caller, params, results),
-        "s" => {
-            set_first_i32(results, 0);
-            Ok(())
-        }
-        "t" => {
-            set_first_i32(results, 0);
-            Ok(())
-        }
-        "u" => {
-            set_first_i32(results, 0);
-            Ok(())
-        }
         "v" => environ_sizes_get(&mut caller, params, results),
-        "w" => Ok(()),
-        "x" => register_simple_type(&mut caller, params),
-        "y" => register_simple_type(&mut caller, params),
-        "z" => register_simple_type(&mut caller, params),
         "A" => register_class(&mut caller, params),
         other => Err(WasmiError::new(format!(
             "unsupported minified afp.wasm import {other:?}"
@@ -429,20 +432,18 @@ fn dispatch_import(
     }
 }
 
-fn register_simple_type(caller: &mut Caller<'_, HostState>, params: &[Val]) -> Result<(), WasmiError> {
-    if let Some(raw_type) = params.first().and_then(Val::i32) {
-        caller.data_mut().class_for_type.entry(raw_type as u32).or_insert(raw_type as u32);
-    }
+fn register_std_string(
+    caller: &mut Caller<'_, HostState>,
+    params: &[Val],
+) -> Result<(), WasmiError> {
+    caller.data_mut().string_types.insert(param_u32(params, 0)?);
     Ok(())
 }
 
-fn register_std_string(caller: &mut Caller<'_, HostState>, params: &[Val]) -> Result<(), WasmiError> {
-    let raw_type = param_u32(params, 0)?;
-    caller.data_mut().string_types.insert(raw_type);
-    Ok(())
-}
-
-fn register_function(caller: &mut Caller<'_, HostState>, params: &[Val]) -> Result<(), WasmiError> {
+fn register_function(
+    caller: &mut Caller<'_, HostState>,
+    params: &[Val],
+) -> Result<(), WasmiError> {
     if params.len() != 6 {
         return Err(WasmiError::new(format!(
             "unexpected _embind_register_function arity {}",
@@ -452,12 +453,14 @@ fn register_function(caller: &mut Caller<'_, HostState>, params: &[Val]) -> Resu
     let name = read_c_string(caller, param_u32(params, 0)?)?;
     let arg_count = param_u32(params, 1)? as usize;
     let arg_types = read_u32_array(caller, param_u32(params, 2)?, arg_count)?;
-    let registration = FunctionRegistration {
-        arg_types,
-        invoker: param_u32(params, 4)?,
-        context: param_u32(params, 5)?,
-    };
-    caller.data_mut().functions.insert(name, registration);
+    caller.data_mut().functions.insert(
+        name,
+        FunctionRegistration {
+            arg_types,
+            invoker: param_u32(params, 4)?,
+            context: param_u32(params, 5)?,
+        },
+    );
     Ok(())
 }
 
@@ -475,15 +478,14 @@ fn register_class_function(
     let name = read_c_string(caller, param_u32(params, 1)?)?;
     let arg_count = param_u32(params, 2)? as usize;
     let arg_types = read_u32_array(caller, param_u32(params, 3)?, arg_count)?;
-    let registration = FunctionRegistration {
-        arg_types,
-        invoker: param_u32(params, 5)?,
-        context: param_u32(params, 6)?,
-    };
-    caller
-        .data_mut()
-        .methods
-        .insert((raw_class_type, name), registration);
+    caller.data_mut().methods.insert(
+        (raw_class_type, name),
+        FunctionRegistration {
+            arg_types,
+            invoker: param_u32(params, 5)?,
+            context: param_u32(params, 6)?,
+        },
+    );
     Ok(())
 }
 
@@ -501,7 +503,9 @@ fn register_class(caller: &mut Caller<'_, HostState>, params: &[Val]) -> Result<
     let state = caller.data_mut();
     state.class_for_type.insert(raw_class_type, raw_class_type);
     state.class_for_type.insert(raw_pointer_type, raw_class_type);
-    state.class_for_type.insert(raw_const_pointer_type, raw_class_type);
+    state
+        .class_for_type
+        .insert(raw_const_pointer_type, raw_class_type);
     state
         .classes
         .insert(raw_class_type, ClassRegistration { destructor });
@@ -519,10 +523,15 @@ fn allocate_exception(
         .and_then(Extern::into_func)
         .ok_or_else(|| WasmiError::new("malloc is unavailable while allocating a C++ exception"))?;
     let mut output = [Val::I32(0)];
-    malloc.call(caller, &[Val::I32(size.saturating_add(16) as i32)], &mut output)?;
+    malloc.call(
+        &mut *caller,
+        &[Val::I32(size.saturating_add(16) as i32)],
+        &mut output,
+    )?;
     let ptr = output[0]
         .i32()
-        .ok_or_else(|| WasmiError::new("malloc returned a non-i32 exception pointer"))? as u32;
+        .ok_or_else(|| WasmiError::new("malloc returned a non-i32 exception pointer"))?
+        as u32;
     set_first_i32(results, ptr.saturating_add(16));
     Ok(())
 }
@@ -542,7 +551,9 @@ fn memcpy(
         .map_err(|error| WasmiError::new(format!("emscripten memcpy source is invalid: {error}")))?;
     memory
         .write(&mut *caller, destination, &bytes)
-        .map_err(|error| WasmiError::new(format!("emscripten memcpy destination is invalid: {error}")))?;
+        .map_err(|error| {
+            WasmiError::new(format!("emscripten memcpy destination is invalid: {error}"))
+        })?;
     set_first_i32(results, destination as u32);
     Ok(())
 }
@@ -603,16 +614,15 @@ fn wasm_memory(caller: &Caller<'_, HostState>) -> Result<Memory, WasmiError> {
 fn read_c_string(caller: &Caller<'_, HostState>, pointer: u32) -> Result<String, WasmiError> {
     let memory = wasm_memory(caller)?;
     let data = memory.data(caller);
-    let start = pointer as usize;
     let tail = data
-        .get(start..)
+        .get(pointer as usize..)
         .ok_or_else(|| WasmiError::new("Embind string pointer is outside wasm memory"))?;
     let length = tail
         .iter()
         .position(|byte| *byte == 0)
         .ok_or_else(|| WasmiError::new("unterminated Embind string"))?;
     std::str::from_utf8(&tail[..length])
-        .map(str::to_owned)
+        .map(|value| value.to_owned())
         .map_err(|error| WasmiError::new(format!("invalid Embind UTF-8 string: {error}")))
 }
 
