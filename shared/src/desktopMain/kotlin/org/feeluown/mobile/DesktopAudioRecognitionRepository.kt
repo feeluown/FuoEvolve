@@ -74,13 +74,9 @@ private class DesktopAudioFingerprintRuntime : AudioFingerprintRuntime {
     private val activeProcess = AtomicReference<Process?>()
 
     override suspend fun generate(samples: FloatArray): String = withContext(Dispatchers.IO) {
-        val runtime = resolveDesktopAudioFingerprintRuntime()
+        val helper = resolveDesktopAudioFingerprintHelper()
             ?: throw IllegalStateException("桌面音频指纹组件未找到，请重新安装应用")
-        val process = ProcessBuilder(
-            runtime.executable.absolutePath,
-            "--wasm",
-            runtime.wasm.absolutePath,
-        ).start()
+        val process = ProcessBuilder(helper.absolutePath).start()
         check(activeProcess.compareAndSet(null, process)) {
             process.destroyForcibly()
             "音频指纹任务已经在进行中"
