@@ -238,7 +238,7 @@ Java_org_feeluown_mobile_nucleus_WindowsD3D11VideoTextureApi_nativeUpload(
     }
 
     HRESULT acquire = IDXGIKeyedMutex_AcquireSync(target->keyed_mutex, 0u, 16u);
-    if (FAILED(acquire)) {
+    if (acquire != S_OK) {
         (*env)->ReleaseIntArrayElements(env, pixels_value, pixels, JNI_ABORT);
         return JNI_FALSE;
     }
