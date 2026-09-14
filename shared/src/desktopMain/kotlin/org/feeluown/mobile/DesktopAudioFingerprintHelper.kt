@@ -5,7 +5,7 @@ import java.io.Reader
 
 internal fun resolveDesktopAudioFingerprintHelper(): File? {
     // Keep the legacy executable/resource name for package compatibility. The binary is now a
-    // headless Wazero fingerprint runtime; it no longer contains a WebView or login implementation.
+    // headless Rust/Wasmi fingerprint runtime; it no longer contains a WebView or login implementation.
     val executableName = desktopAudioFingerprintExecutableName()
     val appDir = System.getProperty("fuoevolve.appdir")
         ?.takeIf { it.isNotBlank() && !it.contains("\$APPDIR") }
