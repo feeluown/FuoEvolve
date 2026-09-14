@@ -32,6 +32,18 @@ fn main() {
     }
     copy(&wasm_source, &staging_dir.join("afp.wasm"));
 
+    // Resolve checksums in the disposable staging module before compiling. Go 1.25
+    // no longer lets `go build` silently populate missing go.sum entries in this setup.
+    let status = Command::new("go")
+        .current_dir(&staging_dir)
+        .arg("mod")
+        .arg("tidy")
+        .status()
+        .expect("failed to resolve Go modules; Go 1.22+ is required for desktop packaging");
+    if !status.success() {
+        panic!("failed to resolve headless audio fingerprint helper dependencies");
+    }
+
     let executable_name = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         "fuoevolve-web-login.exe"
     } else {
