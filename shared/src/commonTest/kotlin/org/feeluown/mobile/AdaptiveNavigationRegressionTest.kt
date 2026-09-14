@@ -109,14 +109,14 @@ class AdaptiveNavigationRegressionTest {
         val playlist = playlistDetail()
         val feature = featureDetail()
 
-        assertTrue(formsAdaptivePair(tabletPortrait, listOf(AppRoute.Search, track)))
-        assertTrue(formsAdaptivePair(tabletPortrait, listOf(feature, playlist)))
-        assertTrue(formsAdaptivePair(tabletPortrait, listOf(feature, playlist, track)))
+        assertTrue(hasAdaptiveListDetailPair(tabletPortrait, listOf(AppRoute.Search, track)))
+        assertTrue(hasAdaptiveListDetailPair(tabletPortrait, listOf(feature, playlist)))
+        assertTrue(hasAdaptiveListDetailPair(tabletPortrait, listOf(feature, playlist, track)))
 
-        assertFalse(formsAdaptivePair(tabletPortrait, listOf(AppRoute.Home, track)))
-        assertFalse(formsAdaptivePair(tabletPortrait, listOf(AppRoute.Search)))
-        assertFalse(formsAdaptivePair(tabletPortrait, listOf(AppRoute.Search, videoDetail())))
-        assertFalse(formsAdaptivePair(phoneLandscape, listOf(AppRoute.Search, track)))
+        assertFalse(hasAdaptiveListDetailPair(tabletPortrait, listOf(AppRoute.Home, track)))
+        assertFalse(hasAdaptiveListDetailPair(tabletPortrait, listOf(AppRoute.Search)))
+        assertFalse(hasAdaptiveListDetailPair(tabletPortrait, listOf(AppRoute.Search, videoDetail())))
+        assertFalse(hasAdaptiveListDetailPair(phoneLandscape, listOf(AppRoute.Search, track)))
     }
 
     @Test
@@ -192,13 +192,6 @@ class AdaptiveNavigationRegressionTest {
                 isVideoFullscreen = true,
             )
         )
-    }
-
-    private fun formsAdaptivePair(layout: AppLayoutInfo, backStack: List<AppRoute>): Boolean {
-        val activeRoute = backStack.lastOrNull()
-        return layout.useListDetailNavigation &&
-            activeRoute?.supportsAdaptiveDetailPane() == true &&
-            backStack.dropLast(1).any { it.supportsAdaptiveListPane() }
     }
 
     private fun featureDetail(): AppRoute.FeatureDetail = AppRoute.FeatureDetail(
