@@ -1,7 +1,9 @@
 package org.feeluown.mobile.nucleus
 
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class WindowsMpvRuntimeLoadPlanTest {
     @Test
@@ -40,5 +42,25 @@ class WindowsMpvRuntimeLoadPlanTest {
             emptyList(),
             windowsMpvRuntimeLoadPlan(listOf("fuoevolve_mpv_jni.dll", "vulkan-1.dll")),
         )
+    }
+
+    @Test
+    fun pinnedWindowsRuntimeCanBePreloadedWithoutChangingDllSearchPath() {
+        if (!System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)) return
+        val runtimeDir = System.getenv("FUOEVOLVE_NUCLEUS_LIBMPV_RUNTIME_DIR")
+            ?.takeIf(String::isNotBlank)
+            ?.let(::File)
+            ?: return
+        val runtimeFiles = runtimeDir.listFiles().orEmpty().filter(File::isFile)
+        val filesByName = runtimeFiles.associateBy { file -> file.name.lowercase() }
+        val loadPlan = windowsMpvRuntimeLoadPlan(runtimeFiles.map(File::getName))
+        assertTrue(loadPlan.isNotEmpty(), "Pinned Windows runtime is missing libmpv")
+
+        loadPlan.dropLast(1).forEach { name ->
+            val dependency = filesByName.getValue(name.lowercase())
+            runCatching { System.load(dependency.absolutePath) }
+        }
+        val libmpv = filesByName.getValue(loadPlan.last().lowercase())
+        System.load(libmpv.absolutePath)
     }
 }
