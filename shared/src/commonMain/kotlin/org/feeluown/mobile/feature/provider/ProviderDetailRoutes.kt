@@ -222,8 +222,10 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
             CenterAlignedTopAppBar(
                 title = { Text(displayPlaylist.title.ifBlank { "歌单" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = owner::close) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    AdaptiveDetailNavigationIcon {
+                        IconButton(onClick = owner::close) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {
@@ -325,8 +327,10 @@ fun ProviderTrackDetailRoute(track: MusicTrack) {
             CenterAlignedTopAppBar(
                 title = { Text(displayTrack.title.ifBlank { "歌曲" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = owner::close) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    AdaptiveDetailNavigationIcon {
+                        IconButton(onClick = owner::close) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {
@@ -429,8 +433,10 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
             CenterAlignedTopAppBar(
                 title = { Text(displayItem.title.ifBlank { if (isArtist) "歌手" else "专辑" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = owner::close) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    AdaptiveDetailNavigationIcon {
+                        IconButton(onClick = owner::close) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {

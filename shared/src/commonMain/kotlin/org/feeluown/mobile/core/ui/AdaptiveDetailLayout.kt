@@ -14,6 +14,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+internal fun shouldShowDetailBackNavigation(isAdaptiveDetailPane: Boolean): Boolean =
+    !isAdaptiveDetailPane
+
+@Composable
+internal fun AdaptiveDetailNavigationIcon(content: @Composable () -> Unit) {
+    if (shouldShowDetailBackNavigation(LocalAppIsAdaptiveDetailPane.current)) {
+        content()
+    }
+}
+
 /**
  * Shared detail-page shell used by provider and local-library resources.
  *
