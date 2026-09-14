@@ -8,9 +8,10 @@ import kotlin.test.assertTrue
 
 class DesktopJniMpvVideoControllerTest {
     @Test
-    fun videoDecodeModesStayOnHardwarePaths() {
+    fun videoDecodeModesMapToExpectedLibmpvHwdecOptions() {
         assertEquals("auto-copy", desktopVideoHwdecOption(DesktopVideoDecodeMode.HardwareCompatible))
         assertEquals("auto", desktopVideoHwdecOption(DesktopVideoDecodeMode.HardwareDirect))
+        assertEquals("no", desktopVideoHwdecOption(DesktopVideoDecodeMode.Software))
     }
 
     @Test
@@ -26,6 +27,10 @@ class DesktopJniMpvVideoControllerTest {
         assertEquals(
             null,
             desktopVideoHwdecInteropOption(DesktopVideoDecodeMode.HardwareDirect, "Linux"),
+        )
+        assertEquals(
+            null,
+            desktopVideoHwdecInteropOption(DesktopVideoDecodeMode.Software, "Windows 11"),
         )
         assertEquals("x11-exact", desktopVideoNativeDisplayDescription(0x11))
         assertEquals("wayland", desktopVideoNativeDisplayDescription(2))

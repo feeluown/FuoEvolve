@@ -65,6 +65,7 @@ enum class DesktopVideoDecodeMode(
 ) {
     HardwareCompatible("兼容模式", "默认模式，优先保证画面正常"),
     HardwareDirect("性能模式", "减少画面复制，部分设备可能不兼容"),
+    Software("软件解码", "使用 CPU 解码，用于硬件解码绿屏或兼容性问题"),
 }
 
 @Serializable
