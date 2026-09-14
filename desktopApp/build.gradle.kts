@@ -118,9 +118,12 @@ val packageResourceOs = when {
     isLinuxHost -> "linux"
     else -> "common"
 }
-val webLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
-val webLoginProjectDir = layout.projectDirectory.dir("native/web-login")
-val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
+val audioFingerprintExecutableName =
+    if (isWindowsHost) "fuoevolve-audio-fingerprint.exe" else "fuoevolve-audio-fingerprint"
+val audioFingerprintProjectDir = layout.projectDirectory.dir("native/audio-fingerprint")
+val audioFingerprintExecutable =
+    audioFingerprintProjectDir.file("target/release/$audioFingerprintExecutableName")
+val audioFingerprintWasm = rootProject.file("shared/src/commonMain/resources/audio_recognition/afp.wasm")
 val desktopAppImageLauncher = layout.projectDirectory.file("packaging/linux/AppRun")
 val audioCaptureLibraryName = when {
     isWindowsHost -> "fuoevolve_audio_capture.dll"
@@ -159,10 +162,16 @@ private fun isJarSignatureEntry(name: String): Boolean {
     return extension.uppercase() in jarSignatureExtensions
 }
 
-val buildNucleusWebLoginHelper by tasks.registering(Exec::class) {
+val buildNucleusAudioFingerprintHelper by tasks.registering(Exec::class) {
     group = "build"
-    description = "Build the shared system-WebView login helper for the Nucleus desktop runtime."
-    workingDir(webLoginProjectDir)
+    description = "Build the headless audio fingerprint helper used by the Nucleus desktop runtime."
+    workingDir(audioFingerprintProjectDir)
+    inputs.files(
+        audioFingerprintProjectDir.file("Cargo.toml"),
+        audioFingerprintProjectDir.dir("src"),
+        audioFingerprintWasm,
+    )
+    outputs.file(audioFingerprintExecutable)
     commandLine("cargo", "build", "--release")
 }
 
@@ -281,10 +290,10 @@ val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
 val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
     group = "distribution"
     description = "Collect the portable Nucleus libmpv/Libsecret/WebKitGTK/audio closure used by the AppImage."
-    dependsOn(buildNucleusWebLoginHelper, buildNucleusAudioCaptureLibrary)
+    dependsOn(buildNucleusAudioFingerprintHelper, buildNucleusAudioCaptureLibrary)
     onlyIf { isLinuxHost && bundleLinuxRuntime.get() }
     inputs.files(
-        webLoginExecutable,
+        audioFingerprintExecutable,
         audioCaptureLibrary,
         layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh"),
     )
@@ -296,7 +305,7 @@ val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
         "bash",
         layout.projectDirectory.file("packaging/linux/prepare-portable-runtime.sh").asFile.absolutePath,
         portableLinuxRuntime.get().asFile.absolutePath,
-        webLoginExecutable.asFile.absolutePath,
+        audioFingerprintExecutable.asFile.absolutePath,
         audioCaptureLibrary.asFile.absolutePath,
     )
 }
@@ -304,10 +313,10 @@ val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
 val prepareNucleusAppResources by tasks.registering(Sync::class) {
     group = "distribution"
     description = "Stage native resources required by the Nucleus desktop runtime."
-    dependsOn(buildNucleusWebLoginHelper, buildNucleusAudioCaptureLibrary, buildNucleusMpvJniBridge)
+    dependsOn(buildNucleusAudioFingerprintHelper, buildNucleusAudioCaptureLibrary, buildNucleusMpvJniBridge)
     if (isLinuxHost) dependsOn(prepareNucleusPortableLinuxRuntime)
 
-    from(webLoginExecutable) {
+    from(audioFingerprintExecutable) {
         into("$stagedNativeResourceRoot/helpers")
         if (!isWindowsHost) {
             filePermissions { unix("755") }
@@ -350,14 +359,14 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
 
     doLast {
         val platformRoot = nucleusAppResources.get().asFile.resolve(stagedNativeResourceRoot)
-        val stagedHelper = platformRoot.resolve("helpers/$webLoginExecutableName")
+        val stagedHelper = platformRoot.resolve("helpers/$audioFingerprintExecutableName")
         val stagedMpvBridge = platformRoot.resolve("lib/$mpvJniLibraryName")
         val stagedAudioCapture = platformRoot.resolve("audio/$audioCaptureLibraryName")
         if (!stagedHelper.isFile) {
-            throw GradleException("Nucleus web login helper was not staged: ${stagedHelper.absolutePath}")
+            throw GradleException("Nucleus audio fingerprint helper was not staged: ${stagedHelper.absolutePath}")
         }
         if (!isWindowsHost && !stagedHelper.canExecute()) {
-            throw GradleException("Nucleus web login helper is not executable: ${stagedHelper.absolutePath}")
+            throw GradleException("Nucleus audio fingerprint helper is not executable: ${stagedHelper.absolutePath}")
         }
         if (isLinuxHost && bundleLinuxRuntime.get()) {
             val stagedAppImageLauncher = nucleusAppResources.get().asFile.resolve("$packageResourceOs/AppRun")
