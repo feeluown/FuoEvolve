@@ -60,15 +60,16 @@ Desktop self-update is intentionally not implemented yet. These version values a
 
 - Windows libmpv input pins live in `desktopApp/packaging/native-deps.lock`. CI verifies the pinned archive, stages the public headers/import library for JNI compilation, and bundles the runtime DLLs into the NSIS package.
 - macOS uses the architecture-specific pinned mpv input and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure.
-- Linux AppImage stages the portable libmpv, Libsecret, WebKitGTK, TLS and audio-capture dependency closure into the application.
-- Linux DEB, RPM and Arch packages stage only the application-owned JNI bridge, audio-capture library and hidden audio-fingerprint WebView helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
+- Linux AppImage stages the portable libmpv, Libsecret, WebKitGTK, TLS and audio-capture dependency closure into the application. WebKitGTK is collected explicitly for the Nucleus provider-login WebView rather than inferred from the audio-fingerprint helper.
+- Linux DEB, RPM and Arch packages stage the application-owned JNI bridge, audio-capture library and headless audio-fingerprint helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
 - Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.
+- Desktop fingerprinting runs in a headless Go helper. `afp.wasm` is embedded into the helper and executed with Wazero/Embind; the fingerprint path has no WebView/WebKit runtime dependency.
 
 ## Linux LTS baseline
 
 The Linux Native Image build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. Both Linux workflow branches use the explicit `ubuntu-26.04` runner label and verify `VERSION_ID=26.04` before building so the native executable ABI cannot silently drift with `ubuntu-latest`.
 
-The AppImage portable closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies.
+The AppImage portable closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies. WebKitGTK in this closure is required only by provider login.
 
 DEB packages declare the Ubuntu 26.04 runtime packages required by the application, including `libmpv2`, `libsecret-1-0`, `libwebkit2gtk-4.1-0`, ALSA, PipeWire and PulseAudio libraries. RPM packages currently target Fedora package naming through `rpmRequires`, including `mpv-libs`, `libsecret`, `webkit2gtk4.1`, `alsa-lib`, `pipewire-libs` and `pulseaudio-libs`. Arch packages declare their equivalents through `pacmanDepends`.
 
@@ -76,7 +77,7 @@ Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is i
 
 ## CI
 
-`.github/workflows/desktop-tests.yml` runs shared desktop tests plus `desktopRuntime` and `desktopApp` tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages desktop native resources.
+`.github/workflows/desktop-tests.yml` runs shared desktop tests plus `desktopRuntime` and `desktopApp` tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages desktop native resources. Building the staged resources also builds the headless fingerprint helper and executes its fixed-vector self-test.
 
 Pull requests use runtime-level validation and do not build the full NSIS/DMG/AppImage/DEB/RPM/Pacman matrix.
 
@@ -100,4 +101,4 @@ Desktop release artifacts currently use the same unsigned package output as Cana
 
 ## Linux portability
 
-The AppImage is the explicitly portable Linux format and carries the application-managed native dependency closure. DEB, RPM and Arch integrate with their distribution package managers and do not duplicate libmpv, WebKitGTK, Libsecret or the Linux audio runtime closure inside the package. `$ORIGIN`-relative loader paths are still used for application-owned native libraries, while external runtime libraries are resolved from the host through package-manager dependencies. The hidden audio-fingerprint WebView helper uses the system WebKitGTK runtime in distro packages and the staged WebKitGTK runtime in AppImage builds.
+The AppImage is the explicitly portable Linux format and carries the application-managed native dependency closure. DEB, RPM and Arch integrate with their distribution package managers and do not duplicate libmpv, WebKitGTK, Libsecret or the Linux audio runtime closure inside the package. `$ORIGIN`-relative loader paths are still used for application-owned native libraries, while external runtime libraries are resolved from the host through package-manager dependencies. The audio-fingerprint helper is headless and self-contained; WebKitGTK remains solely for provider login.
