@@ -27,8 +27,8 @@ class DesktopJniMpvVideoControllerTest {
             null,
             desktopVideoHwdecInteropOption(DesktopVideoDecodeMode.HardwareDirect, "Linux"),
         )
-        assertEquals("wayland-exact", desktopVideoNativeDisplayDescription(0x11))
-        assertEquals("x11", desktopVideoNativeDisplayDescription(2))
+        assertEquals("x11-exact", desktopVideoNativeDisplayDescription(0x11))
+        assertEquals("wayland", desktopVideoNativeDisplayDescription(2))
     }
 
     @Test

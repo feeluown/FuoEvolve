@@ -59,6 +59,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopAppHost
+import org.feeluown.mobile.DesktopOpenGlRenderContextParameters
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.PlayerStatus
@@ -330,14 +331,44 @@ fun main(args: Array<String>) {
                 }
             }
 
+            val openGlRenderContextParameters = remember {
+                nucleusOpenGlRenderContextParameters()
+            }
             DesktopAppHost(
                 externalInputs = appExternalInputs,
+                openGlRenderContextParameters = openGlRenderContextParameters,
                 windowContentWrapper = { content ->
                     FuoDesktopWindowContent(content)
                 },
             )
         }
     }
+}
+
+private fun NucleusDecoratedWindowScope.nucleusOpenGlRenderContextParameters():
+    DesktopOpenGlRenderContextParameters? {
+    if (!System.getProperty("os.name").contains("linux", ignoreCase = true)) return null
+
+    val taoHandle = nucleusWindow.unsafe.taoHandle ?: return null
+    val handles = runCatching { NucleusVideoNativeInterop.nativeLinuxHandles(taoHandle) }.getOrNull()
+    if (handles == null || handles.size != 3 || handles[0] !in 1L..2L || handles[1] == 0L) {
+        AppLogger.w("DesktopVideo", "Tao Linux native display handles are unavailable")
+        return null
+    }
+
+    val taoGetProcAddress = runCatching {
+        NucleusVideoNativeInterop.taoGetProcAddressFunctionPointer()
+    }.getOrDefault(0L)
+    if (taoGetProcAddress == 0L) {
+        AppLogger.w("DesktopVideo", "Tao GL proc address is unavailable")
+        return null
+    }
+
+    return DesktopOpenGlRenderContextParameters(
+        nativeDisplayKind = handles[0].toInt(),
+        nativeDisplay = handles[1],
+        taoGetProcAddress = taoGetProcAddress,
+    )
 }
 
 @Composable

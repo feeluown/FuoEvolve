@@ -88,6 +88,9 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)
         }
+        desktopMain.dependencies {
+            implementation("dev.nucleusframework:composewebview:1.0.3")
+        }
         desktopTest.dependencies {
             implementation(compose.desktop.currentOs)
         }

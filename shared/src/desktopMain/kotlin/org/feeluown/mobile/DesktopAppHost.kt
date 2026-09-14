@@ -1,9 +1,15 @@
 package org.feeluown.mobile
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import java.util.Properties
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,14 +23,49 @@ import kotlinx.coroutines.launch
 fun DesktopAppHost(
     externalInputs: Flow<String>? = null,
     windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
+    openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) {
     val container = remember { DesktopAppContainer() }
-    installDesktopJniMpvVideoControllerFactory(container::desktopVideoDecodeMode)
+    var activeWebLoginProvider by remember { mutableStateOf<ProviderInfo?>(null) }
+    installDesktopJniMpvVideoControllerFactory(
+        videoDecodeMode = container::desktopVideoDecodeMode,
+        openGlRenderContextParameters = openGlRenderContextParameters,
+    )
     DisposableEffect(container) {
         onDispose(container::close)
     }
     LaunchedEffect(container, externalInputs) {
         externalInputs?.collect(container::openExternalInput)
+    }
+    fun requestProviderWebLogin(provider: ProviderInfo) {
+        val config = provider.loginConfig
+        when {
+            config == null -> container.appViewModel.showFeedback("${provider.providerName} 未配置网页登录地址")
+            config.loginUrl.isBlank() -> container.appViewModel.showFeedback("${provider.providerName} 未配置有效网页登录地址")
+            config.cookieKeyGroups.isEmpty() -> {
+                container.appViewModel.showFeedback("${provider.providerName} 未配置登录 Cookie 判定规则")
+            }
+            activeWebLoginProvider != null -> {
+                container.appViewModel.showFeedback("${activeWebLoginProvider?.providerName} 网页登录正在进行中")
+            }
+            else -> activeWebLoginProvider = provider
+        }
+    }
+    val desktopWindowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content ->
+        windowContentWrapper {
+            Box(Modifier.fillMaxSize()) {
+                content()
+                activeWebLoginProvider?.let { provider ->
+                    DesktopProviderWebLogin(
+                        provider = provider,
+                        onResult = { result ->
+                            activeWebLoginProvider = null
+                            container.handleProviderWebLoginResult(provider, result)
+                        },
+                    )
+                }
+            }
+        }
     }
     DesktopProviderCredentialBackupHost(
         backupFactory = { container.providerCredentialBackup },
@@ -37,7 +78,7 @@ fun DesktopAppHost(
         AppRoot(
             appViewModel = container.appViewModel,
             uiGraph = container.appUiGraph,
-            windowContentWrapper = windowContentWrapper,
+            windowContentWrapper = desktopWindowContentWrapper,
             platform = AppPlatformBindings(
                 hasAudioPermission = true,
                 onRequestAudioPermission = {},
@@ -45,7 +86,7 @@ fun DesktopAppHost(
                     source = AudioRecognitionSource.SystemOutput,
                     isAvailable = true,
                 ),
-                onOpenProviderWebLogin = container::openProviderWebLogin,
+                onOpenProviderWebLogin = ::requestProviderWebLogin,
                 onLogoutProvider = container::logoutProvider,
                 onImportLocalPlaylistFile = container::importLocalPlaylistFile,
                 onExportLocalPlaylistFile = container::exportLocalPlaylistFile,
@@ -70,7 +111,6 @@ private fun desktopAppVersionInfo(): String? = runCatching {
 
 private class DesktopAppContainer {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val webLoginLauncher = DesktopWebLoginLauncher()
     private val providerCredentialStore = createDesktopProviderCredentialStore()
     private val providerGraph by lazy {
         createFuoProviderGraph(
@@ -483,17 +523,15 @@ private class DesktopAppContainer {
         backCoordinatorFactory = { appBackCoordinator },
     )
 
-    fun openProviderWebLogin(provider: ProviderInfo) {
-        scope.launch {
-            when (val result = webLoginLauncher.open(provider)) {
-                is DesktopWebLoginResult.Success -> {
+    fun handleProviderWebLoginResult(provider: ProviderInfo, result: DesktopWebLoginResult) {
+        when (result) {
+            is DesktopWebLoginResult.Success -> {
+                scope.launch {
                     providerAuthFeatureController.loginWithCookies(provider.providerId, result.cookiesJson)
                 }
-                DesktopWebLoginResult.Cancelled -> Unit
-                is DesktopWebLoginResult.Failure -> {
-                    appViewModel.showFeedback(result.message)
-                }
             }
+            DesktopWebLoginResult.Cancelled -> Unit
+            is DesktopWebLoginResult.Failure -> appViewModel.showFeedback(result.message)
         }
     }
 
@@ -557,7 +595,6 @@ private class DesktopAppContainer {
             playbackSessionIntegration.value.close()
         }
         playbackQueueStore.flushLatest()
-        webLoginLauncher.close()
         scope.cancel()
         desktopDownloadRepository.close()
         playbackEngine.close()

@@ -61,7 +61,7 @@ Desktop self-update is intentionally not implemented yet. These version values a
 - Windows libmpv input pins live in `desktopApp/packaging/native-deps.lock`. CI verifies the pinned archive, stages the public headers/import library for JNI compilation, and bundles the runtime DLLs into the NSIS package.
 - macOS uses the architecture-specific pinned mpv input and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure.
 - Linux AppImage stages the portable libmpv, Libsecret, WebKitGTK, TLS and audio-capture dependency closure into the application.
-- Linux DEB, RPM and Arch packages stage only the application-owned JNI bridge, audio-capture library and WebView helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
+- Linux DEB, RPM and Arch packages stage only the application-owned JNI bridge, audio-capture library and hidden audio-fingerprint WebView helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
 - Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.
 
 ## Linux LTS baseline
@@ -100,4 +100,4 @@ Desktop release artifacts currently use the same unsigned package output as Cana
 
 ## Linux portability
 
-The AppImage is the explicitly portable Linux format and carries the application-managed native dependency closure. DEB, RPM and Arch integrate with their distribution package managers and do not duplicate libmpv, WebKitGTK, Libsecret or the Linux audio runtime closure inside the package. `$ORIGIN`-relative loader paths are still used for application-owned native libraries, while external runtime libraries are resolved from the host through package-manager dependencies. The WebView helper uses the system WebKitGTK runtime in distro packages and the staged WebKitGTK runtime in AppImage builds.
+The AppImage is the explicitly portable Linux format and carries the application-managed native dependency closure. DEB, RPM and Arch integrate with their distribution package managers and do not duplicate libmpv, WebKitGTK, Libsecret or the Linux audio runtime closure inside the package. `$ORIGIN`-relative loader paths are still used for application-owned native libraries, while external runtime libraries are resolved from the host through package-manager dependencies. The hidden audio-fingerprint WebView helper uses the system WebKitGTK runtime in distro packages and the staged WebKitGTK runtime in AppImage builds.

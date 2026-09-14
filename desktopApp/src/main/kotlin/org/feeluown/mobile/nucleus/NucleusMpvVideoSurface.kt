@@ -295,6 +295,7 @@ private class NucleusOpenGlMpvVideoRenderer(
             // Tell Skia an external producer is about to overwrite the wrapped FBO. This preserves
             // snapshot immutability with a GPU-side copy-on-write when a previous frame is in flight.
             currentSurface.notifyContentWillChange(ContentChangeMode.DISCARD)
+            renderContext.skiaContext.resetGLAll()
             controller.renderOpenGl(mpvRenderContext, target)
             renderContext.skiaContext.resetGLAll()
             val next = currentSurface.makeImageSnapshot()
