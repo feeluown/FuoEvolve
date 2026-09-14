@@ -177,11 +177,13 @@ fun LocalMusicCollectionScreen() {
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = graph.feature::closeCollection) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
-                        )
+                    AdaptiveDetailNavigationIcon {
+                        IconButton(onClick = graph.feature::closeCollection) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "返回",
+                            )
+                        }
                     }
                 },
             )
