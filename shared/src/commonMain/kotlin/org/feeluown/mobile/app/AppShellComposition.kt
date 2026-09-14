@@ -58,6 +58,14 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
     )
 }
 
+internal fun shouldShowShellNavigationRail(
+    layoutInfo: AppLayoutInfo,
+    isFullPlayerOpen: Boolean,
+    isVideoFullscreen: Boolean,
+): Boolean = layoutInfo.usePersistentNavigation &&
+    !isFullPlayerOpen &&
+    !isVideoFullscreen
+
 internal fun AppRoute.showsMiniPlayer(
     hasCurrentTrack: Boolean,
     hasQueueTrack: Boolean,
