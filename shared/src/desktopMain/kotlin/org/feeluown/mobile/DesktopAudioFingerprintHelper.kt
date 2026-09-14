@@ -4,8 +4,6 @@ import java.io.File
 import java.io.Reader
 
 internal fun resolveDesktopAudioFingerprintHelper(): File? {
-    // Keep the legacy executable/resource name for package compatibility. The binary is now a
-    // headless Rust/Wasmi fingerprint runtime; it no longer contains a WebView or login implementation.
     val executableName = desktopAudioFingerprintExecutableName()
     val appDir = System.getProperty("fuoevolve.appdir")
         ?.takeIf { it.isNotBlank() && !it.contains("\$APPDIR") }
@@ -22,8 +20,8 @@ internal fun resolveDesktopAudioFingerprintHelper(): File? {
         if (appDir != null) {
             add(File(appDir, "resources/native/helpers/$executableName"))
         }
-        add(File(userDir, "desktopApp/native/web-login/target/release/$executableName"))
-        add(File(userDir, "native/web-login/target/release/$executableName"))
+        add(File(userDir, "desktopApp/native/audio-fingerprint/target/release/$executableName"))
+        add(File(userDir, "native/audio-fingerprint/target/release/$executableName"))
     }
     directCandidates.firstOrNull(::isUsableDesktopExecutable)?.let { return it }
 
@@ -55,7 +53,7 @@ internal fun readDesktopAudioFingerprintDiagnosticTail(reader: Reader): String {
 }
 
 private fun desktopAudioFingerprintExecutableName(): String =
-    if (isDesktopWindows()) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
+    if (isDesktopWindows()) "fuoevolve-audio-fingerprint.exe" else "fuoevolve-audio-fingerprint"
 
 private fun isUsableDesktopExecutable(candidate: File): Boolean =
     candidate.isFile && (isDesktopWindows() || candidate.canExecute())

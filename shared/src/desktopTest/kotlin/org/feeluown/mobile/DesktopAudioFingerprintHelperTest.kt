@@ -11,7 +11,11 @@ class DesktopAudioFingerprintHelperTest {
     @Test
     fun resolvesHelperFromComposeApplicationResourcesDirectory() {
         val resourcesDir = Files.createTempDirectory("fuoevolve-compose-resources-")
-        val helperName = if (isDesktopWindows()) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
+        val helperName = if (isDesktopWindows()) {
+            "fuoevolve-audio-fingerprint.exe"
+        } else {
+            "fuoevolve-audio-fingerprint"
+        }
         val helper = resourcesDir.resolve("native/helpers/$helperName")
         helper.parent.createDirectories()
         helper.createFile()
