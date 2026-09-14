@@ -124,10 +124,12 @@ internal class DesktopJniMpvVideoController(
             setOption("input-default-bindings", "no")
             setOption("ytdl", "no")
             setOption("vo", "libmpv")
-            // Both modes stay on hardware decoding. The compatibility mode copies frames back
-            // before the custom Tao FBO samples them; direct mode keeps GPU texture interop.
+            // Hardware modes intentionally do not fall back silently. Software mode selects
+            // libmpv's normal CPU decoder while keeping the existing renderer path unchanged.
             setOption("hwdec", desktopVideoHwdecOption(videoDecodeMode))
-            setOption("hwdec-software-fallback", "no")
+            if (videoDecodeMode != DesktopVideoDecodeMode.Software) {
+                setOption("hwdec-software-fallback", "no")
+            }
             desktopVideoHwdecInteropOption(videoDecodeMode)?.let { interop ->
                 setOption("gpu-hwdec-interop", interop)
             }
@@ -589,6 +591,7 @@ internal class DesktopJniMpvVideoController(
     }
 
     private fun ensureHardwareDecoder(): Boolean {
+        if (videoDecodeMode == DesktopVideoDecodeMode.Software) return true
         if (hardwareDecoderRejected) return false
         val decoder = getProperty("hwdec-current")?.trim().orEmpty()
         if (decoder.isBlank() || !decoder.equals("no", ignoreCase = true)) return true
@@ -983,6 +986,7 @@ private fun resolveDesktopJniMpvVideoBridge(): File? {
 internal fun desktopVideoHwdecOption(mode: DesktopVideoDecodeMode): String = when (mode) {
     DesktopVideoDecodeMode.HardwareCompatible -> "auto-copy"
     DesktopVideoDecodeMode.HardwareDirect -> "auto"
+    DesktopVideoDecodeMode.Software -> "no"
 }
 
 internal fun desktopVideoHwdecInteropOption(
