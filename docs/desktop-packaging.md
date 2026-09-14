@@ -63,7 +63,7 @@ Desktop self-update is intentionally not implemented yet. These version values a
 - Linux AppImage stages the portable libmpv, Libsecret, WebKitGTK, TLS and audio-capture dependency closure into the application. WebKitGTK is collected explicitly for the Nucleus provider-login WebView rather than inferred from the audio-fingerprint helper.
 - Linux DEB, RPM and Arch packages stage the application-owned JNI bridge, audio-capture library and headless audio-fingerprint helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
 - Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.
-- Desktop fingerprinting runs in a headless Go helper. `afp.wasm` is embedded into the helper and executed with Wazero/Embind; the fingerprint path has no WebView/WebKit runtime dependency.
+- Desktop fingerprinting runs in a headless Rust helper. `afp.wasm` is embedded into the helper and executed by the Wasmi interpreter with the small legacy Embind host surface needed by `ExtractQueryFP`; the fingerprint path has no JavaScript, WebView, or WebKit runtime dependency.
 
 ## Linux LTS baseline
 
@@ -77,7 +77,7 @@ Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is i
 
 ## CI
 
-`.github/workflows/desktop-tests.yml` runs shared desktop tests plus `desktopRuntime` and `desktopApp` tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages desktop native resources. Building the staged resources also builds the headless fingerprint helper and executes its fixed-vector self-test.
+`.github/workflows/desktop-tests.yml` runs shared desktop tests plus `desktopRuntime` and `desktopApp` tests on Linux, Windows and macOS, then compiles the platform JNI bridge and stages desktop native resources. Building the staged resources also builds the headless fingerprint helper, and CI executes the helper's fixed-vector self-test after staging.
 
 Pull requests use runtime-level validation and do not build the full NSIS/DMG/AppImage/DEB/RPM/Pacman matrix.
 
