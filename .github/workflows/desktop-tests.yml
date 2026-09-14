@@ -48,7 +48,7 @@ jobs:
             ~/.cargo/git
             desktopApp/native/web-login/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
 
@@ -86,6 +86,7 @@ jobs:
             :desktopApp:test \
             :desktopApp:compileKotlin \
             :desktopApp:prepareNucleusAppResources
+          desktopApp/native/web-login/target/release/fuoevolve-web-login --self-test
 
   windows:
     name: Windows Nucleus runtime
@@ -127,7 +128,7 @@ jobs:
             ~/.cargo/git
             desktopApp/native/web-login/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-windows-x64-rust-1.98.1-
 
@@ -161,6 +162,8 @@ jobs:
             :desktopApp:test `
             :desktopApp:compileKotlin `
             :desktopApp:prepareNucleusAppResources
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\desktopApp\native\web-login\target\release\fuoevolve-web-login.exe --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   macos:
@@ -201,7 +204,7 @@ jobs:
             ~/.cargo/git
             desktopApp/native/web-login/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-macos-arm64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-macos-arm64-rust-1.98.1-
 
@@ -237,3 +240,4 @@ jobs:
             :desktopApp:test \
             :desktopApp:compileKotlin \
             :desktopApp:prepareNucleusAppResources
+          desktopApp/native/web-login/target/release/fuoevolve-web-login --self-test
