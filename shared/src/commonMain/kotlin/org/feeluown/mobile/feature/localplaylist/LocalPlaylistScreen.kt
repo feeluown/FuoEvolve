@@ -77,8 +77,10 @@ fun LocalPlaylistScreen(
             CenterAlignedTopAppBar(
                 title = { Text(displayPlaylist.title.ifBlank { "本地歌单" }, maxLines = 1) },
                 navigationIcon = {
-                    IconButton(onClick = actions::close) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    AdaptiveDetailNavigationIcon {
+                        IconButton(onClick = actions::close) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {
