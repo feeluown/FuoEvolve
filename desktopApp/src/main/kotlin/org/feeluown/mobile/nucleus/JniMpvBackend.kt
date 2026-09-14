@@ -12,8 +12,8 @@ import org.feeluown.mobile.desktop.DesktopMpvBackendEvent
  * GraalVM-friendly libmpv transport.
  *
  * The JVM/JNA host and this JNI host both feed the same DesktopMpvPlaybackEngine state machine.
- * JNI is intentionally one-way: Kotlin polls mpv events/properties, so the native library never
- * has to discover or callback into managed classes at runtime.
+ * JNI is intentionally one-way: Kotlin drains mpv's event queue and observed property changes, so
+ * the native library never has to discover or callback into managed classes at runtime.
  */
 internal class JniMpvBackend(
     private val listener: (DesktopMpvBackendEvent) -> Unit,
@@ -30,7 +30,7 @@ internal class JniMpvBackend(
     private var expectedPlaylistEntryId: Long? = null
 
     @Volatile
-    private var polledActivePath: String? = null
+    private var activePath: String? = null
 
     init {
         JniMpvBridgeLoader.ensureLoaded()
@@ -47,6 +47,12 @@ internal class JniMpvBackend(
                 ?: System.getenv("FUOEVOLVE_LIBMPV_AO")?.takeIf(String::isNotBlank)
             audioOutput?.let { setOption("ao", it) }
             checkMpv(JniMpvApi.nativeInitialize(handle), "mpv_initialize")
+            OBSERVED_PROPERTIES.forEachIndexed { index, property ->
+                checkMpv(
+                    JniMpvApi.nativeObserveProperty(handle, index.toLong() + 1L, property),
+                    "observe property $property",
+                )
+            }
             AppLogger.i(
                 LOG_TAG,
                 "JNI libmpv initialized audioOutput=${audioOutput ?: "default"}",
@@ -68,7 +74,7 @@ internal class JniMpvBackend(
         ensureOpen()
         expectedPath = url
         expectedPlaylistEntryId = null
-        polledActivePath = null
+        activePath = null
         lifecycleGate.reset()
         val perFileOptions = encodeMpvLoadfileOptions(headers)
         try {
@@ -90,7 +96,7 @@ internal class JniMpvBackend(
         } catch (throwable: Throwable) {
             expectedPath = null
             expectedPlaylistEntryId = null
-            polledActivePath = null
+            activePath = null
             lifecycleGate.reset()
             throw throwable
         }
@@ -110,7 +116,7 @@ internal class JniMpvBackend(
         ensureOpen()
         expectedPath = null
         expectedPlaylistEntryId = null
-        polledActivePath = null
+        activePath = null
         lifecycleGate.reset()
         command("stop")
     }
@@ -124,7 +130,7 @@ internal class JniMpvBackend(
         if (!closed.compareAndSet(false, true)) return
         expectedPath = null
         expectedPlaylistEntryId = null
-        polledActivePath = null
+        activePath = null
         lifecycleGate.reset()
         JniMpvApi.nativeWakeup(handle)
         if (Thread.currentThread() !== eventThread) {
@@ -135,14 +141,9 @@ internal class JniMpvBackend(
 
     private fun eventLoop() {
         try {
-            var nextPollAtNanos = System.nanoTime()
             while (!closed.get()) {
-                JniMpvApi.nativeWaitEvent(handle, EVENT_WAIT_SECONDS)?.let(::dispatchNativeEvent)
-                val nowNanos = System.nanoTime()
-                if (nowNanos >= nextPollAtNanos) {
-                    publishPolledState()
-                    nextPollAtNanos = nowNanos + STATE_POLL_INTERVAL_NANOS
-                }
+                JniMpvApi.nativeWaitObservedEvent(handle, EVENT_WAIT_SECONDS)
+                    ?.let(::dispatchNativeEvent)
             }
         } catch (throwable: Throwable) {
             if (!closed.get()) {
@@ -154,12 +155,16 @@ internal class JniMpvBackend(
     private fun dispatchNativeEvent(encoded: String) {
         when {
             encoded == "shutdown" -> closed.set(true)
-            encoded == "loaded" -> activateExpectedRequestFromFileLoaded()
+            encoded == "queue-overflow" -> publishObservedSnapshot()
+            encoded == "loaded" -> {
+                if (activateExpectedRequestFromFileLoaded()) publishObservedSnapshot()
+            }
             encoded == "restart" -> {
                 if (playbackRestartMatchesCurrentRequest()) {
                     listener(DesktopMpvBackendEvent.PlaybackRestart)
                 }
             }
+            encoded.startsWith("property:") -> dispatchObservedProperty(encoded)
             encoded.startsWith("start:") -> {
                 val playlistEntryId = encoded.substringAfter(':').toLongOrNull() ?: return
                 if (startFileMatchesCurrentRequest(playlistEntryId)) {
@@ -187,6 +192,16 @@ internal class JniMpvBackend(
                 )
             }
         }
+    }
+
+    private fun dispatchObservedProperty(encoded: String) {
+        val idSeparator = encoded.indexOf(':')
+        val valueSeparator = encoded.indexOf(':', startIndex = idSeparator + 1)
+        if (idSeparator < 0 || valueSeparator < 0) return
+        val id = encoded.substring(idSeparator + 1, valueSeparator).toIntOrNull() ?: return
+        val property = OBSERVED_PROPERTIES.getOrNull(id - 1) ?: return
+        if (!activateCurrentRequestFromObservedState()) return
+        listener(DesktopMpvBackendEvent.Property(property, encoded.substring(valueSeparator + 1)))
     }
 
     private fun startFileMatchesCurrentRequest(playlistEntryId: Long): Boolean {
@@ -220,13 +235,13 @@ internal class JniMpvBackend(
         val playlistEntryId = currentPlaylistEntryId() ?: return false
         if (!lifecycleGate.canAcceptFileLoaded(playlistEntryId)) return false
         if (!currentRequestMatchesEntry(requestedPath, playlistEntryId)) return false
-        if (polledActivePath == requestedPath) {
+        if (activePath == requestedPath) {
             lifecycleGate.markActivated(playlistEntryId)
             return true
         }
 
         expectedPlaylistEntryId = playlistEntryId
-        polledActivePath = requestedPath
+        activePath = requestedPath
         lifecycleGate.markActivated(playlistEntryId)
         listener(DesktopMpvBackendEvent.FileLoaded(requestedPath, playlistEntryId))
         return true
@@ -247,9 +262,9 @@ internal class JniMpvBackend(
         return currentPath == requestedPath || currentPlaylistFilename == requestedPath
     }
 
-    private fun activateCurrentRequestFromPolling(): Boolean {
+    private fun activateCurrentRequestFromObservedState(): Boolean {
         val requestedPath = expectedPath ?: return false
-        if (polledActivePath == requestedPath) {
+        if (activePath == requestedPath) {
             val currentEntryId = currentPlaylistEntryId()
             if (expectedPlaylistEntryId == null && currentEntryId != null) {
                 expectedPlaylistEntryId = currentEntryId
@@ -277,14 +292,14 @@ internal class JniMpvBackend(
             expectedPlaylistEntryId = playlistEntryId
             lifecycleGate.markActivated(playlistEntryId)
         }
-        polledActivePath = requestedPath
+        activePath = requestedPath
         listener(DesktopMpvBackendEvent.FileLoaded(requestedPath, playlistEntryId))
         return true
     }
 
-    private fun publishPolledState() {
-        if (!activateCurrentRequestFromPolling()) return
-        POLLED_PROPERTIES.forEach { property ->
+    private fun publishObservedSnapshot() {
+        if (!activateCurrentRequestFromObservedState()) return
+        OBSERVED_PROPERTIES.forEach { property ->
             getPropertyString(property)?.let { value ->
                 listener(DesktopMpvBackendEvent.Property(property, value))
             }
@@ -318,8 +333,7 @@ internal class JniMpvBackend(
     private fun getPropertyString(name: String): String? = JniMpvApi.nativeGetProperty(handle, name)
 
     private fun command(vararg args: String) {
-        checkMpv(JniMpvApi.nativeCommand(handle, args), "command ${args.firstOrNull().orEmpty()}"
-        )
+        checkMpv(JniMpvApi.nativeCommand(handle, args), "command ${args.firstOrNull().orEmpty()}")
     }
 
     private fun checkMpv(result: Int, operation: String) {
@@ -340,7 +354,8 @@ internal object JniMpvApi {
     external fun nativeSetProperty(handle: Long, name: String, value: String): Int
     external fun nativeGetProperty(handle: Long, name: String): String?
     external fun nativeCommand(handle: Long, args: Array<out String>): Int
-    external fun nativeWaitEvent(handle: Long, timeoutSeconds: Double): String?
+    external fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int
+    external fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String?
     external fun nativeWakeup(handle: Long)
     external fun nativeDestroy(handle: Long)
     external fun nativeErrorString(error: Int): String?
@@ -498,14 +513,13 @@ private fun isMac(): Boolean =
     }
 
 private const val EVENT_WAIT_SECONDS = 0.05
-private const val STATE_POLL_INTERVAL_NANOS = 250_000_000L
 private const val MPV_VOLUME_SCALE = 100.0
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val LOG_TAG = "NucleusMpvJni"
 private const val WINDOWS_MPV_BRIDGE_NAME = "fuoevolve_mpv_jni.dll"
 private val WINDOWS_MPV_RUNTIME_NAMES = listOf("libmpv-2.dll", "mpv-2.dll", "mpv.dll")
 
-private val POLLED_PROPERTIES = listOf(
+private val OBSERVED_PROPERTIES = listOf(
     "pause",
     "time-pos",
     "duration",
