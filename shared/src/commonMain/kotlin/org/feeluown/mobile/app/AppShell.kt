@@ -63,9 +63,11 @@ internal fun AppShell(
                 hasQueueTrack = playback.queue.currentQueueTrack != null,
                 isVideoFullscreen = videoDetailState.isFullscreen,
             ) == true
-        val showShellNavigationRail = layoutInfo.usePersistentNavigation &&
-            !playback.isFullPlayerOpen &&
-            !videoDetailState.isFullscreen
+        val showShellNavigationRail = shouldShowShellNavigationRail(
+            layoutInfo = layoutInfo,
+            isFullPlayerOpen = playback.isFullPlayerOpen,
+            isVideoFullscreen = videoDetailState.isFullscreen,
+        )
         val selectedHomeSectionIndex = AppShellHomeSections
             .indexOfFirst { it.first == homeState.homeSection }
             .coerceAtLeast(0)
