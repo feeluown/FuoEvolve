@@ -1,8 +1,9 @@
 /* Event-driven libmpv property bridge shared by audio and video controllers.
  *
- * Kotlin keeps polling mpv_wait_event(), but property values are pushed into that queue by
- * mpv_observe_property() instead of being synchronously re-read on a timer. This preserves the
- * one-way JNI model: native code never calls back into managed classes.
+ * Property values are pushed into mpv's client event queue by mpv_observe_property(). The JNI
+ * event thread blocks in mpv_wait_event() until work arrives; close paths already call
+ * mpv_wakeup(), so no periodic timeout is needed. This preserves the one-way JNI model: native
+ * code never calls back into managed classes.
  */
 
 static jint fuo_mpv_observe_string_property(
@@ -62,8 +63,9 @@ static jstring fuo_mpv_wait_event_observed(
 ) {
     mpv_handle *handle = handle_from_jlong(handle_value);
     if (handle == NULL) return NULL;
+    (void)timeout_seconds;
 
-    const mpv_event *event = mpv_wait_event(handle, timeout_seconds);
+    const mpv_event *event = mpv_wait_event(handle, -1.0);
     if (event == NULL || event->event_id == MPV_EVENT_NONE) return NULL;
 
     char buffer[192];
