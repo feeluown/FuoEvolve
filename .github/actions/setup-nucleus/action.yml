@@ -1,5 +1,5 @@
 name: Setup Nucleus
-description: Setup the JDK, native build prerequisites, Gradle, GraalVM cache, and Node.js for Nucleus builds
+description: Setup the JDK, native build prerequisites, Gradle, GraalVM cache, Go, and Node.js for Nucleus builds
 
 inputs:
   java-version:
@@ -34,6 +34,14 @@ inputs:
     description: GraalVM distribution cache-key component
     required: false
     default: 'community'
+  setup-go:
+    description: Setup Go for the headless audio-fingerprint helper
+    required: false
+    default: 'true'
+  go-version:
+    description: Go version used to build the audio-fingerprint helper
+    required: false
+    default: '1.25.x'
   setup-node:
     description: Setup Node.js for Nucleus packaging
     required: false
@@ -59,6 +67,18 @@ runs:
         java-package: ${{ inputs.java-package }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
+
+    - name: Set up Go
+      if: inputs.setup-go == 'true'
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+
+    - name: Verify Go
+      if: inputs.setup-go == 'true'
+      shell: bash
+      run: go version
 
     - name: Resolve GraalVM toolchain version
       if: inputs.graalvm == 'true'
