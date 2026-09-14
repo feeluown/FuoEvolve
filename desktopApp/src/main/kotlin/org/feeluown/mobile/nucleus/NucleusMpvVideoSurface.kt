@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
@@ -19,11 +20,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import dev.nucleusframework.window.tao.TaoMetalRenderContext
 import dev.nucleusframework.window.tao.TaoOpenGlRenderContext
 import dev.nucleusframework.window.tao.TextureView
+import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
 import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import dev.nucleusframework.window.tao.rememberTaoGpuRenderContext
 import dev.nucleusframework.window.tao.rememberTextureViewController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.feeluown.mobile.AppLogger
@@ -45,10 +48,10 @@ import org.jetbrains.skia.SurfaceOrigin
 /**
  * Native/Nucleus video presentation surface.
  *
- * Windows/Linux render libmpv directly into an FBO on Tao's ANGLE/EGL context and let the same
- * Skia DirectContext sample it. macOS renders libmpv into an IOSurface-backed CGL FBO which
- * Nucleus imports into its Metal scene through TextureView. Neither GPU path performs a CPU frame
- * readback, and GPU setup failures do not switch to software video.
+ * Windows keeps libmpv's software render loop off the Tao event thread and uploads those CPU
+ * frames into a producer-owned D3D11 shared texture. Nucleus imports that texture through
+ * TextureView, so window move/resize no longer executes libmpv rendering on the ANGLE context.
+ * Linux keeps the direct Tao OpenGL path. macOS keeps the IOSurface/TextureView path.
  */
 internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
     @Composable
@@ -58,6 +61,18 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
         modifier: Modifier,
     ) {
         val openGlController = controller as? DesktopOpenGlVideoController
+        if (isWindowsDesktop() && openGlController != null) {
+            NucleusWindowsTextureVideoContent(
+                controller = controller,
+                softwareController = openGlController,
+                modifier = modifier,
+                onFailure = { throwable ->
+                    AppLogger.e("DesktopVideo", "Windows TextureView video rendering failed", throwable)
+                },
+            )
+            return
+        }
+
         val ioSurfaceController = controller as? DesktopIoSurfaceVideoController
         val taoContext = rememberTaoGpuRenderContext()
         val openGlContext = taoContext as? TaoOpenGlRenderContext
@@ -121,6 +136,99 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
 
         AppLogger.e("DesktopVideo", "no hardware video surface is available")
     }
+}
+
+@Composable
+private fun NucleusWindowsTextureVideoContent(
+    controller: DesktopPlatformVideoController,
+    softwareController: DesktopOpenGlVideoController,
+    modifier: Modifier,
+    onFailure: (Throwable) -> Unit,
+) {
+    val textureController = rememberTextureViewController()
+    val softwareSetup = remember(controller, softwareController) {
+        runCatching { softwareController.enableSoftwareRendering() }
+    }
+    val setupError = softwareSetup.exceptionOrNull()
+    if (setupError != null) {
+        LaunchedEffect(setupError) { onFailure(setupError) }
+        return
+    }
+
+    var target by remember(controller) { mutableStateOf<WindowsD3D11VideoTarget?>(null) }
+
+    LaunchedEffect(controller, textureController) {
+        try {
+            controller.frame.collect { frame ->
+                if (frame == null) {
+                    val previous = target
+                    if (previous != null) {
+                        target = null
+                        withFrameNanos { }
+                        withContext(Dispatchers.Default) { previous.close() }
+                    }
+                    return@collect
+                }
+
+                val current = target
+                val next = if (
+                    current != null &&
+                    current.width == frame.width &&
+                    current.height == frame.height
+                ) {
+                    current
+                } else {
+                    withContext(Dispatchers.Default) {
+                        WindowsD3D11VideoTarget.create(frame.width, frame.height)
+                            ?: error("D3D11 shared video texture creation failed")
+                    }
+                }
+
+                val uploaded = withContext(Dispatchers.Default) { next.upload(frame) }
+                if (!uploaded) {
+                    if (next !== current) withContext(Dispatchers.Default) { next.close() }
+                    return@collect
+                }
+
+                if (next !== current) {
+                    target = next
+                    textureController.markFrameAvailable()
+                    // Publish/import the new shared texture before releasing the previous one.
+                    withFrameNanos { }
+                    if (current != null) withContext(Dispatchers.Default) { current.close() }
+                } else {
+                    textureController.markFrameAvailable()
+                }
+            }
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            onFailure(throwable)
+        }
+    }
+
+    DisposableEffect(controller) {
+        onDispose {
+            target?.close()
+            target = null
+        }
+    }
+
+    val source = remember(target) {
+        target?.let { active ->
+            nucleusD3D11SharedTextureSource(
+                sharedHandle = active.sharedHandle,
+                widthPx = active.width,
+                heightPx = active.height,
+            )
+        }
+    }
+    TextureView(
+        source = source,
+        controller = textureController,
+        modifier = modifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+        filterQuality = FilterQuality.Low,
+    )
 }
 
 @Composable
@@ -262,6 +370,58 @@ private fun NucleusIoSurfaceVideoContent(
         contentScale = ContentScale.Fit,
         filterQuality = FilterQuality.Low,
     )
+}
+
+private class WindowsD3D11VideoTarget private constructor(
+    private val handle: Long,
+    val sharedHandle: Long,
+    val width: Int,
+    val height: Int,
+) : AutoCloseable {
+    private val lock = Any()
+    private val pixels = IntArray(width * height)
+    private var closed = false
+
+    fun upload(frame: ImageBitmap): Boolean = synchronized(lock) {
+        if (closed || frame.width != width || frame.height != height) return@synchronized false
+        frame.readPixels(
+            buffer = pixels,
+            startX = 0,
+            startY = 0,
+            width = width,
+            height = height,
+            bufferOffset = 0,
+            stride = width,
+        )
+        WindowsD3D11VideoTextureApi.nativeUpload(handle, pixels)
+    }
+
+    override fun close() = synchronized(lock) {
+        if (closed) return@synchronized
+        closed = true
+        WindowsD3D11VideoTextureApi.nativeDestroy(handle)
+    }
+
+    companion object {
+        fun create(width: Int, height: Int): WindowsD3D11VideoTarget? {
+            if (width <= 0 || height <= 0) return null
+            val handle = WindowsD3D11VideoTextureApi.nativeCreate(width, height)
+            if (handle == 0L) return null
+            val sharedHandle = WindowsD3D11VideoTextureApi.nativeSharedHandle(handle)
+            if (sharedHandle == 0L) {
+                WindowsD3D11VideoTextureApi.nativeDestroy(handle)
+                return null
+            }
+            return WindowsD3D11VideoTarget(handle, sharedHandle, width, height)
+        }
+    }
+}
+
+private object WindowsD3D11VideoTextureApi {
+    @JvmStatic external fun nativeCreate(width: Int, height: Int): Long
+    @JvmStatic external fun nativeSharedHandle(target: Long): Long
+    @JvmStatic external fun nativeUpload(target: Long, pixels: IntArray): Boolean
+    @JvmStatic external fun nativeDestroy(target: Long)
 }
 
 private class NucleusOpenGlMpvVideoRenderer(
@@ -445,5 +605,8 @@ private class IoSurfaceVideoTarget(
         owner.release(handle)
     }
 }
+
+private fun isWindowsDesktop(): Boolean =
+    System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)
 
 private const val SNAPSHOT_RETIRE_DELAY_FRAMES = 2
