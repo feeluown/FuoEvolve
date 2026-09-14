@@ -1,12 +1,10 @@
 package org.feeluown.mobile.nucleus
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,7 +48,7 @@ import org.jetbrains.skia.SurfaceOrigin
  * Windows/Linux render libmpv directly into an FBO on Tao's ANGLE/EGL context and let the same
  * Skia DirectContext sample it. macOS renders libmpv into an IOSurface-backed CGL FBO which
  * Nucleus imports into its Metal scene through TextureView. Neither GPU path performs a CPU frame
- * readback; the software ImageBitmap path remains the last-resort fallback.
+ * readback, and GPU setup failures do not switch to software video.
  */
 internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
     @Composable
@@ -72,7 +70,7 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
                     .onFailure { throwable ->
                         AppLogger.w(
                             "DesktopVideo",
-                            "Tao OpenGL video setup failed; falling back to software: ${throwable.message}",
+                            "Tao OpenGL video setup failed; hardware video unavailable: ${throwable.message}",
                         )
                     }
             }
@@ -100,7 +98,7 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
                     .onFailure { throwable ->
                         AppLogger.w(
                             "DesktopVideo",
-                            "macOS IOSurface video setup failed; falling back to software: ${throwable.message}",
+                            "macOS IOSurface video setup failed; hardware video unavailable: ${throwable.message}",
                         )
                     }
             }
@@ -121,12 +119,7 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
             }
         }
 
-        NucleusSoftwareVideoContent(
-            controller = controller,
-            gpuController = openGlController,
-            contentDescription = payload?.video?.title,
-            modifier = modifier,
-        )
+        AppLogger.e("DesktopVideo", "no hardware video surface is available")
     }
 }
 
@@ -271,31 +264,6 @@ private fun NucleusIoSurfaceVideoContent(
     )
 }
 
-@Composable
-private fun NucleusSoftwareVideoContent(
-    controller: DesktopPlatformVideoController,
-    gpuController: DesktopOpenGlVideoController?,
-    contentDescription: String?,
-    modifier: Modifier,
-) {
-    DisposableEffect(controller, gpuController) {
-        runCatching { gpuController?.enableSoftwareRendering() }
-            .onFailure { throwable ->
-                AppLogger.e("DesktopVideo", "software video fallback setup failed", throwable)
-            }
-        onDispose { }
-    }
-    val frame by controller.frame.collectAsState()
-    frame?.let { bitmap ->
-        Image(
-            bitmap = bitmap,
-            contentDescription = contentDescription,
-            modifier = modifier.fillMaxSize(),
-            contentScale = ContentScale.Fit,
-        )
-    }
-}
-
 private class NucleusOpenGlMpvVideoRenderer(
     private val controller: DesktopOpenGlVideoController,
     private val renderContext: TaoOpenGlRenderContext,
@@ -338,7 +306,11 @@ private class NucleusOpenGlMpvVideoRenderer(
     }
 
     fun retire(image: SkiaImage) {
-        retired.addLast(image)
+        if (closed) {
+            image.close()
+        } else {
+            retired.addLast(image)
+        }
     }
 
     private fun ensureTarget(width: Int, height: Int) {

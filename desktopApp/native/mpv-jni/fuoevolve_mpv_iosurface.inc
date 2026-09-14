@@ -61,7 +61,9 @@ static int global_mac_gpu_api_loaded = 0;
 #define FUO_CF_NUMBER_SINT64_TYPE 4
 #define FUO_GL_TEXTURE_RECTANGLE 0x84F5u
 #define FUO_GL_TEXTURE_BINDING_RECTANGLE 0x84F6u
+#ifndef FUO_GL_RGBA8
 #define FUO_GL_RGBA8 0x8058u
+#endif
 #define FUO_GL_BGRA 0x80E1u
 #define FUO_GL_UNSIGNED_INT_8_8_8_8_REV 0x8367u
 #define FUO_PIXEL_FORMAT_BGRA 0x42475241u
@@ -527,7 +529,7 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderIoSurface(
         .fbo = (int)target->framebuffer,
         .w = target->width,
         .h = target->height,
-        .internal_format = 0,
+        .internal_format = (int)FUO_GL_RGBA8,
     };
     int flip_y = 1;
     mpv_render_param params[] = {

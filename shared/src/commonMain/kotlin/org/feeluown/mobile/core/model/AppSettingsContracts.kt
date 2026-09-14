@@ -59,6 +59,15 @@ enum class ThemeColorSpec(
 }
 
 @Serializable
+enum class DesktopVideoDecodeMode(
+    val label: String,
+    val description: String,
+) {
+    HardwareCompatible("兼容模式", "默认模式，优先保证画面正常"),
+    HardwareDirect("性能模式", "减少画面复制，部分设备可能不兼容"),
+}
+
+@Serializable
 data class AppSettings(
     val onboardingCompleted: Boolean = false,
     val homeSection: HomeSection = HomeSection.Recommend,
@@ -93,6 +102,7 @@ data class AppSettings(
     val lyricsAssociations: Map<String, String> = emptyMap(),
     val lyricsAlignmentOffsetsMs: Map<String, Long> = emptyMap(),
     val pauseOnOtherAppPlayback: Boolean = DEFAULT_PAUSE_ON_OTHER_APP_PLAYBACK,
+    val desktopVideoDecodeMode: DesktopVideoDecodeMode = DesktopVideoDecodeMode.HardwareCompatible,
     val lyricFontSize: LyricFontSize = LyricFontSize.Small,
     val statusBarLyricsEnabled: Boolean = false,
     val bydInstrumentLyricsEnabled: Boolean = false,

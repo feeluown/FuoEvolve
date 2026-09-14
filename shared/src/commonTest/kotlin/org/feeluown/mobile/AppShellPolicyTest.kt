@@ -7,8 +7,8 @@ import kotlin.test.assertTrue
 class AppShellPolicyTest {
     @Test
     fun homeNeedsCurrentTrackForMiniPlayer() {
-        assertTrue(AppRoute.Home.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false, isVideoFullscreen = false))
-        assertFalse(AppRoute.Home.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true, isVideoFullscreen = false))
+        assertTrue(AppRoute.Home.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false))
+        assertFalse(AppRoute.Home.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
     }
 
     @Test
@@ -24,18 +24,18 @@ class AppShellPolicyTest {
             )
         )
 
-        assertTrue(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true, isVideoFullscreen = false))
-        assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false, isVideoFullscreen = false))
+        assertTrue(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
+        assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false))
     }
 
     @Test
     fun playbackHistoryUsesQueueTrack() {
-        assertTrue(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true, isVideoFullscreen = false))
-        assertFalse(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false, isVideoFullscreen = false))
+        assertTrue(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
+        assertFalse(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false))
     }
 
     @Test
-    fun fullscreenVideoSuppressesMiniPlayer() {
+    fun videoDetailNeverShowsMiniPlayer() {
         val route = AppRoute.VideoDetail(
             NavigationVideo(
                 id = "bilibili:BV1",
@@ -46,8 +46,8 @@ class AppShellPolicyTest {
             )
         )
 
-        assertTrue(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true, isVideoFullscreen = false))
-        assertFalse(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true, isVideoFullscreen = true))
+        assertFalse(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
+        assertFalse(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = false))
     }
 
     @Test
@@ -59,7 +59,7 @@ class AppShellPolicyTest {
             AppRoute.DebugLogs,
             AppRoute.DownloadManager,
         ).forEach { route ->
-            assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = true, isVideoFullscreen = false))
+            assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = true))
         }
     }
 }

@@ -61,7 +61,6 @@ internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
 internal fun AppRoute.showsMiniPlayer(
     hasCurrentTrack: Boolean,
     hasQueueTrack: Boolean,
-    isVideoFullscreen: Boolean,
 ): Boolean = when (this) {
     AppRoute.Home -> hasCurrentTrack
     AppRoute.PlaybackHistory,
@@ -71,7 +70,7 @@ internal fun AppRoute.showsMiniPlayer(
     is AppRoute.PlaylistDetail,
     is AppRoute.TrackDetail,
     is AppRoute.MediaItemDetail -> hasQueueTrack
-    is AppRoute.VideoDetail -> hasQueueTrack && !isVideoFullscreen
+    is AppRoute.VideoDetail -> false
     AppRoute.Search,
     AppRoute.AudioRecognition,
     AppRoute.Settings,

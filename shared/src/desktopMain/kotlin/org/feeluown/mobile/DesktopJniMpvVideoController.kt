@@ -66,9 +66,12 @@ internal data class DesktopJniVideoSourceCandidate(
  *
  * A render context is intentionally created lazily. Windows/Linux attach libmpv to Tao's active
  * OpenGL/ANGLE context. macOS renders into IOSurface on a private CGL context and lets Tao/Metal
- * import the surface. Any failed GPU setup can explicitly enable the software fallback.
+ * import the surface. GPU setup failures are reported instead of silently switching to software
+ * video in the Native/Nucleus surface.
  */
-internal class DesktopJniMpvVideoController :
+internal class DesktopJniMpvVideoController(
+    private val videoDecodeMode: DesktopVideoDecodeMode,
+) :
     DesktopPlatformVideoController,
     DesktopOpenGlVideoController,
     DesktopIoSurfaceVideoController {
@@ -83,6 +86,7 @@ internal class DesktopJniMpvVideoController :
     private val retiredSoftwareFrames = ArrayDeque<DesktopSoftwareFrame>()
 
     private val handle: Long
+    private val nativeDestroyed = AtomicBoolean(false)
     private val eventThread: Thread
     private val renderThread: Thread
 
@@ -95,6 +99,7 @@ internal class DesktopJniMpvVideoController :
     @Volatile private var activePayload: VideoPlaybackPayload? = null
     @Volatile private var activeCandidates: List<DesktopJniVideoSourceCandidate> = emptyList()
     @Volatile private var activeCandidateIndex = -1
+    @Volatile private var hardwareDecoderRejected = false
     @Volatile private var activePlaylistEntryId: Long? = null
     @Volatile private var softwareRenderContext = 0L
     @Volatile private var openGlRenderContext = 0L
@@ -111,9 +116,13 @@ internal class DesktopJniMpvVideoController :
             setOption("input-default-bindings", "no")
             setOption("ytdl", "no")
             setOption("vo", "libmpv")
-            // Prefer the OS hardware decoder. libmpv automatically falls back to software when
-            // the codec, device, driver, or GPU interop path cannot satisfy the request.
-            setOption("hwdec", "auto")
+            // Both modes stay on hardware decoding. The compatibility mode copies frames back
+            // before the custom Tao FBO samples them; direct mode keeps GPU texture interop.
+            setOption("hwdec", desktopVideoHwdecOption(videoDecodeMode))
+            setOption("hwdec-software-fallback", "no")
+            desktopVideoHwdecInteropOption(videoDecodeMode)?.let { interop ->
+                setOption("gpu-hwdec-interop", interop)
+            }
             setOption("audio-display", "no")
             checkMpv(DesktopJniMpvVideoApi.nativeInitialize(handle), "mpv_initialize video")
         } catch (throwable: Throwable) {
@@ -149,6 +158,7 @@ internal class DesktopJniMpvVideoController :
             playbackActive = false
             playWhenReady = false
             command("stop")
+            closeSoftwareFrames()
             mutableState.value = PlatformVideoPlaybackState()
             return
         }
@@ -160,6 +170,7 @@ internal class DesktopJniMpvVideoController :
             activeCandidateIndex = -1
             playbackActive = false
             playWhenReady = false
+            closeSoftwareFrames()
             mutableState.value = PlatformVideoPlaybackState(errorMessage = "当前视频没有可播放地址")
             return
         }
@@ -167,6 +178,7 @@ internal class DesktopJniMpvVideoController :
         activePayload = payload
         activeCandidates = candidates
         activeCandidateIndex = 0
+        hardwareDecoderRejected = false
         mutableState.value = PlatformVideoPlaybackState()
         prepareCandidate(index = 0, positionMs = 0L, shouldPlay = true)
     }
@@ -230,10 +242,20 @@ internal class DesktopJniMpvVideoController :
             "another libmpv video renderer is already active"
         }
         if (openGlRenderContext != 0L) return@synchronized openGlRenderContext
-        val context = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderContext(handle)
+        val context = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderContext(
+            handle = handle,
+            directHardware = videoDecodeMode == DesktopVideoDecodeMode.HardwareDirect,
+        )
         check(context != 0L) { "libmpv OpenGL video render context creation failed" }
         openGlRenderContext = context
-        AppLogger.i("DesktopVideo", "attached libmpv OpenGL renderer with hwdec=auto")
+        val displayKind = DesktopJniMpvVideoApi.nativeOpenGlRenderContextDisplayKind(context)
+        AppLogger.i(
+            "DesktopVideo",
+            "attached libmpv OpenGL renderer with " +
+                "hwdec=${desktopVideoHwdecOption(videoDecodeMode)} " +
+                "interop=${desktopVideoHwdecInteropOption(videoDecodeMode) ?: "auto"} " +
+                "display=${desktopVideoNativeDisplayDescription(displayKind)}",
+        )
         context
     }
 
@@ -276,11 +298,12 @@ internal class DesktopJniMpvVideoController :
     override fun destroyOpenGlRenderContext(renderContext: Long) {
         if (renderContext == 0L) return
         synchronized(renderContextLock) {
-            if (openGlRenderContext != renderContext) return
-            DesktopJniMpvVideoApi.nativeFreeRenderContext(renderContext)
+            if (openGlRenderContext != renderContext) return@synchronized
+            DesktopJniMpvVideoApi.nativeFreeOpenGlRenderContext(renderContext)
             openGlRenderContext = 0L
             lastPipelineDescription = null
         }
+        destroyNativeHandleIfReady()
     }
 
     override fun createIoSurfaceRenderContext(): Long = synchronized(renderContextLock) {
@@ -292,7 +315,10 @@ internal class DesktopJniMpvVideoController :
         val context = DesktopJniMpvVideoApi.nativeCreateIoSurfaceRenderContext(handle)
         check(context != 0L) { "libmpv macOS IOSurface render context creation failed" }
         ioSurfaceRenderContext = context
-        AppLogger.i("DesktopVideo", "attached libmpv IOSurface renderer with hwdec=auto")
+        AppLogger.i(
+            "DesktopVideo",
+            "attached libmpv IOSurface renderer with hwdec=${desktopVideoHwdecOption(videoDecodeMode)}",
+        )
         context
     }
 
@@ -319,18 +345,21 @@ internal class DesktopJniMpvVideoController :
 
     override fun destroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long) {
         if (renderTarget == 0L) return
-        ensureIoSurfaceContext(renderContext)
-        DesktopJniMpvVideoApi.nativeDestroyIoSurfaceRenderTarget(renderContext, renderTarget)
+        synchronized(renderContextLock) {
+            if (ioSurfaceRenderContext != renderContext) return@synchronized
+            DesktopJniMpvVideoApi.nativeDestroyIoSurfaceRenderTarget(renderContext, renderTarget)
+        }
     }
 
     override fun destroyIoSurfaceRenderContext(renderContext: Long) {
         if (renderContext == 0L) return
         synchronized(renderContextLock) {
-            if (ioSurfaceRenderContext != renderContext) return
+            if (ioSurfaceRenderContext != renderContext) return@synchronized
             DesktopJniMpvVideoApi.nativeFreeIoSurfaceRenderContext(renderContext)
             ioSurfaceRenderContext = 0L
             lastPipelineDescription = null
         }
+        destroyNativeHandleIfReady()
     }
 
     override fun enableSoftwareRendering() {
@@ -340,18 +369,22 @@ internal class DesktopJniMpvVideoController :
             check(openGlRenderContext == 0L && ioSurfaceRenderContext == 0L) {
                 "GPU libmpv video renderer is already active"
             }
-            setProperty("hwdec", "no")
             val context = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
             check(context != 0L) { "libmpv software video render context creation failed" }
             softwareRenderContext = context
             softwareFrameDirty = true
-            AppLogger.w("DesktopVideo", "using software video rendering fallback with hwdec=no")
+            AppLogger.w("DesktopVideo", "using software video rendering fallback")
         }
     }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         playbackActive = false
+        playWhenReady = false
+        activePayload = null
+        activeCandidates = emptyList()
+        activeCandidateIndex = -1
+        activePlaylistEntryId = null
         DesktopJniMpvVideoApi.nativeWakeup(handle)
         if (Thread.currentThread() !== eventThread) runCatching { eventThread.join(2_000) }
         if (Thread.currentThread() !== renderThread) runCatching { renderThread.join(2_000) }
@@ -361,29 +394,19 @@ internal class DesktopJniMpvVideoController :
                 DesktopJniMpvVideoApi.nativeFreeRenderContext(context)
                 softwareRenderContext = 0L
             }
-            ioSurfaceRenderContext.takeIf { it != 0L }?.let { context ->
-                DesktopJniMpvVideoApi.nativeFreeIoSurfaceRenderContext(context)
-                ioSurfaceRenderContext = 0L
-            }
-            openGlRenderContext != 0L
+            openGlRenderContext != 0L || ioSurfaceRenderContext != 0L
         }
-        if (gpuContextStillAttached) {
-            // The normal Compose lifecycle disposes the host GPU surface first, while its GL
-            // context can still be made current. Do not attempt OpenGL teardown without that
-            // context here; leaking only on an abnormal disposal order is safer than a driver
-            // crash. The process will reclaim it on exit.
-            AppLogger.w(
-                "DesktopVideo",
-                "OpenGL video surface still attached during controller close; deferring native teardown",
-            )
-            mutableFrame.value = null
-            closeSoftwareFrames()
-            return
-        }
-
         mutableFrame.value = null
         closeSoftwareFrames()
-        DesktopJniMpvVideoApi.nativeDestroy(handle)
+        destroyNativeHandleIfReady()
+        if (gpuContextStillAttached) {
+            // The renderer may still need its host context to release FBO/IOSurface resources.
+            // The corresponding destroy*RenderContext callback finishes mpv teardown afterward.
+            AppLogger.w(
+                "DesktopVideo",
+                "GPU video surface still attached during controller close; deferring native teardown",
+            )
+        }
     }
 
     private fun eventLoop() {
@@ -417,6 +440,7 @@ internal class DesktopJniMpvVideoController :
                 softwareFrameDirty = true
             }
             event == "loaded" || event == "restart" -> {
+                if (!ensureHardwareDecoder()) return
                 playbackActive = true
                 reachedEof = false
                 softwareFrameDirty = true
@@ -439,6 +463,7 @@ internal class DesktopJniMpvVideoController :
             return
         }
         activePlaylistEntryId = null
+        if (hardwareDecoderRejected) return
 
         if (
             endEvent.reason == MPV_END_FILE_REASON_ERROR &&
@@ -487,6 +512,7 @@ internal class DesktopJniMpvVideoController :
     }
 
     private fun prepareCandidate(index: Int, positionMs: Long, shouldPlay: Boolean): Boolean {
+        if (hardwareDecoderRejected) return false
         val payload = activePayload ?: return false
         val candidate = activeCandidates.getOrNull(index) ?: return false
         if (candidate.mainUrl.isBlank()) return false
@@ -518,6 +544,7 @@ internal class DesktopJniMpvVideoController :
     }
 
     private fun publishPolledState() {
+        if (!ensureHardwareDecoder()) return
         val current = mutableState.value
         val duration = getProperty("duration").secondsToMsOrNull() ?: current.durationMs
         val buffered = getProperty("demuxer-cache-time").secondsToMsOrNull() ?: current.bufferedMs
@@ -542,11 +569,29 @@ internal class DesktopJniMpvVideoController :
         val hwdec = getProperty("hwdec-current")
             ?.takeIf { it.isNotBlank() && !it.equals("no", ignoreCase = true) }
             ?: "software"
+        val interop = getProperty("hwdec-interop")?.takeIf(String::isNotBlank) ?: "none"
         val codec = getProperty("video-codec")?.takeIf(String::isNotBlank) ?: "unknown"
-        val description = "decoder=$hwdec renderer=$renderer codec=$codec"
+        val description = "decoder=$hwdec interop=$interop renderer=$renderer codec=$codec"
         if (description == lastPipelineDescription) return
         lastPipelineDescription = description
         AppLogger.i("DesktopVideo", description)
+    }
+
+    private fun ensureHardwareDecoder(): Boolean {
+        if (hardwareDecoderRejected) return false
+        val decoder = getProperty("hwdec-current")?.trim().orEmpty()
+        if (decoder.isBlank() || !decoder.equals("no", ignoreCase = true)) return true
+
+        hardwareDecoderRejected = true
+        playbackActive = false
+        playWhenReady = false
+        runCatching { setProperty("pause", "yes") }
+        mutableState.value = mutableState.value.copy(
+            isPlaying = false,
+            errorMessage = "当前设备无法使用硬件解码",
+        )
+        AppLogger.e("DesktopVideo", "hardware decoder unavailable; software decoding disabled")
+        return false
     }
 
     private fun renderLoop() {
@@ -652,6 +697,22 @@ internal class DesktopJniMpvVideoController :
         ensureOpen()
         check(renderContext != 0L && renderContext == ioSurfaceRenderContext) {
             "IOSurface libmpv video render context is not active"
+        }
+    }
+
+    private fun destroyNativeHandleIfReady() {
+        synchronized(renderContextLock) {
+            if (!closed.get()) return
+            if (
+                softwareRenderContext != 0L ||
+                openGlRenderContext != 0L ||
+                ioSurfaceRenderContext != 0L
+            ) {
+                return
+            }
+            if (nativeDestroyed.compareAndSet(false, true)) {
+                DesktopJniMpvVideoApi.nativeDestroy(handle)
+            }
         }
     }
 
@@ -840,13 +901,15 @@ private object DesktopJniMpvVideoApi {
     external fun nativeDestroy(handle: Long)
     external fun nativeErrorString(error: Int): String?
     external fun nativeCreateSoftwareRenderContext(handle: Long): Long
-    external fun nativeCreateOpenGlRenderContext(handle: Long): Long
+    external fun nativeCreateOpenGlRenderContext(handle: Long, directHardware: Boolean): Long
+    external fun nativeOpenGlRenderContextDisplayKind(renderContext: Long): Int
     external fun nativeUpdateRenderContext(renderContext: Long): Long
     external fun nativeCreateOpenGlRenderTarget(width: Int, height: Int): Long
     external fun nativeOpenGlRenderTargetFramebuffer(renderTarget: Long): Int
     external fun nativeRenderOpenGl(renderContext: Long, renderTarget: Long)
     external fun nativeReportSwap(renderContext: Long)
     external fun nativeDestroyOpenGlRenderTarget(renderTarget: Long)
+    external fun nativeFreeOpenGlRenderContext(renderContext: Long)
     external fun nativeCreateIoSurfaceRenderContext(handle: Long): Long
     external fun nativeCreateIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long
     external fun nativeIoSurfaceRenderTargetPointer(renderTarget: Long): Long
@@ -898,6 +961,29 @@ private fun resolveDesktopJniMpvVideoBridge(): File? {
         add(File(userDir, "desktopNucleusPoc/build/native/mpv-jni/$libraryName"))
         add(File(userDir, "build/native/mpv-jni/$libraryName"))
     }.firstOrNull(File::isFile)
+}
+
+internal fun desktopVideoHwdecOption(mode: DesktopVideoDecodeMode): String = when (mode) {
+    DesktopVideoDecodeMode.HardwareCompatible -> "auto-copy"
+    DesktopVideoDecodeMode.HardwareDirect -> "auto"
+}
+
+internal fun desktopVideoHwdecInteropOption(
+    mode: DesktopVideoDecodeMode,
+    osName: String = System.getProperty("os.name").orEmpty(),
+): String? = when {
+    mode != DesktopVideoDecodeMode.HardwareDirect -> null
+    osName.contains("windows", ignoreCase = true) -> "d3d11-egl"
+    else -> null
+}
+
+internal fun desktopVideoNativeDisplayDescription(kind: Int): String {
+    val protocol = when (kind and 0x0F) {
+        1 -> "wayland"
+        2 -> "x11"
+        else -> "none"
+    }
+    return if (kind and 0x10 != 0) "$protocol-exact" else protocol
 }
 
 private const val EVENT_WAIT_SECONDS = 0.05

@@ -8,6 +8,30 @@ import kotlin.test.assertTrue
 
 class DesktopJniMpvVideoControllerTest {
     @Test
+    fun videoDecodeModesStayOnHardwarePaths() {
+        assertEquals("auto-copy", desktopVideoHwdecOption(DesktopVideoDecodeMode.HardwareCompatible))
+        assertEquals("auto", desktopVideoHwdecOption(DesktopVideoDecodeMode.HardwareDirect))
+    }
+
+    @Test
+    fun directModeUsesWindowsGpuInteropOnly() {
+        assertEquals(
+            null,
+            desktopVideoHwdecInteropOption(DesktopVideoDecodeMode.HardwareCompatible, "Windows 11"),
+        )
+        assertEquals(
+            "d3d11-egl",
+            desktopVideoHwdecInteropOption(DesktopVideoDecodeMode.HardwareDirect, "Windows 11"),
+        )
+        assertEquals(
+            null,
+            desktopVideoHwdecInteropOption(DesktopVideoDecodeMode.HardwareDirect, "Linux"),
+        )
+        assertEquals("wayland-exact", desktopVideoNativeDisplayDescription(0x11))
+        assertEquals("x11", desktopVideoNativeDisplayDescription(2))
+    }
+
+    @Test
     fun softwareRenderSizeCaps4kAt1080p() {
         assertEquals(1920 to 1080, boundedDesktopJniVideoRenderSize(3840, 2160))
         assertEquals(1280 to 720, boundedDesktopJniVideoRenderSize(1280, 720))

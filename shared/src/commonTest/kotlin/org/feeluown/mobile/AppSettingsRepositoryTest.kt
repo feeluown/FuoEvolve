@@ -124,6 +124,27 @@ class AppSettingsRepositoryTest {
     }
 
     @Test
+    fun desktopVideoDecodeModeDefaultsToCompatibilityAndRoundTrips() = runTest {
+        val store = FakeSettingsSnapshotStore()
+        val first = PersistentAppSettingsRepository(
+            store = store,
+            legacyLoader = null,
+            scope = backgroundScope,
+        )
+
+        assertEquals(DesktopVideoDecodeMode.HardwareCompatible, first.awaitSettings().desktopVideoDecodeMode)
+        first.update { it.copy(desktopVideoDecodeMode = DesktopVideoDecodeMode.HardwareDirect) }
+
+        val restored = PersistentAppSettingsRepository(
+            store = store,
+            legacyLoader = null,
+            scope = backgroundScope,
+        ).awaitSettings()
+
+        assertEquals(DesktopVideoDecodeMode.HardwareDirect, restored.desktopVideoDecodeMode)
+    }
+
+    @Test
     fun appUpdatePreferencesRoundTripAcrossSettingsStorage() = runTest {
         val store = FakeSettingsSnapshotStore()
         val first = PersistentAppSettingsRepository(

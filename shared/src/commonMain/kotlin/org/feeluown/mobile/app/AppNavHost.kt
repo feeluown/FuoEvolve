@@ -279,6 +279,7 @@ internal fun AppNavHost(
                                     onImportYtmusicHeaderFile = platform.onImportYtmusicHeaderFile,
                                     onImportYtmusicOAuthFile = platform.onImportYtmusicOAuthFile,
                                     onStartYtmusicOAuth = platform.onStartYtmusicOAuth,
+                                    desktopVideoSettingsAvailable = platform.desktopVideoSettingsAvailable,
                                 )
                                 AppRoute.DebugLogs -> DebugLogFeatureScreen(
                                     uiGraph.debugLogs,

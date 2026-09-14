@@ -48,6 +48,7 @@ interface SettingsFeatureController {
     fun setUnavailablePlaybackPolicy(value: UnavailablePlaybackPolicy)
     fun setSmartReplacementMinScore(value: Double)
     fun setPauseOnOtherAppPlayback(value: Boolean)
+    fun setDesktopVideoDecodeMode(value: DesktopVideoDecodeMode)
     fun setLyricFontSize(value: LyricFontSize)
     fun setDynamicCoverColorEnabled(value: Boolean)
     fun setDownloadParallelism(value: Int)
@@ -165,6 +166,9 @@ private class BoundSettingsFeatureController(
     override fun setUnavailablePlaybackPolicy(value: UnavailablePlaybackPolicy) = owner.setUnavailablePlaybackPolicy(value)
     override fun setSmartReplacementMinScore(value: Double) = owner.setSmartReplacementMinScore(value)
     override fun setPauseOnOtherAppPlayback(value: Boolean) = owner.setPauseOnOtherAppPlayback(value)
+    override fun setDesktopVideoDecodeMode(value: DesktopVideoDecodeMode) {
+        scope.launch { settingsRepository.update { settings -> settings.copy(desktopVideoDecodeMode = value) } }
+    }
     override fun setLyricFontSize(value: LyricFontSize) = owner.setLyricFontSize(value)
     override fun setDynamicCoverColorEnabled(value: Boolean) = owner.setDynamicCoverColorEnabled(value)
     override fun setDownloadParallelism(value: Int) = owner.setDownloadParallelism(value)

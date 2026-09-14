@@ -17,4 +17,5 @@ data class AppPlatformBindings(
     val appVersionInfo: String? = null,
     val hasImagePermission: Boolean = true,
     val onRequestImagePermission: () -> Unit = {},
+    val desktopVideoSettingsAvailable: Boolean = false,
 )

@@ -61,7 +61,6 @@ internal fun AppShell(
             activeRoute?.showsMiniPlayer(
                 hasCurrentTrack = playback.currentTrack != null,
                 hasQueueTrack = playback.queue.currentQueueTrack != null,
-                isVideoFullscreen = videoDetailState.isFullscreen,
             ) == true
         val showShellNavigationRail = layoutInfo.usePersistentNavigation &&
             !playback.isFullPlayerOpen &&

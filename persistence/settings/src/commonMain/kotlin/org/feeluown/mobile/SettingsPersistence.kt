@@ -73,6 +73,7 @@ data class PersistedSettingsV1(
     val lyricsAssociations: Map<String, String>? = null,
     val lyricsAlignmentOffsetsMs: Map<String, Long>? = null,
     val pauseOnOtherAppPlayback: Boolean? = null,
+    val desktopVideoDecodeMode: String? = null,
     val lyricFontSize: String? = null,
     val statusBarLyricsEnabled: Boolean? = null,
     val bydInstrumentLyricsEnabled: Boolean? = null,

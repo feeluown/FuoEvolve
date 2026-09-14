@@ -147,6 +147,7 @@ fun SettingsFeatureScreen(
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportYtmusicOAuthFile: (() -> Unit)? = null,
     onStartYtmusicOAuth: (() -> Unit)? = null,
+    desktopVideoSettingsAvailable: Boolean = false,
 ) {
     val settingsState by settingsController.uiState.collectAsStateWithLifecycle()
     val catalogState by providerCatalog.uiState.collectAsStateWithLifecycle()
@@ -198,6 +199,7 @@ fun SettingsFeatureScreen(
                         onBack = settingsController::close,
                         settingsController = settingsController,
                         providerCatalog = providerCatalog,
+                        desktopVideoSettingsAvailable = desktopVideoSettingsAvailable,
                     )
                     is FeatureSettingsRoute.Category -> SettingsCategoryPage(
                         category = route.category,
@@ -210,6 +212,7 @@ fun SettingsFeatureScreen(
                         onOpenProvider = { push(FeatureSettingsRoute.Provider(it.providerId)) },
                         onOpenCredentialBackup = { push(FeatureSettingsRoute.CredentialBackup) },
                         onBack = ::pop,
+                        desktopVideoSettingsAvailable = desktopVideoSettingsAvailable,
                     )
                     FeatureSettingsRoute.Theme -> SettingsScaffold(
                         title = "主题设置",
@@ -293,6 +296,7 @@ private fun SettingsMainPage(
     onBack: () -> Unit,
     settingsController: SettingsFeatureController,
     providerCatalog: ProviderCatalogFeatureController,
+    desktopVideoSettingsAvailable: Boolean,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -343,6 +347,7 @@ private fun SettingsMainPage(
                             onOpenTheme = onOpenTheme,
                             onOpenProvider = onOpenProvider,
                             onOpenCredentialBackup = onOpenCredentialBackup,
+                            desktopVideoSettingsAvailable = desktopVideoSettingsAvailable,
                         )
                     }
                 }
@@ -372,6 +377,7 @@ private fun SettingsCategoryPage(
     onOpenProvider: (ProviderInfo) -> Unit,
     onOpenCredentialBackup: () -> Unit,
     onBack: () -> Unit,
+    desktopVideoSettingsAvailable: Boolean,
 ) {
     SettingsScaffold(
         title = category.title,
@@ -389,6 +395,7 @@ private fun SettingsCategoryPage(
             onOpenTheme = onOpenTheme,
             onOpenProvider = onOpenProvider,
             onOpenCredentialBackup = onOpenCredentialBackup,
+            desktopVideoSettingsAvailable = desktopVideoSettingsAvailable,
             modifier = bodyModifier,
         )
     }
@@ -510,6 +517,7 @@ private fun SettingsCategoryDetail(
     onOpenTheme: () -> Unit,
     onOpenProvider: (ProviderInfo) -> Unit,
     onOpenCredentialBackup: () -> Unit,
+    desktopVideoSettingsAvailable: Boolean,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     SettingsDetailColumn(modifier = modifier) {
@@ -535,6 +543,7 @@ private fun SettingsCategoryDetail(
                 catalog = catalog,
                 settingsController = settingsController,
                 providerCatalog = providerCatalog,
+                desktopVideoSettingsAvailable = desktopVideoSettingsAvailable,
             )
             FeatureSettingsCategory.Appearance -> AppearanceFeatureSettings(
                 state = settings,
@@ -845,6 +854,7 @@ private fun PlaybackFeatureSettings(
     catalog: ProviderCatalogUiState,
     settingsController: SettingsFeatureController,
     providerCatalog: ProviderCatalogFeatureController,
+    desktopVideoSettingsAvailable: Boolean,
 ) {
     val settings = state.settings
     val busy = state.isBusy || catalog.isLoading
@@ -896,6 +906,21 @@ private fun PlaybackFeatureSettings(
                     ) { Text(policy.label) }
                 }
             }
+        }
+    }
+
+    if (desktopVideoSettingsAvailable) {
+        SettingsGroup(title = "视频播放") {
+            SettingsChoiceRow(
+                title = "播放模式",
+                supportingText = "${settings.desktopVideoDecodeMode.description}；重新打开视频后生效",
+                value = settings.desktopVideoDecodeMode.label,
+                options = DesktopVideoDecodeMode.entries,
+                selected = settings.desktopVideoDecodeMode,
+                optionLabel = DesktopVideoDecodeMode::label,
+                enabled = !busy,
+                onSelect = settingsController::setDesktopVideoDecodeMode,
+            )
         }
     }
 

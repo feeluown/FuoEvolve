@@ -112,9 +112,6 @@ fun ProviderVideoDetailRoute(video: ProviderVideo) {
                 )
             }
         },
-        bottomBar = {
-            if (!state.isFullscreen && graph.playbackQueue.currentQueueTrack != null) PlaybackMiniPlayer()
-        },
     ) { paddingValues ->
         val screenModifier = if (state.isFullscreen) {
             Modifier.fillMaxSize().background(Color.Black)

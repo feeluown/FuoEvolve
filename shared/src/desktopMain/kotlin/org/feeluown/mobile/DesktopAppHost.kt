@@ -19,6 +19,7 @@ fun DesktopAppHost(
     windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
 ) {
     val container = remember { DesktopAppContainer() }
+    installDesktopJniMpvVideoControllerFactory(container::desktopVideoDecodeMode)
     DisposableEffect(container) {
         onDispose(container::close)
     }
@@ -48,6 +49,7 @@ fun DesktopAppHost(
                 onLogoutProvider = container::logoutProvider,
                 onImportLocalPlaylistFile = container::importLocalPlaylistFile,
                 onExportLocalPlaylistFile = container::exportLocalPlaylistFile,
+                desktopVideoSettingsAvailable = true,
                 appVersionInfo = desktopAppVersionInfo(),
             ),
         )
@@ -498,6 +500,9 @@ private class DesktopAppContainer {
     fun logoutProvider(provider: ProviderInfo) {
         providerAuthFeatureController.logout(provider.providerId)
     }
+
+    fun desktopVideoDecodeMode(): DesktopVideoDecodeMode =
+        settingsRepository.state.value.settings.desktopVideoDecodeMode
 
     fun openExternalInput(input: String) {
         if (input == DESKTOP_ACTIVATION_FOCUS) return
