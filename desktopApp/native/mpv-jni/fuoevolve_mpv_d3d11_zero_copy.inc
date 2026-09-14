@@ -158,6 +158,14 @@ static int fuo_ensure_windows_egl(fuo_gl_render_context *renderer) {
     return 1;
 }
 
+static jboolean fuo_throw_d3d11_render_failure(JNIEnv *env, const char *message) {
+    jclass exception_class = (*env)->FindClass(env, "java/lang/IllegalStateException");
+    if (exception_class != NULL) {
+        (*env)->ThrowNew(env, exception_class, message);
+    }
+    return JNI_FALSE;
+}
+
 static void fuo_destroy_windows_mpv_shared_target(fuo_windows_mpv_shared_target *target) {
     if (target == NULL) return;
     if (
@@ -333,7 +341,6 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderD3D11(
     jlong render_context_value,
     jlong target_value
 ) {
-    (void)env;
     (void)self;
     fuo_gl_render_context *renderer = gl_render_context_from_jlong(render_context_value);
     fuo_windows_mpv_shared_target *target =
@@ -345,7 +352,7 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderD3D11(
         target->pbuffer == NULL ||
         !fuo_ensure_windows_egl(renderer)
     ) {
-        return JNI_FALSE;
+        return fuo_throw_d3d11_render_failure(env, "Windows D3D11 libmpv render target is unavailable");
     }
 
     fuo_egl_display current_display = fuo_windows_egl.get_current_display();
@@ -358,7 +365,7 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderD3D11(
         host_draw == NULL ||
         host_read == NULL
     ) {
-        return JNI_FALSE;
+        return fuo_throw_d3d11_render_failure(env, "Windows D3D11 libmpv EGL binding no longer matches the render target");
     }
 
     if (
@@ -369,7 +376,7 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderD3D11(
             target->context
         )
     ) {
-        return JNI_FALSE;
+        return fuo_throw_d3d11_render_failure(env, "Windows D3D11 libmpv EGL pbuffer could not be made current");
     }
 
     mpv_opengl_fbo fbo = {
@@ -393,7 +400,10 @@ Java_org_feeluown_mobile_DesktopJniMpvVideoApi_nativeRenderD3D11(
         host_read,
         current_context
     );
-    return restored ? JNI_TRUE : JNI_FALSE;
+    if (!restored) {
+        return fuo_throw_d3d11_render_failure(env, "Windows D3D11 libmpv EGL host binding could not be restored");
+    }
+    return JNI_TRUE;
 }
 
 JNIEXPORT void JNICALL
