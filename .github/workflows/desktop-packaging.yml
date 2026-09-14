@@ -53,9 +53,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/web-login/target
+            desktopApp/native/audio-fingerprint/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-windows-x64-rust-1.98.1-${{ hashFiles('desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-windows-x64-rust-1.98.1-
 
@@ -166,9 +166,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/web-login/target
+            desktopApp/native/audio-fingerprint/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-macos-${{ matrix.arch }}-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-macos-${{ matrix.arch }}-rust-1.98.1-${{ hashFiles('desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-macos-${{ matrix.arch }}-rust-1.98.1-
 
@@ -222,7 +222,7 @@ jobs:
           JNI="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_mpv_jni.dylib' -print -quit)"
           MPV="$(find desktopApp/build/compose/binaries -type f -name 'libmpv.dylib' -print -quit)"
           AUDIO="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_audio_capture.dylib' -print -quit)"
-          HELPER="$(find desktopApp/build/compose/binaries -type f -name 'fuoevolve-web-login' -print -quit)"
+          HELPER="$(find desktopApp/build/compose/binaries -type f -name 'fuoevolve-audio-fingerprint' -print -quit)"
           PLIST="$(find desktopApp/build/compose/binaries -type f -path '*.app/Contents/Info.plist' -print -quit)"
           test -n "$JNI" && test -n "$MPV" && test -n "$AUDIO" && test -n "$HELPER" && test -n "$PLIST"
           test "$(plutil -extract CFBundleIdentifier raw -o - "$PLIST")" = "org.feeluown.mobile.desktop"
@@ -309,9 +309,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktopApp/native/web-login/target
+            desktopApp/native/audio-fingerprint/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-${{ hashFiles('desktopApp/native/web-login/Cargo.toml', 'desktopApp/native/web-login/Cargo.lock', 'desktopApp/native/web-login/src/**', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-${{ hashFiles('desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
             nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-
             nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
@@ -367,7 +367,7 @@ jobs:
             find "$ROOT" -type f -name libfuoevolve_mpv_jni.so -print -quit | grep -q .
             find "$ROOT" -type f -name libfuoevolve_audio_capture.so -print -quit | grep -q .
             find "$ROOT" -type f -name 'libmpv.so*' -print -quit | grep -q .
-            find "$ROOT" -type f -name fuoevolve-web-login -print -quit | grep -q .
+            find "$ROOT" -type f -name fuoevolve-audio-fingerprint -print -quit | grep -q .
             find "$ROOT" -type f -name WebKitNetworkProcess -print -quit | grep -q .
             find "$ROOT" -type f -name libgiognutls.so -print -quit | grep -q .
             test -x "$ROOT/AppRun"
@@ -432,7 +432,7 @@ jobs:
           done
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
-          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep 'fuoevolve-web-login' >/dev/null
+          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep 'fuoevolve-audio-fingerprint' >/dev/null
           if dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
             echo "DEB unexpectedly bundles portable Linux runtime libraries" >&2
             exit 1
@@ -457,7 +457,7 @@ jobs:
           done
           rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
           rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
-          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep 'fuoevolve-web-login' >/dev/null
+          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep 'fuoevolve-audio-fingerprint' >/dev/null
           if rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
             echo "RPM unexpectedly bundles portable Linux runtime libraries" >&2
             exit 1
@@ -472,7 +472,7 @@ jobs:
           grep -Eq '^depend = libpulse($|[<>=])' build/arch-pkginfo.txt
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_mpv_jni\.(so|dll|dylib)$' >/dev/null
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
-          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep 'fuoevolve-web-login' >/dev/null
+          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep 'fuoevolve-audio-fingerprint' >/dev/null
           if bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
             echo "Arch package unexpectedly bundles portable Linux runtime libraries" >&2
             exit 1
