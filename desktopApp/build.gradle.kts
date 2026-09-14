@@ -121,6 +121,7 @@ val packageResourceOs = when {
 val webLoginExecutableName = if (isWindowsHost) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
 val webLoginProjectDir = layout.projectDirectory.dir("native/web-login")
 val webLoginExecutable = webLoginProjectDir.file("target/release/$webLoginExecutableName")
+val desktopAppImageLauncher = layout.projectDirectory.file("packaging/linux/AppRun")
 val audioCaptureLibraryName = when {
     isWindowsHost -> "fuoevolve_audio_capture.dll"
     isMacHost -> "libfuoevolve_audio_capture.dylib"
@@ -339,6 +340,10 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         from(portableLinuxRuntime) {
             into(stagedNativeResourceRoot)
         }
+        from(desktopAppImageLauncher) {
+            into(packageResourceOs)
+            filePermissions { unix("755") }
+        }
     }
 
     into(nucleusAppResources)
@@ -353,6 +358,12 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
         }
         if (!isWindowsHost && !stagedHelper.canExecute()) {
             throw GradleException("Nucleus web login helper is not executable: ${stagedHelper.absolutePath}")
+        }
+        if (isLinuxHost && bundleLinuxRuntime.get()) {
+            val stagedAppImageLauncher = nucleusAppResources.get().asFile.resolve("$packageResourceOs/AppRun")
+            if (!stagedAppImageLauncher.isFile || !stagedAppImageLauncher.canExecute()) {
+                throw GradleException("Nucleus AppImage launcher was not staged: ${stagedAppImageLauncher.absolutePath}")
+            }
         }
         if (!stagedMpvBridge.isFile) {
             throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")

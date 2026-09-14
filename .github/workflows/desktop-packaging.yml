@@ -361,6 +361,16 @@ jobs:
             find "$ROOT" -type f -name fuoevolve-web-login -print -quit | grep -q .
             find "$ROOT" -type f -name WebKitNetworkProcess -print -quit | grep -q .
             find "$ROOT" -type f -name libgiognutls.so -print -quit | grep -q .
+            test -x "$ROOT/AppRun"
+            test -d "$ROOT/native/webview/lib"
+            test -x "$ROOT/native/webview/webkit2gtk-4.1/WebKitNetworkProcess"
+            test -f "$ROOT/native/webview/webkit2gtk-4.1/injected-bundle/libwebkit2gtkinjectedbundle.so"
+            test -f "$ROOT/native/webview/gio/modules/libgiognutls.so"
+            grep -Fq 'native/webview/lib' "$ROOT/AppRun"
+            grep -Fq 'WEBKIT_EXEC_PATH' "$ROOT/AppRun"
+            grep -Fq 'WEBKIT_INJECTED_BUNDLE_PATH' "$ROOT/AppRun"
+            grep -Fq 'GIO_EXTRA_MODULES' "$ROOT/AppRun"
+            grep -Fq 'exec "$APPDIR/fuoevolve" "$@"' "$ROOT/AppRun"
           )
 
           du -h build/artifacts/FuoEvolve-linux-x64.AppImage

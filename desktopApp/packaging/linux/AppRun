@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export APPDIR="${APPDIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
+
+webview_lib_dir="$APPDIR/native/webview/lib"
+webkit_runtime_dir="$APPDIR/native/webview/webkit2gtk-4.1"
+gio_module_dir="$APPDIR/native/webview/gio/modules"
+
+if [[ -d "$webview_lib_dir" ]]; then
+  export LD_LIBRARY_PATH="$webview_lib_dir:$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+if [[ -d "$webkit_runtime_dir" ]]; then
+  export WEBKIT_EXEC_PATH="$webkit_runtime_dir"
+  export WEBKIT_INJECTED_BUNDLE_PATH="$webkit_runtime_dir/injected-bundle"
+fi
+if [[ -d "$gio_module_dir" ]]; then
+  export GIO_EXTRA_MODULES="$gio_module_dir"
+fi
+
+exec "$APPDIR/fuoevolve" "$@"
