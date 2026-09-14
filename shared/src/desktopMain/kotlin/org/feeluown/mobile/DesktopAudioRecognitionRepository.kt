@@ -74,11 +74,13 @@ private class DesktopAudioFingerprintRuntime : AudioFingerprintRuntime {
     private val activeProcess = AtomicReference<Process?>()
 
     override suspend fun generate(samples: FloatArray): String = withContext(Dispatchers.IO) {
-        val helper = resolveDesktopWebViewHelper()
+        val runtime = resolveDesktopAudioFingerprintRuntime()
             ?: throw IllegalStateException("桌面音频指纹组件未找到，请重新安装应用")
-        val processBuilder = ProcessBuilder(helper.absolutePath)
-        configureDesktopWebLoginProcessEnvironment(processBuilder.environment())
-        val process = processBuilder.start()
+        val process = ProcessBuilder(
+            runtime.executable.absolutePath,
+            "--wasm",
+            runtime.wasm.absolutePath,
+        ).start()
         check(activeProcess.compareAndSet(null, process)) {
             process.destroyForcibly()
             "音频指纹任务已经在进行中"
@@ -88,7 +90,7 @@ private class DesktopAudioFingerprintRuntime : AudioFingerprintRuntime {
                 val diagnosticsDeferred = async(Dispatchers.IO) {
                     runCatching {
                         process.errorStream.bufferedReader(Charsets.UTF_8)
-                            .use(::readDesktopWebViewHelperDiagnosticTail)
+                            .use(::readDesktopAudioFingerprintDiagnosticTail)
                     }.getOrDefault("")
                 }
                 try {
