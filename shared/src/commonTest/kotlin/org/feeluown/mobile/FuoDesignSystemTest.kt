@@ -103,6 +103,12 @@ class FuoDesignSystemTest {
     }
 
     @Test
+    fun adaptiveDetailPaneOwnsBackNavigation() {
+        assertTrue(shouldShowDetailBackNavigation(isAdaptiveDetailPane = false))
+        assertFalse(shouldShowDetailBackNavigation(isAdaptiveDetailPane = true))
+    }
+
+    @Test
     fun themeModeResolutionHonorsExplicitModesAndSystemMode() {
         assertFalse(resolvedDarkTheme(ThemeMode.System, systemDark = false))
         assertTrue(resolvedDarkTheme(ThemeMode.System, systemDark = true))
