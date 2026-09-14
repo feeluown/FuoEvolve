@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -19,6 +20,9 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
+
+//go:embed afp.wasm
+var afpWasm []byte
 
 const expectedSelfTestFingerprint = "Oxx8fV/EFTodkOd6OGfINlloG4c6o/Pl/brdhHqA/CD/u/mJHB/w7MHuD7isMM5qQHPDgkTSuB5ibZmJuLbl5UIpsOf/RwaY3JYBIH/WviQGnAEo3+0WfrOAtljkY4X9T95hnU5gv/fVE4Tsx9Kybjv1wORt1HIG3X0NzvS8PPfj3/RylFOTa2ADTOAkuA5nNOJZaHjd36dExYZy5Uuo8QvyJhbycR/XgOqEjQuegHA23iIeZgjsKt82VjlCJSB5uwaJ6ukC//LFmAGBEqw/n2n7gLLeUa0USNEFGQVBccw="
 
@@ -75,20 +79,14 @@ type fingerprintResponse struct {
 type fingerprintRuntime struct {
 	ctx    context.Context
 	engine embind.Engine
-	module api.Module
 	rt     wazero.Runtime
 }
 
 func main() {
-	wasmPath := flag.String("wasm", "", "path to afp.wasm")
 	selfTest := flag.Bool("self-test", false, "verify the fixed fingerprint vector")
 	flag.Parse()
 
-	if *wasmPath == "" {
-		fail(errors.New("--wasm is required"))
-	}
-
-	runtime, err := newFingerprintRuntime(*wasmPath)
+	runtime, err := newFingerprintRuntime()
 	if err != nil {
 		fail(err)
 	}
@@ -112,7 +110,7 @@ func main() {
 		fail(fmt.Errorf("invalid samplesBase64: %w", err))
 	}
 	if len(samples) == 0 || len(samples)%4 != 0 {
-		fail(fmt.Errorf("audio samples must contain non-empty Float32 bytes"))
+		fail(errors.New("audio samples must contain non-empty Float32 bytes"))
 	}
 
 	fingerprint, err := runtime.generate(samples)
@@ -143,12 +141,8 @@ func fail(err error) {
 	os.Exit(1)
 }
 
-func newFingerprintRuntime(path string) (*fingerprintRuntime, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read afp.wasm: %w", err)
-	}
-	normalized, moduleDefinition, err := normalizeAfpModule(raw)
+func newFingerprintRuntime() (*fingerprintRuntime, error) {
+	normalized, moduleDefinition, err := normalizeAfpModule(afpWasm)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +191,7 @@ func newFingerprintRuntime(path string) (*fingerprintRuntime, error) {
 		return nil, fmt.Errorf("unable to initialize audio fingerprint wasm: %w", err)
 	}
 
-	return &fingerprintRuntime{ctx: ctx, engine: engine, module: module, rt: rt}, nil
+	return &fingerprintRuntime{ctx: ctx, engine: engine, rt: rt}, nil
 }
 
 func (r *fingerprintRuntime) close() {
@@ -205,9 +199,9 @@ func (r *fingerprintRuntime) close() {
 }
 
 func (r *fingerprintRuntime) generate(floatBytes []byte) (string, error) {
-	// The original browser wrapper passes Float32Array.buffer to an Embind
-	// std::string conversion. A Go string preserves the same raw bytes, including
-	// embedded NULs, so no JavaScript or browser runtime is needed here.
+	// The browser wrapper passed Float32Array.buffer to an Embind std::string conversion.
+	// A Go string preserves the same raw bytes, including embedded NULs, so the WASM can
+	// be invoked directly without JavaScript or a WebView.
 	result, err := r.engine.CallPublicSymbol(r.ctx, "ExtractQueryFP", string(floatBytes))
 	if err != nil {
 		return "", fmt.Errorf("ExtractQueryFP failed: %w", err)
@@ -229,6 +223,7 @@ func (r *fingerprintRuntime) generate(floatBytes []byte) (string, error) {
 	if size <= 64 {
 		return "", fmt.Errorf("fingerprint output is unexpectedly short: %d bytes", size)
 	}
+
 	fingerprint := make([]byte, size)
 	for index := uint32(0); index < size; index++ {
 		value, err := vector.CallInstanceMethod(r.ctx, vector, "get", index)
@@ -338,10 +333,6 @@ func convertValueTypes(types []wabinwasm.ValueType) ([]api.ValueType, error) {
 			result[index] = api.ValueTypeF32
 		case wabinwasm.ValueTypeF64:
 			result[index] = api.ValueTypeF64
-		case wabinwasm.ValueTypeExternref:
-			result[index] = api.ValueTypeExternref
-		case wabinwasm.ValueTypeFuncref:
-			result[index] = api.ValueTypeFuncref
 		default:
 			return nil, fmt.Errorf("value type 0x%x", byte(valueType))
 		}
@@ -422,16 +413,9 @@ func hostEnvironSizesGet(_ context.Context, mod api.Module, stack []uint64) {
 }
 
 func hostFdWrite(_ context.Context, mod api.Module, stack []uint64) {
-	fd := uint32(stack[0])
 	iovs := uint32(stack[1])
 	iovsLen := uint32(stack[2])
 	writtenPointer := uint32(stack[3])
-	var writer io.Writer = io.Discard
-	if fd == 1 {
-		writer = os.Stdout
-	} else if fd == 2 {
-		writer = os.Stderr
-	}
 	var total uint32
 	for index := uint32(0); index < iovsLen; index++ {
 		entry := iovs + index*8
@@ -444,7 +428,7 @@ func hostFdWrite(_ context.Context, mod api.Module, stack []uint64) {
 		if !ok {
 			panic("fd_write data is outside wasm memory")
 		}
-		_, _ = writer.Write(data)
+		_, _ = os.Stderr.Write(data)
 		total += length
 	}
 	if !mod.Memory().WriteUint32Le(writtenPointer, total) {
@@ -456,8 +440,8 @@ func hostFdWrite(_ context.Context, mod api.Module, stack []uint64) {
 func hostSetTempRet0(_ context.Context, _ api.Module, _ []uint64) {}
 
 func hostStrftime(_ context.Context, _ api.Module, stack []uint64) {
-	// Fingerprint generation never needs locale-aware time formatting. Keep the
-	// Emscripten compatibility import deterministic if dead code reaches it.
+	// Fingerprint generation never uses locale-aware time formatting. Keep the
+	// Emscripten compatibility import deterministic if unreachable code calls it.
 	stack[0] = 0
 }
 
