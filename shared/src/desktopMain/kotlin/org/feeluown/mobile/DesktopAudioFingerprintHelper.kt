@@ -3,8 +3,10 @@ package org.feeluown.mobile
 import java.io.File
 import java.io.Reader
 
-internal fun resolveDesktopWebViewHelper(): File? {
-    val executableName = desktopWebViewHelperExecutableName()
+internal fun resolveDesktopAudioFingerprintHelper(): File? {
+    // Keep the legacy executable/resource name for package compatibility. The binary is now a
+    // headless Rust/Wasmi fingerprint runtime; it no longer contains a WebView or login implementation.
+    val executableName = desktopAudioFingerprintExecutableName()
     val appDir = System.getProperty("fuoevolve.appdir")
         ?.takeIf { it.isNotBlank() && !it.contains("\$APPDIR") }
         ?.let(::File)
@@ -15,8 +17,6 @@ internal fun resolveDesktopWebViewHelper(): File? {
 
     val directCandidates = buildList {
         if (composeResourcesDir != null) {
-            // Nucleus exposes prepared appResources through this standard Compose property for
-            // both JVM distributables and GraalVM packaged native applications.
             add(File(composeResourcesDir, "native/helpers/$executableName"))
         }
         if (appDir != null) {
@@ -25,7 +25,7 @@ internal fun resolveDesktopWebViewHelper(): File? {
         add(File(userDir, "desktopApp/native/web-login/target/release/$executableName"))
         add(File(userDir, "native/web-login/target/release/$executableName"))
     }
-    directCandidates.firstOrNull(::isUsableDesktopWebViewHelper)?.let { return it }
+    directCandidates.firstOrNull(::isUsableDesktopExecutable)?.let { return it }
 
     return sequenceOf(composeResourcesDir, appDir)
         .filterNotNull()
@@ -34,13 +34,13 @@ internal fun resolveDesktopWebViewHelper(): File? {
             root.walkTopDown()
                 .maxDepth(6)
                 .filter { candidate ->
-                    candidate.name == executableName && isUsableDesktopWebViewHelper(candidate)
+                    candidate.name == executableName && isUsableDesktopExecutable(candidate)
                 }
         }
         .firstOrNull()
 }
 
-internal fun readDesktopWebViewHelperDiagnosticTail(reader: Reader): String {
+internal fun readDesktopAudioFingerprintDiagnosticTail(reader: Reader): String {
     val tail = StringBuilder()
     val buffer = CharArray(DIAGNOSTIC_BUFFER_CHARS)
     while (true) {
@@ -54,10 +54,10 @@ internal fun readDesktopWebViewHelperDiagnosticTail(reader: Reader): String {
     return tail.toString()
 }
 
-private fun desktopWebViewHelperExecutableName(): String =
+private fun desktopAudioFingerprintExecutableName(): String =
     if (isDesktopWindows()) "fuoevolve-web-login.exe" else "fuoevolve-web-login"
 
-private fun isUsableDesktopWebViewHelper(candidate: File): Boolean =
+private fun isUsableDesktopExecutable(candidate: File): Boolean =
     candidate.isFile && (isDesktopWindows() || candidate.canExecute())
 
 internal fun isDesktopWindows(): Boolean =

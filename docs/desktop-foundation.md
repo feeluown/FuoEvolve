@@ -28,8 +28,8 @@ The production host uses Nucleus/Tao and GraalVM Native Image while reusing the 
 - Linux exposes MPRIS through Nucleus and uses native Tao Wayland windowing when running in a Wayland session.
 - ComposeNativeTray provides close-to-tray behavior. Linux probes for a usable StatusNotifier watcher and keeps the main window recoverable when tray support is unavailable.
 - Provider cookies, authorization headers, and OAuth credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service/Libsecret.
-- Provider web login uses the Nucleus Tao WebView; the packaged Rust system-WebView helper remains for the hidden audio-fingerprint runtime. Linux uses WebKitGTK without requiring an embedded Chromium/XWayland browser.
-- Desktop audio recognition uses a native CPAL/JNI capture library. Linux prefers PipeWire and falls back to PulseAudio monitor capture.
+- Provider web login uses the Nucleus Tao WebView. Linux uses WebKitGTK without requiring an embedded Chromium/XWayland browser.
+- Desktop audio recognition uses a native CPAL/JNI capture library. Linux prefers PipeWire and falls back to PulseAudio monitor capture. Fingerprinting runs in a headless Rust helper that embeds `afp.wasm` and executes it through Wasmi with the required legacy Embind ABI, so recognition does not depend on JavaScript, WebKit, or WebView.
 - FileKit provides native Open/Save dialogs.
 - Nucleus provides single-instance activation, `fuo://` protocol handling, `.fuo` file association, native notifications, and platform clipboard/window integration.
 
@@ -60,7 +60,8 @@ Desktop CI runs on Linux, Windows, and macOS and validates:
 - shared desktop and `desktopRuntime` tests;
 - `desktopApp` tests and Kotlin compilation;
 - JNI libmpv bridge compilation;
-- native audio-capture and WebView helper builds;
+- native audio-capture and headless audio-fingerprint helper builds;
+- fixed-vector fingerprint compatibility through the helper self-test;
 - packaged native-resource staging;
 - platform-specific libmpv runtime preparation.
 
@@ -68,7 +69,7 @@ The reusable packaging workflow additionally verifies NSIS/DMG/AppImage/DEB/RPM/
 
 ## Linux Wayland requirement
 
-Linux production packages must use native Wayland windowing when launched in a Wayland session and must not require XWayland for the main application window. Tao/Nucleus is the desktop window backend; WebKitGTK is embedded by the provider-login WebView, while the hidden audio-fingerprint path remains isolated in its helper.
+Linux production packages must use native Wayland windowing when launched in a Wayland session and must not require XWayland for the main application window. Tao/Nucleus is the desktop window backend; WebKitGTK is used only by the provider-login WebView. Audio fingerprinting is headless and does not participate in the windowing stack.
 
 The packaged Linux user-space closure keeps graphics-driver-facing libraries host-managed while bundling the runtime dependencies required by FuoEvolve helpers and playback integration.
 

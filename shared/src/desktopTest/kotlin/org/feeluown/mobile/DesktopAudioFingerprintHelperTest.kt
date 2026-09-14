@@ -7,7 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
-class DesktopWebViewHelperTest {
+class DesktopAudioFingerprintHelperTest {
     @Test
     fun resolvesHelperFromComposeApplicationResourcesDirectory() {
         val resourcesDir = Files.createTempDirectory("fuoevolve-compose-resources-")
@@ -23,7 +23,7 @@ class DesktopWebViewHelperTest {
         val previous = System.getProperty(propertyName)
         try {
             System.setProperty(propertyName, resourcesDir.toString())
-            val resolved = assertNotNull(resolveDesktopWebViewHelper())
+            val resolved = assertNotNull(resolveDesktopAudioFingerprintHelper())
             assertEquals(helper.toRealPath(), resolved.toPath().toRealPath())
         } finally {
             if (previous == null) {
