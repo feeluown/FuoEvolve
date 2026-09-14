@@ -52,6 +52,23 @@ jobs:
           restore-keys: |
             nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
 
+      - name: Validate Rust audio fingerprint helper
+        run: |
+          cargo build --release --manifest-path desktopApp/native/web-login/Cargo.toml
+          python3 - <<'PY' | desktopApp/native/web-login/target/release/fuoevolve-web-login
+          import base64
+          import json
+          import math
+          import struct
+
+          samples = b''.join(
+              struct.pack('<f', 0.5 * math.sin(2 * math.pi * 440 * index / 8000))
+              for index in range(48000)
+          )
+          print(json.dumps({'samplesBase64': base64.b64encode(samples).decode()}))
+          PY
+          desktopApp/native/web-login/target/release/fuoevolve-web-login --self-test
+
       - name: Install Linux native dependencies
         run: |
           sudo apt-get update
