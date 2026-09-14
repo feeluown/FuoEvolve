@@ -130,3 +130,14 @@ subprojects {
             }
     }
 }
+
+// The JNI translation unit includes platform helpers directly, so Gradle must track the includes
+// as task inputs as well as the top-level .c source to avoid reusing a stale native bridge.
+project(":desktopApp") {
+    val mpvJniIncludes = fileTree("native/mpv-jni") {
+        include("*.inc")
+    }
+    tasks.matching { it.name == "buildNucleusMpvJniBridge" }.configureEach {
+        inputs.files(mpvJniIncludes)
+    }
+}
