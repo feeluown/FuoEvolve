@@ -34,6 +34,7 @@ import org.feeluown.mobile.DesktopIoSurfaceVideoController
 import org.feeluown.mobile.DesktopOpenGlVideoController
 import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
+import org.feeluown.mobile.DesktopWindowsD3D11VideoController
 import org.feeluown.mobile.VideoPlaybackPayload
 import org.jetbrains.skia.BackendRenderTarget
 import org.jetbrains.skia.ColorSpace
@@ -48,10 +49,10 @@ import org.jetbrains.skia.SurfaceOrigin
 /**
  * Native/Nucleus video presentation surface.
  *
- * Windows keeps libmpv's software render loop off the Tao event thread and uploads those CPU
- * frames into a producer-owned D3D11 shared texture. Nucleus imports that texture through
- * TextureView, so window move/resize no longer executes libmpv rendering on the ANGLE context.
- * Linux keeps the direct Tao OpenGL path. macOS keeps the IOSurface/TextureView path.
+ * Windows renders libmpv directly into an ANGLE-owned D3D11 shared texture and lets TextureView
+ * sample the same resource without CPU readback/upload. The previous software-frame upload path is
+ * retained as a setup/runtime fallback. Linux keeps the direct Tao OpenGL path. macOS keeps the
+ * IOSurface/TextureView path.
  */
 internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
     @Composable
@@ -61,24 +62,59 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
         modifier: Modifier,
     ) {
         val openGlController = controller as? DesktopOpenGlVideoController
+        val windowsD3D11Controller = controller as? DesktopWindowsD3D11VideoController
+        val ioSurfaceController = controller as? DesktopIoSurfaceVideoController
+        val taoContext = rememberTaoGpuRenderContext()
+        val openGlContext = taoContext as? TaoOpenGlRenderContext
+        val metalContext = taoContext as? TaoMetalRenderContext
+
         if (isWindowsDesktop() && openGlController != null) {
+            var directDisabled by remember(controller, taoContext) { mutableStateOf(false) }
+            if (windowsD3D11Controller != null && openGlContext != null && !directDisabled) {
+                val rendererResult = remember(windowsD3D11Controller, openGlContext) {
+                    runCatching {
+                        NucleusWindowsD3D11MpvVideoRenderer(windowsD3D11Controller, openGlContext)
+                    }.onFailure { throwable ->
+                        AppLogger.w(
+                            "DesktopVideo",
+                            "Windows direct D3D11 video setup failed; using CPU fallback: ${throwable.message}",
+                        )
+                    }
+                }
+                val renderer = rendererResult.getOrNull()
+                if (renderer != null) {
+                    DisposableEffect(renderer) {
+                        onDispose(renderer::close)
+                    }
+                    NucleusWindowsD3D11VideoContent(
+                        renderer = renderer,
+                        modifier = modifier,
+                        onFailure = { throwable ->
+                            AppLogger.e(
+                                "DesktopVideo",
+                                "Windows direct D3D11 video rendering failed; using CPU fallback",
+                                throwable,
+                            )
+                            renderer.close()
+                            directDisabled = true
+                        },
+                    )
+                    return
+                }
+            }
+
             NucleusWindowsTextureVideoContent(
                 controller = controller,
                 softwareController = openGlController,
                 modifier = modifier,
                 onFailure = { throwable ->
-                    AppLogger.e("DesktopVideo", "Windows TextureView video rendering failed", throwable)
+                    AppLogger.e("DesktopVideo", "Windows TextureView fallback failed", throwable)
                 },
             )
             return
         }
 
-        val ioSurfaceController = controller as? DesktopIoSurfaceVideoController
-        val taoContext = rememberTaoGpuRenderContext()
-        val openGlContext = taoContext as? TaoOpenGlRenderContext
-        val metalContext = taoContext as? TaoMetalRenderContext
         var gpuDisabled by remember(controller, taoContext) { mutableStateOf(false) }
-
         if (openGlController != null && openGlContext != null && !gpuDisabled) {
             val rendererResult = remember(openGlController, openGlContext) {
                 runCatching { NucleusOpenGlMpvVideoRenderer(openGlController, openGlContext) }
@@ -136,6 +172,81 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
 
         AppLogger.e("DesktopVideo", "no hardware video surface is available")
     }
+}
+
+@Composable
+private fun NucleusWindowsD3D11VideoContent(
+    renderer: NucleusWindowsD3D11MpvVideoRenderer,
+    modifier: Modifier,
+    onFailure: (Throwable) -> Unit,
+) {
+    val textureController = rememberTextureViewController()
+    var width by remember(renderer) { mutableStateOf(0) }
+    var height by remember(renderer) { mutableStateOf(0) }
+    var target by remember(renderer) { mutableStateOf<WindowsD3D11MpvRenderTarget?>(null) }
+
+    LaunchedEffect(renderer, width, height) {
+        if (width <= 0 || height <= 0) return@LaunchedEffect
+        try {
+            val next = renderer.createTarget(width = width, height = height)
+            val previous = target
+            target = next
+            textureController.markFrameAvailable()
+            if (previous != null) {
+                // Let Compose publish/import the new shared handle before destroying the old one.
+                withFrameNanos { }
+                previous.close()
+            }
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            onFailure(throwable)
+        }
+    }
+
+    val activeTarget = target
+    LaunchedEffect(renderer, activeTarget, textureController) {
+        val renderTarget = activeTarget ?: return@LaunchedEffect
+        try {
+            while (isActive) {
+                withFrameNanos { }
+                if (renderer.render(renderTarget)) {
+                    textureController.markFrameAvailable()
+                }
+            }
+        } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
+            onFailure(throwable)
+        }
+    }
+
+    DisposableEffect(renderer) {
+        onDispose {
+            target?.close()
+            target = null
+        }
+    }
+
+    val source = remember(activeTarget) {
+        activeTarget?.let { renderTarget ->
+            nucleusD3D11SharedTextureSource(
+                sharedHandle = renderTarget.sharedHandle,
+                widthPx = renderTarget.width,
+                heightPx = renderTarget.height,
+            )
+        }
+    }
+    TextureView(
+        source = source,
+        controller = textureController,
+        modifier = modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                width = size.width
+                height = size.height
+            },
+        contentScale = ContentScale.Fit,
+        filterQuality = FilterQuality.Low,
+    )
 }
 
 @Composable
@@ -422,6 +533,108 @@ private object WindowsD3D11VideoTextureApi {
     @JvmStatic external fun nativeSharedHandle(target: Long): Long
     @JvmStatic external fun nativeUpload(target: Long, pixels: IntArray): Boolean
     @JvmStatic external fun nativeDestroy(target: Long)
+}
+
+private class NucleusWindowsD3D11MpvVideoRenderer(
+    private val controller: DesktopWindowsD3D11VideoController,
+    private val renderContext: TaoOpenGlRenderContext,
+) : AutoCloseable {
+    private val lock = Any()
+    private val mpvRenderContext: Long = renderContext.withContextCurrent {
+        controller.createOpenGlRenderContext()
+    } ?: error("Tao OpenGL context is not available")
+    private val targets = mutableSetOf<Long>()
+    private var closed = false
+
+    fun createTarget(width: Int, height: Int): WindowsD3D11MpvRenderTarget {
+        check(width > 0 && height > 0)
+        return renderContext.withContextCurrent {
+            synchronized(lock) {
+                check(!closed) { "Windows D3D11 video renderer is closed" }
+                val handle = controller.createD3D11RenderTarget(mpvRenderContext, width, height)
+                try {
+                    val sharedHandle = controller.d3D11RenderTargetSharedHandle(handle)
+                    targets += handle
+                    WindowsD3D11MpvRenderTarget(
+                        owner = this,
+                        handle = handle,
+                        sharedHandle = sharedHandle,
+                        width = width,
+                        height = height,
+                    ).also {
+                        AppLogger.i(
+                            "DesktopVideo",
+                            "zero-copy D3D11 video target ${width}x$height attached to TextureView",
+                        )
+                    }
+                } catch (throwable: Throwable) {
+                    controller.destroyD3D11RenderTarget(handle)
+                    throw throwable
+                }
+            }
+        } ?: error("Tao OpenGL context is not available")
+    }
+
+    fun render(target: WindowsD3D11MpvRenderTarget): Boolean {
+        return renderContext.withContextCurrent {
+            synchronized(lock) {
+                if (closed || target.handle !in targets) return@synchronized false
+                val shouldRender = target.needsInitialFrame ||
+                    controller.updateOpenGlRenderContext(mpvRenderContext)
+                if (!shouldRender) return@synchronized false
+
+                renderContext.skiaContext.resetGLAll()
+                val rendered = controller.renderD3D11(mpvRenderContext, target.handle)
+                renderContext.skiaContext.resetGLAll()
+                if (rendered) {
+                    controller.reportOpenGlSwap(mpvRenderContext)
+                    target.needsInitialFrame = false
+                }
+                rendered
+            }
+        } ?: false
+    }
+
+    fun release(handle: Long) {
+        renderContext.withContextCurrent {
+            synchronized(lock) {
+                if (handle !in targets) return@synchronized
+                targets.remove(handle)
+                if (!closed) controller.destroyD3D11RenderTarget(handle)
+            }
+        }
+    }
+
+    override fun close() {
+        synchronized(lock) {
+            if (closed) return
+            closed = true
+        }
+        renderContext.withContextCurrent {
+            synchronized(lock) {
+                targets.toList().forEach(controller::destroyD3D11RenderTarget)
+                targets.clear()
+                controller.destroyOpenGlRenderContext(mpvRenderContext)
+            }
+        }
+    }
+}
+
+private class WindowsD3D11MpvRenderTarget(
+    private val owner: NucleusWindowsD3D11MpvVideoRenderer,
+    val handle: Long,
+    val sharedHandle: Long,
+    val width: Int,
+    val height: Int,
+) : AutoCloseable {
+    var needsInitialFrame: Boolean = true
+    private var closed = false
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        owner.release(handle)
+    }
 }
 
 private class NucleusOpenGlMpvVideoRenderer(
