@@ -2,25 +2,95 @@ name: PR Tests
 
 "on":
   pull_request:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number whose head branch should be tested
+        required: true
+        type: string
+      package:
+        description: Build installable artifacts after tests pass
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  context:
+    name: Resolve PR
+    runs-on: ubuntu-24.04
+    outputs:
+      pr-number: ${{ steps.resolve.outputs.pr-number }}
+      internal: ${{ steps.resolve.outputs.internal }}
+      package: ${{ steps.resolve.outputs.package }}
+
+    steps:
+      - name: Resolve PR head
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+          DISPATCH_PACKAGE: ${{ inputs.package }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "pr-number=$EVENT_PR_NUMBER" >> "$GITHUB_OUTPUT"
+            if [[ "$EVENT_HEAD_REPO" == "$GITHUB_REPOSITORY" ]]; then
+              echo "internal=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "internal=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "package=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pr="$DISPATCH_PR_NUMBER"
+          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq '.head.sha')"
+          head_repo="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq '.head.repo.full_name')"
+          head_ref="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq '.head.ref')"
+
+          if [[ "$head_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::PR #$pr currently points to $head_ref ($head_sha), but this run uses $GITHUB_REF_NAME ($GITHUB_SHA). Run PR Tests manually from the PR head branch."
+            exit 1
+          fi
+
+          if [[ "$head_repo" == "$GITHUB_REPOSITORY" ]]; then
+            internal=true
+          else
+            internal=false
+          fi
+          if [[ "$DISPATCH_PACKAGE" == "true" && "$internal" != "true" ]]; then
+            echo "::error::Packaging is only allowed for PRs whose head branch belongs to $GITHUB_REPOSITORY."
+            exit 1
+          fi
+
+          echo "pr-number=$pr" >> "$GITHUB_OUTPUT"
+          echo "internal=$internal" >> "$GITHUB_OUTPUT"
+          echo "package=$DISPATCH_PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "Resolved PR #$pr to $head_ref ($head_sha)"
+
   android:
     name: Android
+    needs: context
     uses: ./.github/workflows/android-tests.yml
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   android-package:
     name: Android signed release APK
-    needs: android
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: [context, android]
+    if: >-
+      needs.context.outputs.internal == 'true' &&
+      (github.event_name == 'pull_request' || needs.context.outputs.package == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -80,14 +150,14 @@ jobs:
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
-          artifact_path="build/artifacts/fuo-evolve-pr-${{ github.event.pull_request.number }}-release-signed-${GITHUB_SHA}.apk"
+          artifact_path="build/artifacts/fuo-evolve-pr-${{ needs.context.outputs.pr-number }}-release-signed-${GITHUB_SHA}.apk"
           cp "${apks[0]}" "$artifact_path"
           echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed PR release APK
         uses: actions/upload-artifact@v7
         with:
-          name: fuo-evolve-pr-${{ github.event.pull_request.number }}-release-signed-${{ github.sha }}.apk
+          name: fuo-evolve-pr-${{ needs.context.outputs.pr-number }}-release-signed-${{ github.sha }}.apk
           path: ${{ steps.artifact.outputs.path }}
           archive: false
           if-no-files-found: error
@@ -95,8 +165,16 @@ jobs:
 
   desktop:
     name: Desktop
+    needs: context
     uses: ./.github/workflows/desktop-tests.yml
 
   ios:
     name: iOS
+    needs: context
     uses: ./.github/workflows/ios-tests.yml
+
+  desktop-package:
+    name: Desktop packages
+    needs: [context, desktop]
+    if: github.event_name == 'workflow_dispatch' && needs.context.outputs.package == 'true'
+    uses: ./.github/workflows/desktop-packaging.yml
