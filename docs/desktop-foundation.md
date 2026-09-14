@@ -29,7 +29,7 @@ The production host uses Nucleus/Tao and GraalVM Native Image while reusing the 
 - ComposeNativeTray provides close-to-tray behavior. Linux probes for a usable StatusNotifier watcher and keeps the main window recoverable when tray support is unavailable.
 - Provider cookies, authorization headers, and OAuth credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service/Libsecret.
 - Provider web login uses the Nucleus Tao WebView. Linux uses WebKitGTK without requiring an embedded Chromium/XWayland browser.
-- Desktop audio recognition uses a native CPAL/JNI capture library. Linux prefers PipeWire and falls back to PulseAudio monitor capture. Fingerprinting runs in a headless Go helper that embeds `afp.wasm` and executes it through Wazero/Embind, so recognition does not depend on WebKit/WebView.
+- Desktop audio recognition uses a native CPAL/JNI capture library. Linux prefers PipeWire and falls back to PulseAudio monitor capture. Fingerprinting runs in a headless Rust helper that embeds `afp.wasm` and executes it through Wasmi with the required legacy Embind ABI, so recognition does not depend on JavaScript, WebKit, or WebView.
 - FileKit provides native Open/Save dialogs.
 - Nucleus provides single-instance activation, `fuo://` protocol handling, `.fuo` file association, native notifications, and platform clipboard/window integration.
 
