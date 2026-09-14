@@ -136,6 +136,16 @@ internal fun AppRoute.supportsAdaptiveDetailPane(): Boolean = when (this) {
     else -> false
 }
 
+internal fun hasAdaptiveListDetailPair(
+    layoutInfo: AppLayoutInfo,
+    backStack: List<AppRoute>,
+): Boolean {
+    val activeRoute = backStack.lastOrNull()
+    return layoutInfo.useListDetailNavigation &&
+        activeRoute?.supportsAdaptiveDetailPane() == true &&
+        backStack.dropLast(1).any { it.supportsAdaptiveListPane() }
+}
+
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 private fun AppRoute.adaptivePaneMetadata(
     activeRoute: AppRoute?,
@@ -159,9 +169,7 @@ internal fun AppNavHost(
     val localPlaylistState by uiGraph.localPlaylist.uiState.collectAsStateWithLifecycle()
     val activeRoute = backStack.lastOrNull()
     val rootLayoutInfo = LocalAppLayoutInfo.current
-    val adaptivePairActive = rootLayoutInfo.useListDetailNavigation &&
-        activeRoute?.supportsAdaptiveDetailPane() == true &&
-        backStack.dropLast(1).any { it.supportsAdaptiveListPane() }
+    val adaptivePairActive = hasAdaptiveListDetailPair(rootLayoutInfo, backStack)
     val predictiveBackPreference = rememberPredictiveBackPreference()
     val density = LocalDensity.current
     val pageSpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
