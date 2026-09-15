@@ -66,6 +66,7 @@ import org.feeluown.mobile.PlayerStatus
 import org.feeluown.mobile.TrackSourceType
 import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.desktop.DesktopMpvPlaybackEngine
+import org.feeluown.mobile.desktop.createCheckedDesktopFfmMpvNativeApi
 import org.feeluown.mobile.desktop.createDesktopNativeTextFileDialogProvider
 import org.feeluown.mobile.desktop.createDesktopRuntimeListeningHistorySink
 import org.feeluown.mobile.desktop.createDesktopRuntimeLocalMusicRepository
@@ -90,6 +91,7 @@ private const val LINUX_TRAY_PROBE_TIMEOUT_SECONDS = 1L
 fun main(args: Array<String>) {
     configurePackagedNativeRuntime()
     installDesktopAppLogger()
+    val mpvNativeApi = createCheckedDesktopFfmMpvNativeApi()
 
     val activation = NucleusExternalActivation.open(args) ?: return
     val trayPlaybackController = NucleusTrayPlaybackController()
@@ -104,7 +106,7 @@ fun main(args: Array<String>) {
     }
     installDesktopPlaybackEngineFactory {
         createPersistentDesktopPlaybackEngine(
-            delegate = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener) },
+            delegate = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener, mpvNativeApi) },
             resumeStore = createDesktopPlaybackResumeStore(),
         )
     }
@@ -286,7 +288,7 @@ fun main(args: Array<String>) {
                     check(playbackSmokeFile.isFile) {
                         "Native playback smoke file does not exist: ${playbackSmokeFile.absolutePath}"
                     }
-                    val engine = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener) }
+                    val engine = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener, mpvNativeApi) }
                     try {
                         val track = MusicTrack(
                             id = "nucleus-native-playback-smoke",
@@ -335,6 +337,7 @@ fun main(args: Array<String>) {
                 nucleusOpenGlRenderContextParameters()
             }
             DesktopAppHost(
+                nativeMpvApi = mpvNativeApi,
                 externalInputs = appExternalInputs,
                 openGlRenderContextParameters = openGlRenderContextParameters,
                 windowContentWrapper = { content ->
