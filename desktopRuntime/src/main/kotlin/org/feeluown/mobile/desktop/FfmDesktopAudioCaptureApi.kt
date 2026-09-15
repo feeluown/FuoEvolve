@@ -2,11 +2,9 @@ package org.feeluown.mobile.desktop
 
 import java.io.File
 import java.lang.foreign.Arena
-import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.SymbolLookup
-import java.lang.foreign.ValueLayout
 import java.lang.invoke.MethodHandle
 import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopAudioCaptureApi
@@ -80,43 +78,20 @@ private object FfmDesktopAudioCaptureApi : DesktopAudioCaptureApi {
             val linker = Linker.nativeLinker()
             val lookup = SymbolLookup.loaderLookup()
 
-            fun bind(name: String, descriptor: FunctionDescriptor): MethodHandle {
-                val symbol = lookup.find(name).orElseThrow {
-                    UnsatisfiedLinkError("Missing FFM symbol $name in the system audio capture library")
+            fun bind(downcall: DesktopFfmDowncall): MethodHandle {
+                val symbol = lookup.find(downcall.symbol).orElseThrow {
+                    UnsatisfiedLinkError(
+                        "Missing FFM symbol ${downcall.symbol} in the system audio capture library",
+                    )
                 }
-                return linker.downcallHandle(symbol, descriptor)
+                return linker.downcallHandle(symbol, downcall.descriptor)
             }
 
-            openHandle = bind(
-                "fuo_audio_capture_open",
-                FunctionDescriptor.of(ValueLayout.JAVA_LONG),
-            )
-            readHandle = bind(
-                "fuo_audio_capture_read",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                ),
-            )
-            cancelHandle = bind(
-                "fuo_audio_capture_cancel",
-                FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-            )
-            closeHandle = bind(
-                "fuo_audio_capture_close",
-                FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-            )
-            lastErrorHandle = bind(
-                "fuo_audio_capture_last_error",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                ),
-            )
+            openHandle = bind(DesktopAudioCaptureFfmDowncalls.open)
+            readHandle = bind(DesktopAudioCaptureFfmDowncalls.read)
+            cancelHandle = bind(DesktopAudioCaptureFfmDowncalls.cancel)
+            closeHandle = bind(DesktopAudioCaptureFfmDowncalls.close)
+            lastErrorHandle = bind(DesktopAudioCaptureFfmDowncalls.lastError)
             AppLogger.i(LOG_TAG, "loaded FFM system audio capture library ${library.absolutePath}")
         }
     }
