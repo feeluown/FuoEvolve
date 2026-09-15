@@ -34,6 +34,9 @@
         <meta-data android:name="lyricon_module_author" android:value="FeelUOwn" />
         <meta-data android:name="lyricon_module_description" android:value="FuoEvolve 状态栏歌词" />
         <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
+        <meta-data
+            android:name="io.github.andrealtb.lockscreenlyrics.OPLUS_MEDIA_HISTORY"
+            android:value="true" />
         <activity
             android:name=".MainActivity"
             android:configChanges="uiMode|orientation|screenSize"
