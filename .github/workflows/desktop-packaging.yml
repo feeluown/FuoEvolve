@@ -39,7 +39,7 @@ jobs:
       - name: Set up Nucleus GraalVM toolchain
         uses: ./.github/actions/setup-nucleus
         with:
-          java-version: "17"
+          java-version: "25"
           graalvm: "true"
           packaging-tools: "false"
           setup-node: "true"
@@ -152,7 +152,7 @@ jobs:
       - name: Set up Nucleus GraalVM toolchain
         uses: ./.github/actions/setup-nucleus
         with:
-          java-version: "17"
+          java-version: "25"
           graalvm: "true"
           packaging-tools: "false"
           setup-node: "true"
@@ -295,7 +295,7 @@ jobs:
       - name: Set up Nucleus GraalVM toolchain
         uses: ./.github/actions/setup-nucleus
         with:
-          java-version: "17"
+          java-version: "25"
           graalvm: "true"
           packaging-tools: "true"
           setup-node: "true"
@@ -357,7 +357,6 @@ jobs:
             printf '%s\n' "${appimages[@]}" >&2
             exit 1
           fi
-
           mkdir -p build/artifacts build/appimage-verify
           cp "${appimages[0]}" build/artifacts/FuoEvolve-linux-x64.AppImage
           chmod +x build/artifacts/FuoEvolve-linux-x64.AppImage
