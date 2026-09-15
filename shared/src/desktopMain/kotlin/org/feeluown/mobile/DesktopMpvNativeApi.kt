@@ -1,10 +1,12 @@
 package org.feeluown.mobile
 
+import java.util.ServiceLoader
+
 /**
  * Low-level libmpv/native rendering boundary for the desktop host.
  *
  * The shared desktop code stays on the JVM 17 bytecode baseline; the concrete implementation is
- * installed by the JDK 25 desktop runtime and uses the Foreign Function & Memory API.
+ * supplied by the JDK 25 desktop runtime and uses the Foreign Function & Memory API.
  */
 interface DesktopMpvNativeApi {
     fun create(): Long
@@ -67,6 +69,13 @@ fun installDesktopMpvNativeApi(api: DesktopMpvNativeApi) {
     installedDesktopMpvNativeApi = api
 }
 
-fun desktopMpvNativeApi(): DesktopMpvNativeApi =
-    installedDesktopMpvNativeApi
-        ?: error("Desktop libmpv native API has not been installed by the desktop host")
+fun desktopMpvNativeApi(): DesktopMpvNativeApi {
+    installedDesktopMpvNativeApi?.let { return it }
+    return synchronized(DesktopMpvNativeApi::class.java) {
+        installedDesktopMpvNativeApi?.let { return@synchronized it }
+        ServiceLoader.load(DesktopMpvNativeApi::class.java)
+            .firstOrNull()
+            ?.also { installedDesktopMpvNativeApi = it }
+            ?: error("Desktop libmpv native API provider was not found on the desktop runtime classpath")
+    }
+}
