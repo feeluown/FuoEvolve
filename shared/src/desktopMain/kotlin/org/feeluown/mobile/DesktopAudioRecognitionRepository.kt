@@ -33,6 +33,7 @@ internal class DesktopAudioRecognitionCaptureDevice(
     private val nativeApi: DesktopAudioCaptureApi,
 ) : AudioRecognitionCaptureDevice {
     private val activeHandle = AtomicLong(0L)
+    private val handleLifecycleLock = Any()
 
     override suspend fun capture(onSamples: (FloatArray) -> Unit) = withContext(Dispatchers.IO) {
         val handle = nativeApi.open()
@@ -62,13 +63,17 @@ internal class DesktopAudioRecognitionCaptureDevice(
                 }
             }
         } finally {
-            activeHandle.compareAndSet(handle, 0L)
-            nativeApi.close(handle)
+            synchronized(handleLifecycleLock) {
+                activeHandle.compareAndSet(handle, 0L)
+                nativeApi.close(handle)
+            }
         }
     }
 
     override fun cancel() {
-        activeHandle.get().takeIf { it != 0L }?.let(nativeApi::cancel)
+        synchronized(handleLifecycleLock) {
+            activeHandle.get().takeIf { it != 0L }?.let(nativeApi::cancel)
+        }
     }
 }
 
