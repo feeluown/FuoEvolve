@@ -40,7 +40,7 @@ jobs:
       - name: Set up Nucleus toolchain
         uses: ./.github/actions/setup-nucleus
         with:
-          java-version: "17"
+          java-version: "25"
           packaging-tools: "false"
           setup-node: "false"
 
@@ -138,7 +138,7 @@ jobs:
       - name: Set up Nucleus toolchain
         uses: ./.github/actions/setup-nucleus
         with:
-          java-version: "17"
+          java-version: "25"
           packaging-tools: "false"
           setup-node: "false"
 
@@ -215,7 +215,7 @@ jobs:
       - name: Set up Nucleus toolchain
         uses: ./.github/actions/setup-nucleus
         with:
-          java-version: "17"
+          java-version: "25"
           packaging-tools: "false"
           setup-node: "false"
 
