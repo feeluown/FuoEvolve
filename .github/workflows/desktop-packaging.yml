@@ -219,16 +219,16 @@ jobs:
 
       - name: Verify macOS package closure
         run: |
-          JNI="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_mpv_jni.dylib' -print -quit)"
+          BRIDGE="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_mpv_bridge.dylib' -print -quit)"
           MPV="$(find desktopApp/build/compose/binaries -type f -name 'libmpv.dylib' -print -quit)"
           AUDIO="$(find desktopApp/build/compose/binaries -type f -name 'libfuoevolve_audio_capture.dylib' -print -quit)"
           HELPER="$(find desktopApp/build/compose/binaries -type f -name 'fuoevolve-audio-fingerprint' -print -quit)"
           PLIST="$(find desktopApp/build/compose/binaries -type f -path '*.app/Contents/Info.plist' -print -quit)"
-          test -n "$JNI" && test -n "$MPV" && test -n "$AUDIO" && test -n "$HELPER" && test -n "$PLIST"
+          test -n "$BRIDGE" && test -n "$MPV" && test -n "$AUDIO" && test -n "$HELPER" && test -n "$PLIST"
           test "$(plutil -extract CFBundleIdentifier raw -o - "$PLIST")" = "org.feeluown.mobile.desktop"
           test "$(plutil -extract NSMicrophoneUsageDescription raw -o - "$PLIST")" = "FuoEvolve 使用麦克风进行听歌识曲。"
           test "$(plutil -extract NSAudioCaptureUsageDescription raw -o - "$PLIST")" = "FuoEvolve 使用系统音频进行听歌识曲。"
-          if otool -L "$JNI" "$MPV" "$AUDIO" | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
+          if otool -L "$BRIDGE" "$MPV" "$AUDIO" | grep -E '/(opt/homebrew|usr/local)/(Cellar|opt)/'; then
             echo "Nucleus macOS package still references Homebrew" >&2
             exit 1
           fi
@@ -365,7 +365,7 @@ jobs:
             cd build/appimage-verify
             ../artifacts/FuoEvolve-linux-x64.AppImage --appimage-extract >/dev/null
             ROOT=squashfs-root
-            find "$ROOT" -type f -name libfuoevolve_mpv_jni.so -print -quit | grep -q .
+            find "$ROOT" -type f -name libfuoevolve_mpv_bridge.so -print -quit | grep -q .
             find "$ROOT" -type f -name libfuoevolve_audio_capture.so -print -quit | grep -q .
             find "$ROOT" -type f -name 'libmpv.so*' -print -quit | grep -q .
             find "$ROOT" -type f -name fuoevolve-audio-fingerprint -print -quit | grep -q .
@@ -443,7 +443,7 @@ jobs:
               exit 1
             }
           done
-          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
+          dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_mpv_bridge\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep 'fuoevolve-audio-fingerprint' >/dev/null
           if dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
@@ -468,7 +468,7 @@ jobs:
               exit 1
             }
           done
-          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_mpv_jni\.so$' >/dev/null
+          rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_mpv_bridge\.so$' >/dev/null
           rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
           rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep 'fuoevolve-audio-fingerprint' >/dev/null
           if rpm -qpl build/artifacts/FuoEvolve-linux-x64.rpm | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
@@ -483,7 +483,7 @@ jobs:
           grep -Eq '^depend = alsa-lib($|[<>=])' build/arch-pkginfo.txt
           grep -Eq '^depend = pipewire($|[<>=])' build/arch-pkginfo.txt
           grep -Eq '^depend = libpulse($|[<>=])' build/arch-pkginfo.txt
-          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_mpv_jni\.(so|dll|dylib)$' >/dev/null
+          bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_mpv_bridge\.(so|dll|dylib)$' >/dev/null
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
           bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep 'fuoevolve-audio-fingerprint' >/dev/null
           if bsdtar -tf build/artifacts/FuoEvolve-linux-x64.pkg.tar.zst | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
