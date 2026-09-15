@@ -316,7 +316,7 @@ private class DesktopAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = scope,
-            onProviderMutation = homeRefreshPort::refreshMine,
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
