@@ -78,7 +78,7 @@ private object FfmDesktopAudioCaptureApi : DesktopAudioCaptureApi {
             val linker = Linker.nativeLinker()
             val lookup = SymbolLookup.loaderLookup()
 
-            fun bind(downcall: DesktopFfmDowncall): MethodHandle {
+            fun bind(downcall: DesktopMpvFfmDowncall): MethodHandle {
                 val symbol = lookup.find(downcall.symbol).orElseThrow {
                     UnsatisfiedLinkError(
                         "Missing FFM symbol ${downcall.symbol} in the system audio capture library",
