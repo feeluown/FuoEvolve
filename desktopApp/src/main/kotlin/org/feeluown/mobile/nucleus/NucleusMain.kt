@@ -100,7 +100,7 @@ fun main(args: Array<String>) {
     installDesktopProviderCredentialStoreFactory(::createDesktopSecureProviderCredentialStore)
     installDesktopListeningHistorySinkFactory(::createDesktopRuntimeListeningHistorySink)
     installDesktopLocalMusicRepositoryFactory(::createDesktopRuntimeLocalMusicRepository)
-    installDesktopPlatformVideoSurface(NucleusMpvVideoSurface)
+    installDesktopPlatformVideoSurface(NucleusMpvVideoSurface(mpvNativeApi))
     installDesktopTextFileDialogProviderFactory {
         createDesktopNativeTextFileDialogProvider(requireNativeLinuxPortal = true)
     }
