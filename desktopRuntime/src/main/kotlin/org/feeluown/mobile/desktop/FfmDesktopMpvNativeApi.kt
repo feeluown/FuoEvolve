@@ -2,7 +2,6 @@ package org.feeluown.mobile.desktop
 
 import java.io.File
 import java.lang.foreign.Arena
-import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.SymbolLookup
@@ -71,215 +70,45 @@ private object FfmDesktopMpvNativeApi : DesktopMpvNativeApi {
         linker = Linker.nativeLinker()
         lookup = SymbolLookup.loaderLookup()
 
-        createHandle = bind("fuo_mpv_create", FunctionDescriptor.of(ValueLayout.JAVA_LONG))
-        initializeHandle = bind(
-            "fuo_mpv_initialize",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG),
-        )
-        setOptionHandle = bind(
-            "fuo_mpv_set_option",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS,
-                ValueLayout.ADDRESS,
-            ),
-        )
-        setPropertyHandle = bind(
-            "fuo_mpv_set_property",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS,
-                ValueLayout.ADDRESS,
-            ),
-        )
-        getPropertyHandle = bind(
-            "fuo_mpv_get_property",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-            ),
-        )
-        commandHandle = bind(
-            "fuo_mpv_command",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS),
-        )
-        observePropertyHandle = bind(
-            "fuo_mpv_observe_property",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS,
-            ),
-        )
-        waitObservedEventHandle = bind(
-            "fuo_mpv_wait_observed_event",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_DOUBLE,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-            ),
-        )
-        wakeupHandle = bind(
-            "fuo_mpv_wakeup",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        destroyHandle = bind(
-            "fuo_mpv_destroy",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        errorStringHandle = bind(
-            "fuo_mpv_error_string",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-            ),
-        )
+        createHandle = bind(DesktopMpvFfmDowncalls.mpvCreate)
+        initializeHandle = bind(DesktopMpvFfmDowncalls.mpvInitialize)
+        setOptionHandle = bind(DesktopMpvFfmDowncalls.mpvSetOption)
+        setPropertyHandle = bind(DesktopMpvFfmDowncalls.mpvSetProperty)
+        getPropertyHandle = bind(DesktopMpvFfmDowncalls.mpvGetProperty)
+        commandHandle = bind(DesktopMpvFfmDowncalls.mpvCommand)
+        observePropertyHandle = bind(DesktopMpvFfmDowncalls.mpvObserveProperty)
+        waitObservedEventHandle = bind(DesktopMpvFfmDowncalls.mpvWaitObservedEvent)
+        wakeupHandle = bind(DesktopMpvFfmDowncalls.mpvWakeup)
+        destroyHandle = bind(DesktopMpvFfmDowncalls.mpvDestroy)
+        errorStringHandle = bind(DesktopMpvFfmDowncalls.mpvErrorString)
 
-        createSoftwareRenderContextHandle = bind(
-            "fuo_mpv_create_software_render_context",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        createOpenGlRenderContextHandle = bind(
-            "fuo_mpv_create_opengl_render_context",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_LONG,
-            ),
-        )
-        openGlRenderContextDisplayKindHandle = bind(
-            "fuo_mpv_opengl_render_context_display_kind",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG),
-        )
-        updateRenderContextHandle = bind(
-            "fuo_mpv_update_render_context",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        createOpenGlRenderTargetHandle = bind(
-            "fuo_mpv_create_opengl_render_target",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
-        )
-        openGlRenderTargetFramebufferHandle = bind(
-            "fuo_mpv_opengl_render_target_framebuffer",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG),
-        )
-        renderOpenGlHandle = bind(
-            "fuo_mpv_render_opengl",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        reportSwapHandle = bind(
-            "fuo_mpv_report_swap",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        destroyOpenGlRenderTargetHandle = bind(
-            "fuo_mpv_destroy_opengl_render_target",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        createD3D11RenderTargetHandle = bind(
-            "fuo_mpv_create_d3d11_render_target",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-            ),
-        )
-        d3D11RenderTargetSharedHandleHandle = bind(
-            "fuo_mpv_d3d11_render_target_shared_handle",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        renderD3D11Handle = bind(
-            "fuo_mpv_render_d3d11",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        destroyD3D11RenderTargetHandle = bind(
-            "fuo_mpv_destroy_d3d11_render_target",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        freeOpenGlRenderContextHandle = bind(
-            "fuo_mpv_free_opengl_render_context",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        createIoSurfaceRenderContextHandle = bind(
-            "fuo_mpv_create_iosurface_render_context",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        createIoSurfaceRenderTargetHandle = bind(
-            "fuo_mpv_create_iosurface_render_target",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-            ),
-        )
-        ioSurfaceRenderTargetPointerHandle = bind(
-            "fuo_mpv_iosurface_render_target_pointer",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        renderIoSurfaceHandle = bind(
-            "fuo_mpv_render_iosurface",
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        destroyIoSurfaceRenderTargetHandle = bind(
-            "fuo_mpv_destroy_iosurface_render_target",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        freeIoSurfaceRenderContextHandle = bind(
-            "fuo_mpv_free_iosurface_render_context",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
-        renderSoftwareHandle = bind(
-            "fuo_mpv_render_software",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-            ),
-        )
-        freeRenderContextHandle = bind(
-            "fuo_mpv_free_render_context",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
+        createSoftwareRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvCreateSoftwareRenderContext)
+        createOpenGlRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvCreateOpenGlRenderContext)
+        openGlRenderContextDisplayKindHandle = bind(DesktopMpvFfmDowncalls.mpvOpenGlRenderContextDisplayKind)
+        updateRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvUpdateRenderContext)
+        createOpenGlRenderTargetHandle = bind(DesktopMpvFfmDowncalls.mpvCreateOpenGlRenderTarget)
+        openGlRenderTargetFramebufferHandle = bind(DesktopMpvFfmDowncalls.mpvOpenGlRenderTargetFramebuffer)
+        renderOpenGlHandle = bind(DesktopMpvFfmDowncalls.mpvRenderOpenGl)
+        reportSwapHandle = bind(DesktopMpvFfmDowncalls.mpvReportSwap)
+        destroyOpenGlRenderTargetHandle = bind(DesktopMpvFfmDowncalls.mpvDestroyOpenGlRenderTarget)
+        createD3D11RenderTargetHandle = bind(DesktopMpvFfmDowncalls.mpvCreateD3D11RenderTarget)
+        d3D11RenderTargetSharedHandleHandle = bind(DesktopMpvFfmDowncalls.mpvD3D11RenderTargetSharedHandle)
+        renderD3D11Handle = bind(DesktopMpvFfmDowncalls.mpvRenderD3D11)
+        destroyD3D11RenderTargetHandle = bind(DesktopMpvFfmDowncalls.mpvDestroyD3D11RenderTarget)
+        freeOpenGlRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvFreeOpenGlRenderContext)
+        createIoSurfaceRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvCreateIoSurfaceRenderContext)
+        createIoSurfaceRenderTargetHandle = bind(DesktopMpvFfmDowncalls.mpvCreateIoSurfaceRenderTarget)
+        ioSurfaceRenderTargetPointerHandle = bind(DesktopMpvFfmDowncalls.mpvIoSurfaceRenderTargetPointer)
+        renderIoSurfaceHandle = bind(DesktopMpvFfmDowncalls.mpvRenderIoSurface)
+        destroyIoSurfaceRenderTargetHandle = bind(DesktopMpvFfmDowncalls.mpvDestroyIoSurfaceRenderTarget)
+        freeIoSurfaceRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvFreeIoSurfaceRenderContext)
+        renderSoftwareHandle = bind(DesktopMpvFfmDowncalls.mpvRenderSoftware)
+        freeRenderContextHandle = bind(DesktopMpvFfmDowncalls.mpvFreeRenderContext)
 
-        createWindowsD3D11TextureHandle = bind(
-            "fuo_d3d11_texture_create",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
-        )
-        windowsD3D11TextureSharedHandleHandle = bind(
-            "fuo_d3d11_texture_shared_handle",
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG),
-        )
-        uploadWindowsD3D11TextureHandle = bind(
-            "fuo_d3d11_texture_upload",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-            ),
-        )
-        destroyWindowsD3D11TextureHandle = bind(
-            "fuo_d3d11_texture_destroy",
-            FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG),
-        )
+        createWindowsD3D11TextureHandle = bind(DesktopMpvFfmDowncalls.d3D11TextureCreate)
+        windowsD3D11TextureSharedHandleHandle = bind(DesktopMpvFfmDowncalls.d3D11TextureSharedHandle)
+        uploadWindowsD3D11TextureHandle = bind(DesktopMpvFfmDowncalls.d3D11TextureUpload)
+        destroyWindowsD3D11TextureHandle = bind(DesktopMpvFfmDowncalls.d3D11TextureDestroy)
         AppLogger.i(LOG_TAG, "loaded FFM libmpv bridge ${bridge.absolutePath}")
     }
 
@@ -470,11 +299,11 @@ private object FfmDesktopMpvNativeApi : DesktopMpvNativeApi {
         destroyWindowsD3D11TextureHandle.invokeExact(target)
     }
 
-    private fun bind(name: String, descriptor: FunctionDescriptor): MethodHandle {
-        val symbol = lookup.find(name).orElseThrow {
-            UnsatisfiedLinkError("Missing FFM symbol $name in the packaged libmpv bridge")
+    private fun bind(downcall: DesktopMpvFfmDowncall): MethodHandle {
+        val symbol = lookup.find(downcall.symbol).orElseThrow {
+            UnsatisfiedLinkError("Missing FFM symbol ${downcall.symbol} in the packaged libmpv bridge")
         }
-        return linker.downcallHandle(symbol, descriptor)
+        return linker.downcallHandle(symbol, downcall.descriptor)
     }
 
     private inline fun <T> withUtf8(value: String, block: (MemorySegment) -> T): T =
