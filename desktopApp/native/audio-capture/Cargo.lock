@@ -277,7 +277,6 @@ name = "fuoevolve-audio-capture"
 version = "0.1.0"
 dependencies = [
  "cpal",
- "jni",
 ]
 
 [[package]]
@@ -898,7 +897,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1d4b7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
