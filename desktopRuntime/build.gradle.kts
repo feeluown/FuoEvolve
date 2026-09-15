@@ -17,5 +17,7 @@ dependencies {
     implementation(libs.jaudiotagger)
     implementation("io.github.vinceglb:filekit-dialogs:0.15.0")
 
+    compileOnly("org.graalvm.sdk:nativeimage:25.0.3")
+
     testImplementation(kotlin("test"))
 }
