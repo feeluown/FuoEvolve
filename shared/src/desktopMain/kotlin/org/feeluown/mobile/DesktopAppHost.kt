@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 /** Desktop composition root. It hosts the same AppRoot/UI graph used by Android and iOS. */
 @Composable
 fun DesktopAppHost(
+    nativeMpvApi: DesktopMpvNativeApi,
     externalInputs: Flow<String>? = null,
     windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
     openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
@@ -28,6 +29,7 @@ fun DesktopAppHost(
     val container = remember { DesktopAppContainer() }
     var activeWebLoginProvider by remember { mutableStateOf<ProviderInfo?>(null) }
     installDesktopJniMpvVideoControllerFactory(
+        nativeApi = nativeMpvApi,
         videoDecodeMode = container::desktopVideoDecodeMode,
         openGlRenderContextParameters = openGlRenderContextParameters,
     )
