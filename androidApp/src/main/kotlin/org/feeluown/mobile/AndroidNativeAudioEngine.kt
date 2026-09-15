@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -37,6 +38,7 @@ class AndroidNativeAudioEngine(
     private var lastPersistedIdentity: String? = null
     private var lastPersistedPositionMs: Long = restoredSession?.positionMs ?: 0L
     private var restoredRepublishSerial = 0L
+    private var metadataRevision = 0L
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
     override val resolvesResourcesInternally: Boolean = true
@@ -500,14 +502,24 @@ class AndroidNativeAudioEngine(
         if (!currentItem.matchesTrack(pending.trackId)) return
         val currentIndex = controller.currentMediaItemIndex
         if (currentIndex < 0) return
-        val lineLyrics = toTimedLineLrc(pending.lyrics)
-        if (lineLyrics == null) {
+        val currentExtras = currentItem.mediaMetadata.extras
+        val sourceLyrics = currentExtras
+            ?.getString("lyrics")
+            ?.takeIf(String::isNotBlank)
+        val platformLyrics = sourceLyrics
+            ?.let { lyrics ->
+                toPlatformTimedLyrics(
+                    rawLyrics = lyrics,
+                    alignmentOffsetMs = inferTimedLyricsAlignmentOffsetMs(lyrics, pending.lyrics),
+                )
+            }
+            ?: toPlatformTimedLyrics(pending.lyrics)
+        if (platformLyrics == null) {
             pendingLockScreenLyrics = null
             clearCurrentLockScreenLyrics(pending.trackId)
             return
         }
-        val lyricInfo = buildLockScreenLyricInfo(track, lineLyrics)
-        val currentExtras = currentItem.mediaMetadata.extras
+        val lyricInfo = buildLockScreenLyricInfo(track, platformLyrics)
         if (currentExtras?.getString(OPLUS_LYRIC_INFO_KEY) == lyricInfo) {
             pendingLockScreenLyrics = null
             return
@@ -549,8 +561,22 @@ class AndroidNativeAudioEngine(
         currentItem: MediaItem,
         extras: Bundle,
     ): Result<Unit> = runCatching {
-        // Preserve URI and playback configuration; only session-visible metadata changes.
+        // MediaMetadata.equals() deliberately ignores Bundle contents. Change requestMetadata too so
+        // Media3 propagates extras-only lyric updates to legacy/system controllers without touching
+        // the actual LocalConfiguration URI used for playback.
+        metadataRevision += 1L
+        val requestMetadata = MediaItem.RequestMetadata.Builder()
+            .setMediaUri(
+                Uri.Builder()
+                    .scheme("fuoevolve")
+                    .authority("media-metadata")
+                    .appendPath(currentItem.mediaId)
+                    .appendQueryParameter("revision", metadataRevision.toString())
+                    .build(),
+            )
+            .build()
         val updatedItem = currentItem.buildUpon()
+            .setRequestMetadata(requestMetadata)
             .setMediaMetadata(
                 currentItem.mediaMetadata.buildUpon()
                     .setExtras(extras)
@@ -566,13 +592,30 @@ class AndroidNativeAudioEngine(
     private fun MediaItem.matchesGeneration(generation: Long): Boolean =
         mediaId.startsWith("$generation:")
 
-    private fun buildLockScreenLyricInfo(track: MusicTrack, lineLyrics: String): String =
-        JSONObject()
+    private fun buildLockScreenLyricInfo(track: MusicTrack, lyrics: PlatformTimedLyrics): String {
+        val providerTrackId = track.providerId?.takeIf(String::isNotBlank) ?: track.id
+        val trackKey = listOf(track.source, providerTrackId)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .joinToString(":")
+            .ifBlank { track.id }
+        return JSONObject()
             .put("songName", track.title)
             .put("artist", track.artists)
             .put("songId", track.id)
-            .put("lyric", lineLyrics)
+            .put("lyricType", 0)
+            .put("lyric", lyrics.lyric)
+            .put("noLyric", false)
+            .put("provider", context.packageName)
+            .put("source", "fuoevolve")
+            .put("trackKey", trackKey)
+            .put("sessionGeneration", mutableState.value.playbackGeneration)
+            .apply {
+                lyrics.rawLyric?.let { put("rawLyric", it) }
+                lyrics.translationLyric?.let { put("translationLyric", it) }
+            }
             .toString()
+    }
 
     private fun updatePosition() {
         applyPendingResumeSeek()
