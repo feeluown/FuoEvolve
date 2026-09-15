@@ -3,16 +3,16 @@ package org.feeluown.mobile.desktop
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.ValueLayout
 
-internal data class DesktopFfmDowncall(
+internal data class DesktopMpvFfmDowncall(
     val symbol: String,
     val descriptor: FunctionDescriptor,
 )
 
 internal object DesktopMpvFfmDowncalls {
-    private val registered = mutableListOf<DesktopFfmDowncall>()
+    private val registered = mutableListOf<DesktopMpvFfmDowncall>()
 
-    private fun downcall(symbol: String, descriptor: FunctionDescriptor): DesktopFfmDowncall =
-        DesktopFfmDowncall(symbol, descriptor).also(registered::add)
+    private fun downcall(symbol: String, descriptor: FunctionDescriptor): DesktopMpvFfmDowncall =
+        DesktopMpvFfmDowncall(symbol, descriptor).also(registered::add)
 
     val mpvCreate = downcall(
         "fuo_mpv_create",
@@ -205,6 +205,6 @@ internal object DesktopMpvFfmDowncalls {
     )
     val d3D11TextureDestroy = downcall("fuo_d3d11_texture_destroy", mpvWakeup.descriptor)
 
-    val all: List<DesktopFfmDowncall>
+    val all: List<DesktopMpvFfmDowncall>
         get() = registered.toList()
 }
