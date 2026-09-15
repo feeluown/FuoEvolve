@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
-import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -78,9 +77,7 @@ internal data class DesktopJniVideoSourceCandidate(
 }
 
 /**
- * GraalVM-friendly desktop video controller backed by the same libmpv JNI bridge packaged by the
- * Nucleus desktop runtime. The legacy JVM host installs its JNA controller explicitly, so this
- * controller is only used by the Native/Nucleus host.
+ * GraalVM-friendly desktop video controller backed by the desktop libmpv FFM bridge.
  *
  * A render context is intentionally created lazily. Windows/Linux attach libmpv to Tao's active
  * OpenGL/ANGLE context. macOS renders into IOSurface on a private CGL context and lets Tao/Metal
@@ -88,12 +85,14 @@ internal data class DesktopJniVideoSourceCandidate(
  * video in the Native/Nucleus surface.
  */
 internal class DesktopJniMpvVideoController(
+    nativeApi: DesktopMpvNativeApi,
     private val videoDecodeMode: DesktopVideoDecodeMode,
     private val openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) :
     DesktopPlatformVideoController,
     DesktopWindowsD3D11VideoController,
     DesktopIoSurfaceVideoController {
+    private val DesktopJniMpvVideoApi = DesktopMpvVideoApiAdapter(nativeApi)
     private val closed = AtomicBoolean(false)
     private val renderContextLock = Any()
     private val mutableState = MutableStateFlow(PlatformVideoPlaybackState())
@@ -127,7 +126,6 @@ internal class DesktopJniMpvVideoController(
     @Volatile private var lastPipelineDescription: String? = null
 
     init {
-        DesktopJniMpvVideoBridgeLoader.ensureLoaded()
         handle = DesktopJniMpvVideoApi.nativeCreate()
         check(handle != 0L) { "libmpv mpv_create() returned null for video" }
         try {
@@ -136,8 +134,6 @@ internal class DesktopJniMpvVideoController(
             setOption("input-default-bindings", "no")
             setOption("ytdl", "no")
             setOption("vo", "libmpv")
-            // Hardware modes intentionally do not fall back silently. Software mode selects
-            // libmpv's normal CPU decoder while keeping the existing renderer path unchanged.
             setOption("hwdec", desktopVideoHwdecOption(videoDecodeMode))
             if (videoDecodeMode != DesktopVideoDecodeMode.Software) {
                 setOption("hwdec-software-fallback", "no")
@@ -160,13 +156,13 @@ internal class DesktopJniMpvVideoController(
         eventThread = thread(
             start = true,
             isDaemon = true,
-            name = "fuoevolve-jni-libmpv-video-events",
+            name = "fuoevolve-ffm-libmpv-video-events",
             block = ::eventLoop,
         )
         renderThread = thread(
             start = true,
             isDaemon = true,
-            name = "fuoevolve-jni-libmpv-video-render",
+            name = "fuoevolve-ffm-libmpv-video-render",
             block = ::renderLoop,
         )
     }
@@ -462,8 +458,6 @@ internal class DesktopJniMpvVideoController(
         closeSoftwareFrames()
         destroyNativeHandleIfReady()
         if (gpuContextStillAttached) {
-            // The renderer may still need its host context to release FBO/IOSurface resources.
-            // The corresponding destroy*RenderContext callback finishes mpv teardown afterward.
             AppLogger.w(
                 "DesktopVideo",
                 "GPU video surface still attached during controller close; deferring native teardown",
@@ -573,9 +567,6 @@ internal class DesktopJniMpvVideoController(
 
     private fun handleEndEvent(encoded: String) {
         val endEvent = parseDesktopJniVideoEndEvent(encoded) ?: return
-        // loadfile replace and payload/source switches can deliver END_FILE for the previous
-        // playlist entry after a new load was already requested. Never let a stale event stop or
-        // retry the current source.
         if (activePlaylistEntryId == null || endEvent.playlistEntryId != activePlaylistEntryId) {
             return
         }
@@ -992,89 +983,70 @@ private fun String?.secondsToMsOrNull(): Long? =
 
 private fun alignTo64(value: Int): Int = ((value + 63) / 64) * 64
 
-private object DesktopJniMpvVideoApi {
-    external fun nativeCreate(): Long
-    external fun nativeInitialize(handle: Long): Int
-    external fun nativeSetOption(handle: Long, name: String, value: String): Int
-    external fun nativeSetProperty(handle: Long, name: String, value: String): Int
-    external fun nativeGetProperty(handle: Long, name: String): String?
-    external fun nativeCommand(handle: Long, args: Array<out String>): Int
-    external fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int
-    external fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String?
-    external fun nativeWakeup(handle: Long)
-    external fun nativeDestroy(handle: Long)
-    external fun nativeErrorString(error: Int): String?
-    external fun nativeCreateSoftwareRenderContext(handle: Long): Long
-    external fun nativeCreateOpenGlRenderContext(
+private class DesktopMpvVideoApiAdapter(
+    private val api: DesktopMpvNativeApi,
+) {
+    fun nativeCreate(): Long = api.create()
+    fun nativeInitialize(handle: Long): Int = api.initialize(handle)
+    fun nativeSetOption(handle: Long, name: String, value: String): Int = api.setOption(handle, name, value)
+    fun nativeSetProperty(handle: Long, name: String, value: String): Int = api.setProperty(handle, name, value)
+    fun nativeGetProperty(handle: Long, name: String): String? = api.getProperty(handle, name)
+    fun nativeCommand(handle: Long, args: Array<out String>): Int = api.command(handle, args)
+    fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int =
+        api.observeProperty(handle, replyUserdata, name)
+    fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String? =
+        api.waitObservedEvent(handle, timeoutSeconds)
+    fun nativeWakeup(handle: Long) = api.wakeup(handle)
+    fun nativeDestroy(handle: Long) = api.destroy(handle)
+    fun nativeErrorString(error: Int): String? = api.errorString(error)
+    fun nativeCreateSoftwareRenderContext(handle: Long): Long = api.createSoftwareRenderContext(handle)
+    fun nativeCreateOpenGlRenderContext(
         handle: Long,
         directHardware: Boolean,
         nativeDisplayKind: Int,
         nativeDisplay: Long,
         taoGetProcAddress: Long,
-    ): Long
-    external fun nativeOpenGlRenderContextDisplayKind(renderContext: Long): Int
-    external fun nativeUpdateRenderContext(renderContext: Long): Long
-    external fun nativeCreateOpenGlRenderTarget(width: Int, height: Int): Long
-    external fun nativeOpenGlRenderTargetFramebuffer(renderTarget: Long): Int
-    external fun nativeRenderOpenGl(renderContext: Long, renderTarget: Long)
-    external fun nativeReportSwap(renderContext: Long)
-    external fun nativeDestroyOpenGlRenderTarget(renderTarget: Long)
-    external fun nativeCreateD3D11RenderTarget(renderContext: Long, width: Int, height: Int): Long
-    external fun nativeD3D11RenderTargetSharedHandle(renderTarget: Long): Long
-    external fun nativeRenderD3D11(renderContext: Long, renderTarget: Long): Boolean
-    external fun nativeDestroyD3D11RenderTarget(renderTarget: Long)
-    external fun nativeFreeOpenGlRenderContext(renderContext: Long)
-    external fun nativeCreateIoSurfaceRenderContext(handle: Long): Long
-    external fun nativeCreateIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long
-    external fun nativeIoSurfaceRenderTargetPointer(renderTarget: Long): Long
-    external fun nativeRenderIoSurface(renderContext: Long, renderTarget: Long): Boolean
-    external fun nativeDestroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long)
-    external fun nativeFreeIoSurfaceRenderContext(renderContext: Long)
-    external fun nativeRenderSoftware(
+    ): Long = api.createOpenGlRenderContext(
+        handle,
+        directHardware,
+        nativeDisplayKind,
+        nativeDisplay,
+        taoGetProcAddress,
+    )
+    fun nativeOpenGlRenderContextDisplayKind(renderContext: Long): Int =
+        api.openGlRenderContextDisplayKind(renderContext)
+    fun nativeUpdateRenderContext(renderContext: Long): Long = api.updateRenderContext(renderContext)
+    fun nativeCreateOpenGlRenderTarget(width: Int, height: Int): Long = api.createOpenGlRenderTarget(width, height)
+    fun nativeOpenGlRenderTargetFramebuffer(renderTarget: Long): Int =
+        api.openGlRenderTargetFramebuffer(renderTarget)
+    fun nativeRenderOpenGl(renderContext: Long, renderTarget: Long) = api.renderOpenGl(renderContext, renderTarget)
+    fun nativeReportSwap(renderContext: Long) = api.reportSwap(renderContext)
+    fun nativeDestroyOpenGlRenderTarget(renderTarget: Long) = api.destroyOpenGlRenderTarget(renderTarget)
+    fun nativeCreateD3D11RenderTarget(renderContext: Long, width: Int, height: Int): Long =
+        api.createD3D11RenderTarget(renderContext, width, height)
+    fun nativeD3D11RenderTargetSharedHandle(renderTarget: Long): Long =
+        api.d3D11RenderTargetSharedHandle(renderTarget)
+    fun nativeRenderD3D11(renderContext: Long, renderTarget: Long): Boolean =
+        api.renderD3D11(renderContext, renderTarget)
+    fun nativeDestroyD3D11RenderTarget(renderTarget: Long) = api.destroyD3D11RenderTarget(renderTarget)
+    fun nativeFreeOpenGlRenderContext(renderContext: Long) = api.freeOpenGlRenderContext(renderContext)
+    fun nativeCreateIoSurfaceRenderContext(handle: Long): Long = api.createIoSurfaceRenderContext(handle)
+    fun nativeCreateIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long =
+        api.createIoSurfaceRenderTarget(renderContext, width, height)
+    fun nativeIoSurfaceRenderTargetPointer(renderTarget: Long): Long = api.ioSurfaceRenderTargetPointer(renderTarget)
+    fun nativeRenderIoSurface(renderContext: Long, renderTarget: Long): Boolean =
+        api.renderIoSurface(renderContext, renderTarget)
+    fun nativeDestroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long) =
+        api.destroyIoSurfaceRenderTarget(renderContext, renderTarget)
+    fun nativeFreeIoSurfaceRenderContext(renderContext: Long) = api.freeIoSurfaceRenderContext(renderContext)
+    fun nativeRenderSoftware(
         renderContext: Long,
         width: Int,
         height: Int,
         stride: Int,
         pixels: ByteArray,
-    ): Int
-    external fun nativeFreeRenderContext(renderContext: Long)
-}
-
-private object DesktopJniMpvVideoBridgeLoader {
-    @Volatile private var loaded = false
-
-    fun ensureLoaded() {
-        if (loaded) return
-        synchronized(this) {
-            if (loaded) return
-            val bridge = resolveDesktopJniMpvVideoBridge()
-                ?: throw UnsatisfiedLinkError(
-                    "Nucleus libmpv JNI bridge not found in packaged resources or development build output",
-                )
-            System.load(bridge.absolutePath)
-            loaded = true
-            AppLogger.i("DesktopVideo", "loaded JNI video bridge ${bridge.absolutePath}")
-        }
-    }
-}
-
-private fun resolveDesktopJniMpvVideoBridge(): File? {
-    val osName = System.getProperty("os.name").orEmpty()
-    val libraryName = when {
-        osName.contains("windows", ignoreCase = true) -> "fuoevolve_mpv_jni.dll"
-        osName.contains("mac", ignoreCase = true) || osName.contains("darwin", ignoreCase = true) ->
-            "libfuoevolve_mpv_jni.dylib"
-        else -> "libfuoevolve_mpv_jni.so"
-    }
-    val resourcesDir = System.getProperty("compose.application.resources.dir")
-        ?.takeIf(String::isNotBlank)
-        ?.let(::File)
-    val userDir = File(System.getProperty("user.dir").orEmpty().ifBlank { "." })
-    return buildList {
-        resourcesDir?.let { add(File(it, "native/lib/$libraryName")) }
-        add(File(userDir, "desktopNucleusPoc/build/native/mpv-jni/$libraryName"))
-        add(File(userDir, "build/native/mpv-jni/$libraryName"))
-    }.firstOrNull(File::isFile)
+    ): Int = api.renderSoftware(renderContext, width, height, stride, pixels)
+    fun nativeFreeRenderContext(renderContext: Long) = api.freeRenderContext(renderContext)
 }
 
 internal fun desktopVideoHwdecOption(mode: DesktopVideoDecodeMode): String = when (mode) {

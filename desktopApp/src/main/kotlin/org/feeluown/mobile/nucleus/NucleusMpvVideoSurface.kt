@@ -31,6 +31,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopIoSurfaceVideoController
+import org.feeluown.mobile.DesktopMpvNativeApi
 import org.feeluown.mobile.DesktopOpenGlVideoController
 import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
@@ -54,7 +55,9 @@ import org.jetbrains.skia.SurfaceOrigin
  * retained as a setup/runtime fallback. Linux keeps the direct Tao OpenGL path. macOS keeps the
  * IOSurface/TextureView path.
  */
-internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
+internal class NucleusMpvVideoSurface(
+    private val nativeApi: DesktopMpvNativeApi,
+) : DesktopPlatformVideoSurface {
     @Composable
     override fun Content(
         controller: DesktopPlatformVideoController,
@@ -104,6 +107,7 @@ internal object NucleusMpvVideoSurface : DesktopPlatformVideoSurface {
             }
 
             NucleusWindowsTextureVideoContent(
+                nativeApi = nativeApi,
                 controller = controller,
                 softwareController = openGlController,
                 modifier = modifier,
@@ -193,7 +197,6 @@ private fun NucleusWindowsD3D11VideoContent(
             target = next
             textureController.markFrameAvailable()
             if (previous != null) {
-                // Let Compose publish/import the new shared handle before destroying the old one.
                 withFrameNanos { }
                 previous.close()
             }
@@ -251,6 +254,7 @@ private fun NucleusWindowsD3D11VideoContent(
 
 @Composable
 private fun NucleusWindowsTextureVideoContent(
+    nativeApi: DesktopMpvNativeApi,
     controller: DesktopPlatformVideoController,
     softwareController: DesktopOpenGlVideoController,
     modifier: Modifier,
@@ -290,7 +294,7 @@ private fun NucleusWindowsTextureVideoContent(
                     current
                 } else {
                     withContext(Dispatchers.Default) {
-                        WindowsD3D11VideoTarget.create(frame.width, frame.height)
+                        WindowsD3D11VideoTarget.create(nativeApi, frame.width, frame.height)
                             ?: error("D3D11 shared video texture creation failed")
                     }
                 }
@@ -304,7 +308,6 @@ private fun NucleusWindowsTextureVideoContent(
                 if (next !== current) {
                     target = next
                     textureController.markFrameAvailable()
-                    // Publish/import the new shared texture before releasing the previous one.
                     withFrameNanos { }
                     if (current != null) withContext(Dispatchers.Default) { current.close() }
                 } else {
@@ -426,7 +429,6 @@ private fun NucleusIoSurfaceVideoContent(
             val previous = target
             target = next
             if (previous != null) {
-                // Let Compose publish/import the new source before retiring the old IOSurface.
                 withFrameNanos { }
                 withContext(Dispatchers.Default) { previous.close() }
             }
@@ -484,6 +486,7 @@ private fun NucleusIoSurfaceVideoContent(
 }
 
 private class WindowsD3D11VideoTarget private constructor(
+    private val nativeApi: DesktopMpvNativeApi,
     private val handle: Long,
     val sharedHandle: Long,
     val width: Int,
@@ -504,35 +507,32 @@ private class WindowsD3D11VideoTarget private constructor(
             bufferOffset = 0,
             stride = width,
         )
-        WindowsD3D11VideoTextureApi.nativeUpload(handle, pixels)
+        nativeApi.uploadWindowsD3D11Texture(handle, pixels)
     }
 
     override fun close() = synchronized(lock) {
         if (closed) return@synchronized
         closed = true
-        WindowsD3D11VideoTextureApi.nativeDestroy(handle)
+        nativeApi.destroyWindowsD3D11Texture(handle)
     }
 
     companion object {
-        fun create(width: Int, height: Int): WindowsD3D11VideoTarget? {
+        fun create(
+            nativeApi: DesktopMpvNativeApi,
+            width: Int,
+            height: Int,
+        ): WindowsD3D11VideoTarget? {
             if (width <= 0 || height <= 0) return null
-            val handle = WindowsD3D11VideoTextureApi.nativeCreate(width, height)
+            val handle = nativeApi.createWindowsD3D11Texture(width, height)
             if (handle == 0L) return null
-            val sharedHandle = WindowsD3D11VideoTextureApi.nativeSharedHandle(handle)
+            val sharedHandle = nativeApi.windowsD3D11TextureSharedHandle(handle)
             if (sharedHandle == 0L) {
-                WindowsD3D11VideoTextureApi.nativeDestroy(handle)
+                nativeApi.destroyWindowsD3D11Texture(handle)
                 return null
             }
-            return WindowsD3D11VideoTarget(handle, sharedHandle, width, height)
+            return WindowsD3D11VideoTarget(nativeApi, handle, sharedHandle, width, height)
         }
     }
-}
-
-private object WindowsD3D11VideoTextureApi {
-    @JvmStatic external fun nativeCreate(width: Int, height: Int): Long
-    @JvmStatic external fun nativeSharedHandle(target: Long): Long
-    @JvmStatic external fun nativeUpload(target: Long, pixels: IntArray): Boolean
-    @JvmStatic external fun nativeDestroy(target: Long)
 }
 
 private class NucleusWindowsD3D11MpvVideoRenderer(
@@ -665,8 +665,6 @@ private class NucleusOpenGlMpvVideoRenderer(
                 return@withContextCurrent null
             }
 
-            // Tell Skia an external producer is about to overwrite the wrapped FBO. This preserves
-            // snapshot immutability with a GPU-side copy-on-write when a previous frame is in flight.
             currentSurface.notifyContentWillChange(ContentChangeMode.DISCARD)
             renderContext.skiaContext.resetGLAll()
             controller.renderOpenGl(mpvRenderContext, target)
