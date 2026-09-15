@@ -5,7 +5,7 @@ inputs:
   java-version:
     description: JDK version used to run Gradle
     required: false
-    default: '17'
+    default: '25'
   java-package:
     description: JDK package variant
     required: false
