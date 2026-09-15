@@ -114,5 +114,77 @@
     {
       "glob": "fuoevolve-desktop-version.properties"
     }
-  ]
+  ],
+  "foreign": {
+    "downcalls": [
+      {
+        "returnType": "jlong",
+        "parameterTypes": []
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "void*", "void*"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "void*", "void*", "jlong"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "void*"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "jlong", "void*"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "jdouble", "void*", "jlong"]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": ["jlong"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jint", "void*", "jlong"]
+      },
+      {
+        "returnType": "jlong",
+        "parameterTypes": ["jlong"]
+      },
+      {
+        "returnType": "jlong",
+        "parameterTypes": ["jlong", "jint", "jint", "jlong", "jlong"]
+      },
+      {
+        "returnType": "jlong",
+        "parameterTypes": ["jint", "jint"]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": ["jlong", "jlong"]
+      },
+      {
+        "returnType": "jlong",
+        "parameterTypes": ["jlong", "jint", "jint"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "jlong"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "jint", "jint", "jint", "void*", "jlong"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["jlong", "void*", "jlong"]
+      }
+    ]
+  }
 }
