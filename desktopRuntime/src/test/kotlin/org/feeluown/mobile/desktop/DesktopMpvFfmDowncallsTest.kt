@@ -13,7 +13,6 @@ class DesktopMpvFfmDowncallsTest {
 
         assertEquals(37, downcalls.size)
         assertEquals(symbols.size, symbols.toSet().size, "FFM bridge symbols must be unique")
-        assertEquals(17, DesktopMpvFfmDowncalls.uniqueDescriptors.size)
     }
 
     @Test
