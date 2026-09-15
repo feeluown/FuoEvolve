@@ -4,19 +4,19 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import org.feeluown.mobile.AppLogger
-import org.feeluown.mobile.desktopMpvNativeApi
+import org.feeluown.mobile.DesktopMpvNativeApi
 import org.feeluown.mobile.desktop.DesktopMpvBackend
 import org.feeluown.mobile.desktop.DesktopMpvBackendEvent
 
 /**
  * GraalVM-friendly libmpv transport.
  *
- * The desktop host installs the JDK 25 FFM implementation before constructing this backend.
- * Kotlin drains mpv's event queue and observed property changes without native callbacks into
- * managed code.
+ * The desktop composition root supplies the JDK 25 FFM implementation explicitly. Kotlin drains
+ * mpv's event queue and observed property changes without native callbacks into managed code.
  */
 internal class JniMpvBackend(
     private val listener: (DesktopMpvBackendEvent) -> Unit,
+    private val nativeApi: DesktopMpvNativeApi,
 ) : DesktopMpvBackend {
     private val closed = AtomicBoolean(false)
     private val handle: Long
@@ -33,7 +33,7 @@ internal class JniMpvBackend(
     private var activePath: String? = null
 
     init {
-        handle = JniMpvApi.nativeCreate()
+        handle = nativeApi.create()
         check(handle != 0L) { "libmpv mpv_create() returned null" }
         try {
             setOption("config", "no")
@@ -45,10 +45,10 @@ internal class JniMpvBackend(
                 ?.takeIf(String::isNotBlank)
                 ?: System.getenv("FUOEVOLVE_LIBMPV_AO")?.takeIf(String::isNotBlank)
             audioOutput?.let { setOption("ao", it) }
-            checkMpv(JniMpvApi.nativeInitialize(handle), "mpv_initialize")
+            checkMpv(nativeApi.initialize(handle), "mpv_initialize")
             OBSERVED_PROPERTIES.forEachIndexed { index, property ->
                 checkMpv(
-                    JniMpvApi.nativeObserveProperty(handle, index.toLong() + 1L, property),
+                    nativeApi.observeProperty(handle, index.toLong() + 1L, property),
                     "observe property $property",
                 )
             }
@@ -57,7 +57,7 @@ internal class JniMpvBackend(
                 "FFM libmpv initialized audioOutput=${audioOutput ?: "default"}",
             )
         } catch (throwable: Throwable) {
-            JniMpvApi.nativeDestroy(handle)
+            nativeApi.destroy(handle)
             throw throwable
         }
 
@@ -128,17 +128,17 @@ internal class JniMpvBackend(
         expectedPlaylistEntryId = null
         activePath = null
         lifecycleGate.reset()
-        JniMpvApi.nativeWakeup(handle)
+        nativeApi.wakeup(handle)
         if (Thread.currentThread() !== eventThread) {
             runCatching { eventThread.join() }
         }
-        JniMpvApi.nativeDestroy(handle)
+        nativeApi.destroy(handle)
     }
 
     private fun eventLoop() {
         try {
             while (!closed.get()) {
-                JniMpvApi.nativeWaitObservedEvent(handle, EVENT_WAIT_SECONDS)
+                nativeApi.waitObservedEvent(handle, EVENT_WAIT_SECONDS)
                     ?.let(::dispatchNativeEvent)
             }
         } catch (throwable: Throwable) {
@@ -183,7 +183,7 @@ internal class JniMpvBackend(
                         reason = reason,
                         errorMessage = error
                             .takeIf { reason == MPV_END_FILE_REASON_ERROR && it < 0 }
-                            ?.let(JniMpvApi::nativeErrorString),
+                            ?.let(nativeApi::errorString),
                     ),
                 )
             }
@@ -319,46 +319,28 @@ internal class JniMpvBackend(
     }
 
     private fun setOption(name: String, value: String) {
-        checkMpv(JniMpvApi.nativeSetOption(handle, name, value), "set option $name")
+        checkMpv(nativeApi.setOption(handle, name, value), "set option $name")
     }
 
     private fun setProperty(name: String, value: String) {
-        checkMpv(JniMpvApi.nativeSetProperty(handle, name, value), "set property $name")
+        checkMpv(nativeApi.setProperty(handle, name, value), "set property $name")
     }
 
-    private fun getPropertyString(name: String): String? = JniMpvApi.nativeGetProperty(handle, name)
+    private fun getPropertyString(name: String): String? = nativeApi.getProperty(handle, name)
 
     private fun command(vararg args: String) {
-        checkMpv(JniMpvApi.nativeCommand(handle, args), "command ${args.firstOrNull().orEmpty()}")
+        checkMpv(nativeApi.command(handle, args), "command ${args.firstOrNull().orEmpty()}")
     }
 
     private fun checkMpv(result: Int, operation: String) {
         if (result >= 0) return
-        val detail = JniMpvApi.nativeErrorString(result) ?: "error $result"
+        val detail = nativeApi.errorString(result) ?: "error $result"
         throw IllegalStateException("libmpv $operation failed: $detail")
     }
 
     private fun ensureOpen() {
         check(!closed.get()) { "libmpv FFM backend is closed" }
     }
-}
-
-internal object JniMpvApi {
-    private val api get() = desktopMpvNativeApi()
-
-    fun nativeCreate(): Long = api.create()
-    fun nativeInitialize(handle: Long): Int = api.initialize(handle)
-    fun nativeSetOption(handle: Long, name: String, value: String): Int = api.setOption(handle, name, value)
-    fun nativeSetProperty(handle: Long, name: String, value: String): Int = api.setProperty(handle, name, value)
-    fun nativeGetProperty(handle: Long, name: String): String? = api.getProperty(handle, name)
-    fun nativeCommand(handle: Long, args: Array<out String>): Int = api.command(handle, args)
-    fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int =
-        api.observeProperty(handle, replyUserdata, name)
-    fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String? =
-        api.waitObservedEvent(handle, timeoutSeconds)
-    fun nativeWakeup(handle: Long) = api.wakeup(handle)
-    fun nativeDestroy(handle: Long) = api.destroy(handle)
-    fun nativeErrorString(error: Int): String? = api.errorString(error)
 }
 
 internal fun windowsMpvRuntimeLoadPlan(libraryNames: List<String>): List<String> {
