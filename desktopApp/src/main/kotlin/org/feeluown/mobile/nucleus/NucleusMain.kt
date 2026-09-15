@@ -67,6 +67,7 @@ import org.feeluown.mobile.TrackSourceType
 import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.desktop.DesktopMpvPlaybackEngine
 import org.feeluown.mobile.desktop.createCheckedDesktopFfmMpvNativeApi
+import org.feeluown.mobile.desktop.createDesktopFfmAudioCaptureApi
 import org.feeluown.mobile.desktop.createDesktopNativeTextFileDialogProvider
 import org.feeluown.mobile.desktop.createDesktopRuntimeListeningHistorySink
 import org.feeluown.mobile.desktop.createDesktopRuntimeLocalMusicRepository
@@ -92,6 +93,7 @@ fun main(args: Array<String>) {
     configurePackagedNativeRuntime()
     installDesktopAppLogger()
     val mpvNativeApi = createCheckedDesktopFfmMpvNativeApi()
+    val audioCaptureApi = createDesktopFfmAudioCaptureApi()
 
     val activation = NucleusExternalActivation.open(args) ?: return
     val trayPlaybackController = NucleusTrayPlaybackController()
@@ -338,6 +340,7 @@ fun main(args: Array<String>) {
             }
             DesktopAppHost(
                 nativeMpvApi = mpvNativeApi,
+                audioCaptureApi = audioCaptureApi,
                 externalInputs = appExternalInputs,
                 openGlRenderContextParameters = openGlRenderContextParameters,
                 windowContentWrapper = { content ->
