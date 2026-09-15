@@ -5,8 +5,8 @@ import org.graalvm.nativeimage.hosted.RuntimeForeignAccess
 
 class DesktopMpvFfmFeature : Feature {
     override fun duringSetup(access: Feature.DuringSetupAccess) {
-        DesktopMpvFfmDowncalls.uniqueDescriptors.forEach { descriptor ->
-            RuntimeForeignAccess.registerForDowncall(descriptor)
+        DesktopMpvFfmDowncalls.all.forEach { downcall ->
+            RuntimeForeignAccess.registerForDowncall(downcall.descriptor)
         }
     }
 }
