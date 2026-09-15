@@ -99,7 +99,7 @@ See `docs/architecture.md` and `docs/p0-architecture-migration.md` for the curre
 
 ## Build, Test, and Development Commands
 
-Use the checked-in Gradle wrapper and JDK 17 or newer.
+Use the checked-in Gradle wrapper. JDK 17 or newer is sufficient for Android/shared work; desktop development (`:desktopApp` / `:desktopRuntime`) requires an installed JDK 25.
 
 - `./gradlew :androidApp:assembleDebug`: build a debug Android APK.
 - `./gradlew :androidApp:installDebug`: install the debug app on a connected Android device or emulator.
