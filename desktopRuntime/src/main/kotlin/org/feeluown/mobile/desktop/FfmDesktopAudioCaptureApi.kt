@@ -141,7 +141,7 @@ private fun nextAudioBufferCapacity(value: Long): Long {
     return result.coerceAtLeast(value)
 }
 
-private fun resolveDesktopAudioCaptureLibrary(): File? {
+internal fun resolveDesktopAudioCaptureLibrary(): File? {
     val libraryName = when {
         isDesktopWindows() -> "fuoevolve_audio_capture.dll"
         isDesktopMac() -> "libfuoevolve_audio_capture.dylib"
@@ -159,10 +159,10 @@ private fun resolveDesktopAudioCaptureLibrary(): File? {
     }.firstOrNull(File::isFile)
 }
 
-private fun isDesktopWindows(): Boolean =
+internal fun isDesktopWindows(): Boolean =
     System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)
 
-private fun isDesktopMac(): Boolean =
+internal fun isDesktopMac(): Boolean =
     System.getProperty("os.name").orEmpty().let { name ->
         name.contains("mac", ignoreCase = true) || name.contains("darwin", ignoreCase = true)
     }
