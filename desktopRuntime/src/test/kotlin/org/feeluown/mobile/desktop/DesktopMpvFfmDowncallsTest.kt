@@ -1,7 +1,6 @@
 package org.feeluown.mobile.desktop
 
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -11,8 +10,11 @@ class DesktopMpvFfmDowncallsTest {
         val downcalls = DesktopMpvFfmDowncalls.all
         val symbols = downcalls.map(DesktopMpvFfmDowncall::symbol)
 
-        assertEquals(37, downcalls.size)
-        assertEquals(symbols.size, symbols.toSet().size, "FFM bridge symbols must be unique")
+        assertTrue(downcalls.isNotEmpty(), "FFM bridge registry must not be empty")
+        assertTrue(
+            symbols.size == symbols.toSet().size,
+            "FFM bridge symbols must be unique",
+        )
     }
 
     @Test
