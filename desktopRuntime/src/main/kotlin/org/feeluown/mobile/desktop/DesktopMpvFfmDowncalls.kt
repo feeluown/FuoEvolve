@@ -207,7 +207,4 @@ internal object DesktopMpvFfmDowncalls {
 
     val all: List<DesktopMpvFfmDowncall>
         get() = registered.toList()
-
-    val uniqueDescriptors: List<FunctionDescriptor>
-        get() = registered.map(DesktopMpvFfmDowncall::descriptor).distinct()
 }
