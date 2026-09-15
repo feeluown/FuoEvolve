@@ -4,10 +4,10 @@ import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.ValueLayout
 
 internal object DesktopAudioCaptureFfmDowncalls {
-    private val registered = mutableListOf<DesktopFfmDowncall>()
+    private val registered = mutableListOf<DesktopMpvFfmDowncall>()
 
-    private fun downcall(symbol: String, descriptor: FunctionDescriptor): DesktopFfmDowncall =
-        DesktopFfmDowncall(symbol, descriptor).also(registered::add)
+    private fun downcall(symbol: String, descriptor: FunctionDescriptor): DesktopMpvFfmDowncall =
+        DesktopMpvFfmDowncall(symbol, descriptor).also(registered::add)
 
     val open = downcall(
         "fuo_audio_capture_open",
@@ -40,6 +40,6 @@ internal object DesktopAudioCaptureFfmDowncalls {
         ),
     )
 
-    val all: List<DesktopFfmDowncall>
+    val all: List<DesktopMpvFfmDowncall>
         get() = registered.toList()
 }
