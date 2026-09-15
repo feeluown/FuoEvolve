@@ -1,19 +1,19 @@
 package org.feeluown.mobile.nucleus
 
-import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import org.feeluown.mobile.AppLogger
+import org.feeluown.mobile.desktopMpvNativeApi
 import org.feeluown.mobile.desktop.DesktopMpvBackend
 import org.feeluown.mobile.desktop.DesktopMpvBackendEvent
 
 /**
  * GraalVM-friendly libmpv transport.
  *
- * The JVM/JNA host and this JNI host both feed the same DesktopMpvPlaybackEngine state machine.
- * JNI is intentionally one-way: Kotlin drains mpv's event queue and observed property changes, so
- * the native library never has to discover or callback into managed classes at runtime.
+ * The desktop host installs the JDK 25 FFM implementation before constructing this backend.
+ * Kotlin drains mpv's event queue and observed property changes without native callbacks into
+ * managed code.
  */
 internal class JniMpvBackend(
     private val listener: (DesktopMpvBackendEvent) -> Unit,
@@ -33,7 +33,6 @@ internal class JniMpvBackend(
     private var activePath: String? = null
 
     init {
-        JniMpvBridgeLoader.ensureLoaded()
         handle = JniMpvApi.nativeCreate()
         check(handle != 0L) { "libmpv mpv_create() returned null" }
         try {
@@ -55,7 +54,7 @@ internal class JniMpvBackend(
             }
             AppLogger.i(
                 LOG_TAG,
-                "JNI libmpv initialized audioOutput=${audioOutput ?: "default"}",
+                "FFM libmpv initialized audioOutput=${audioOutput ?: "default"}",
             )
         } catch (throwable: Throwable) {
             JniMpvApi.nativeDestroy(handle)
@@ -65,7 +64,7 @@ internal class JniMpvBackend(
         eventThread = thread(
             start = true,
             isDaemon = true,
-            name = "fuoevolve-jni-libmpv-events",
+            name = "fuoevolve-ffm-libmpv-events",
             block = ::eventLoop,
         )
     }
@@ -83,15 +82,12 @@ internal class JniMpvBackend(
             } else {
                 command("loadfile", url, "replace", "-1", perFileOptions)
             }
-            // The replace command owns playlist slot 0 synchronously. Prefer that id over the
-            // currently-playing position, which may still describe the previous entry while mpv
-            // drains queued lifecycle events from a rapid source switch.
             getPropertyString("playlist/0/id")?.toLongOrNull()?.let { playlistEntryId ->
                 expectedPlaylistEntryId = playlistEntryId
             }
             AppLogger.i(
                 LOG_TAG,
-                "JNI loadfile submitted sourceKind=${sourceKind(url)} headers=${headers.size}",
+                "FFM loadfile submitted sourceKind=${sourceKind(url)} headers=${headers.size}",
             )
         } catch (throwable: Throwable) {
             expectedPath = null
@@ -343,87 +339,26 @@ internal class JniMpvBackend(
     }
 
     private fun ensureOpen() {
-        check(!closed.get()) { "libmpv JNI backend is closed" }
+        check(!closed.get()) { "libmpv FFM backend is closed" }
     }
 }
 
 internal object JniMpvApi {
-    external fun nativeCreate(): Long
-    external fun nativeInitialize(handle: Long): Int
-    external fun nativeSetOption(handle: Long, name: String, value: String): Int
-    external fun nativeSetProperty(handle: Long, name: String, value: String): Int
-    external fun nativeGetProperty(handle: Long, name: String): String?
-    external fun nativeCommand(handle: Long, args: Array<out String>): Int
-    external fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int
-    external fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String?
-    external fun nativeWakeup(handle: Long)
-    external fun nativeDestroy(handle: Long)
-    external fun nativeErrorString(error: Int): String?
-}
+    private val api get() = desktopMpvNativeApi()
 
-private object JniMpvBridgeLoader {
-    @Volatile
-    private var loaded = false
-
-    fun ensureLoaded() {
-        if (loaded) return
-        synchronized(this) {
-            if (loaded) return
-            val bridge = resolveJniMpvBridge()
-                ?: throw UnsatisfiedLinkError(
-                    "Nucleus libmpv JNI bridge not found in packaged resources or development build output",
-                )
-            if (isWindows()) {
-                preloadPackagedWindowsMpvRuntime(bridge)
-            }
-            System.load(bridge.absolutePath)
-            loaded = true
-            AppLogger.i(LOG_TAG, "loaded JNI bridge ${bridge.absolutePath}")
-        }
-    }
-}
-
-private fun preloadPackagedWindowsMpvRuntime(bridge: File) {
-    val runtimeDir = bridge.parentFile ?: return
-    val runtimeFiles = runtimeDir.listFiles().orEmpty()
-        .filter { file -> file.isFile && file.extension.equals("dll", ignoreCase = true) }
-    val loadPlan = windowsMpvRuntimeLoadPlan(runtimeFiles.map(File::getName))
-    if (loadPlan.isEmpty()) return
-
-    val filesByName = runtimeFiles.associateBy { file -> file.name.lowercase() }
-    val mpvRuntimeName = loadPlan.last()
-    val supportNames = loadPlan.dropLast(1)
-    val pendingSupport = supportNames.toMutableList()
-    var madeProgress: Boolean
-    do {
-        madeProgress = false
-        val iterator = pendingSupport.iterator()
-        while (iterator.hasNext()) {
-            val name = iterator.next()
-            val file = filesByName[name.lowercase()] ?: run {
-                iterator.remove()
-                continue
-            }
-            if (runCatching { System.load(file.absolutePath) }.isSuccess) {
-                iterator.remove()
-                madeProgress = true
-                AppLogger.i(LOG_TAG, "preloaded Windows runtime dependency ${file.name}")
-            }
-        }
-    } while (madeProgress && pendingSupport.isNotEmpty())
-
-    val mpvRuntime = filesByName[mpvRuntimeName.lowercase()] ?: return
-    try {
-        System.load(mpvRuntime.absolutePath)
-    } catch (error: UnsatisfiedLinkError) {
-        val unresolved = pendingSupport.takeIf(List<String>::isNotEmpty)?.joinToString()
-        val detail = buildString {
-            append("Failed to load packaged Windows libmpv runtime: ${mpvRuntime.absolutePath}")
-            if (unresolved != null) append("; unresolved sibling DLLs: $unresolved")
-        }
-        throw UnsatisfiedLinkError(detail).also { it.initCause(error) }
-    }
-    AppLogger.i(LOG_TAG, "preloaded Windows libmpv runtime ${mpvRuntime.absolutePath}")
+    fun nativeCreate(): Long = api.create()
+    fun nativeInitialize(handle: Long): Int = api.initialize(handle)
+    fun nativeSetOption(handle: Long, name: String, value: String): Int = api.setOption(handle, name, value)
+    fun nativeSetProperty(handle: Long, name: String, value: String): Int = api.setProperty(handle, name, value)
+    fun nativeGetProperty(handle: Long, name: String): String? = api.getProperty(handle, name)
+    fun nativeCommand(handle: Long, args: Array<out String>): Int = api.command(handle, args)
+    fun nativeObserveProperty(handle: Long, replyUserdata: Long, name: String): Int =
+        api.observeProperty(handle, replyUserdata, name)
+    fun nativeWaitObservedEvent(handle: Long, timeoutSeconds: Double): String? =
+        api.waitObservedEvent(handle, timeoutSeconds)
+    fun nativeWakeup(handle: Long) = api.wakeup(handle)
+    fun nativeDestroy(handle: Long) = api.destroy(handle)
+    fun nativeErrorString(error: Int): String? = api.errorString(error)
 }
 
 internal fun windowsMpvRuntimeLoadPlan(libraryNames: List<String>): List<String> {
@@ -438,23 +373,6 @@ internal fun windowsMpvRuntimeLoadPlan(libraryNames: List<String>): List<String>
         }
         .sortedBy(String::lowercase)
     return support + mpvRuntime
-}
-
-private fun resolveJniMpvBridge(): File? {
-    val libraryName = when {
-        isWindows() -> WINDOWS_MPV_BRIDGE_NAME
-        isMac() -> "libfuoevolve_mpv_jni.dylib"
-        else -> "libfuoevolve_mpv_jni.so"
-    }
-    val resourcesDir = System.getProperty("compose.application.resources.dir")
-        ?.takeIf(String::isNotBlank)
-        ?.let(::File)
-    val userDir = File(System.getProperty("user.dir").orEmpty().ifBlank { "." })
-    return buildList {
-        resourcesDir?.let { add(File(it, "native/lib/$libraryName")) }
-        add(File(userDir, "desktopNucleusPoc/build/native/mpv-jni/$libraryName"))
-        add(File(userDir, "build/native/mpv-jni/$libraryName"))
-    }.firstOrNull { it.isFile }
 }
 
 private fun encodeMpvLoadfileOptions(headers: Map<String, String>): String {
@@ -504,18 +422,10 @@ private fun sourceKind(url: String): String = when {
     else -> "other"
 }
 
-private fun isWindows(): Boolean =
-    System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)
-
-private fun isMac(): Boolean =
-    System.getProperty("os.name").orEmpty().let { name ->
-        name.contains("mac", ignoreCase = true) || name.contains("darwin", ignoreCase = true)
-    }
-
 private const val EVENT_WAIT_SECONDS = 0.05
 private const val MPV_VOLUME_SCALE = 100.0
 private const val MPV_END_FILE_REASON_ERROR = 4
-private const val LOG_TAG = "NucleusMpvJni"
+private const val LOG_TAG = "NucleusMpvFfm"
 private const val WINDOWS_MPV_BRIDGE_NAME = "fuoevolve_mpv_jni.dll"
 private val WINDOWS_MPV_RUNTIME_NAMES = listOf("libmpv-2.dll", "mpv-2.dll", "mpv.dll")
 
