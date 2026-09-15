@@ -108,7 +108,7 @@ fun main(args: Array<String>) {
     }
     installDesktopPlaybackEngineFactory {
         createPersistentDesktopPlaybackEngine(
-            delegate = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener, mpvNativeApi) },
+            delegate = DesktopMpvPlaybackEngine { listener -> FfmMpvBackend(listener, mpvNativeApi) },
             resumeStore = createDesktopPlaybackResumeStore(),
         )
     }
@@ -290,7 +290,7 @@ fun main(args: Array<String>) {
                     check(playbackSmokeFile.isFile) {
                         "Native playback smoke file does not exist: ${playbackSmokeFile.absolutePath}"
                     }
-                    val engine = DesktopMpvPlaybackEngine { listener -> JniMpvBackend(listener, mpvNativeApi) }
+                    val engine = DesktopMpvPlaybackEngine { listener -> FfmMpvBackend(listener, mpvNativeApi) }
                     try {
                         val track = MusicTrack(
                             id = "nucleus-native-playback-smoke",
