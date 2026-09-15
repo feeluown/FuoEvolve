@@ -85,12 +85,14 @@ internal data class DesktopJniVideoSourceCandidate(
  * video in the Native/Nucleus surface.
  */
 internal class DesktopJniMpvVideoController(
+    nativeApi: DesktopMpvNativeApi,
     private val videoDecodeMode: DesktopVideoDecodeMode,
     private val openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) :
     DesktopPlatformVideoController,
     DesktopWindowsD3D11VideoController,
     DesktopIoSurfaceVideoController {
+    private val DesktopJniMpvVideoApi = DesktopMpvVideoApiAdapter(nativeApi)
     private val closed = AtomicBoolean(false)
     private val renderContextLock = Any()
     private val mutableState = MutableStateFlow(PlatformVideoPlaybackState())
@@ -124,7 +126,6 @@ internal class DesktopJniMpvVideoController(
     @Volatile private var lastPipelineDescription: String? = null
 
     init {
-        DesktopJniMpvVideoBridgeLoader.ensureLoaded()
         handle = DesktopJniMpvVideoApi.nativeCreate()
         check(handle != 0L) { "libmpv mpv_create() returned null for video" }
         try {
@@ -982,9 +983,9 @@ private fun String?.secondsToMsOrNull(): Long? =
 
 private fun alignTo64(value: Int): Int = ((value + 63) / 64) * 64
 
-private object DesktopJniMpvVideoApi {
-    private val api get() = desktopMpvNativeApi()
-
+private class DesktopMpvVideoApiAdapter(
+    private val api: DesktopMpvNativeApi,
+) {
     fun nativeCreate(): Long = api.create()
     fun nativeInitialize(handle: Long): Int = api.initialize(handle)
     fun nativeSetOption(handle: Long, name: String, value: String): Int = api.setOption(handle, name, value)
@@ -1046,12 +1047,6 @@ private object DesktopJniMpvVideoApi {
         pixels: ByteArray,
     ): Int = api.renderSoftware(renderContext, width, height, stride, pixels)
     fun nativeFreeRenderContext(renderContext: Long) = api.freeRenderContext(renderContext)
-}
-
-private object DesktopJniMpvVideoBridgeLoader {
-    fun ensureLoaded() {
-        desktopMpvNativeApi()
-    }
 }
 
 internal fun desktopVideoHwdecOption(mode: DesktopVideoDecodeMode): String = when (mode) {
