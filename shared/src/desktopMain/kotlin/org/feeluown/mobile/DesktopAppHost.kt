@@ -29,7 +29,7 @@ fun DesktopAppHost(
 ) {
     val container = remember(audioCaptureApi) { DesktopAppContainer(audioCaptureApi) }
     var activeWebLoginProvider by remember { mutableStateOf<ProviderInfo?>(null) }
-    installDesktopJniMpvVideoControllerFactory(
+    installDesktopFfmMpvVideoControllerFactory(
         nativeApi = nativeMpvApi,
         videoDecodeMode = container::desktopVideoDecodeMode,
         openGlRenderContextParameters = openGlRenderContextParameters,
