@@ -36,6 +36,7 @@ import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
 import org.feeluown.mobile.DesktopWindowsD3D11VideoController
 import org.feeluown.mobile.VideoPlaybackPayload
+import org.feeluown.mobile.desktopMpvNativeApi
 import org.jetbrains.skia.BackendRenderTarget
 import org.jetbrains.skia.ColorSpace
 import org.jetbrains.skia.ContentChangeMode
@@ -193,7 +194,6 @@ private fun NucleusWindowsD3D11VideoContent(
             target = next
             textureController.markFrameAvailable()
             if (previous != null) {
-                // Let Compose publish/import the new shared handle before destroying the old one.
                 withFrameNanos { }
                 previous.close()
             }
@@ -304,7 +304,6 @@ private fun NucleusWindowsTextureVideoContent(
                 if (next !== current) {
                     target = next
                     textureController.markFrameAvailable()
-                    // Publish/import the new shared texture before releasing the previous one.
                     withFrameNanos { }
                     if (current != null) withContext(Dispatchers.Default) { current.close() }
                 } else {
@@ -426,7 +425,6 @@ private fun NucleusIoSurfaceVideoContent(
             val previous = target
             target = next
             if (previous != null) {
-                // Let Compose publish/import the new source before retiring the old IOSurface.
                 withFrameNanos { }
                 withContext(Dispatchers.Default) { previous.close() }
             }
@@ -529,10 +527,12 @@ private class WindowsD3D11VideoTarget private constructor(
 }
 
 private object WindowsD3D11VideoTextureApi {
-    @JvmStatic external fun nativeCreate(width: Int, height: Int): Long
-    @JvmStatic external fun nativeSharedHandle(target: Long): Long
-    @JvmStatic external fun nativeUpload(target: Long, pixels: IntArray): Boolean
-    @JvmStatic external fun nativeDestroy(target: Long)
+    private val api get() = desktopMpvNativeApi()
+
+    fun nativeCreate(width: Int, height: Int): Long = api.createWindowsD3D11Texture(width, height)
+    fun nativeSharedHandle(target: Long): Long = api.windowsD3D11TextureSharedHandle(target)
+    fun nativeUpload(target: Long, pixels: IntArray): Boolean = api.uploadWindowsD3D11Texture(target, pixels)
+    fun nativeDestroy(target: Long) = api.destroyWindowsD3D11Texture(target)
 }
 
 private class NucleusWindowsD3D11MpvVideoRenderer(
@@ -665,8 +665,6 @@ private class NucleusOpenGlMpvVideoRenderer(
                 return@withContextCurrent null
             }
 
-            // Tell Skia an external producer is about to overwrite the wrapped FBO. This preserves
-            // snapshot immutability with a GPU-side copy-on-write when a previous frame is in flight.
             currentSurface.notifyContentWillChange(ContentChangeMode.DISCARD)
             renderContext.skiaContext.resetGLAll()
             controller.renderOpenGl(mpvRenderContext, target)
