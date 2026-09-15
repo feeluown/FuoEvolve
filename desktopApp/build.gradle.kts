@@ -135,13 +135,13 @@ val audioCaptureLibrary = audioCaptureProjectDir.file("target/release/$audioCapt
 val nucleusAppResources = layout.buildDirectory.dir("nucleus-app-resources")
 val stagedNativeResourceRoot = "$packageResourceOs/native"
 
-val mpvJniLibraryName = when {
-    isWindowsHost -> "fuoevolve_mpv_jni.dll"
-    isMacHost -> "libfuoevolve_mpv_jni.dylib"
-    else -> "libfuoevolve_mpv_jni.so"
+val mpvBridgeLibraryName = when {
+    isWindowsHost -> "fuoevolve_mpv_bridge.dll"
+    isMacHost -> "libfuoevolve_mpv_bridge.dylib"
+    else -> "libfuoevolve_mpv_bridge.so"
 }
-val mpvJniSource = layout.projectDirectory.file("native/mpv-jni/fuoevolve_mpv_jni.c")
-val mpvJniOutput = layout.buildDirectory.file("native/mpv-jni/$mpvJniLibraryName")
+val mpvBridgeSource = layout.projectDirectory.file("native/mpv-bridge/fuoevolve_mpv_bridge.c")
+val mpvBridgeOutput = layout.buildDirectory.file("native/mpv-bridge/$mpvBridgeLibraryName")
 val mpvDevDirPath = providers.gradleProperty("fuoevolve.nucleus.libmpvDevDir")
     .orElse(providers.environmentVariable("FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR"))
 val mpvRuntimeDirPath = providers.gradleProperty("fuoevolve.nucleus.libmpvRuntimeDir")
@@ -188,32 +188,19 @@ val buildNucleusAudioCaptureLibrary by tasks.registering(Exec::class) {
     commandLine("cargo", "build", "--release")
 }
 
-val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
+val buildNucleusMpvBridge by tasks.registering(Exec::class) {
     group = "build"
-    description = "Build the thin JNI bridge used by the Nucleus libmpv playback backend."
-    inputs.file(mpvJniSource)
-    outputs.file(mpvJniOutput)
+    description = "Build the native C bridge used by the Nucleus libmpv FFM backend."
+    inputs.file(mpvBridgeSource)
+    outputs.file(mpvBridgeOutput)
 
     doFirst {
-        mpvJniOutput.get().asFile.parentFile.mkdirs()
-        val javaHome = File(System.getProperty("java.home"))
-        val includeRoot = javaHome.resolve("include")
-        val platformInclude = includeRoot.resolve(
-            when {
-                isWindowsHost -> "win32"
-                isMacHost -> "darwin"
-                else -> "linux"
-            },
-        )
-        check(includeRoot.isDirectory && platformInclude.isDirectory) {
-            "JNI headers were not found below ${javaHome.absolutePath}"
-        }
-
+        mpvBridgeOutput.get().asFile.parentFile.mkdirs()
         when {
             isWindowsHost -> {
                 val devDir = mpvDevDirPath.orNull?.let(::file)
                     ?: throw GradleException(
-                        "Windows Nucleus JNI build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
+                        "Windows Nucleus libmpv bridge build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
                     )
                 val header = devDir.resolve("include/mpv/client.h")
                 val importLibrary = devDir.resolve("libmpv.dll.a")
@@ -227,20 +214,18 @@ val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
                     "-Wall",
                     "-Wextra",
                     "-fuse-ld=lld",
-                    "-I${includeRoot.absolutePath}",
-                    "-I${platformInclude.absolutePath}",
                     "-I${devDir.resolve("include").absolutePath}",
-                    mpvJniSource.asFile.absolutePath,
+                    mpvBridgeSource.asFile.absolutePath,
                     importLibrary.absolutePath,
                     "-o",
-                    mpvJniOutput.get().asFile.absolutePath,
+                    mpvBridgeOutput.get().asFile.absolutePath,
                 )
             }
 
             isMacHost -> {
                 val devDir = mpvDevDirPath.orNull?.let(::file)
                     ?: throw GradleException(
-                        "macOS Nucleus JNI build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
+                        "macOS Nucleus libmpv bridge build requires FUOEVOLVE_NUCLEUS_LIBMPV_DEV_DIR",
                     )
                 val runtimeDir = mpvRuntimeDirPath.orNull?.let(::file) ?: devDir.resolve("lib")
                 val header = devDir.resolve("include/mpv/client.h")
@@ -254,15 +239,13 @@ val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
                     "-O2",
                     "-Wall",
                     "-Wextra",
-                    "-I${includeRoot.absolutePath}",
-                    "-I${platformInclude.absolutePath}",
                     "-I${devDir.resolve("include").absolutePath}",
-                    mpvJniSource.asFile.absolutePath,
+                    mpvBridgeSource.asFile.absolutePath,
                     "-L${runtimeDir.absolutePath}",
                     "-lmpv",
                     "-Wl,-rpath,@loader_path",
                     "-o",
-                    mpvJniOutput.get().asFile.absolutePath,
+                    mpvBridgeOutput.get().asFile.absolutePath,
                 )
             }
 
@@ -273,12 +256,10 @@ val buildNucleusMpvJniBridge by tasks.registering(Exec::class) {
                 "-O2",
                 "-Wall",
                 "-Wextra",
-                "-I${includeRoot.absolutePath}",
-                "-I${platformInclude.absolutePath}",
-                mpvJniSource.asFile.absolutePath,
+                mpvBridgeSource.asFile.absolutePath,
                 "-Wl,-rpath,\$ORIGIN",
                 "-o",
-                mpvJniOutput.get().asFile.absolutePath,
+                mpvBridgeOutput.get().asFile.absolutePath,
                 "-lmpv",
             )
 
@@ -313,7 +294,7 @@ val prepareNucleusPortableLinuxRuntime by tasks.registering(Exec::class) {
 val prepareNucleusAppResources by tasks.registering(Sync::class) {
     group = "distribution"
     description = "Stage native resources required by the Nucleus desktop runtime."
-    dependsOn(buildNucleusAudioFingerprintHelper, buildNucleusAudioCaptureLibrary, buildNucleusMpvJniBridge)
+    dependsOn(buildNucleusAudioFingerprintHelper, buildNucleusAudioCaptureLibrary, buildNucleusMpvBridge)
     if (isLinuxHost) dependsOn(prepareNucleusPortableLinuxRuntime)
 
     from(audioFingerprintExecutable) {
@@ -322,7 +303,7 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
             filePermissions { unix("755") }
         }
     }
-    from(mpvJniOutput) {
+    from(mpvBridgeOutput) {
         into("$stagedNativeResourceRoot/lib")
         if (!isWindowsHost) {
             filePermissions { unix("755") }
@@ -360,7 +341,7 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
     doLast {
         val platformRoot = nucleusAppResources.get().asFile.resolve(stagedNativeResourceRoot)
         val stagedHelper = platformRoot.resolve("helpers/$audioFingerprintExecutableName")
-        val stagedMpvBridge = platformRoot.resolve("lib/$mpvJniLibraryName")
+        val stagedMpvBridge = platformRoot.resolve("lib/$mpvBridgeLibraryName")
         val stagedAudioCapture = platformRoot.resolve("audio/$audioCaptureLibraryName")
         if (!stagedHelper.isFile) {
             throw GradleException("Nucleus audio fingerprint helper was not staged: ${stagedHelper.absolutePath}")
@@ -375,7 +356,7 @@ val prepareNucleusAppResources by tasks.registering(Sync::class) {
             }
         }
         if (!stagedMpvBridge.isFile) {
-            throw GradleException("Nucleus libmpv JNI bridge was not staged: ${stagedMpvBridge.absolutePath}")
+            throw GradleException("Nucleus libmpv native bridge was not staged: ${stagedMpvBridge.absolutePath}")
         }
         if (!stagedAudioCapture.isFile) {
             throw GradleException("Nucleus system audio capture library was not staged: ${stagedAudioCapture.absolutePath}")

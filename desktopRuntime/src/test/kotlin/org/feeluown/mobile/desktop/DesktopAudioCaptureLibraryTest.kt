@@ -1,4 +1,4 @@
-package org.feeluown.mobile
+package org.feeluown.mobile.desktop
 
 import java.nio.file.Files
 import kotlin.io.path.createDirectories

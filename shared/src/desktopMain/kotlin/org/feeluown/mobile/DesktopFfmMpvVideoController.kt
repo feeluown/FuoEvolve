@@ -62,7 +62,7 @@ interface DesktopIoSurfaceVideoController {
     fun destroyIoSurfaceRenderContext(renderContext: Long)
 }
 
-internal data class DesktopJniVideoSourceCandidate(
+internal data class DesktopFfmVideoSourceCandidate(
     val url: String = "",
     val videoUrl: String = "",
     val audioUrl: String = "",
@@ -84,7 +84,7 @@ internal data class DesktopJniVideoSourceCandidate(
  * import the surface. GPU setup failures are reported instead of silently switching to software
  * video in the Native/Nucleus surface.
  */
-internal class DesktopJniMpvVideoController(
+internal class DesktopFfmMpvVideoController(
     nativeApi: DesktopMpvNativeApi,
     private val videoDecodeMode: DesktopVideoDecodeMode,
     private val openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
@@ -92,7 +92,7 @@ internal class DesktopJniMpvVideoController(
     DesktopPlatformVideoController,
     DesktopWindowsD3D11VideoController,
     DesktopIoSurfaceVideoController {
-    private val DesktopJniMpvVideoApi = DesktopMpvVideoApiAdapter(nativeApi)
+    private val DesktopFfmMpvVideoApi = DesktopMpvVideoApiAdapter(nativeApi)
     private val closed = AtomicBoolean(false)
     private val renderContextLock = Any()
     private val mutableState = MutableStateFlow(PlatformVideoPlaybackState())
@@ -115,7 +115,7 @@ internal class DesktopJniMpvVideoController(
     @Volatile private var reachedEof = false
     @Volatile private var softwareFrameDirty = false
     @Volatile private var activePayload: VideoPlaybackPayload? = null
-    @Volatile private var activeCandidates: List<DesktopJniVideoSourceCandidate> = emptyList()
+    @Volatile private var activeCandidates: List<DesktopFfmVideoSourceCandidate> = emptyList()
     @Volatile private var activeCandidateIndex = -1
     @Volatile private var hardwareDecoderRejected = false
     @Volatile private var activePlaylistEntryId: Long? = null
@@ -126,7 +126,7 @@ internal class DesktopJniMpvVideoController(
     @Volatile private var lastPipelineDescription: String? = null
 
     init {
-        handle = DesktopJniMpvVideoApi.nativeCreate()
+        handle = DesktopFfmMpvVideoApi.nativeCreate()
         check(handle != 0L) { "libmpv mpv_create() returned null for video" }
         try {
             setOption("config", "no")
@@ -142,15 +142,15 @@ internal class DesktopJniMpvVideoController(
                 setOption("gpu-hwdec-interop", interop)
             }
             setOption("audio-display", "no")
-            checkMpv(DesktopJniMpvVideoApi.nativeInitialize(handle), "mpv_initialize video")
+            checkMpv(DesktopFfmMpvVideoApi.nativeInitialize(handle), "mpv_initialize video")
             VIDEO_OBSERVED_PROPERTIES.forEachIndexed { index, property ->
                 checkMpv(
-                    DesktopJniMpvVideoApi.nativeObserveProperty(handle, index.toLong() + 1L, property),
+                    DesktopFfmMpvVideoApi.nativeObserveProperty(handle, index.toLong() + 1L, property),
                     "observe video property $property",
                 )
             }
         } catch (throwable: Throwable) {
-            DesktopJniMpvVideoApi.nativeDestroy(handle)
+            DesktopFfmMpvVideoApi.nativeDestroy(handle)
             throw throwable
         }
         eventThread = thread(
@@ -187,7 +187,7 @@ internal class DesktopJniMpvVideoController(
             return
         }
 
-        val candidates = desktopJniVideoSourceCandidates(payload)
+        val candidates = desktopFfmVideoSourceCandidates(payload)
         if (candidates.isEmpty()) {
             activePayload = null
             activeCandidates = emptyList()
@@ -224,7 +224,7 @@ internal class DesktopJniMpvVideoController(
         val current = mutableState.value
         if (
             activeCandidateIndex in activeCandidates.indices &&
-            shouldRestartDesktopJniVideoPlayback(
+            shouldRestartDesktopFfmVideoPlayback(
                 reachedEof = reachedEof,
                 playbackActive = playbackActive,
                 positionMs = current.positionMs,
@@ -266,7 +266,7 @@ internal class DesktopJniMpvVideoController(
             "another libmpv video renderer is already active"
         }
         if (openGlRenderContext != 0L) return@synchronized openGlRenderContext
-        val context = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderContext(
+        val context = DesktopFfmMpvVideoApi.nativeCreateOpenGlRenderContext(
             handle = handle,
             directHardware = videoDecodeMode == DesktopVideoDecodeMode.HardwareDirect,
             nativeDisplayKind = openGlRenderContextParameters?.nativeDisplayKind ?: 0,
@@ -275,7 +275,7 @@ internal class DesktopJniMpvVideoController(
         )
         check(context != 0L) { "libmpv OpenGL video render context creation failed" }
         openGlRenderContext = context
-        val displayKind = DesktopJniMpvVideoApi.nativeOpenGlRenderContextDisplayKind(context)
+        val displayKind = DesktopFfmMpvVideoApi.nativeOpenGlRenderContextDisplayKind(context)
         AppLogger.i(
             "DesktopVideo",
             "attached libmpv OpenGL renderer with " +
@@ -288,21 +288,21 @@ internal class DesktopJniMpvVideoController(
 
     override fun updateOpenGlRenderContext(renderContext: Long): Boolean {
         ensureOpenGlContext(renderContext)
-        return DesktopJniMpvVideoApi.nativeUpdateRenderContext(renderContext) and
+        return DesktopFfmMpvVideoApi.nativeUpdateRenderContext(renderContext) and
             MPV_RENDER_UPDATE_FRAME != 0L
     }
 
     override fun createOpenGlRenderTarget(width: Int, height: Int): Long {
         ensureOpen()
         require(width > 0 && height > 0) { "OpenGL video render target must have positive dimensions" }
-        val target = DesktopJniMpvVideoApi.nativeCreateOpenGlRenderTarget(width, height)
+        val target = DesktopFfmMpvVideoApi.nativeCreateOpenGlRenderTarget(width, height)
         check(target != 0L) { "OpenGL video render target creation failed" }
         return target
     }
 
     override fun openGlRenderTargetFramebuffer(renderTarget: Long): Int {
         ensureOpen()
-        val framebuffer = DesktopJniMpvVideoApi.nativeOpenGlRenderTargetFramebuffer(renderTarget)
+        val framebuffer = DesktopFfmMpvVideoApi.nativeOpenGlRenderTargetFramebuffer(renderTarget)
         check(framebuffer > 0) { "OpenGL video render target has no framebuffer" }
         return framebuffer
     }
@@ -310,22 +310,22 @@ internal class DesktopJniMpvVideoController(
     override fun renderOpenGl(renderContext: Long, renderTarget: Long) {
         ensureOpenGlContext(renderContext)
         check(renderTarget != 0L) { "OpenGL video render target is closed" }
-        DesktopJniMpvVideoApi.nativeRenderOpenGl(renderContext, renderTarget)
+        DesktopFfmMpvVideoApi.nativeRenderOpenGl(renderContext, renderTarget)
     }
 
     override fun reportOpenGlSwap(renderContext: Long) {
         ensureOpenGlContext(renderContext)
-        DesktopJniMpvVideoApi.nativeReportSwap(renderContext)
+        DesktopFfmMpvVideoApi.nativeReportSwap(renderContext)
     }
 
     override fun destroyOpenGlRenderTarget(renderTarget: Long) {
-        if (renderTarget != 0L) DesktopJniMpvVideoApi.nativeDestroyOpenGlRenderTarget(renderTarget)
+        if (renderTarget != 0L) DesktopFfmMpvVideoApi.nativeDestroyOpenGlRenderTarget(renderTarget)
     }
 
     override fun createD3D11RenderTarget(renderContext: Long, width: Int, height: Int): Long {
         ensureOpenGlContext(renderContext)
         require(width > 0 && height > 0) { "D3D11 video render target must have positive dimensions" }
-        val target = DesktopJniMpvVideoApi.nativeCreateD3D11RenderTarget(renderContext, width, height)
+        val target = DesktopFfmMpvVideoApi.nativeCreateD3D11RenderTarget(renderContext, width, height)
         check(target != 0L) { "D3D11 shared libmpv render target creation failed" }
         d3D11DirectTargetCount += 1
         lastPipelineDescription = null
@@ -334,7 +334,7 @@ internal class DesktopJniMpvVideoController(
 
     override fun d3D11RenderTargetSharedHandle(renderTarget: Long): Long {
         ensureOpen()
-        val sharedHandle = DesktopJniMpvVideoApi.nativeD3D11RenderTargetSharedHandle(renderTarget)
+        val sharedHandle = DesktopFfmMpvVideoApi.nativeD3D11RenderTargetSharedHandle(renderTarget)
         check(sharedHandle != 0L) { "D3D11 libmpv render target has no shared handle" }
         return sharedHandle
     }
@@ -342,12 +342,12 @@ internal class DesktopJniMpvVideoController(
     override fun renderD3D11(renderContext: Long, renderTarget: Long): Boolean {
         ensureOpenGlContext(renderContext)
         check(renderTarget != 0L) { "D3D11 libmpv render target is closed" }
-        return DesktopJniMpvVideoApi.nativeRenderD3D11(renderContext, renderTarget)
+        return DesktopFfmMpvVideoApi.nativeRenderD3D11(renderContext, renderTarget)
     }
 
     override fun destroyD3D11RenderTarget(renderTarget: Long) {
         if (renderTarget == 0L) return
-        DesktopJniMpvVideoApi.nativeDestroyD3D11RenderTarget(renderTarget)
+        DesktopFfmMpvVideoApi.nativeDestroyD3D11RenderTarget(renderTarget)
         d3D11DirectTargetCount = (d3D11DirectTargetCount - 1).coerceAtLeast(0)
         lastPipelineDescription = null
     }
@@ -356,7 +356,7 @@ internal class DesktopJniMpvVideoController(
         if (renderContext == 0L) return
         synchronized(renderContextLock) {
             if (openGlRenderContext != renderContext) return@synchronized
-            DesktopJniMpvVideoApi.nativeFreeOpenGlRenderContext(renderContext)
+            DesktopFfmMpvVideoApi.nativeFreeOpenGlRenderContext(renderContext)
             openGlRenderContext = 0L
             d3D11DirectTargetCount = 0
             lastPipelineDescription = null
@@ -370,7 +370,7 @@ internal class DesktopJniMpvVideoController(
             "another libmpv video renderer is already active"
         }
         if (ioSurfaceRenderContext != 0L) return@synchronized ioSurfaceRenderContext
-        val context = DesktopJniMpvVideoApi.nativeCreateIoSurfaceRenderContext(handle)
+        val context = DesktopFfmMpvVideoApi.nativeCreateIoSurfaceRenderContext(handle)
         check(context != 0L) { "libmpv macOS IOSurface render context creation failed" }
         ioSurfaceRenderContext = context
         AppLogger.i(
@@ -383,14 +383,14 @@ internal class DesktopJniMpvVideoController(
     override fun createIoSurfaceRenderTarget(renderContext: Long, width: Int, height: Int): Long {
         ensureIoSurfaceContext(renderContext)
         require(width > 0 && height > 0) { "IOSurface video target must have positive dimensions" }
-        val target = DesktopJniMpvVideoApi.nativeCreateIoSurfaceRenderTarget(renderContext, width, height)
+        val target = DesktopFfmMpvVideoApi.nativeCreateIoSurfaceRenderTarget(renderContext, width, height)
         check(target != 0L) { "macOS IOSurface video target creation failed" }
         return target
     }
 
     override fun ioSurfaceRenderTargetPointer(renderTarget: Long): Long {
         ensureOpen()
-        val surface = DesktopJniMpvVideoApi.nativeIoSurfaceRenderTargetPointer(renderTarget)
+        val surface = DesktopFfmMpvVideoApi.nativeIoSurfaceRenderTargetPointer(renderTarget)
         check(surface != 0L) { "macOS video target has no IOSurface" }
         return surface
     }
@@ -398,14 +398,14 @@ internal class DesktopJniMpvVideoController(
     override fun renderIoSurface(renderContext: Long, renderTarget: Long): Boolean {
         ensureIoSurfaceContext(renderContext)
         check(renderTarget != 0L) { "IOSurface video render target is closed" }
-        return DesktopJniMpvVideoApi.nativeRenderIoSurface(renderContext, renderTarget)
+        return DesktopFfmMpvVideoApi.nativeRenderIoSurface(renderContext, renderTarget)
     }
 
     override fun destroyIoSurfaceRenderTarget(renderContext: Long, renderTarget: Long) {
         if (renderTarget == 0L) return
         synchronized(renderContextLock) {
             if (ioSurfaceRenderContext != renderContext) return@synchronized
-            DesktopJniMpvVideoApi.nativeDestroyIoSurfaceRenderTarget(renderContext, renderTarget)
+            DesktopFfmMpvVideoApi.nativeDestroyIoSurfaceRenderTarget(renderContext, renderTarget)
         }
     }
 
@@ -413,7 +413,7 @@ internal class DesktopJniMpvVideoController(
         if (renderContext == 0L) return
         synchronized(renderContextLock) {
             if (ioSurfaceRenderContext != renderContext) return@synchronized
-            DesktopJniMpvVideoApi.nativeFreeIoSurfaceRenderContext(renderContext)
+            DesktopFfmMpvVideoApi.nativeFreeIoSurfaceRenderContext(renderContext)
             ioSurfaceRenderContext = 0L
             lastPipelineDescription = null
         }
@@ -427,7 +427,7 @@ internal class DesktopJniMpvVideoController(
             check(openGlRenderContext == 0L && ioSurfaceRenderContext == 0L) {
                 "GPU libmpv video renderer is already active"
             }
-            val context = DesktopJniMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
+            val context = DesktopFfmMpvVideoApi.nativeCreateSoftwareRenderContext(handle)
             check(context != 0L) { "libmpv software video render context creation failed" }
             softwareRenderContext = context
             softwareFrameDirty = true
@@ -443,13 +443,13 @@ internal class DesktopJniMpvVideoController(
         activeCandidates = emptyList()
         activeCandidateIndex = -1
         activePlaylistEntryId = null
-        DesktopJniMpvVideoApi.nativeWakeup(handle)
+        DesktopFfmMpvVideoApi.nativeWakeup(handle)
         if (Thread.currentThread() !== eventThread) runCatching { eventThread.join(2_000) }
         if (Thread.currentThread() !== renderThread) runCatching { renderThread.join(2_000) }
 
         val gpuContextStillAttached = synchronized(renderContextLock) {
             softwareRenderContext.takeIf { it != 0L }?.let { context ->
-                DesktopJniMpvVideoApi.nativeFreeRenderContext(context)
+                DesktopFfmMpvVideoApi.nativeFreeRenderContext(context)
                 softwareRenderContext = 0L
             }
             openGlRenderContext != 0L || ioSurfaceRenderContext != 0L
@@ -468,7 +468,7 @@ internal class DesktopJniMpvVideoController(
     private fun eventLoop() {
         try {
             while (!closed.get()) {
-                val event = DesktopJniMpvVideoApi.nativeWaitObservedEvent(handle, EVENT_WAIT_SECONDS)
+                val event = DesktopFfmMpvVideoApi.nativeWaitObservedEvent(handle, EVENT_WAIT_SECONDS)
                 if (event == "shutdown") return
                 if (event != null) handleEvent(event)
             }
@@ -487,7 +487,7 @@ internal class DesktopJniMpvVideoController(
             event == "queue-overflow" -> refreshObservedState()
             event.startsWith("property:") -> handleObservedProperty(event)
             event.startsWith("start:") -> {
-                activePlaylistEntryId = parseDesktopJniVideoStartEvent(event)
+                activePlaylistEntryId = parseDesktopFfmVideoStartEvent(event)
                 softwareFrameDirty = true
             }
             event == "loaded" || event == "restart" -> {
@@ -566,7 +566,7 @@ internal class DesktopJniMpvVideoController(
     }
 
     private fun handleEndEvent(encoded: String) {
-        val endEvent = parseDesktopJniVideoEndEvent(encoded) ?: return
+        val endEvent = parseDesktopFfmVideoEndEvent(encoded) ?: return
         if (activePlaylistEntryId == null || endEvent.playlistEntryId != activePlaylistEntryId) {
             return
         }
@@ -588,7 +588,7 @@ internal class DesktopJniMpvVideoController(
         val errorMessage = if (
             endEvent.reason == MPV_END_FILE_REASON_ERROR && endEvent.error < 0
         ) {
-            DesktopJniMpvVideoApi.nativeErrorString(endEvent.error)
+            DesktopFfmMpvVideoApi.nativeErrorString(endEvent.error)
                 ?.let { "视频播放失败：$it" }
                 ?: "视频播放失败"
         } else {
@@ -639,7 +639,7 @@ internal class DesktopJniMpvVideoController(
         )
 
         setProperty("pause", if (shouldPlay) "no" else "yes")
-        val options = encodeDesktopJniVideoLoadfileOptions(payload.headers, candidate.externalAudioUrl)
+        val options = encodeDesktopFfmVideoLoadfileOptions(payload.headers, candidate.externalAudioUrl)
         if (options.isBlank()) {
             command("loadfile", candidate.mainUrl, "replace")
         } else {
@@ -700,7 +700,7 @@ internal class DesktopJniMpvVideoController(
                 Thread.sleep(80L)
                 continue
             }
-            val (width, height) = boundedDesktopJniVideoRenderSize(viewportWidth, viewportHeight)
+            val (width, height) = boundedDesktopFfmVideoRenderSize(viewportWidth, viewportHeight)
             if (!playbackActive || width <= 0 || height <= 0) {
                 Thread.sleep(if (playbackActive) 30L else 80L)
                 continue
@@ -727,7 +727,7 @@ internal class DesktopJniMpvVideoController(
                     bufferStride = stride
                 }
                 checkMpv(
-                    DesktopJniMpvVideoApi.nativeRenderSoftware(
+                    DesktopFfmMpvVideoApi.nativeRenderSoftware(
                         renderContext = renderContext,
                         width = width,
                         height = height,
@@ -805,31 +805,31 @@ internal class DesktopJniMpvVideoController(
                 return
             }
             if (nativeDestroyed.compareAndSet(false, true)) {
-                DesktopJniMpvVideoApi.nativeDestroy(handle)
+                DesktopFfmMpvVideoApi.nativeDestroy(handle)
             }
         }
     }
 
     private fun setOption(name: String, value: String) {
-        checkMpv(DesktopJniMpvVideoApi.nativeSetOption(handle, name, value), "set video option $name")
+        checkMpv(DesktopFfmMpvVideoApi.nativeSetOption(handle, name, value), "set video option $name")
     }
 
     private fun setProperty(name: String, value: String) {
-        checkMpv(DesktopJniMpvVideoApi.nativeSetProperty(handle, name, value), "set video property $name")
+        checkMpv(DesktopFfmMpvVideoApi.nativeSetProperty(handle, name, value), "set video property $name")
     }
 
-    private fun getProperty(name: String): String? = DesktopJniMpvVideoApi.nativeGetProperty(handle, name)
+    private fun getProperty(name: String): String? = DesktopFfmMpvVideoApi.nativeGetProperty(handle, name)
 
     private fun command(vararg args: String) {
         checkMpv(
-            DesktopJniMpvVideoApi.nativeCommand(handle, args),
+            DesktopFfmMpvVideoApi.nativeCommand(handle, args),
             "video command ${args.firstOrNull().orEmpty()}",
         )
     }
 
     private fun checkMpv(result: Int, operation: String) {
         if (result >= 0) return
-        val detail = DesktopJniMpvVideoApi.nativeErrorString(result) ?: "error $result"
+        val detail = DesktopFfmMpvVideoApi.nativeErrorString(result) ?: "error $result"
         throw IllegalStateException("libmpv $operation failed: $detail")
     }
 
@@ -847,35 +847,35 @@ private class DesktopSoftwareFrame(
     }
 }
 
-internal data class DesktopJniVideoEndEvent(
+internal data class DesktopFfmVideoEndEvent(
     val playlistEntryId: Long,
     val reason: Int,
     val error: Int,
 )
 
-internal fun parseDesktopJniVideoStartEvent(encoded: String): Long? {
+internal fun parseDesktopFfmVideoStartEvent(encoded: String): Long? {
     if (!encoded.startsWith("start:")) return null
     return encoded.substringAfter(':').toLongOrNull()
 }
 
-internal fun parseDesktopJniVideoEndEvent(encoded: String): DesktopJniVideoEndEvent? {
+internal fun parseDesktopFfmVideoEndEvent(encoded: String): DesktopFfmVideoEndEvent? {
     val fields = encoded.split(':', limit = 4)
     if (fields.size != 4 || fields[0] != "end") return null
-    return DesktopJniVideoEndEvent(
+    return DesktopFfmVideoEndEvent(
         playlistEntryId = fields[1].toLongOrNull() ?: return null,
         reason = fields[2].toIntOrNull() ?: return null,
         error = fields[3].toIntOrNull() ?: return null,
     )
 }
 
-internal fun desktopJniVideoSourceCandidates(
+internal fun desktopFfmVideoSourceCandidates(
     payload: VideoPlaybackPayload,
-): List<DesktopJniVideoSourceCandidate> {
-    val candidates = mutableListOf<DesktopJniVideoSourceCandidate>()
+): List<DesktopFfmVideoSourceCandidate> {
+    val candidates = mutableListOf<DesktopFfmVideoSourceCandidate>()
     (listOf(payload.url) + payload.fallbackUrls)
         .filter(String::isNotBlank)
         .distinct()
-        .forEach { mediaUrl -> candidates += DesktopJniVideoSourceCandidate(url = mediaUrl) }
+        .forEach { mediaUrl -> candidates += DesktopFfmVideoSourceCandidate(url = mediaUrl) }
 
     if (payload.videoUrl.isNotBlank() && payload.audioUrl.isNotBlank()) {
         val videos = (listOf(payload.videoUrl) + payload.fallbackVideoUrls)
@@ -885,25 +885,25 @@ internal fun desktopJniVideoSourceCandidates(
             .filter(String::isNotBlank)
             .distinct()
         if (videos.isNotEmpty() && audios.isNotEmpty()) {
-            candidates += DesktopJniVideoSourceCandidate(
+            candidates += DesktopFfmVideoSourceCandidate(
                 videoUrl = videos.first(),
                 audioUrl = audios.first(),
             )
             videos.drop(1).forEach { fallbackVideo ->
-                candidates += DesktopJniVideoSourceCandidate(
+                candidates += DesktopFfmVideoSourceCandidate(
                     videoUrl = fallbackVideo,
                     audioUrl = audios.first(),
                 )
             }
             audios.drop(1).forEach { fallbackAudio ->
-                candidates += DesktopJniVideoSourceCandidate(
+                candidates += DesktopFfmVideoSourceCandidate(
                     videoUrl = videos.first(),
                     audioUrl = fallbackAudio,
                 )
             }
             videos.drop(1).forEach { fallbackVideo ->
                 audios.drop(1).forEach { fallbackAudio ->
-                    candidates += DesktopJniVideoSourceCandidate(
+                    candidates += DesktopFfmVideoSourceCandidate(
                         videoUrl = fallbackVideo,
                         audioUrl = fallbackAudio,
                     )
@@ -915,7 +915,7 @@ internal fun desktopJniVideoSourceCandidates(
     return candidates.distinct().take(MAX_VIDEO_SOURCE_CANDIDATES)
 }
 
-internal fun shouldRestartDesktopJniVideoPlayback(
+internal fun shouldRestartDesktopFfmVideoPlayback(
     reachedEof: Boolean,
     playbackActive: Boolean,
     positionMs: Long,
@@ -924,7 +924,7 @@ internal fun shouldRestartDesktopJniVideoPlayback(
     !playbackActive ||
     (durationMs > 0L && positionMs >= (durationMs - RESTART_NEAR_END_THRESHOLD_MS).coerceAtLeast(0L))
 
-internal fun boundedDesktopJniVideoRenderSize(width: Int, height: Int): Pair<Int, Int> {
+internal fun boundedDesktopFfmVideoRenderSize(width: Int, height: Int): Pair<Int, Int> {
     if (width <= 0 || height <= 0) return 0 to 0
     val pixels = width.toLong() * height.toLong()
     if (pixels <= MAX_SOFTWARE_RENDER_PIXELS) return width to height
@@ -932,17 +932,17 @@ internal fun boundedDesktopJniVideoRenderSize(width: Int, height: Int): Pair<Int
     return (width * scale).toInt().coerceAtLeast(1) to (height * scale).toInt().coerceAtLeast(1)
 }
 
-internal fun encodeDesktopJniVideoLoadfileOptions(
+internal fun encodeDesktopFfmVideoLoadfileOptions(
     headers: Map<String, String>,
     externalAudioUrl: String?,
 ): String = buildList {
-    encodeDesktopJniHttpOptions(headers).takeIf(String::isNotBlank)?.let(::add)
+    encodeDesktopFfmHttpOptions(headers).takeIf(String::isNotBlank)?.let(::add)
     externalAudioUrl?.takeIf(String::isNotBlank)?.let { url ->
-        add("audio-files-append=${desktopJniMpvFixedLength(url)}")
+        add("audio-files-append=${desktopFfmMpvFixedLength(url)}")
     }
 }.joinToString(",")
 
-private fun encodeDesktopJniHttpOptions(headers: Map<String, String>): String {
+private fun encodeDesktopFfmHttpOptions(headers: Map<String, String>): String {
     val sanitized = headers.mapNotNull { (name, value) ->
         if (name.isBlank() || name.any(::isHeaderLineBreak) || value.any(::isHeaderLineBreak)) null
         else name to value
@@ -958,8 +958,8 @@ private fun encodeDesktopJniHttpOptions(headers: Map<String, String>): String {
         .joinToString(",")
 
     return buildList {
-        userAgent?.let { add("user-agent=${desktopJniMpvFixedLength(it)}") }
-        if (headerFields.isNotEmpty()) add("http-header-fields=${desktopJniMpvFixedLength(headerFields)}")
+        userAgent?.let { add("user-agent=${desktopFfmMpvFixedLength(it)}") }
+        if (headerFields.isNotEmpty()) add("http-header-fields=${desktopFfmMpvFixedLength(headerFields)}")
     }.joinToString(",")
 }
 
@@ -973,7 +973,7 @@ private fun escapeMpvStringListItem(value: String): String = buildString(value.l
     }
 }
 
-private fun desktopJniMpvFixedLength(value: String): String =
+private fun desktopFfmMpvFixedLength(value: String): String =
     "%${value.toByteArray(StandardCharsets.UTF_8).size}%$value"
 
 private fun isHeaderLineBreak(char: Char): Boolean = char == '\r' || char == '\n'

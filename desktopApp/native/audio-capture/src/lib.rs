@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ffi::c_char;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
@@ -8,9 +9,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
     Data, FromSample, InputCallbackInfo, Sample, SampleFormat, SizedSample, SupportedStreamConfig,
 };
-use jni::objects::{JFloatArray, JObject};
-use jni::sys::{jfloatArray, jint, jlong, jstring};
-use jni::{errors::ThrowRuntimeExAndDefault, EnvUnowned};
 
 const TARGET_SAMPLE_RATE: u32 = 48_000;
 const RING_CAPACITY_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 2;
@@ -21,8 +19,8 @@ const READ_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_ERROR_BYTES: usize = 512;
 const MAX_DEVICE_ATTEMPTS: usize = 4;
 const MAX_PULSE_DEVICES: usize = 64;
-const READ_CANCELLED: jint = -1;
-const READ_FAILED: jint = -2;
+const READ_CANCELLED: i32 = -1;
+const READ_FAILED: i32 = -2;
 
 static LAST_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
@@ -58,8 +56,8 @@ fn clear_last_error() {
     *lock(last_error()) = None;
 }
 
-fn take_last_error() -> Option<String> {
-    lock(last_error()).take()
+fn global_last_error() -> Option<String> {
+    lock(last_error()).clone()
 }
 
 struct CaptureState {
@@ -96,12 +94,15 @@ impl CaptureState {
         true
     }
 
-    fn read(&self, max_samples: usize) -> ReadResult {
+    fn read_into(&self, target: &mut [f32]) -> ReadResult {
         let mut buffer = lock(&self.samples);
         loop {
             if !buffer.is_empty() {
-                let count = max_samples.min(buffer.len());
-                return ReadResult::Samples(buffer.drain(..count).collect());
+                let count = target.len().min(buffer.len());
+                for slot in target.iter_mut().take(count) {
+                    *slot = buffer.pop_front().expect("capture ring count changed while locked");
+                }
+                return ReadResult::Samples(count);
             }
             if let Some(message) = lock(&self.error).clone() {
                 return ReadResult::Failed(message);
@@ -142,7 +143,7 @@ impl CaptureState {
 }
 
 enum ReadResult {
-    Samples(Vec<f32>),
+    Samples(usize),
     Timeout,
     Cancelled,
     Failed(String),
@@ -431,141 +432,104 @@ fn select_capture_device() -> Result<(cpal::Device, SupportedStreamConfig), Stri
     open_device_config(device, description)
 }
 
-fn handle_from_jlong(value: jlong) -> Option<&'static CaptureHandle> {
+fn handle_from_i64(value: i64) -> Option<&'static CaptureHandle> {
     if value == 0 {
         return None;
     }
-    // The pointer is owned by the Java-side capture session and remains valid until nativeClose.
+    // The pointer is owned by the managed capture session and remains valid until close.
     unsafe { (value as usize as *const CaptureHandle).as_ref() }
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_feeluown_mobile_DesktopAudioCaptureNative_nativeOpen<'local>(
-    mut unowned_env: EnvUnowned<'local>,
-    _this: JObject<'local>,
-) -> jlong {
-    unowned_env
-        .with_env(|_| -> jni::errors::Result<jlong> {
-            clear_last_error();
-            match CaptureHandle::open() {
-                Ok(handle) => Ok(Box::into_raw(Box::new(handle)) as jlong),
-                Err(error) => {
-                    set_last_error(error);
-                    Ok(0)
-                }
-            }
-        })
-        .resolve::<ThrowRuntimeExAndDefault>()
+fn write_utf8(message: &str, buffer: *mut c_char, capacity: usize) -> i32 {
+    let bytes = message.as_bytes();
+    if buffer.is_null() || capacity <= bytes.len() {
+        return -(bytes.len() as i32);
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer.cast::<u8>(), bytes.len());
+        *buffer.cast::<u8>().add(bytes.len()) = 0;
+    }
+    bytes.len() as i32
 }
 
-/// Reads captured mono samples into the Java float array supplied by the JVM.
+#[unsafe(no_mangle)]
+pub extern "C" fn fuo_audio_capture_open() -> i64 {
+    clear_last_error();
+    match CaptureHandle::open() {
+        Ok(handle) => Box::into_raw(Box::new(handle)) as i64,
+        Err(error) => {
+            set_last_error(error);
+            0
+        }
+    }
+}
+
+/// Reads captured mono samples directly into the caller-provided native buffer.
 ///
 /// # Safety
 ///
-/// The JVM must pass a valid `jfloatArray` and a handle returned by
-/// `nativeOpen` that has not been closed. The Java-side capture session
-/// serializes reads and close operations for that handle.
+/// `target` must point to at least `length` writable `f32` values, and `handle_value` must be a
+/// handle returned by `fuo_audio_capture_open` that has not been closed. Reads and close operations
+/// for one handle must be serialized by the caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn Java_org_feeluown_mobile_DesktopAudioCaptureNative_nativeRead<
-    'local,
->(
-    mut unowned_env: EnvUnowned<'local>,
-    _this: JObject<'local>,
-    handle_value: jlong,
-    target: jfloatArray,
-    offset: jint,
-    length: jint,
-) -> jint {
-    unowned_env
-        .with_env(|env| -> jni::errors::Result<jint> {
-            let Some(handle) = handle_from_jlong(handle_value) else {
-                set_last_error("系统音频采集句柄无效");
-                return Ok(READ_FAILED);
-            };
-            if target.is_null() || offset < 0 || length <= 0 {
-                set_last_error("系统音频采集缓冲区参数无效");
-                return Ok(READ_FAILED);
-            }
+pub unsafe extern "C" fn fuo_audio_capture_read(
+    handle_value: i64,
+    target: *mut f32,
+    length: usize,
+) -> i32 {
+    let Some(handle) = handle_from_i64(handle_value) else {
+        set_last_error("系统音频采集句柄无效");
+        return READ_FAILED;
+    };
+    if target.is_null() || length == 0 || length > isize::MAX as usize / std::mem::size_of::<f32>() {
+        set_last_error("系统音频采集缓冲区参数无效");
+        return READ_FAILED;
+    }
 
-            let array = unsafe { JFloatArray::from_raw(env, target) };
-            let array_length = array.len(env)?;
-            let end = (offset as usize).checked_add(length as usize);
-            if end.is_none_or(|end| end > array_length) {
-                set_last_error("系统音频采集缓冲区范围无效");
-                return Ok(READ_FAILED);
-            }
-
-            match handle.state.read(length as usize) {
-                ReadResult::Samples(samples) => {
-                    array.set_region(env, offset, &samples)?;
-                    Ok(samples.len() as jint)
-                }
-                ReadResult::Timeout => Ok(0),
-                ReadResult::Cancelled => Ok(READ_CANCELLED),
-                ReadResult::Failed(error) => {
-                    set_last_error(error);
-                    Ok(READ_FAILED)
-                }
-            }
-        })
-        .resolve::<ThrowRuntimeExAndDefault>()
+    let target = unsafe { std::slice::from_raw_parts_mut(target, length) };
+    match handle.state.read_into(target) {
+        ReadResult::Samples(count) => count as i32,
+        ReadResult::Timeout => 0,
+        ReadResult::Cancelled => READ_CANCELLED,
+        ReadResult::Failed(error) => {
+            set_last_error(error);
+            READ_FAILED
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_feeluown_mobile_DesktopAudioCaptureNative_nativeCancel<'local>(
-    mut unowned_env: EnvUnowned<'local>,
-    _this: JObject<'local>,
-    handle_value: jlong,
-) {
-    unowned_env
-        .with_env(|_| -> jni::errors::Result<()> {
-            if let Some(handle) = handle_from_jlong(handle_value) {
-                handle.cancel();
-            }
-            Ok(())
-        })
-        .resolve::<ThrowRuntimeExAndDefault>()
+pub extern "C" fn fuo_audio_capture_cancel(handle_value: i64) {
+    if let Some(handle) = handle_from_i64(handle_value) {
+        handle.cancel();
+    }
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_feeluown_mobile_DesktopAudioCaptureNative_nativeClose<'local>(
-    mut unowned_env: EnvUnowned<'local>,
-    _this: JObject<'local>,
-    handle_value: jlong,
-) {
-    unowned_env
-        .with_env(|_| -> jni::errors::Result<()> {
-            if handle_value != 0 {
-                let handle = unsafe { Box::from_raw(handle_value as usize as *mut CaptureHandle) };
-                handle.cancel();
-                drop(handle);
-            }
-            Ok(())
-        })
-        .resolve::<ThrowRuntimeExAndDefault>()
+pub extern "C" fn fuo_audio_capture_close(handle_value: i64) {
+    if handle_value == 0 {
+        return;
+    }
+    let handle = unsafe { Box::from_raw(handle_value as usize as *mut CaptureHandle) };
+    handle.cancel();
+    drop(handle);
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_feeluown_mobile_DesktopAudioCaptureNative_nativeLastError<
-    'local,
->(
-    mut unowned_env: EnvUnowned<'local>,
-    _this: JObject<'local>,
-    handle_value: jlong,
-) -> jstring {
-    unowned_env
-        .with_env(|env| -> jni::errors::Result<jstring> {
-            let message = if let Some(handle) = handle_from_jlong(handle_value) {
-                handle.state.error()
-            } else {
-                take_last_error()
-            };
-            match message {
-                Some(message) => Ok(env.new_string(message)?.into_raw()),
-                None => Ok(std::ptr::null_mut()),
-            }
-        })
-        .resolve::<ThrowRuntimeExAndDefault>()
+pub extern "C" fn fuo_audio_capture_last_error(
+    handle_value: i64,
+    buffer: *mut c_char,
+    capacity: usize,
+) -> i32 {
+    let message = if let Some(handle) = handle_from_i64(handle_value) {
+        handle.state.error()
+    } else {
+        global_last_error()
+    };
+    message
+        .as_deref()
+        .map(|message| write_utf8(message, buffer, capacity))
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -597,5 +561,15 @@ mod tests {
         assert_eq!(output[0], 0.0);
         assert_eq!(output[1], 0.5);
         assert_eq!(output[2], 1.0);
+    }
+
+    #[test]
+    fn read_into_drains_directly_into_caller_buffer() {
+        let state = CaptureState::new();
+        assert!(state.push(&[0.25, -0.5, 0.75]));
+        let mut target = [0.0_f32; 2];
+        assert!(matches!(state.read_into(&mut target), ReadResult::Samples(2)));
+        assert_eq!(target, [0.25, -0.5]);
+        assert_eq!(lock(&state.samples).len(), 1);
     }
 }

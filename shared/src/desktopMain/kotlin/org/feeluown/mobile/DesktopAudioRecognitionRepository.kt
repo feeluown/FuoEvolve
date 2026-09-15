@@ -14,9 +14,11 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-internal class DesktopAudioRecognitionRepository : AudioRecognitionRepository {
+internal class DesktopAudioRecognitionRepository(
+    audioCaptureApi: DesktopAudioCaptureApi,
+) : AudioRecognitionRepository {
     private val delegate = DefaultAudioRecognitionRepository(
-        captureDevice = DesktopAudioRecognitionCaptureDevice(),
+        captureDevice = DesktopAudioRecognitionCaptureDevice(audioCaptureApi),
         fingerprintRuntime = DesktopAudioFingerprintRuntime(),
         matcher = NeteaseAudioRecognitionMatcher(),
     )
@@ -27,31 +29,33 @@ internal class DesktopAudioRecognitionRepository : AudioRecognitionRepository {
     override fun cancel() = delegate.cancel()
 }
 
-internal class DesktopAudioRecognitionCaptureDevice : AudioRecognitionCaptureDevice {
+internal class DesktopAudioRecognitionCaptureDevice(
+    private val nativeApi: DesktopAudioCaptureApi,
+) : AudioRecognitionCaptureDevice {
     private val activeHandle = AtomicLong(0L)
+    private val handleLifecycleLock = Any()
 
     override suspend fun capture(onSamples: (FloatArray) -> Unit) = withContext(Dispatchers.IO) {
-        DesktopAudioCaptureNativeLoader.ensureLoaded()
-        val handle = DesktopAudioCaptureNative.nativeOpen()
+        val handle = nativeApi.open()
         if (handle == 0L) {
             throw IllegalStateException(
-                DesktopAudioCaptureNative.nativeLastError(0L)
+                nativeApi.lastError(0L)
                     ?: "系统音频采集不可用，请确认默认输出设备和系统音频权限",
             )
         }
         check(activeHandle.compareAndSet(0L, handle)) {
-            DesktopAudioCaptureNative.nativeCancel(handle)
-            DesktopAudioCaptureNative.nativeClose(handle)
+            nativeApi.cancel(handle)
+            nativeApi.close(handle)
             "系统音频采集已经在进行中"
         }
 
         val samples = FloatArray(DESKTOP_AUDIO_READ_SAMPLES)
         try {
             while (activeHandle.get() == handle) {
-                when (val read = DesktopAudioCaptureNative.nativeRead(handle, samples, 0, samples.size)) {
+                when (val read = nativeApi.read(handle, samples, 0, samples.size)) {
                     READ_CANCELLED -> break
                     READ_FAILED -> throw IllegalStateException(
-                        DesktopAudioCaptureNative.nativeLastError(handle)
+                        nativeApi.lastError(handle)
                             ?: "系统音频采集失败，请确认默认输出设备和系统音频权限",
                     )
                     0 -> Unit
@@ -59,13 +63,17 @@ internal class DesktopAudioRecognitionCaptureDevice : AudioRecognitionCaptureDev
                 }
             }
         } finally {
-            activeHandle.compareAndSet(handle, 0L)
-            DesktopAudioCaptureNative.nativeClose(handle)
+            synchronized(handleLifecycleLock) {
+                activeHandle.compareAndSet(handle, 0L)
+                nativeApi.close(handle)
+            }
         }
     }
 
     override fun cancel() {
-        activeHandle.get().takeIf { it != 0L }?.let(DesktopAudioCaptureNative::nativeCancel)
+        synchronized(handleLifecycleLock) {
+            activeHandle.get().takeIf { it != 0L }?.let(nativeApi::cancel)
+        }
     }
 }
 

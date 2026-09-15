@@ -4,6 +4,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.feeluown.mobile.desktop.windowsMpvRuntimeLoadPlan
 
 class WindowsMpvRuntimeLoadPlanTest {
     @Test
@@ -16,7 +17,7 @@ class WindowsMpvRuntimeLoadPlanTest {
             ),
             windowsMpvRuntimeLoadPlan(
                 listOf(
-                    "fuoevolve_mpv_jni.dll",
+                    "fuoevolve_mpv_bridge.dll",
                     "libmpv-2.dll",
                     "vulkan-1.dll",
                     "libgcc_s_seh-1.dll",
@@ -31,7 +32,7 @@ class WindowsMpvRuntimeLoadPlanTest {
         assertEquals(
             listOf("VULKAN-1.DLL", "MPV-2.DLL"),
             windowsMpvRuntimeLoadPlan(
-                listOf("FUOEVOLVE_MPV_JNI.DLL", "MPV-2.DLL", "VULKAN-1.DLL"),
+                listOf("FUOEVOLVE_MPV_BRIDGE.DLL", "MPV-2.DLL", "VULKAN-1.DLL"),
             ),
         )
     }
@@ -40,7 +41,7 @@ class WindowsMpvRuntimeLoadPlanTest {
     fun returnsEmptyPlanWhenPackagedLibmpvIsMissing() {
         assertEquals(
             emptyList(),
-            windowsMpvRuntimeLoadPlan(listOf("fuoevolve_mpv_jni.dll", "vulkan-1.dll")),
+            windowsMpvRuntimeLoadPlan(listOf("fuoevolve_mpv_bridge.dll", "vulkan-1.dll")),
         )
     }
 

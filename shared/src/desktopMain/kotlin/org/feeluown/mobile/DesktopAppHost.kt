@@ -22,13 +22,14 @@ import kotlinx.coroutines.launch
 @Composable
 fun DesktopAppHost(
     nativeMpvApi: DesktopMpvNativeApi,
+    audioCaptureApi: DesktopAudioCaptureApi,
     externalInputs: Flow<String>? = null,
     windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
     openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) {
-    val container = remember { DesktopAppContainer() }
+    val container = remember(audioCaptureApi) { DesktopAppContainer(audioCaptureApi) }
     var activeWebLoginProvider by remember { mutableStateOf<ProviderInfo?>(null) }
-    installDesktopJniMpvVideoControllerFactory(
+    installDesktopFfmMpvVideoControllerFactory(
         nativeApi = nativeMpvApi,
         videoDecodeMode = container::desktopVideoDecodeMode,
         openGlRenderContextParameters = openGlRenderContextParameters,
@@ -111,7 +112,9 @@ private fun desktopAppVersionInfo(): String? = runCatching {
         ?.let { version -> "版本 $version" }
 }.getOrNull()
 
-private class DesktopAppContainer {
+private class DesktopAppContainer(
+    private val audioCaptureApi: DesktopAudioCaptureApi,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val providerCredentialStore = createDesktopProviderCredentialStore()
     private val providerGraph by lazy {
@@ -164,7 +167,8 @@ private class DesktopAppContainer {
     private val debugLogFeatureController by lazy {
         createDebugLogFeatureController(createDesktopDebugLogRepository(), scope)
     }
-    private val audioRecognitionRepository: AudioRecognitionRepository = DesktopAudioRecognitionRepository()
+    private val audioRecognitionRepository: AudioRecognitionRepository =
+        DesktopAudioRecognitionRepository(audioCaptureApi)
 
     private val searchController: SearchFeatureController by lazy {
         val initialSettings = settingsRepository.state.value.settings

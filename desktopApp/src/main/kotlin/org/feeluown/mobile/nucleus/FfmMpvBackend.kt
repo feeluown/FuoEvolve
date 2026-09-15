@@ -14,7 +14,7 @@ import org.feeluown.mobile.desktop.DesktopMpvBackendEvent
  * The desktop composition root supplies the JDK 25 FFM implementation explicitly. Kotlin drains
  * mpv's event queue and observed property changes without native callbacks into managed code.
  */
-internal class JniMpvBackend(
+internal class FfmMpvBackend(
     private val listener: (DesktopMpvBackendEvent) -> Unit,
     private val nativeApi: DesktopMpvNativeApi,
 ) : DesktopMpvBackend {
@@ -343,20 +343,6 @@ internal class JniMpvBackend(
     }
 }
 
-internal fun windowsMpvRuntimeLoadPlan(libraryNames: List<String>): List<String> {
-    val dllNames = libraryNames.filter { name -> name.endsWith(".dll", ignoreCase = true) }
-    val mpvRuntime = WINDOWS_MPV_RUNTIME_NAMES.firstNotNullOfOrNull { expected ->
-        dllNames.firstOrNull { name -> name.equals(expected, ignoreCase = true) }
-    } ?: return emptyList()
-    val support = dllNames
-        .filterNot { name ->
-            name.equals(WINDOWS_MPV_BRIDGE_NAME, ignoreCase = true) ||
-                name.equals(mpvRuntime, ignoreCase = true)
-        }
-        .sortedBy(String::lowercase)
-    return support + mpvRuntime
-}
-
 private fun encodeMpvLoadfileOptions(headers: Map<String, String>): String {
     val sanitized = headers.mapNotNull { (name, value) ->
         if (name.isBlank() || name.any(::isHeaderLineBreak) || value.any(::isHeaderLineBreak)) {
@@ -408,8 +394,6 @@ private const val EVENT_WAIT_SECONDS = 0.05
 private const val MPV_VOLUME_SCALE = 100.0
 private const val MPV_END_FILE_REASON_ERROR = 4
 private const val LOG_TAG = "NucleusMpvFfm"
-private const val WINDOWS_MPV_BRIDGE_NAME = "fuoevolve_mpv_jni.dll"
-private val WINDOWS_MPV_RUNTIME_NAMES = listOf("libmpv-2.dll", "mpv-2.dll", "mpv.dll")
 
 private val OBSERVED_PROPERTIES = listOf(
     "pause",

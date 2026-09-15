@@ -12,4 +12,3 @@ strip = "symbols"
 
 [dependencies]
 cpal = { version = "=0.18.2", default-features = false, features = ["pipewire", "pulseaudio"] }
-jni = "=0.22.4"

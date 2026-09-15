@@ -353,8 +353,8 @@ private fun nextPowerOfTwo(value: Long): Long {
 private fun resolveDesktopMpvBridge(): File? {
     val libraryName = when {
         isWindows() -> WINDOWS_MPV_BRIDGE_NAME
-        isMac() -> "libfuoevolve_mpv_jni.dylib"
-        else -> "libfuoevolve_mpv_jni.so"
+        isMac() -> "libfuoevolve_mpv_bridge.dylib"
+        else -> "libfuoevolve_mpv_bridge.so"
     }
     val resourcesDir = System.getProperty("compose.application.resources.dir")
         ?.takeIf(String::isNotBlank)
@@ -362,9 +362,9 @@ private fun resolveDesktopMpvBridge(): File? {
     val userDir = File(System.getProperty("user.dir").orEmpty().ifBlank { "." })
     return buildList {
         resourcesDir?.let { add(File(it, "native/lib/$libraryName")) }
-        add(File(userDir, "desktopApp/build/native/mpv-jni/$libraryName"))
-        add(File(userDir, "desktopNucleusPoc/build/native/mpv-jni/$libraryName"))
-        add(File(userDir, "build/native/mpv-jni/$libraryName"))
+        add(File(userDir, "desktopApp/build/native/mpv-bridge/$libraryName"))
+        add(File(userDir, "desktopNucleusPoc/build/native/mpv-bridge/$libraryName"))
+        add(File(userDir, "build/native/mpv-bridge/$libraryName"))
     }.firstOrNull(File::isFile)
 }
 
@@ -433,7 +433,7 @@ private fun isMac(): Boolean =
     }
 
 private const val LOG_TAG = "DesktopMpvFfm"
-private const val WINDOWS_MPV_BRIDGE_NAME = "fuoevolve_mpv_jni.dll"
+private const val WINDOWS_MPV_BRIDGE_NAME = "fuoevolve_mpv_bridge.dll"
 private const val DEFAULT_TEXT_BUFFER_BYTES = 4_096L
 private const val EVENT_BUFFER_BYTES = 16_384L
 private val WINDOWS_MPV_RUNTIME_NAMES = listOf("libmpv-2.dll", "mpv-2.dll", "mpv.dll")
