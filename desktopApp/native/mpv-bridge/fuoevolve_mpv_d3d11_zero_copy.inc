@@ -274,7 +274,10 @@ FUO_NATIVE_EXPORT int fuo_mpv_render_d3d11(int64_t render_context_value, int64_t
         .h = target->height,
         .internal_format = (int)FUO_GL_RGBA8,
     };
-    int flip_y = 1;
+    // The EGL pbuffer is backed by the D3D11 texture that Nucleus imports with
+    // SurfaceOrigin.TOP_LEFT; applying the default-framebuffer flip here
+    // reverses the video a second time.
+    int flip_y = 0;
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &fbo},
         {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
