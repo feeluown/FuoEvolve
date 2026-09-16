@@ -12,6 +12,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.feeluown.mobile.persistence.listening.AndroidListeningHistoryDriverFactory
 import org.feeluown.mobile.persistence.listening.SqlDelightListeningHistoryStore
@@ -151,6 +152,7 @@ internal class AndroidAppContainer(
             scope = appScope,
             isPlaybackActive = { playbackEngine.state.value.status == PlayerStatus.Playing },
             pausePlayback = playbackEngine::pause,
+            resumePlayback = playbackEngine::resume,
         )
     }
 
@@ -474,8 +476,11 @@ internal class AndroidAppContainer(
             }.distinctUntilChanged().collect { (trackId, status, _) ->
                 playbackEngine.republishRestoredState()
                 if (trackId != null && (status == PlaybackSessionStatus.Playing || status == PlaybackSessionStatus.Paused)) {
-                    playbackQueueStore.flushLatest()
-                    playbackResumeStore.flush()
+                    // Keep synchronous durable commits, but perform them off the main thread in order.
+                    withContext(Dispatchers.IO) {
+                        playbackQueueStore.flushLatest()
+                        playbackResumeStore.flush()
+                    }
                 }
             }
         }
