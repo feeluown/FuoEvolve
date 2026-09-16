@@ -46,8 +46,34 @@ class WindowsVideoTargetRetirementTest {
         queue.onFrame()
         queue.close()
         queue.close()
+        queue.onFrame()
 
         assertEquals(1, pending.closes)
+        assertFailsWith<IllegalStateException> { queue.retire(TrackedTarget()) }
+    }
+
+    @Test
+    fun duplicateRetirementIsRejected() {
+        val queue = WindowsVideoTargetRetirement<TrackedTarget>()
+        val target = TrackedTarget()
+        queue.retire(target)
+        assertFailsWith<IllegalStateException> { queue.retire(target) }
+        queue.close()
+        assertEquals(1, target.closes)
+    }
+
+    @Test
+    fun cleanupReleasesEveryTargetEvenIfOneReleaseFails() {
+        val queue = WindowsVideoTargetRetirement<TrackedTarget>()
+        val broken = TrackedTarget(failOnClose = true)
+        val healthy = TrackedTarget()
+        queue.retire(broken)
+        queue.retire(healthy)
+        assertFailsWith<IllegalStateException> { queue.close() }
+        assertEquals(1, broken.closes)
+        assertEquals(1, healthy.closes)
+        queue.close()
+        assertEquals(1, broken.closes)
     }
 
     @Test
@@ -55,8 +81,11 @@ class WindowsVideoTargetRetirementTest {
         assertFailsWith<IllegalArgumentException> { WindowsVideoTargetRetirement<TrackedTarget>(0) }
     }
 
-    private class TrackedTarget : AutoCloseable {
+    private class TrackedTarget(private val failOnClose: Boolean = false) : AutoCloseable {
         var closes = 0
-        override fun close() { closes++ }
+        override fun close() {
+            closes++
+            if (failOnClose) throw IllegalStateException("native release failed")
+        }
     }
 }
