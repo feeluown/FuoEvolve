@@ -464,7 +464,7 @@ class FuoPlaybackService : MediaSessionService() {
         val track = request.track.copy(
             title = if (parts.isEmpty()) payload.title.ifBlank { request.track.title } else request.track.title,
             artists = payload.artists.ifBlank { request.track.artists },
-            album = payload.album,
+            album = payload.album.ifBlank { request.track.album },
             source = if (isSmartReplacementPlayback) {
                 payload.originalSource?.takeIf { it.isNotBlank() } ?: request.track.source
             } else {
@@ -718,7 +718,7 @@ class FuoPlaybackService : MediaSessionService() {
 
     private fun PlaybackPart.toTrack(parent: MusicTrack): MusicTrack = parent.copy(
         id = id,
-        title = title.ifBlank { title },
+        title = title.ifBlank { parent.title },
         durationMs = durationMs ?: parent.durationMs,
         providerId = id,
     )
