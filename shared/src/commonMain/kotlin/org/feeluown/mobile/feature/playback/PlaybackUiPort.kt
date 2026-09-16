@@ -35,6 +35,8 @@ interface PlaybackPresentationPort {
     val lyricFontSize: LyricFontSize
     val themeMode: ThemeMode
     val dynamicCoverColorEnabled: Boolean
+    val waveformAnimationDisabled: Boolean
+        get() = false
     val audioQuality: String?
     val audioFormatInfo: AudioFormatInfo?
     val audioDecoderInfo: AudioDecoderInfo?

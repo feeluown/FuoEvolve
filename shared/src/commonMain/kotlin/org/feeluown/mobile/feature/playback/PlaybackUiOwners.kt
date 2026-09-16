@@ -71,6 +71,8 @@ class DefaultPlaybackPresentationPort(
         get() = settings.themeMode
     override val dynamicCoverColorEnabled: Boolean
         get() = settings.dynamicCoverColorEnabled
+    override val waveformAnimationDisabled: Boolean
+        get() = settings.waveformAnimationDisabled
     override val audioQuality: String?
         get() = playbackState.audioQuality
     override val audioFormatInfo: AudioFormatInfo?

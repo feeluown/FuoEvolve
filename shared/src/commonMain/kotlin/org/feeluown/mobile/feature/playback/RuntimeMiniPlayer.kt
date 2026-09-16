@@ -31,11 +31,9 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -72,6 +70,7 @@ internal fun RuntimeMiniPlayer(
     playbackSession: PlaybackSession,
     isFullPlayerOpen: Boolean,
     transitionDirection: TrackChangeDirection,
+    waveformAnimationDisabled: Boolean,
     onOpenFullPlayer: () -> Unit,
 ) {
     val state by playbackSession.state.collectAsStateWithLifecycle()
@@ -199,6 +198,7 @@ internal fun RuntimeMiniPlayer(
                 RuntimeMiniPlayerProgress(
                     state = state,
                     isLoadingAudio = isLoadingAudio,
+                    waveformAnimationDisabled = waveformAnimationDisabled,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = if (isWideLayout) 12.dp else 16.dp)
@@ -217,6 +217,7 @@ internal fun shouldShowMiniPlayerPreviousControl(maxWidth: Dp, isWideLayout: Boo
 private fun RuntimeMiniPlayerProgress(
     state: PlaybackSessionState,
     isLoadingAudio: Boolean,
+    waveformAnimationDisabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     if (isLoadingAudio) {
@@ -232,16 +233,11 @@ private fun RuntimeMiniPlayerProgress(
         animationSpec = FuoMotion.fastEffectsSpec(),
         label = "mini player progress",
     )
-    LinearWavyProgressIndicator(
+    PlaybackProgressIndicator(
         progress = { progress },
+        isPlaying = state.status == PlaybackSessionStatus.Playing,
+        waveformAnimationDisabled = waveformAnimationDisabled,
         modifier = modifier.height(5.dp),
-        amplitude = { value ->
-            if (state.status == PlaybackSessionStatus.Playing) {
-                WavyProgressIndicatorDefaults.indicatorAmplitude(value)
-            } else {
-                0f
-            }
-        },
     )
 }
 

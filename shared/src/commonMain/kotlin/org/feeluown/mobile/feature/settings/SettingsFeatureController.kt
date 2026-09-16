@@ -51,6 +51,7 @@ interface SettingsFeatureController {
     fun setDesktopVideoDecodeMode(value: DesktopVideoDecodeMode)
     fun setLyricFontSize(value: LyricFontSize)
     fun setDynamicCoverColorEnabled(value: Boolean)
+    fun setWaveformAnimationDisabled(value: Boolean)
     fun setDownloadParallelism(value: Int)
     fun setAudioCacheLimitMb(value: Int)
     fun setImageCacheLimitMb(value: Int)
@@ -171,6 +172,9 @@ private class BoundSettingsFeatureController(
     }
     override fun setLyricFontSize(value: LyricFontSize) = owner.setLyricFontSize(value)
     override fun setDynamicCoverColorEnabled(value: Boolean) = owner.setDynamicCoverColorEnabled(value)
+    override fun setWaveformAnimationDisabled(value: Boolean) {
+        scope.launch { settingsRepository.update { settings -> settings.copy(waveformAnimationDisabled = value) } }
+    }
     override fun setDownloadParallelism(value: Int) = owner.setDownloadParallelism(value)
     override fun setAudioCacheLimitMb(value: Int) = owner.setAudioCacheLimitMb(value)
     override fun setImageCacheLimitMb(value: Int) = owner.setImageCacheLimitMb(value)

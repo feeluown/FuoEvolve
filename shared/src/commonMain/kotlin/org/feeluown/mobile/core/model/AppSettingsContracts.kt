@@ -113,6 +113,7 @@ data class AppSettings(
     val themePaletteStyle: ThemePaletteStyle = ThemePaletteStyle.Expressive,
     val themeColorSpec: ThemeColorSpec = ThemeColorSpec.Expressive_2025,
     val dynamicCoverColorEnabled: Boolean = false,
+    val waveformAnimationDisabled: Boolean = false,
     val appUpdateChannel: AppUpdateChannel = AppUpdateChannel.Stable,
     val autoCheckAppUpdates: Boolean = true,
     val playlistPlaybackStatsVersion: Int = 0,

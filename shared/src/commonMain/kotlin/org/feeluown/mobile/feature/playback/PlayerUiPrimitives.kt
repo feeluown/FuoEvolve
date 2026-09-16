@@ -36,6 +36,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -422,26 +423,35 @@ private fun PlayPauseMorphIcon(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun PlayingProgressIndicator(
+internal fun PlaybackProgressIndicator(
     progress: () -> Float,
     isPlaying: Boolean,
+    waveformAnimationDisabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    LinearWavyProgressIndicator(
-        progress = progress,
-        modifier = modifier,
-        amplitude = { value ->
-            if (isPlaying) {
-                WavyProgressIndicatorDefaults.indicatorAmplitude(value)
-            } else {
-                0f
-            }
-        },
-    )
+    if (waveformAnimationDisabled) {
+        LinearProgressIndicator(progress = progress, modifier = modifier)
+    } else {
+        LinearWavyProgressIndicator(
+            progress = progress,
+            modifier = modifier,
+            amplitude = { value ->
+                if (isPlaying) {
+                    WavyProgressIndicatorDefaults.indicatorAmplitude(value)
+                } else {
+                    0f
+                }
+            },
+        )
+    }
 }
 
 @Composable
-fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
+fun ProgressBlock(
+    state: PlaybackState,
+    onSeek: (Long) -> Unit,
+    waveformAnimationDisabled: Boolean = false,
+) {
     val duration = state.durationMs.takeIf { it > 0 } ?: 1L
     val canSeek = state.currentTrack != null &&
         state.durationMs > 0 &&
@@ -481,9 +491,10 @@ fun ProgressBlock(state: PlaybackState, onSeek: (Long) -> Unit) {
         enabled = canSeek,
         valueRange = 0f..duration.toFloat(),
         track = { sliderState ->
-            PlayingProgressIndicator(
+            PlaybackProgressIndicator(
                 progress = { sliderState.value / duration.toFloat() },
                 isPlaying = canSeek && state.status == PlayerStatus.Playing,
+                waveformAnimationDisabled = waveformAnimationDisabled,
                 modifier = Modifier.fillMaxWidth(),
             )
         },

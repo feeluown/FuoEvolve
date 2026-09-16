@@ -83,6 +83,7 @@ data class PersistedSettingsV1(
     val themePaletteStyle: String? = null,
     val themeColorSpec: String? = null,
     val dynamicCoverColorEnabled: Boolean? = null,
+    val waveformAnimationDisabled: Boolean? = null,
     val appUpdateChannel: String? = null,
     val autoCheckAppUpdates: Boolean? = null,
     val playlistPlaybackStatsVersion: Int? = null,

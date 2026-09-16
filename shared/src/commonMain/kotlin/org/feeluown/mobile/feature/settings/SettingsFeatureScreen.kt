@@ -1133,6 +1133,14 @@ private fun AppearanceFeatureSettings(
                 onCheckedChange = controller::setBydInstrumentLyricsEnabled,
             )
         }
+        SettingsDivider(startPadding = FuoSpacing.lg)
+        SettingsToggleRow(
+            title = "关闭波形动画",
+            supportingText = "应用内所有进度条使用普通直线样式",
+            checked = settings.waveformAnimationDisabled,
+            enabled = enabled,
+            onCheckedChange = controller::setWaveformAnimationDisabled,
+        )
     }
 }
 

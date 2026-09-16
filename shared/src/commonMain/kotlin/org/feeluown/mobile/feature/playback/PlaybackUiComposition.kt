@@ -151,11 +151,13 @@ internal fun PlaybackMiniPlayerOverlay() {
 @Composable
 private fun PlaybackMiniPlayerContent() {
     val graph = LocalPlaybackUiPort.current
+    val presentation = LocalPlaybackPresentationPort.current
     PlaybackDynamicColorTheme(emphasis = PlaybackColorEmphasis.Ambient) {
         RuntimeMiniPlayer(
             playbackSession = LocalPlaybackSession.current,
             isFullPlayerOpen = graph.navigation.isFullPlayerOpen,
             transitionDirection = graph.queue.trackChangeDirection,
+            waveformAnimationDisabled = presentation.waveformAnimationDisabled,
             onOpenFullPlayer = graph.navigation::openFullPlayer,
         )
     }

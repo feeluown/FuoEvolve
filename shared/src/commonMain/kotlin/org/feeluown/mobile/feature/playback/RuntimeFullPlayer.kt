@@ -326,7 +326,11 @@ private fun RuntimePlayerTransport(
 ) {
     val presentation = LocalPlaybackPresentationPort.current
     val queue = LocalPlaybackQueueUiPort.current
-    ProgressBlock(state, presentation::seekTo)
+    ProgressBlock(
+        state = state,
+        onSeek = presentation::seekTo,
+        waveformAnimationDisabled = presentation.waveformAnimationDisabled,
+    )
     PlayerControls(
         state = state,
         modifier = Modifier.fillMaxWidth(),
