@@ -10,13 +10,8 @@ private const val DESKTOP_APP_LOG_MAX_BYTES = 4L * 1024L * 1024L
 fun installDesktopAppLogger() {
     val logTarget = runCatching {
         val logDirectory = DesktopAppDirectories.state().resolve("logs")
-        val logFile = logDirectory.resolve("application.log")
-        val previousLogFile = logDirectory.resolve("application.previous.log")
-        logFile to RollingFileOutputStream(
-            activeFile = logFile,
-            previousFile = previousLogFile,
-            maxBytes = DESKTOP_APP_LOG_MAX_BYTES,
-        )
+        val logFile = StartupLogFiles.start(logDirectory)
+        logFile to StartupLogOutputStream(logFile, DESKTOP_APP_LOG_MAX_BYTES)
     }.onFailure { failure ->
         System.err.println(
             "FuoEvolve: unable to initialize persisted application logging; " +
@@ -33,7 +28,7 @@ fun installDesktopAppLogger() {
 }
 
 private class DesktopAppLogSink(
-    private val fileSink: RollingFileOutputStream?,
+    private val fileSink: StartupLogOutputStream?,
 ) : AppLogSink {
     private val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
@@ -57,8 +52,7 @@ private class DesktopAppLogSink(
         console.print(line)
         val persistentSink = fileSink ?: return
         runCatching {
-            val bytes = line.toByteArray(StandardCharsets.UTF_8)
-            persistentSink.write(bytes)
+            persistentSink.write(line.toByteArray(StandardCharsets.UTF_8))
             persistentSink.flush()
         }.onFailure { failure ->
             System.err.println("FuoEvolve: unable to persist application log: ${failure.message.orEmpty()}")

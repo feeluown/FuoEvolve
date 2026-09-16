@@ -26,6 +26,7 @@ import dev.nucleusframework.window.tao.rememberTaoGpuRenderContext
 import dev.nucleusframework.window.tao.rememberTextureViewController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -188,21 +189,37 @@ private fun NucleusWindowsD3D11VideoContent(
     var width by remember(renderer) { mutableStateOf(0) }
     var height by remember(renderer) { mutableStateOf(0) }
     var target by remember(renderer) { mutableStateOf<WindowsD3D11MpvRenderTarget?>(null) }
+    val retirement = remember(renderer) {
+        WindowsVideoTargetRetirement<WindowsD3D11MpvRenderTarget>()
+    }
 
     LaunchedEffect(renderer, width, height) {
         if (width <= 0 || height <= 0) return@LaunchedEffect
+        var prepared: WindowsD3D11MpvRenderTarget? = null
         try {
-            val next = renderer.createTarget(width = width, height = height)
-            val previous = target
-            target = next
-            textureController.markFrameAvailable()
-            if (previous != null) {
-                withFrameNanos { }
-                previous.close()
+            if (target?.width == width && target?.height == height) return@LaunchedEffect
+            // Keep the last usable texture visible while a resize is still in progress.
+            if (target != null) delay(WINDOWS_VIDEO_RESIZE_SETTLE_MS)
+
+            // Both allocation and the initial libmpv render need the active Tao GPU frame.
+            val firstFrameReady = withFrameNanos {
+                val next = renderer.createTarget(width = width, height = height)
+                prepared = next
+                renderer.render(next)
             }
+            check(firstFrameReady) { "Initial Windows D3D11 video frame was not rendered" }
+
+            val previous = target
+            target = prepared
+            prepared = null
+            if (previous != null) retirement.retire(previous)
+            textureController.markFrameAvailable()
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             onFailure(throwable)
+        } finally {
+            // A resize can cancel the effect after allocation but before publication.
+            prepared?.close()
         }
     }
 
@@ -211,10 +228,14 @@ private fun NucleusWindowsD3D11VideoContent(
         val renderTarget = activeTarget ?: return@LaunchedEffect
         try {
             while (isActive) {
-                withFrameNanos { }
-                if (renderer.render(renderTarget)) {
-                    textureController.markFrameAvailable()
+                val rendered = withFrameNanos {
+                    val updated = renderer.render(renderTarget)
+                    // Release retired shared handles on the GPU thread, after the source swap
+                    // has had multiple draw frames to detach the old TextureView import.
+                    retirement.onFrame()
+                    updated
                 }
+                if (rendered) textureController.markFrameAvailable()
             }
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
@@ -226,6 +247,7 @@ private fun NucleusWindowsD3D11VideoContent(
         onDispose {
             target?.close()
             target = null
+            retirement.close()
         }
     }
 
@@ -820,4 +842,5 @@ private class IoSurfaceVideoTarget(
 private fun isWindowsDesktop(): Boolean =
     System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)
 
+private const val WINDOWS_VIDEO_RESIZE_SETTLE_MS = 180L
 private const val SNAPSHOT_RETIRE_DELAY_FRAMES = 2
