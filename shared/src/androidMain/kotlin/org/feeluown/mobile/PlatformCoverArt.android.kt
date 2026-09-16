@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.SystemClock
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,14 +34,28 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val MEMORY_CACHE_BYTES = 24 * 1024 * 1024
 private const val FAILED_CACHE_ENTRIES = 512
+private const val FAILED_CACHE_RETRY_MS = 30_000L
+private const val COVER_LOG_TAG = "CoverArt"
+
+// Never log full URLs, local paths, exception messages or stack traces: they may contain credentials.
+private fun coverLogSource(imageUrl: String): String {
+    val uri = Uri.parse(imageUrl)
+    return if (uri.scheme == "http" || uri.scheme == "https") {
+        "host=${uri.host.orEmpty().ifBlank { "unknown" }}"
+    } else {
+        "scheme=${uri.scheme.orEmpty().ifBlank { "unknown" }}"
+    }
+}
 
 @Composable
 actual fun PlatformCoverArt(
@@ -77,12 +92,17 @@ internal actual fun rememberPlatformCoverImage(imageUrl: String?, maxSizePx: Int
     var image by remember(requestKey) { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(requestKey) {
-        image = imageUrl?.takeIf { it.isNotBlank() }?.let {
-            runCatching {
+        image = imageUrl?.takeIf { it.isNotBlank() }?.let { url ->
+            try {
                 PlatformCoverImageCache.getOrLoad(requireNotNull(requestKey)) {
-                    loadCover(context, it, normalizedSizePx)
+                    loadCover(context, url, normalizedSizePx)
                 }
-            }.getOrNull()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                AppLogger.w(COVER_LOG_TAG, "Cover load failed ${coverLogSource(url)} stage=load error=${exception.javaClass.simpleName}")
+                null
+            }
         }
     }
     return image
@@ -112,6 +132,7 @@ private suspend fun loadCover(
     if (image != null) {
         CoverArtMemoryCache.put(cacheKey, image)
     } else {
+        AppLogger.w(COVER_LOG_TAG, "Cover load failed ${coverLogSource(imageUrl)} stage=all-sources sizePx=$maxSizePx")
         CoverArtMemoryCache.markFailed(cacheKey)
     }
     image
@@ -123,27 +144,49 @@ private fun loadDirectCover(context: Context, imageUrl: String, maxSizePx: Int):
     if (CoverArtMemoryCache.isFailed(cacheKey)) return null
     val requestUrls = coverImageRequestUrls(imageUrl, maxSizePx)
     val uri = Uri.parse(requestUrls.first())
-    val image = when (uri.scheme) {
-        "content" -> decodeSampledStream({ context.contentResolver.openInputStream(uri) }, maxSizePx)?.asImageBitmap()
-        "file" -> uri.path?.let { decodeSampledFile(File(it), maxSizePx) }?.asImageBitmap()
-        "http", "https" -> requestUrls.firstNotNullOfOrNull { requestUrl ->
-            loadCachedRemoteCover(context, requestUrl, maxSizePx)
+    val image = try {
+        when (uri.scheme) {
+            "content" -> decodeSampledStream({ context.contentResolver.openInputStream(uri) }, maxSizePx)?.asImageBitmap()
+            "file" -> uri.path?.let { decodeSampledFile(File(it), maxSizePx) }?.asImageBitmap()
+            "http", "https" -> requestUrls.firstNotNullOfOrNull { requestUrl ->
+                loadCachedRemoteCover(context, requestUrl, maxSizePx)
+            }
+            else -> null
         }
-        else -> null
+    } catch (exception: Exception) {
+        AppLogger.w(COVER_LOG_TAG, "Cover load failed ${coverLogSource(imageUrl)} stage=direct error=${exception.javaClass.simpleName}")
+        null
     }
     if (image != null) {
         CoverArtMemoryCache.put(cacheKey, image)
     } else {
+        if (uri.scheme == "http" || uri.scheme == "https") {
+            AppLogger.w(COVER_LOG_TAG, "All cover URLs failed ${coverLogSource(imageUrl)} stage=remote attempts=${requestUrls.size}")
+        } else {
+            AppLogger.w(COVER_LOG_TAG, "Cover decode failed ${coverLogSource(imageUrl)} stage=direct")
+        }
         CoverArtMemoryCache.markFailed(cacheKey)
     }
     return image
 }
 
-private fun loadCachedRemoteCover(context: Context, imageUrl: String, maxSizePx: Int) =
-    AndroidResourceCache.cachedImage(context, imageUrl)
-        ?.takeIf { it.exists() && it.length() > 0L }
-        ?.let { decodeSampledFile(it, maxSizePx)?.asImageBitmap() }
-        ?: loadRemoteCoverWithoutDiskCache(imageUrl, maxSizePx)
+private fun loadCachedRemoteCover(context: Context, imageUrl: String, maxSizePx: Int): ImageBitmap? {
+    val cached = AndroidResourceCache.cachedImage(context, imageUrl)
+    if (cached != null && cached.exists() && cached.length() > 0L) {
+        val decoded = try {
+            decodeSampledFile(cached, maxSizePx)?.asImageBitmap()
+        } catch (exception: Exception) {
+            AppLogger.w(COVER_LOG_TAG, "Cover decode failed ${coverLogSource(imageUrl)} stage=disk-cache error=${exception.javaClass.simpleName}")
+            null
+        }
+        if (decoded != null) return decoded
+        AppLogger.w(COVER_LOG_TAG, "Cover decode failed ${coverLogSource(imageUrl)} stage=disk-cache bytes=${cached.length()}")
+        if (!cached.delete()) {
+            AppLogger.w(COVER_LOG_TAG, "Invalid cover cache removal failed ${coverLogSource(imageUrl)} stage=disk-cache")
+        }
+    }
+    return loadRemoteCoverWithoutDiskCache(imageUrl, maxSizePx)
+}
 
 private fun loadEmbeddedCover(context: Context, imageUrl: String, maxSizePx: Int): ImageBitmap? {
     val uri = Uri.parse(imageUrl)
@@ -154,9 +197,16 @@ private fun loadEmbeddedCover(context: Context, imageUrl: String, maxSizePx: Int
             "file" -> retriever.setDataSource(requireNotNull(uri.path))
             else -> return null
         }
-        val bytes = retriever.embeddedPicture ?: return null
-        decodeSampledByteArray(bytes, maxSizePx)?.asImageBitmap()
-    } catch (_: Throwable) {
+        val bytes = retriever.embeddedPicture
+        if (bytes == null) {
+            AppLogger.d(COVER_LOG_TAG, "No embedded artwork ${coverLogSource(imageUrl)}")
+            return null
+        }
+        decodeSampledByteArray(bytes, maxSizePx)?.asImageBitmap().also { image ->
+            if (image == null) AppLogger.w(COVER_LOG_TAG, "Cover decode failed ${coverLogSource(imageUrl)} stage=embedded bytes=${bytes.size}")
+        }
+    } catch (exception: Exception) {
+        AppLogger.w(COVER_LOG_TAG, "Embedded cover load failed ${coverLogSource(imageUrl)} error=${exception.javaClass.simpleName}")
         null
     } finally {
         runCatching { retriever.release() }
@@ -164,14 +214,38 @@ private fun loadEmbeddedCover(context: Context, imageUrl: String, maxSizePx: Int
 }
 
 private fun loadRemoteCoverWithoutDiskCache(imageUrl: String, maxSizePx: Int): ImageBitmap? {
-    val bytes = runCatching {
-        URL(imageUrl).openConnection().run {
+    val source = coverLogSource(imageUrl)
+    val connection = try {
+        URL(imageUrl).openConnection().apply {
             connectTimeout = 15_000
             readTimeout = 20_000
-            getInputStream().use { it.readBytes() }
         }
-    }.getOrNull() ?: return null
-    return decodeSampledByteArray(bytes, maxSizePx)?.asImageBitmap()
+    } catch (exception: Exception) {
+        AppLogger.w(COVER_LOG_TAG, "Cover request failed $source stage=direct-connect error=${exception.javaClass.simpleName}")
+        return null
+    }
+    return try {
+        if (connection is HttpURLConnection) {
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                AppLogger.w(COVER_LOG_TAG, "Cover request failed $source stage=direct-download httpStatus=$status")
+                return null
+            }
+        }
+        val bytes = connection.getInputStream().use { it.readBytes() }
+        if (bytes.isEmpty()) {
+            AppLogger.w(COVER_LOG_TAG, "Cover response is empty $source stage=direct-download")
+            return null
+        }
+        decodeSampledByteArray(bytes, maxSizePx)?.asImageBitmap().also { image ->
+            if (image == null) AppLogger.w(COVER_LOG_TAG, "Cover decode failed $source stage=direct-download bytes=${bytes.size}")
+        }
+    } catch (exception: Exception) {
+        AppLogger.w(COVER_LOG_TAG, "Cover request failed $source stage=direct-download error=${exception.javaClass.simpleName}")
+        null
+    } finally {
+        (connection as? HttpURLConnection)?.disconnect()
+    }
 }
 
 private fun decodeSampledFile(file: File, maxSizePx: Int): Bitmap? {
@@ -188,9 +262,7 @@ private fun decodeSampledFile(file: File, maxSizePx: Int): Bitmap? {
 private fun decodeSampledStream(openInput: () -> InputStream?, maxSizePx: Int): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     openInput()?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
-    if (!bounds.hasSize()) {
-        return null
-    }
+    if (!bounds.hasSize()) return null
     val options = BitmapFactory.Options().apply {
         inSampleSize = bounds.inSampleSize(maxSizePx)
     }
@@ -226,8 +298,8 @@ private object CoverArtMemoryCache {
                 .toInt()
         }
     }
-    private val failed = object : LruCache<String, Boolean>(FAILED_CACHE_ENTRIES) {
-        override fun sizeOf(key: String, value: Boolean): Int = 1
+    private val failed = object : LruCache<String, Long>(FAILED_CACHE_ENTRIES) {
+        override fun sizeOf(key: String, value: Long): Int = 1
     }
 
     @Synchronized
@@ -240,11 +312,16 @@ private object CoverArtMemoryCache {
     }
 
     @Synchronized
-    fun isFailed(key: String): Boolean = failed.get(key) == true
+    fun isFailed(key: String): Boolean {
+        val failedAt = failed.get(key) ?: return false
+        if (SystemClock.elapsedRealtime() - failedAt < FAILED_CACHE_RETRY_MS) return true
+        failed.remove(key)
+        return false
+    }
 
     @Synchronized
     fun markFailed(key: String) {
-        failed.put(key, true)
+        failed.put(key, SystemClock.elapsedRealtime())
     }
 }
 
