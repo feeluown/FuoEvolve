@@ -16,6 +16,7 @@ internal object AndroidAppLogFiles {
     private const val MAX_STORED_STARTUPS = 10
     const val EXPORT_STARTUPS = 3
     private val namePattern = Regex("application-\\d{8}-\\d{6}-\\d{3}-[0-9a-f]{8}\\.log")
+    private var lastStartMillis = 0L
 
     fun directory(context: Context): File = File(context.filesDir, "logs")
 
@@ -24,20 +25,22 @@ internal object AndroidAppLogFiles {
         return directory(context).listFiles()
             .orEmpty()
             .filter { it.isFile && namePattern.matches(it.name) }
-            .sortedByDescending(File::getName)
+            .sortedByDescending { it.name }
             .take(limit)
     }
 
+    @Synchronized
     fun start(context: Context): File {
         val directory = directory(context).also { check(it.isDirectory || it.mkdirs()) }
+        lastStartMillis = maxOf(System.currentTimeMillis(), lastStartMillis + 1)
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        }.format(Date(lastStartMillis))
         var active: File
         do {
             active = File(directory, "application-$timestamp-${UUID.randomUUID().toString().take(8)}.log")
         } while (!active.createNewFile())
-        latest(context, Int.MAX_VALUE).drop(MAX_STORED_STARTUPS).forEach(File::delete)
+        latest(context, Int.MAX_VALUE).drop(MAX_STORED_STARTUPS).forEach { it.delete() }
         return active
     }
 }
