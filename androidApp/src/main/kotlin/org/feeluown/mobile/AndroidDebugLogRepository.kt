@@ -16,13 +16,7 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_DIAGNOSTIC_LOG_LINES = 2_000
 
-/**
- * Compatibility adapter for the old debug-log feature contract.
- *
- * The UI no longer exposes raw logs; this repository now reads AppLogger's rolling files and
- * exports a user-shareable diagnostics archive. Availability is intentionally enabled in release
- * builds as diagnostics are a support feature rather than a developer-only tool.
- */
+/** Export only the three latest startup files, not arbitrary contents of the log directory. */
 class AndroidDebugLogRepository(
     private val context: Context,
     @Suppress("UNUSED_PARAMETER") legacyDebuggableOnly: Boolean,
@@ -30,8 +24,7 @@ class AndroidDebugLogRepository(
     override val isAvailable: Boolean = true
 
     override suspend fun logLines(): List<String> = withContext(Dispatchers.IO) {
-        listOf(AndroidAppLogFiles.previous(context), AndroidAppLogFiles.active(context))
-            .filter(File::isFile)
+        AndroidAppLogFiles.latest(context).asReversed()
             .flatMap { file -> file.readLines(Charsets.UTF_8) }
             .map(String::trimEnd)
             .filter(String::isNotBlank)
@@ -48,13 +41,11 @@ class AndroidDebugLogRepository(
                 zip.write(diagnosticsSummary().toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
 
-                listOf(AndroidAppLogFiles.active(context), AndroidAppLogFiles.previous(context))
-                    .filter(File::isFile)
-                    .forEach { logFile ->
-                        zip.putNextEntry(ZipEntry(logFile.name))
-                        logFile.inputStream().use { input -> input.copyTo(zip) }
-                        zip.closeEntry()
-                    }
+                AndroidAppLogFiles.latest(context).asReversed().forEach { logFile ->
+                    zip.putNextEntry(ZipEntry(logFile.name))
+                    logFile.inputStream().use { input -> input.copyTo(zip) }
+                    zip.closeEntry()
+                }
             }
             archive
         }
