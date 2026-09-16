@@ -8,6 +8,7 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
@@ -20,6 +21,7 @@ object AndroidResourceCache {
     private const val AUDIO_DIR = "audio"
     private const val IMAGE_DIR = "images"
     private const val IMAGE_EXTENSION = ".img"
+    private const val COVER_LOG_TAG = "CoverArt"
 
     private val lock = Any()
     private var audioCache: SimpleCache? = null
@@ -73,21 +75,39 @@ object AndroidResourceCache {
     fun cachedImage(context: Context, imageUrl: String): File? {
         val uri = Uri.parse(imageUrl)
         if (uri.scheme !in setOf("http", "https")) return null
+        val host = uri.host.orEmpty().ifBlank { "unknown" }
         val target = File(imageDir(context).apply { mkdirs() }, "${sha256(imageUrl)}$IMAGE_EXTENSION")
         if (target.exists() && target.length() > 0L) {
             target.setLastModified(System.currentTimeMillis())
             return target
         }
+        if (target.exists()) {
+            AppLogger.w(COVER_LOG_TAG, "Image cache entry is empty host=$host stage=disk-cache")
+            target.delete()
+        }
         val temp = File(target.parentFile, "${target.name}.tmp")
-        return runCatching {
-            URL(imageUrl).openConnection().run {
+        return try {
+            val connection = URL(imageUrl).openConnection().apply {
                 connectTimeout = 15_000
                 readTimeout = 20_000
-                getInputStream().use { input ->
+            }
+            try {
+                if (connection is HttpURLConnection) {
+                    val status = connection.responseCode
+                    if (status !in 200..299) {
+                        AppLogger.w(COVER_LOG_TAG, "Image request failed host=$host stage=disk-download httpStatus=$status")
+                        temp.delete()
+                        return null
+                    }
+                }
+                connection.getInputStream().use { input ->
                     temp.outputStream().use { output -> input.copyTo(output) }
                 }
+            } finally {
+                (connection as? HttpURLConnection)?.disconnect()
             }
             if (temp.length() <= 0L) {
+                AppLogger.w(COVER_LOG_TAG, "Image response is empty host=$host stage=disk-download")
                 temp.delete()
                 null
             } else {
@@ -97,11 +117,17 @@ object AndroidResourceCache {
                     trimImages(context)
                     target
                 } else {
+                    AppLogger.w(COVER_LOG_TAG, "Image cache write failed host=$host stage=rename")
                     temp.delete()
                     null
                 }
             }
-        }.getOrNull()
+        } catch (exception: Exception) {
+            temp.delete()
+            // Exception messages and stack traces can contain signed URLs or authentication tokens.
+            AppLogger.w(COVER_LOG_TAG, "Image download failed host=$host stage=disk-download error=${exception.javaClass.simpleName}")
+            null
+        }
     }
 
     private fun trimImages(context: Context) {
@@ -123,13 +149,8 @@ object AndroidResourceCache {
         val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return CacheLimit(
             audioMaxBytes = preferences.getLong(
-                KEY_AUDIO_LIMIT_BYTES,
-                DEFAULT_AUDIO_CACHE_LIMIT_MB.toLong() * 1024L * 1024L,
-            ),
-            imageMaxBytes = preferences.getLong(
-                KEY_IMAGE_LIMIT_BYTES,
-                DEFAULT_IMAGE_CACHE_LIMIT_MB.toLong() * 1024L * 1024L,
-            ),
+                KEY_AUDIO_LIMIT_BYTES, DEFAULT_AUDIO_CACHE_LIMIT_MB.toLong() * 1024L * 1024L),
+            imageMaxBytes = preferences.getLong(KEY_IMAGE_LIMIT_BYTES, DEFAULT_IMAGE_CACHE_LIMIT_MB.toLong() * 1024L * 1024L),
         )
     }
 
