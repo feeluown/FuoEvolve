@@ -205,6 +205,10 @@ class DesktopMpvPlaybackEngine(
             return
         }
         runCatching {
+            // loadfile inherits libmpv's current pause property. A fresh playback request is a
+            // play intent; PersistentDesktopPlaybackEngine reapplies a pause requested while the
+            // asynchronous start is in progress.
+            activeBackend.setPaused(false)
             activeBackend.load(payload.url, payload.headers)
         }.onFailure(::publishBackendFailure)
     }
