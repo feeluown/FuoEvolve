@@ -165,7 +165,7 @@ private fun RecognitionContent(
             },
             subtitle = when (source) {
                 AudioRecognitionSource.Microphone -> "录音不会保存到设备"
-                AudioRecognitionSource.SystemOutput -> "不会暂停当前播放"
+                AudioRecognitionSource.SystemOutput -> "将暂停当前播放，避免干扰识别"
             },
             progress = null,
         )
@@ -177,14 +177,14 @@ private fun RecognitionContent(
             },
             subtitle = when (source) {
                 AudioRecognitionSource.Microphone -> "请靠近声音来源，并保持周围环境安静"
-                AudioRecognitionSource.SystemOutput -> "请保持音乐继续通过系统默认输出播放"
+                AudioRecognitionSource.SystemOutput -> "请继续播放待识别的系统音频"
             },
             progress = (state.capturedMs.toFloat() / state.windowDurationMs).coerceIn(0f, 1f),
         )
         RecognitionUiState.Matching -> ListeningContent(
             modifier = modifier,
             title = "正在寻找这首歌",
-            subtitle = "马上就好，请继续让音乐播放",
+            subtitle = "马上就好，请继续让待识别的音乐播放",
             progress = null,
         )
         is RecognitionUiState.Success -> RecognitionResults(
@@ -197,7 +197,7 @@ private fun RecognitionContent(
             title = "暂未识别到歌曲",
             message = when (source) {
                 AudioRecognitionSource.Microphone -> "可以让手机更靠近声音来源，或换到安静一点的环境再试一次。"
-                AudioRecognitionSource.SystemOutput -> "请确认音乐正在通过系统默认输出播放，再重试。"
+                AudioRecognitionSource.SystemOutput -> "请确认待识别音乐正在通过系统默认输出播放，再重试。"
             },
             actionLabel = "重新识别",
             onAction = { actions.dispatch(RecognitionAction.Retry) },

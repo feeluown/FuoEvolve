@@ -12,7 +12,7 @@ import kotlin.test.assertIs
 
 class AudioRecognitionControllerTest {
     @Test
-    fun startOwnsStateAndPausesActivePlayback() = runTest {
+    fun startPausesActivePlaybackAndRestoresItAfterSuccess() = runTest {
         val song = RecognizedSong(
             neteaseSongId = "123",
             title = "Song",
@@ -29,23 +29,28 @@ class AudioRecognitionControllerTest {
             override fun cancel() = Unit
         }
         var pauseCount = 0
+        var resumeCount = 0
         val controller = createRecognitionFeatureController(
             repository = repository,
             scope = this,
             isPlaybackActive = { true },
             pausePlayback = { pauseCount += 1 },
+            resumePlayback = { resumeCount += 1 },
         )
 
         controller.dispatch(RecognitionAction.Start)
         advanceUntilIdle()
 
         assertEquals(1, pauseCount)
+        assertEquals(1, resumeCount)
         assertEquals(RecognitionUiState.Success(listOf(song)), controller.uiState.value)
     }
 
     @Test
-    fun cancelIfInProgressCancelsRepositoryAndPublishesCancelled() = runTest {
+    fun cancelIfInProgressRestoresPlaybackPausedByRecognition() = runTest {
         var cancelCount = 0
+        var pauseCount = 0
+        var resumeCount = 0
         val repository = object : AudioRecognitionRepository {
             override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> {
                 onEvent(AudioRecognitionEvent.Capturing(attempt = 1, capturedMs = 500))
@@ -59,8 +64,9 @@ class AudioRecognitionControllerTest {
         val controller = createRecognitionFeatureController(
             repository = repository,
             scope = this,
-            isPlaybackActive = { false },
-            pausePlayback = {},
+            isPlaybackActive = { true },
+            pausePlayback = { pauseCount += 1 },
+            resumePlayback = { resumeCount += 1 },
         )
 
         controller.dispatch(RecognitionAction.Start)
@@ -71,12 +77,40 @@ class AudioRecognitionControllerTest {
         runCurrent()
 
         assertEquals(1, cancelCount)
+        assertEquals(1, pauseCount)
+        assertEquals(1, resumeCount)
         assertEquals(RecognitionUiState.Cancelled, controller.uiState.value)
     }
 
     @Test
-    fun systemOutputCaptureDoesNotPausePlayback() = runTest {
+    fun recognitionDoesNotResumePlaybackThatWasAlreadyPaused() = runTest {
         var pauseCount = 0
+        var resumeCount = 0
+        val repository = object : AudioRecognitionRepository {
+            override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> = emptyList()
+
+            override fun cancel() = Unit
+        }
+        val controller = createRecognitionFeatureController(
+            repository = repository,
+            scope = this,
+            isPlaybackActive = { false },
+            pausePlayback = { pauseCount += 1 },
+            resumePlayback = { resumeCount += 1 },
+        )
+
+        controller.dispatch(RecognitionAction.Start)
+        advanceUntilIdle()
+
+        assertEquals(0, pauseCount)
+        assertEquals(0, resumeCount)
+        assertEquals(RecognitionUiState.NoResult, controller.uiState.value)
+    }
+
+    @Test
+    fun explicitPauseOptOutDoesNotTakePlaybackOwnership() = runTest {
+        var pauseCount = 0
+        var resumeCount = 0
         val repository = object : AudioRecognitionRepository {
             override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> {
                 awaitCancellation()
@@ -89,14 +123,16 @@ class AudioRecognitionControllerTest {
             scope = this,
             isPlaybackActive = { true },
             pausePlayback = { pauseCount += 1 },
+            resumePlayback = { resumeCount += 1 },
             pausePlaybackBeforeCapture = false,
         )
 
         controller.dispatch(RecognitionAction.Start)
         runCurrent()
+        controller.dispatch(RecognitionAction.Cancel)
 
         assertEquals(0, pauseCount)
-        controller.dispatch(RecognitionAction.Cancel)
+        assertEquals(0, resumeCount)
     }
 
     @Test

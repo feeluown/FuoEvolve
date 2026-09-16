@@ -28,6 +28,7 @@ fun createRecognitionFeatureController(
     scope: CoroutineScope,
     isPlaybackActive: () -> Boolean,
     pausePlayback: () -> Unit,
+    resumePlayback: () -> Unit = {},
     pausePlaybackBeforeCapture: Boolean = true,
     initialState: RecognitionUiState = RecognitionUiState.Idle,
 ): RecognitionFeatureController = AudioRecognitionController(
@@ -35,6 +36,7 @@ fun createRecognitionFeatureController(
     scope = scope,
     isPlaybackActive = isPlaybackActive,
     pausePlayback = pausePlayback,
+    resumePlayback = resumePlayback,
     pausePlaybackBeforeCapture = pausePlaybackBeforeCapture,
     initialState = initialState,
 )
@@ -44,6 +46,7 @@ internal class AudioRecognitionController(
     private val scope: CoroutineScope,
     private val isPlaybackActive: () -> Boolean,
     private val pausePlayback: () -> Unit,
+    private val resumePlayback: () -> Unit,
     private val pausePlaybackBeforeCapture: Boolean,
     initialState: RecognitionUiState = RecognitionUiState.Idle,
 ) : RecognitionFeatureController {
@@ -52,6 +55,7 @@ internal class AudioRecognitionController(
 
     private var recognitionJob: Job? = null
     private var recognitionSerial: Long = 0
+    private var playbackPausedByRecognition = false
 
     override fun dispatch(action: RecognitionAction) {
         when (action) {
@@ -70,7 +74,8 @@ internal class AudioRecognitionController(
 
     private fun start() {
         if (recognitionJob?.isActive == true) return
-        if (pausePlaybackBeforeCapture && isPlaybackActive()) {
+        if (pausePlaybackBeforeCapture && !playbackPausedByRecognition && isPlaybackActive()) {
+            playbackPausedByRecognition = true
             pausePlayback()
         }
         mutableUiState.value = RecognitionUiState.Capturing(
@@ -103,20 +108,22 @@ internal class AudioRecognitionController(
             }
             if (serial == recognitionSerial) {
                 recognitionJob = null
+                restorePlaybackIfOwned()
             }
         }
     }
 
-    private fun cancel() {
+    private fun cancel(restorePlayback: Boolean = true) {
         recognitionSerial += 1
         repository.cancel()
         recognitionJob?.cancel()
         recognitionJob = null
         mutableUiState.value = RecognitionUiState.Cancelled
+        if (restorePlayback) restorePlaybackIfOwned()
     }
 
     private fun retry() {
-        cancel()
+        cancel(restorePlayback = false)
         mutableUiState.value = RecognitionUiState.Idle
         start()
     }
@@ -127,6 +134,7 @@ internal class AudioRecognitionController(
         recognitionJob?.cancel()
         recognitionJob = null
         mutableUiState.value = RecognitionUiState.Idle
+        restorePlaybackIfOwned()
     }
 
     private fun cancelIfInProgress() {
@@ -168,6 +176,13 @@ internal class AudioRecognitionController(
         recognitionJob?.cancel()
         repository.cancel()
         recognitionJob = null
+        restorePlaybackIfOwned()
+    }
+
+    private fun restorePlaybackIfOwned() {
+        if (!playbackPausedByRecognition) return
+        playbackPausedByRecognition = false
+        resumePlayback()
     }
 
     private fun resultState(songs: List<RecognizedSong>): RecognitionUiState {

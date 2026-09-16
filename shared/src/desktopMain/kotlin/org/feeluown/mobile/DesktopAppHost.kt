@@ -205,7 +205,7 @@ private class DesktopAppContainer(
             scope = scope,
             isPlaybackActive = { playbackEngine.state.value.status == PlayerStatus.Playing },
             pausePlayback = playbackEngine::pause,
-            pausePlaybackBeforeCapture = false,
+            resumePlayback = playbackEngine::resume,
         )
     }
 
