@@ -2,9 +2,7 @@ package org.feeluown.mobile
 
 import java.nio.file.Path
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import org.feeluown.mobile.playback.api.PlaybackSession
 
 @Volatile
@@ -27,8 +25,9 @@ fun installDesktopListeningHistorySinkFactory(factory: (Path) -> ListeningHistor
 }
 
 internal fun createDesktopListeningHistorySink(): ListeningHistorySink =
-    desktopListeningHistorySinkFactory?.invoke(DesktopAppDirectories.data().resolve("listening_history.db"))
-        ?: NoOpListeningHistorySink
+    checkNotNull(desktopListeningHistorySinkFactory) {
+        "Desktop listening history storage must be installed before DesktopAppHost is created"
+    }.invoke(DesktopAppDirectories.data().resolve("listening_history.db"))
 
 @Volatile
 private var desktopLocalMusicRepositoryFactory: (() -> LocalMusicRepository)? = null
@@ -44,7 +43,9 @@ fun installDesktopLocalMusicRepositoryFactory(factory: () -> LocalMusicRepositor
  */
 internal object DesktopUnsupportedLocalMusicRepository : LocalMusicRepository {
     private val delegate: LocalMusicRepository by lazy {
-        desktopLocalMusicRepositoryFactory?.invoke() ?: MissingDesktopLocalMusicRepository
+        checkNotNull(desktopLocalMusicRepositoryFactory) {
+            "Desktop local music repository must be installed before DesktopAppHost is created"
+        }.invoke()
     }
 
     override val mediaChangeEvents: Flow<Unit>
@@ -62,20 +63,11 @@ internal object DesktopUnsupportedLocalMusicRepository : LocalMusicRepository {
     override suspend fun saveLyrics(track: MusicTrack, lyrics: String) = delegate.saveLyrics(track, lyrics)
 }
 
-private object MissingDesktopLocalMusicRepository : LocalMusicRepository {
-    override suspend fun updateScanSettings(settings: LocalMusicScanSettings) = Unit
-    override suspend fun directories(): List<LocalMusicDirectory> = emptyList()
-    override suspend fun tracks(): List<MusicTrack> = emptyList()
-    override suspend fun refreshDatabase(): List<MusicTrack> = emptyList()
-    override suspend fun search(keyword: String): List<MusicTrack> = emptyList()
-}
-
 @Volatile
 private var desktopPlaybackEngineFactory: (() -> PlaybackEngine)? = null
 
 /**
  * Installs the concrete desktop playback runtime from the JVM host module.
- *
  * Native dependencies such as JNA/libmpv intentionally stay in `desktopApp`; shared desktop code
  * only sees the existing [PlaybackEngine] contract. Call this before composing [DesktopAppHost].
  */
@@ -83,17 +75,15 @@ fun installDesktopPlaybackEngineFactory(factory: () -> PlaybackEngine) {
     desktopPlaybackEngineFactory = factory
 }
 
-/**
- * Compatibility name kept so the existing desktop composition root does not own a native runtime.
- * The real implementation is supplied by `desktopApp` before [DesktopAppHost] is created.
- */
+/** Compatibility name retained at the desktop composition edge. */
 internal class DesktopUnsupportedPlaybackEngine :
     PlaybackEngine,
     PlaybackStartReasonAwareEngine,
     ResolvedPlaybackSourceAwareEngine,
     AutoCloseable {
-    private val delegate: PlaybackEngine = desktopPlaybackEngineFactory?.invoke()
-        ?: MissingDesktopPlaybackEngine()
+    private val delegate: PlaybackEngine = checkNotNull(desktopPlaybackEngineFactory) {
+        "Desktop playback engine must be installed before DesktopAppHost is created"
+    }.invoke()
 
     override val state: StateFlow<PlaybackState>
         get() = delegate.state
@@ -137,41 +127,5 @@ internal class DesktopUnsupportedPlaybackEngine :
 
     override fun close() {
         (delegate as? AutoCloseable)?.close()
-    }
-}
-
-private class MissingDesktopPlaybackEngine : PlaybackEngine {
-    private val mutableState = MutableStateFlow(PlaybackState())
-    override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
-
-    override fun prepareLoading(track: MusicTrack) {
-        mutableState.value = mutableState.value.copy(
-            status = PlayerStatus.Loading,
-            currentTrack = track,
-            positionMs = 0L,
-            durationMs = track.durationMs ?: 0L,
-            errorMessage = null,
-        )
-    }
-
-    override fun play(track: MusicTrack, payload: PlaybackPayload) {
-        mutableState.value = mutableState.value.copy(
-            status = PlayerStatus.Error,
-            currentTrack = track,
-            positionMs = 0L,
-            durationMs = payload.durationMs ?: track.durationMs ?: 0L,
-            errorMessage = "桌面播放引擎未由 desktopApp 注入",
-        )
-    }
-
-    override fun pause() = Unit
-    override fun resume() = Unit
-
-    override fun stop() {
-        mutableState.value = PlaybackState()
-    }
-
-    override fun seekTo(positionMs: Long) {
-        mutableState.value = mutableState.value.copy(positionMs = positionMs.coerceAtLeast(0L))
     }
 }

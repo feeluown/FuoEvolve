@@ -187,6 +187,7 @@ private class IosAppContainer(
             scope = scope,
             isPlaybackActive = { playbackEngine.state.value.status == PlayerStatus.Playing },
             pausePlayback = playbackEngine::pause,
+            resumePlayback = playbackEngine::resume,
         )
     }
 

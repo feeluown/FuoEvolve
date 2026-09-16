@@ -147,6 +147,7 @@ class AudioRecognitionControllerTest {
             scope = this,
             isPlaybackActive = { false },
             pausePlayback = {},
+            resumePlayback = {},
             initialState = RecognitionUiState.Cancelled,
         )
 
