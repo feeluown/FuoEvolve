@@ -15,29 +15,32 @@ internal object StartupLogFiles {
     private const val MAX_STORED_STARTUPS = 10
     const val EXPORT_STARTUPS = 3
     private val namePattern = Regex("application-\\d{8}-\\d{6}-\\d{3}-[0-9a-f]{8}\\.log")
+    private var lastStartMillis = 0L
 
     fun latest(directory: Path, limit: Int = EXPORT_STARTUPS): List<Path> {
         require(limit >= 0)
         if (!Files.isDirectory(directory)) return emptyList()
         return Files.list(directory).use { paths ->
             paths.filter { Files.isRegularFile(it) && namePattern.matches(it.fileName.toString()) }
-                .sorted(Comparator.comparing<Path, String> { it.fileName.toString() }.reversed())
+                .sorted { first, second -> second.fileName.toString().compareTo(first.fileName.toString()) }
                 .limit(limit.toLong())
                 .toList()
         }
     }
 
+    @Synchronized
     fun start(directory: Path): Path {
         Files.createDirectories(directory)
+        // A monotonic millisecond timestamp also preserves ordering when a launch or
+        // repeated logger initialization happens within the same wall-clock millisecond.
+        lastStartMillis = maxOf(System.currentTimeMillis(), lastStartMillis + 1)
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        }.format(Date(lastStartMillis))
         val active = Files.createFile(
             directory.resolve("application-$timestamp-${UUID.randomUUID().toString().take(8)}.log"),
         )
-        // Prune only our own files. Never remove another process's current file: on a
-        // normal single-instance launch, the newest file is ours and is always kept.
-        latest(directory, Int.MAX_VALUE).drop(MAX_STORED_STARTUPS).forEach(Files::deleteIfExists)
+        latest(directory, Int.MAX_VALUE).drop(MAX_STORED_STARTUPS).forEach { Files.deleteIfExists(it) }
         return active
     }
 }
