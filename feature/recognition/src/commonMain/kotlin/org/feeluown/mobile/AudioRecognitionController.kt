@@ -28,7 +28,7 @@ fun createRecognitionFeatureController(
     scope: CoroutineScope,
     isPlaybackActive: () -> Boolean,
     pausePlayback: () -> Unit,
-    resumePlayback: () -> Unit = {},
+    resumePlayback: () -> Unit,
     pausePlaybackBeforeCapture: Boolean = true,
     initialState: RecognitionUiState = RecognitionUiState.Idle,
 ): RecognitionFeatureController = AudioRecognitionController(
