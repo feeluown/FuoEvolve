@@ -278,17 +278,22 @@ FUO_NATIVE_EXPORT int fuo_mpv_render_d3d11(int64_t render_context_value, int64_t
     // SurfaceOrigin.TOP_LEFT; applying the default-framebuffer flip here
     // reverses the video a second time.
     int flip_y = 0;
+    // Tao invokes us in its frame callback. mpv's default timing wait can stall
+    // the window event/present loop while video is playing; Tao already paces draws.
+    int block_for_target_time = 0;
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &fbo},
         {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
+        {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time},
         {MPV_RENDER_PARAM_INVALID, NULL},
     };
-    mpv_render_context_render(renderer->mpv, params);
-    if (ensure_gl_api()) global_gl_api.flush();
+    int render_result = mpv_render_context_render(renderer->mpv, params);
+    if (render_result >= 0 && ensure_gl_api()) global_gl_api.flush();
 
-    return fuo_windows_egl.make_current(
+    int restored = fuo_windows_egl.make_current(
         current_display, host_draw, host_read, current_context
-    ) ? 1 : 0;
+    );
+    return render_result >= 0 && restored ? 1 : 0;
 }
 
 FUO_NATIVE_EXPORT void fuo_mpv_destroy_d3d11_render_target(int64_t target_value) {
