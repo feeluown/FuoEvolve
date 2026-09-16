@@ -194,7 +194,7 @@ private class DesktopAppContainer(
             },
             initialState = SearchUiState(
                 searchScope = initialSettings.searchScope,
-                selectedProviderId = initialSettings.selectedSearchProviderId,
+                selectedSearchProviderId = initialSettings.selectedSearchProviderId,
             ),
         )
     }
@@ -316,7 +316,7 @@ private class DesktopAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = scope,
-            onProviderMutation = homeRefreshPort::refreshMine,
+            onProviderMutation = { homeRefreshPort.refreshMine() },
         )
     }
 
