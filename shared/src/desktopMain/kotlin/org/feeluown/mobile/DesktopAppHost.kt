@@ -194,7 +194,7 @@ private class DesktopAppContainer(
             },
             initialState = SearchUiState(
                 searchScope = initialSettings.searchScope,
-                selectedSearchProviderId = initialSettings.selectedSearchProviderId,
+                selectedProviderId = initialSettings.selectedSearchProviderId,
             ),
         )
     }
@@ -205,7 +205,7 @@ private class DesktopAppContainer(
             scope = scope,
             isPlaybackActive = { playbackEngine.state.value.status == PlayerStatus.Playing },
             pausePlayback = playbackEngine::pause,
-            pausePlaybackBeforeCapture = false,
+            resumePlayback = playbackEngine::resume,
         )
     }
 
@@ -316,7 +316,7 @@ private class DesktopAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = scope,
-            onProviderMutation = { homeRefreshPort.refreshMine() },
+            onProviderMutation = homeRefreshPort::refreshMine,
         )
     }
 
