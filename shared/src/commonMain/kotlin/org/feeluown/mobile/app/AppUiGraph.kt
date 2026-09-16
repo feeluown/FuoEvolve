@@ -56,8 +56,9 @@ fun createAppUiGraph(
     searchAppPort: SearchAppPort,
     recognitionController: RecognitionFeatureController,
     recognitionAppPort: RecognitionAppPort,
-): AppUiGraph {
-    val playback = PlaybackUiGraph(
+): AppUiGraph = EagerAppUiGraph(
+    playbackSession = playbackSession,
+    playback = createPlaybackUiGraph(
         navigation = playbackNavigationPort,
         presentation = playbackPresentationPort,
         queue = playbackQueueUiPort,
@@ -68,44 +69,35 @@ fun createAppUiGraph(
         localMusicActions = localMusicActionPort,
         lyrics = playbackLyricsPort,
         replacement = replacementActionPort,
-    )
-    val listeningHistory = ListeningHistoryPlaylistMetadataRepository(
-        delegate = playbackQueueUiPort.listeningHistoryRepository ?: NoOpListeningHistoryRepository,
+    ),
+    providerDetail = createProviderDetailUiGraph(
+        owners = providerDetailOwners,
+        playbackQueue = playbackQueueUiPort,
+        downloads = downloadActionPort,
+        playlists = playlistActionPort,
+        providerTrackActions = providerTrackActionPort,
+    ),
+    home = createHomeUiGraph(
         home = homeFeatureController,
-    )
-    return EagerAppUiGraph(
-        playbackSession = playbackSession,
-        playback = playback,
-        providerDetail = ProviderDetailUiGraph(
-            owners = providerDetailOwners,
-            playbackQueue = playbackQueueUiPort,
-            downloads = downloadActionPort,
-            playlists = playlistActionPort,
-            providerTrackActions = providerTrackActionPort,
-        ),
-        home = HomeFeatureUiGraph(
-            home = homeFeatureController,
-            providerCatalog = providerCatalogFeatureController,
-            playbackQueue = playbackQueueUiPort,
-            listeningHistory = listeningHistory,
-            downloads = downloadActionPort,
-            playlists = playlistActionPort,
-            providerTrackActions = providerTrackActionPort,
-            localPlaylist = localPlaylistFeatureController,
-            localMusic = localMusicFeatureController,
-        ),
-        search = SearchRouteGraph(searchController, searchAppPort),
-        recognition = RecognitionRouteGraph(recognitionController, recognitionAppPort),
-        debugLogs = debugLogFeatureController,
         providerCatalog = providerCatalogFeatureController,
-        providerAuth = providerAuthFeatureController,
-        settings = settingsFeatureController,
-        onboarding = onboardingFeatureController,
-        localMusic = localMusicFeatureController,
+        playbackQueue = playbackQueueUiPort,
+        downloads = downloadActionPort,
+        playlists = playlistActionPort,
+        providerTrackActions = providerTrackActionPort,
         localPlaylist = localPlaylistFeatureController,
-        sharedResources = sharedResourceActionPort,
-    )
-}
+        localMusic = localMusicFeatureController,
+    ),
+    search = SearchRouteGraph(searchController, searchAppPort),
+    recognition = RecognitionRouteGraph(recognitionController, recognitionAppPort),
+    debugLogs = debugLogFeatureController,
+    providerCatalog = providerCatalogFeatureController,
+    providerAuth = providerAuthFeatureController,
+    settings = settingsFeatureController,
+    onboarding = onboardingFeatureController,
+    localMusic = localMusicFeatureController,
+    localPlaylist = localPlaylistFeatureController,
+    sharedResources = sharedResourceActionPort,
+)
 
 /**
  * Creates a graph whose feature owners are resolved only when the corresponding UI surface reads
