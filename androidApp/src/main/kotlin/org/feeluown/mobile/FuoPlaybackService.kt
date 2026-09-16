@@ -48,6 +48,7 @@ import org.json.JSONObject
 class FuoPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
+    private var headphoneDisconnectMonitor: AndroidHeadphoneDisconnectMonitor? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var settingsJob: Job? = null
     private var loadJob: Job? = null
@@ -61,6 +62,9 @@ class FuoPlaybackService : MediaSessionService() {
     private var pendingPreloadError: String? = null
     private var stopAfterCurrentTrack = false
     private var holdAtCurrentEnd = false
+    // Playback resolution completes asynchronously. A disconnect (or pause command) must stop
+    // its eventual play() call, not just pause the currently prepared ExoPlayer instance.
+    private var pauseRequestedDuringLoad = false
     @Volatile
     private var activeGeneration: Long = 0L
     private var itemSerial: Long = 0L
@@ -156,6 +160,7 @@ class FuoPlaybackService : MediaSessionService() {
                 })
             }
         player = exoPlayer
+        headphoneDisconnectMonitor = AndroidHeadphoneDisconnectMonitor(this, ::pauseOnHeadphoneDisconnect)
         settingsJob = (application as? FuoEvolveApplication)?.settingsRepository?.let { settingsRepository ->
             serviceScope.launch {
                 settingsRepository.state.collect { settingsState ->
@@ -211,8 +216,22 @@ class FuoPlaybackService : MediaSessionService() {
                     errorMessage = throwable.message ?: "播放计划无效",
                 )
             }
-            ACTION_PAUSE -> player?.pause()
-            ACTION_RESUME -> player?.play()
+            ACTION_PAUSE -> {
+                pauseRequestedDuringLoad = true
+                player?.pause()
+                publishPendingLoadPause()
+            }
+            ACTION_RESUME -> {
+                pauseRequestedDuringLoad = false
+                if (activePlayback == null) {
+                    val current = mutablePlaybackState.value
+                    if (current.status == PlayerStatus.Paused && current.currentTrack != null) {
+                        mutablePlaybackState.value = current.copy(status = PlayerStatus.Loading)
+                    }
+                } else {
+                    player?.play()
+                }
+            }
             ACTION_SET_STOP_AFTER_CURRENT -> {
                 val enabled = intent.getBooleanExtra(EXTRA_STOP_AFTER_CURRENT, false)
                 val wasEnabled = stopAfterCurrentTrack
@@ -230,6 +249,7 @@ class FuoPlaybackService : MediaSessionService() {
                 publishPlaybackState()
             }
             ACTION_STOP -> {
+                pauseRequestedDuringLoad = false
                 stopAfterCurrentTrack = false
                 holdAtCurrentEnd = false
                 player?.stop()
@@ -241,7 +261,28 @@ class FuoPlaybackService : MediaSessionService() {
         return START_STICKY
     }
 
+    /** The receiver runs on the service main thread, where all ExoPlayer and load-gate updates live. */
+    private fun pauseOnHeadphoneDisconnect() {
+        val status = mutablePlaybackState.value.status
+        if (status != PlayerStatus.Playing && status != PlayerStatus.Loading) return
+        if (activePlayback != null && player?.playWhenReady != true) return
+        pauseRequestedDuringLoad = true
+        player?.pause()
+        publishPendingLoadPause()
+        AppLogger.i(TAG, "headphones disconnected; paused playback generation=$activeGeneration")
+    }
+
+    private fun publishPendingLoadPause() {
+        if (activePlayback != null) return
+        val state = mutablePlaybackState.value
+        if (state.status == PlayerStatus.Loading) {
+            mutablePlaybackState.value = state.copy(status = PlayerStatus.Paused)
+        }
+    }
+
     override fun onDestroy() {
+        headphoneDisconnectMonitor?.close()
+        headphoneDisconnectMonitor = null
         settingsJob?.cancel()
         settingsJob = null
         loadJob?.cancel()
@@ -278,6 +319,7 @@ class FuoPlaybackService : MediaSessionService() {
         activePlaybackHasReachedReady = false
         pendingPreloadError = null
         holdAtCurrentEnd = false
+        pauseRequestedDuringLoad = false
         activeGeneration = plan.generation
         mutableAudioFormatInfo.value = null
         mutablePlaybackState.value = PlaybackState(
@@ -300,7 +342,7 @@ class FuoPlaybackService : MediaSessionService() {
                         applyStopAfterCurrentTrackGate()
                         setMediaSource(prepared.mediaSource)
                         prepare()
-                        play()
+                        if (!pauseRequestedDuringLoad) play()
                     }
                     publishPlaybackState()
                 }
@@ -341,7 +383,7 @@ class FuoPlaybackService : MediaSessionService() {
                     preparedItems[prepared.mediaItem.mediaId] = prepared
                     player?.run {
                         addMediaSource(prepared.mediaSource)
-                        if (playbackState == Player.STATE_ENDED && !shouldHoldAtCurrentEnd()) {
+                        if (playbackState == Player.STATE_ENDED && !shouldHoldAtCurrentEnd() && !pauseRequestedDuringLoad) {
                             seekToNextMediaItem()
                             play()
                         }
@@ -422,7 +464,7 @@ class FuoPlaybackService : MediaSessionService() {
         val track = request.track.copy(
             title = if (parts.isEmpty()) payload.title.ifBlank { request.track.title } else request.track.title,
             artists = payload.artists.ifBlank { request.track.artists },
-            album = payload.album.ifBlank { request.track.album },
+            album = payload.album,
             source = if (isSmartReplacementPlayback) {
                 payload.originalSource?.takeIf { it.isNotBlank() } ?: request.track.source
             } else {
@@ -623,6 +665,7 @@ class FuoPlaybackService : MediaSessionService() {
                 hasPendingOrLoadingRequest() && !shouldHold -> PlayerStatus.Loading
             currentPlayer.playbackState == Player.STATE_ENDED || heldAtEnd -> PlayerStatus.Ended
             currentPlayer.isPlaying -> PlayerStatus.Playing
+            pauseRequestedDuringLoad && !currentPlayer.playWhenReady -> PlayerStatus.Paused
             currentPlayer.playbackState == Player.STATE_BUFFERING &&
                 currentPlayer.playWhenReady &&
                 currentPlayer.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE -> PlayerStatus.Loading
@@ -675,7 +718,7 @@ class FuoPlaybackService : MediaSessionService() {
 
     private fun PlaybackPart.toTrack(parent: MusicTrack): MusicTrack = parent.copy(
         id = id,
-        title = title.ifBlank { parent.title },
+        title = title.ifBlank { title },
         durationMs = durationMs ?: parent.durationMs,
         providerId = id,
     )
