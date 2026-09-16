@@ -1,6 +1,11 @@
 package org.feeluown.mobile
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
 
 /**
  * Thin Android process host.
@@ -11,9 +16,24 @@ import android.app.Application
 class FuoEvolveApplication : Application() {
     private var containerHolder: AndroidAppContainer? = null
 
+    // The playback service keeps this process alive during background playback. Register at the
+    // process level so disconnects are handled even if the activity has been destroyed.
+    private val noisyAudioReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != AudioManager.ACTION_AUDIO_BECOMING_NOISY) return
+            if (FuoPlaybackService.playbackState.value.status == PlayerStatus.Playing) {
+                FuoPlaybackService.pause(context)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         installAndroidAppLogger(this)
+        registerReceiver(
+            noisyAudioReceiver,
+            IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+        )
     }
 
     private fun container(): AndroidAppContainer =
@@ -36,6 +56,7 @@ class FuoEvolveApplication : Application() {
         get() = container().appViewModel
 
     override fun onTerminate() {
+        unregisterReceiver(noisyAudioReceiver)
         containerHolder?.close()
         containerHolder = null
         super.onTerminate()
