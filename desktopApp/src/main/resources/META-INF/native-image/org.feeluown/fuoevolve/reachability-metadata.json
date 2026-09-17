@@ -114,5 +114,34 @@
     {
       "glob": "fuoevolve-desktop-version.properties"
     }
-  ]
+  ],
+  "foreign": {
+    "downcalls": [
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "jint",
+          "void*",
+          "void*",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "void*",
+          "void*",
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["void*", "jint"]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": ["void*"]
+      }
+    ]
+  }
 }
