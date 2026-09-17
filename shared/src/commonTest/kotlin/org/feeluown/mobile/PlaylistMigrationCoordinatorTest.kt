@@ -110,6 +110,36 @@ class PlaylistMigrationCoordinatorTest {
     }
 
     @Test
+    fun writePassAttemptsRemainingTracksBeforeReportingPartial() = runTest {
+        val store = FakeStore()
+        val provider = FakeProvider().apply {
+            pages[0] = MigrationPage(listOf(first, second), 2, false)
+            matches[first.id] = listOf(MigrationCandidate(firstMatch, 0.99))
+            matches[second.id] = listOf(MigrationCandidate(secondMatch, 0.99))
+            rejectOnce = firstMatch.id
+        }
+        val workflow = PlaylistMigrationCoordinator(store, provider)
+        workflow.initialize()
+        workflow.create("task", source, "qqmusic")
+        workflow.runUntilBlocked("task")
+        workflow.confirmMatches("task")
+        workflow.chooseDestination("task", destination)
+
+        val partial = workflow.runUntilBlocked("task")
+
+        assertEquals(MigrationPhase.Partial, partial.phase)
+        assertEquals(MigrationTrackStatus.Failed, partial.entries[0].status)
+        assertEquals(MigrationTrackStatus.Added, partial.entries[1].status)
+        assertEquals(2, provider.addCalls)
+
+        workflow.retry("task")
+        val completed = workflow.runUntilBlocked("task")
+        assertEquals(MigrationPhase.Complete, completed.phase)
+        assertEquals(2, completed.addedCount)
+        assertEquals(3, provider.addCalls)
+    }
+
+    @Test
     fun retryDoesNotRepeatSuccessfulWrites() = runTest {
         val store = FakeStore()
         val provider = FakeProvider().apply {
