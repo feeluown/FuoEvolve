@@ -8,7 +8,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import dev.nucleusframework.window.tao.NativeView
-import dev.nucleusframework.window.tao.NucleusPlatformView
+import dev.nucleusframework.window.tao.nucleusHwndPlatformView
 import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopMpvNativeApi
 import org.feeluown.mobile.DesktopPlatformVideoController
@@ -55,16 +55,14 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
 
         key(hwnd) {
             NativeView(
-                factory = { WindowsMpvHostView(hwnd) },
+                factory = {
+                    nucleusHwndPlatformView(handle = { hwnd })
+                },
                 modifier = modifier.fillMaxSize(),
             )
         }
     }
 }
-
-private class WindowsMpvHostView(
-    override val hwndHandle: Long,
-) : NucleusPlatformView.HWnd
 
 private fun isWindowsDesktopRuntime(): Boolean =
     System.getProperty("os.name").orEmpty().contains("windows", ignoreCase = true)
