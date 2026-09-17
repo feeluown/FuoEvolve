@@ -136,26 +136,29 @@ class PlaylistMigrationFeatureController(
     }
 
     /**
-     * Executes a bounded amount of checkpointed work for a durable platform scheduler.
-     * Returns true only when another slice is still useful. Review, destination choice, partial
-     * failure and explicit pause remain user-visible stopping points rather than retry loops.
+     * Executes a bounded amount of one background stage. A stale conversion worker is never
+     * allowed to cross Review and start destination writing, and a stale writing worker never
+     * starts conversion work.
      */
     suspend fun runBackgroundSlice(
         taskId: String,
+        stage: PlaylistMigrationBackgroundStage,
         maxSteps: Int = 24,
         onProgress: suspend (PlaylistMigrationTask) -> Unit = {},
     ): Boolean {
         require(maxSteps > 0)
         ready.await()
-        tasks.value.firstOrNull { it.id == taskId }?.let { onProgress(it) }
+        val initial = tasks.value.firstOrNull { it.id == taskId } ?: return false
+        onProgress(initial)
+        if (!stage.accepts(initial.phase)) return false
         repeat(maxSteps) {
             val current = tasks.value.firstOrNull { it.id == taskId } ?: return false
-            if (current.phase !in BACKGROUND_RUNNABLE_PHASES) return false
+            if (!stage.accepts(current.phase)) return false
             val next = coordinator.step(taskId)
             onProgress(next)
-            if (next.phase !in BACKGROUND_RUNNABLE_PHASES) return false
+            if (!stage.accepts(next.phase)) return false
         }
-        return tasks.value.firstOrNull { it.id == taskId }?.phase in BACKGROUND_RUNNABLE_PHASES
+        return tasks.value.firstOrNull { it.id == taskId }?.let { stage.accepts(it.phase) } == true
     }
 
     fun clearError() { mutableError.value = null }
@@ -166,18 +169,22 @@ class PlaylistMigrationFeatureController(
     private suspend fun providerFeatures(): List<ProviderFeature> = provider.features()
 
     private fun run(taskId: String) {
-        val task = tasks.value.firstOrNull { it.id == taskId }
-        if (task != null && enqueuePlaylistMigrationBackground(task)) return
-        if (jobs[taskId]?.isActive == true) return
-        jobs[taskId] = scope.launch {
+        val task = tasks.value.firstOrNull { it.id == taskId } ?: return
+        val stage = task.backgroundStageOrNull() ?: return
+        if (enqueuePlaylistMigrationBackground(task)) return
+        val jobKey = "$taskId:${stage.name}"
+        if (jobs[jobKey]?.isActive == true) return
+        jobs[jobKey] = scope.launch {
             try {
-                coordinator.runUntilBlocked(taskId)
+                while (runBackgroundSlice(taskId, stage, maxSteps = 64)) {
+                    // Keep the in-process fallback bounded per slice while the app remains alive.
+                }
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (failure: Exception) {
                 mutableError.value = failure.message ?: "迁移失败，请重试"
             } finally {
-                jobs.remove(taskId)
+                jobs.remove(jobKey)
             }
         }
     }
