@@ -161,11 +161,11 @@ fun PlaylistMigrationTask.backgroundProgress(
     MigrationPhase.Review -> PlaylistMigrationBackgroundProgress(
         taskId = id,
         stage = PlaylistMigrationBackgroundStage.Conversion,
-        title = "歌曲转换完成",
+        title = "转换完成，等待确认",
         detail = if (unresolvedCount > 0) {
-            "有 $unresolvedCount 首需要确认，点击检查转换结果"
+            "有 $unresolvedCount 首需要确认，点击检查匹配"
         } else {
-            "请确认转换结果，点击继续"
+            "请确认匹配结果后再写入目标歌单"
         },
         completed = entries.size,
         total = entries.size.coerceAtLeast(1),
@@ -195,7 +195,7 @@ fun PlaylistMigrationTask.backgroundProgress(
             taskId = id,
             stage = PlaylistMigrationBackgroundStage.Writing,
             title = "正在写入目标歌单",
-            detail = "正在写入歌曲 · $completedCount/${writable.size}",
+            detail = "已写入 $addedCount / ${writable.size}",
             completed = completedCount,
             total = writable.size.coerceAtLeast(1),
             indeterminate = writable.isEmpty(),
@@ -214,17 +214,24 @@ fun PlaylistMigrationTask.backgroundProgress(
         terminal = true,
         openTarget = PlaylistMigrationOpenTarget.Result,
     )
-    MigrationPhase.Partial -> PlaylistMigrationBackgroundProgress(
-        taskId = id,
-        stage = PlaylistMigrationBackgroundStage.Writing,
-        title = "目标歌单写入需要处理",
-        detail = "已写入 $addedCount 首 · $failedCount 首待处理，点击查看结果",
-        completed = addedCount,
-        total = (addedCount + failedCount).coerceAtLeast(1),
-        indeterminate = false,
-        terminal = true,
-        openTarget = PlaylistMigrationOpenTarget.Result,
-    )
+    MigrationPhase.Partial -> {
+        val writable = entries.filter { it.selected != null && it.status != MigrationTrackStatus.Skipped }
+        PlaylistMigrationBackgroundProgress(
+            taskId = id,
+            stage = PlaylistMigrationBackgroundStage.Writing,
+            title = "目标歌单写入需要处理",
+            detail = "已写入 $addedCount 首 · $failedCount 首待处理，点击查看结果",
+            completed = writable.count {
+                it.status == MigrationTrackStatus.Added ||
+                    it.status == MigrationTrackStatus.Failed ||
+                    it.status == MigrationTrackStatus.Uncertain
+            },
+            total = writable.size.coerceAtLeast(1),
+            indeterminate = false,
+            terminal = true,
+            openTarget = PlaylistMigrationOpenTarget.Result,
+        )
+    }
     MigrationPhase.Paused -> {
         val stage = when (resumePhase) {
             MigrationPhase.Writing -> PlaylistMigrationBackgroundStage.Writing
