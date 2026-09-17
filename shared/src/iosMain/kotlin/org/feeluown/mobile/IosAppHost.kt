@@ -171,7 +171,9 @@ private class IosAppContainer(
             openSearch = { navigator.navigate(AppRoute.Search) },
             onPreferencesChanged = { searchScope, selectedProviderId ->
                 scope.launch {
-                    settingsRepository.update { it.copy(searchScope = searchScope, selectedProviderId = selectedProviderId) }
+                    settingsRepository.update {
+                        it.copy(searchScope = searchScope, selectedSearchProviderId = selectedProviderId)
+                    }
                 }
             },
             initialState = SearchUiState(
