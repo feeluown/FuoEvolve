@@ -161,6 +161,10 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
                     self.scheduleDeferredProcessing()
                 } else {
                     self.finish(taskId: work.taskId, stage: work.stage)
+                    // BGProcessingTask has one stable identifier on pre-iOS 26 systems. Process
+                    // one durable work item per launch, then explicitly schedule the next pending
+                    // migration stage instead of leaving it stranded until the app is foregrounded.
+                    self.scheduleDeferredProcessing()
                 }
                 processingTask.setTaskCompleted(success: success)
             }
