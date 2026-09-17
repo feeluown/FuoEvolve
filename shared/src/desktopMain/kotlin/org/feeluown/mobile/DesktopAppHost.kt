@@ -139,6 +139,17 @@ private class DesktopAppContainer(
             providerPlaybackSource = providerGraph.playbackSource,
         )
     }
+    private val playlistMigrationFeatureController: PlaylistMigrationFeatureController by lazy {
+        createPlaylistMigrationFeatureController(
+            storage = createDesktopMigrationDocumentStorage(),
+            registry = providerGraph.registry,
+            catalog = providerGraph.content,
+            library = providerGraph.content,
+            search = providerGraph.search,
+            replacement = playbackProvider,
+            scope = scope,
+        )
+    }
     private val localRepository: LocalMusicRepository = DesktopUnsupportedLocalMusicRepository
     private val localPlaylistRepository: LocalPlaylistRepository = createDesktopLocalPlaylistRepository()
     private val desktopDownloadRepository = DesktopDownloadRepository(
@@ -504,6 +515,7 @@ private class DesktopAppContainer(
         localMusic = { localMusicFeatureController },
         localPlaylist = { localPlaylistFeatureController },
         sharedResources = { sharedResourceActionPort },
+        playlistMigration = { playlistMigrationFeatureController },
     )
 
     private val appBackCoordinator: AppBackCoordinator by lazy {
