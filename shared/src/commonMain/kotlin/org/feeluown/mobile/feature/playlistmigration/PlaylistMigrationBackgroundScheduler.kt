@@ -44,10 +44,11 @@ internal fun bindPlaylistMigrationBackgroundRunner(
     playlistMigrationBackgroundRunner = PlaylistMigrationBackgroundRunnerBinding(controller, scope)
 }
 
-internal fun enqueuePlaylistMigrationBackground(task: PlaylistMigrationTask) {
-    playlistMigrationBackgroundScheduler?.invoke(
-        PlaylistMigrationBackgroundRequest(task.id, task.source.title),
-    )
+/** Returns true when an OS-owned scheduler accepted responsibility for executing the task. */
+internal fun enqueuePlaylistMigrationBackground(task: PlaylistMigrationTask): Boolean {
+    val scheduler = playlistMigrationBackgroundScheduler ?: return false
+    scheduler(PlaylistMigrationBackgroundRequest(task.id, task.source.title))
+    return true
 }
 
 /** Callback-shaped API for native platform schedulers such as iOS BackgroundTasks. */
