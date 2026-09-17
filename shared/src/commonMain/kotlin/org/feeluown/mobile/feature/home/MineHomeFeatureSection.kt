@@ -144,6 +144,9 @@ private fun MineOwnerChips(
                 else if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) MineFilterChips(home)
             }
         }
+        if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) {
+            TextButton(onClick = home::openPlaylistMigration) { Text("歌单迁移") }
+        }
         TextButton(onClick = home::openPlaybackHistory) {
             Text(
                 text = "播放记录",
