@@ -72,6 +72,7 @@ internal fun AppRoute.showsMiniPlayer(
 ): Boolean = when (this) {
     AppRoute.Home -> hasCurrentTrack
     AppRoute.PlaybackHistory,
+    AppRoute.PlaylistMigration,
     AppRoute.LocalPlaylist,
     AppRoute.LocalMusicCollection,
     is AppRoute.FeatureDetail,
