@@ -171,7 +171,7 @@ private class IosAppContainer(
             openSearch = { navigator.navigate(AppRoute.Search) },
             onPreferencesChanged = { searchScope, selectedProviderId ->
                 scope.launch {
-                    settingsRepository.update { it.copy(searchScope = searchScope, selectedSearchProviderId = selectedProviderId) }
+                    settingsRepository.update { it.copy(searchScope = searchScope, selectedProviderId = selectedProviderId) }
                 }
             },
             initialState = SearchUiState(
@@ -208,6 +208,18 @@ private class IosAppContainer(
                     ProviderDisplaySection.Replace -> Unit
                 }
             },
+        )
+    }
+
+    private val playlistMigrationFeatureController: PlaylistMigrationFeatureController by lazy {
+        createPlaylistMigrationFeatureController(
+            storage = createIosMigrationDocumentStorage(),
+            registry = providerGraph.registry,
+            catalog = providerGraph.content,
+            library = providerGraph.content,
+            search = providerGraph.search,
+            replacement = playbackProvider,
+            scope = scope,
         )
     }
 
@@ -425,6 +437,7 @@ private class IosAppContainer(
             searchAppPort = searchAppPort,
             recognitionController = recognitionController,
             recognitionAppPort = recognitionAppPort,
+            playlistMigrationFeatureController = playlistMigrationFeatureController,
         )
     }
 
