@@ -45,6 +45,7 @@ fun PlaylistMigrationScreen(
     val alternatives by controller.searchResults.collectAsStateWithLifecycle()
     val busy by controller.busy.collectAsStateWithLifecycle()
     val error by controller.error.collectAsStateWithLifecycle()
+    val notificationOpenRequest by playlistMigrationOpenRequest.collectAsStateWithLifecycle()
     var taskId by rememberSaveable { mutableStateOf<String?>(null) }
     var choosingSource by rememberSaveable { mutableStateOf(false) }
     var sourceId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -56,6 +57,13 @@ fun PlaylistMigrationScreen(
     var destinationName by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(controller) { controller.refreshProviders() }
+    LaunchedEffect(notificationOpenRequest?.sequence) {
+        notificationOpenRequest?.let { request ->
+            taskId = request.taskId
+            choosingSource = false
+            selectedPosition = null
+        }
+    }
     LaunchedEffect(sourceId) {
         sourceId?.let(controller::loadPlaylists)
         sourcePlaylistId = null
