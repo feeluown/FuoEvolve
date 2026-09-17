@@ -42,6 +42,10 @@ data class PlaybackRuntimeOverlay(
 interface PlaybackRuntimeEngine {
     val state: StateFlow<PlaybackRuntimeEngineState>
 
+    /** False when a paused logical state still needs queue resource restoration before resume. */
+    val hasEstablishedPlaybackSession: Boolean
+        get() = true
+
     fun pause()
     fun resume()
     fun stop() = pause()
@@ -104,7 +108,13 @@ class DefaultPlaybackRuntime(
         when (state.value.status) {
             PlaybackSessionStatus.Playing -> Unit
             PlaybackSessionStatus.Paused -> {
-                if (state.value.currentTrack != null) engine.resume()
+                if (state.value.currentTrack != null) {
+                    if (engine.hasEstablishedPlaybackSession) {
+                        engine.resume()
+                    } else {
+                        queueActions.startCurrent()
+                    }
+                }
             }
             PlaybackSessionStatus.Idle,
             PlaybackSessionStatus.Loading,

@@ -51,6 +51,9 @@ internal class PersistentDesktopPlaybackEngine(
     private var lastPersistedPositionMs: Long = restoredSession?.positionMs ?: 0L
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
+    override val hasEstablishedPlaybackSession: Boolean
+        get() = delegate.hasEstablishedPlaybackSession
+
     override val resolvesResourcesInternally: Boolean
         get() = delegate.resolvesResourcesInternally
 

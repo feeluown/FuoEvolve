@@ -98,6 +98,9 @@ internal class DesktopUnsupportedPlaybackEngine :
     override val state: StateFlow<PlaybackState>
         get() = delegate.state
 
+    override val hasEstablishedPlaybackSession: Boolean
+        get() = delegate.hasEstablishedPlaybackSession
+
     override val resolvesResourcesInternally: Boolean
         get() = delegate.resolvesResourcesInternally
 

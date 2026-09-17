@@ -92,6 +92,9 @@ private class PlaybackRuntimeEngineAdapter(
     startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
 ) : PlaybackRuntimeEngine {
+    override val hasEstablishedPlaybackSession: Boolean
+        get() = playbackEngine.hasEstablishedPlaybackSession
+
     override val state: StateFlow<PlaybackRuntimeEngineState> = combine(
         playbackEngine.state,
         startFailureSource.startFailure,

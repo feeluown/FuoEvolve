@@ -49,7 +49,36 @@ class AndroidPlaybackRuntimeResumeTest {
         }
     }
 
-    private class Fixture(status: PlayerStatus) {
+    @Test
+    fun playStartsCurrentQueueItemWhenPausedSessionNeedsResourceRestore() {
+        val fixture = Fixture(PlayerStatus.Paused, hasEstablishedPlaybackSession = false)
+        try {
+            fixture.session.play()
+
+            assertEquals(0, fixture.engine.resumeCalls)
+            assertEquals(1, fixture.transport.startCurrentCalls)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun toggleStartsCurrentQueueItemWhenPausedSessionNeedsResourceRestore() {
+        val fixture = Fixture(PlayerStatus.Paused, hasEstablishedPlaybackSession = false)
+        try {
+            fixture.session.toggle()
+
+            assertEquals(0, fixture.engine.resumeCalls)
+            assertEquals(1, fixture.transport.startCurrentCalls)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    private class Fixture(
+        status: PlayerStatus,
+        hasEstablishedPlaybackSession: Boolean = true,
+    ) {
         val track = MusicTrack(
             id = "provider:track",
             title = "Track",
@@ -65,6 +94,7 @@ class AndroidPlaybackRuntimeResumeTest {
                 positionMs = 42_000L,
                 durationMs = 180_000L,
             ),
+            hasEstablishedPlaybackSession = hasEstablishedPlaybackSession,
         )
         val transport = RecordingPlaybackTransport(track)
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -83,7 +113,10 @@ class AndroidPlaybackRuntimeResumeTest {
         fun close() = scope.cancel()
     }
 
-    private class RecordingPlaybackEngine(initialState: PlaybackState) : PlaybackEngine {
+    private class RecordingPlaybackEngine(
+        initialState: PlaybackState,
+        override val hasEstablishedPlaybackSession: Boolean,
+    ) : PlaybackEngine {
         override val state: StateFlow<PlaybackState> = MutableStateFlow(initialState)
         var resumeCalls = 0
             private set

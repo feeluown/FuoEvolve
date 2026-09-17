@@ -354,6 +354,15 @@ object PlaybackQueueIdentityCodec {
 
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>
+
+    /**
+     * Whether [resume] can continue the current session without resolving and loading a new
+     * media source. Persistent wrappers may expose a restored logical track before native media
+     * has been recreated, so they must override this capability.
+     */
+    val hasEstablishedPlaybackSession: Boolean
+        get() = state.value.currentTrack != null
+
     val resolvesResourcesInternally: Boolean
         get() = false
     fun prepareLoading(track: MusicTrack) = Unit
