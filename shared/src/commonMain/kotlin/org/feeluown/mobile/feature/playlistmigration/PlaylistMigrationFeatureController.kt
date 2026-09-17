@@ -16,6 +16,10 @@ private val BACKGROUND_RUNNABLE_PHASES = setOf(
     MigrationPhase.Writing,
 )
 
+/** A target must support both playlist creation and writing tracks to the created playlist. */
+internal fun ProviderCapabilities.canCreateMigrationDestination(): Boolean =
+    canAddSongToPlaylist && canCreatePlaylist
+
 /**
  * App-scoped feature owner. Screens observe state and dispatch actions; they never own a running
  * migration job. Durable platform schedulers may resume the same persisted checkpoints after a
@@ -35,6 +39,8 @@ class PlaylistMigrationFeatureController(
     val sources: StateFlow<List<ProviderInfo>> = mutableSources.asStateFlow()
     private val mutableTargets = MutableStateFlow<List<ProviderInfo>>(emptyList())
     val targets: StateFlow<List<ProviderInfo>> = mutableTargets.asStateFlow()
+    private val mutableCreatableProviderIds = MutableStateFlow<Set<String>>(emptySet())
+    val creatableProviderIds: StateFlow<Set<String>> = mutableCreatableProviderIds.asStateFlow()
     private val mutablePlaylists = MutableStateFlow<List<ProviderPlaylist>>(emptyList())
     val playlists: StateFlow<List<ProviderPlaylist>> = mutablePlaylists.asStateFlow()
     private val mutableCandidates = MutableStateFlow<List<MusicTrack>>(emptyList())
@@ -69,6 +75,9 @@ class PlaylistMigrationFeatureController(
                 it.contentType == ProviderContentType.Playlists
         }.mapTo(mutableSetOf()) { it.providerId }
         mutableSources.value = registered.filter { it.providerId in readable }
+        mutableCreatableProviderIds.value = capabilities.values.filter {
+            it.canCreateMigrationDestination()
+        }.mapTo(mutableSetOf()) { it.providerId }
         mutableTargets.value = registered.filter {
             capabilities[it.providerId]?.canAddSongToPlaylist == true
         }
@@ -120,6 +129,10 @@ class PlaylistMigrationFeatureController(
     }
 
     fun createDestination(taskId: String, name: String) = action {
+        val current = requireNotNull(tasks.value.firstOrNull { it.id == taskId })
+        require(registry.providerCapabilities().any {
+            it.providerId == current.targetProviderId && it.canCreateMigrationDestination()
+        }) { "该平台暂不支持创建歌单，请先手动创建后选择" }
         val task = coordinator.createDestination(taskId, name.trim())
         if (task.phase == MigrationPhase.Writing) run(task.id)
     }
