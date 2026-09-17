@@ -22,6 +22,10 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
                 }
                 val options = listOf(
                     "wid" to windowsMpvWidValue(hwnd),
+                    // The NativeView host owns geometry. Do not let mpv try to resize its embedded
+                    // window when the source dimensions change or constrain it to the video aspect.
+                    "auto-window-resize" to "no",
+                    "keepaspect-window" to "no",
                     "gpu-api" to "d3d11",
                     "gpu-context" to "d3d11",
                     "d3d11-output-mode" to "window",
@@ -31,6 +35,12 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
                 for ((optionName, optionValue) in options) {
                     val result = delegate.setOption(handle, optionName, optionValue)
                     if (result < 0) {
+                        AppLogger.e(
+                            "DesktopVideo",
+                            "failed to configure native Windows mpv option " +
+                                "$optionName=$optionValue: " +
+                                (delegate.errorString(result) ?: "error $result"),
+                        )
                         nativeWindowsVideoHosts.remove(handle, hwnd)
                         if (pendingWindowsVideoHost.get() == hwnd) {
                             pendingWindowsVideoHost.set(0L)
@@ -43,7 +53,7 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
                 AppLogger.i(
                     "DesktopVideo",
                     "configured native Windows mpv output with gpu-next/d3d11 " +
-                        "hwnd=0x${hwnd.toString(16)}",
+                        "and host-owned geometry hwnd=0x${hwnd.toString(16)}",
                 )
                 return 0
             }
