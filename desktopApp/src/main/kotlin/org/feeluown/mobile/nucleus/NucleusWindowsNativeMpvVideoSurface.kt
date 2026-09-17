@@ -2,11 +2,14 @@ package org.feeluown.mobile.nucleus
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import dev.nucleusframework.window.tao.NativeView
 import dev.nucleusframework.window.tao.nucleusHwndPlatformView
 import org.feeluown.mobile.AppLogger
@@ -19,8 +22,7 @@ import org.feeluown.mobile.desktop.hideDesktopWindowsVideoHost
 
 /**
  * Selects the Windows-native mpv HWND presentation path while leaving Linux/macOS on the existing
- * Nucleus GPU integrations. The previous Windows D3D11/TextureView implementation remains compiled
- * in [NucleusMpvVideoSurface], but is no longer installed on Windows.
+ * Nucleus GPU integrations. Windows does not fall back to the old D3D11/TextureView pipeline.
  */
 internal fun createNucleusMpvVideoSurface(
     nativeApi: DesktopMpvNativeApi,
@@ -45,9 +47,16 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
         }
         if (hwnd == 0L) {
             LaunchedEffect(controller) {
-                AppLogger.e("DesktopVideo", "Windows native mpv video host HWND is unavailable")
+                AppLogger.e(
+                    "DesktopVideo",
+                    "Windows native mpv video host HWND is unavailable; " +
+                        "controller=${controller.javaClass.name}; " +
+                        "error=${controller.state.value.errorMessage ?: "none"}",
+                )
             }
-            Box(modifier.fillMaxSize())
+            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("视频播放器初始化失败，请导出诊断日志", color = Color.White)
+            }
             return
         }
 

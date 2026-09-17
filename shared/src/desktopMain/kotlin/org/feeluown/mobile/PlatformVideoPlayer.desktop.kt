@@ -71,6 +71,9 @@ private class UnsupportedDesktopPlatformVideoController(
 actual fun rememberPlatformVideoController(): PlatformVideoController {
     val controller = remember {
         runCatching(desktopPlatformVideoControllerFactory).getOrElse { throwable ->
+            // Preserve the original mpv/FFM/Win32 failure. Without this log the Windows native
+            // surface only reports a missing HWND, hiding the actual initialization error.
+            AppLogger.e("DesktopVideo", "desktop video controller initialization failed", throwable)
             UnsupportedDesktopPlatformVideoController(
                 throwable.message?.takeIf(String::isNotBlank) ?: "桌面视频播放组件初始化失败",
             )
