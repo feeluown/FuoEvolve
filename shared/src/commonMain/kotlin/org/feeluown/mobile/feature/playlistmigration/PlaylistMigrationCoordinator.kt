@@ -132,7 +132,26 @@ class PlaylistMigrationCoordinator(
                 val next = requireNotNull(task.resumePhase)
                 persist(task.copy(phase = next, resumePhase = null, error = null))
             }
-            MigrationPhase.Partial -> persist(task.copy(phase = MigrationPhase.Writing, error = null))
+            MigrationPhase.Partial -> persist(task.copy(
+                phase = MigrationPhase.Writing,
+                error = null,
+                entries = task.entries.map { entry ->
+                    when (entry.status) {
+                        // A clean rejection can be attempted again as a normal matched item.
+                        MigrationTrackStatus.Failed -> entry.copy(
+                            status = MigrationTrackStatus.Matched,
+                            error = null,
+                        )
+                        // An uncertain request must reconcile destination state before a resend.
+                        // Adding has exactly that restart behavior in writeNext().
+                        MigrationTrackStatus.Uncertain -> entry.copy(
+                            status = MigrationTrackStatus.Adding,
+                            error = null,
+                        )
+                        else -> entry
+                    }
+                },
+            ))
             else -> task
         }
     }
@@ -179,10 +198,12 @@ class PlaylistMigrationCoordinator(
 
     private suspend fun writeNext(task: PlaylistMigrationTask): PlaylistMigrationTask {
         val destination = requireNotNull(task.destination) { "请先选择目标歌单" }
-        val entry = task.entries.firstOrNull { it.status in setOf(
-            MigrationTrackStatus.Matched, MigrationTrackStatus.Failed,
-            MigrationTrackStatus.Uncertain, MigrationTrackStatus.Adding,
-        ) } ?: return persist(task.copy(
+        // Failed/Uncertain are terminal for the current pass. This lets the background write stage
+        // attempt every other matched song instead of stopping at the first per-track failure.
+        // retry(Partial) explicitly turns only those entries back into retryable states.
+        val entry = task.entries.firstOrNull {
+            it.status == MigrationTrackStatus.Matched || it.status == MigrationTrackStatus.Adding
+        } ?: return persist(task.copy(
             phase = if (task.entries.any { it.status == MigrationTrackStatus.Failed ||
                     it.status == MigrationTrackStatus.Uncertain }) MigrationPhase.Partial else MigrationPhase.Complete,
             error = null,
@@ -203,15 +224,16 @@ class PlaylistMigrationCoordinator(
             if (provider.addTrack(destination, selected)) {
                 changeEntry(inFlight, entry.position) { it.copy(status = MigrationTrackStatus.Added, error = null) }
             } else {
-                changeEntry(inFlight, entry.position) { it.copy(status = MigrationTrackStatus.Failed, error = "添加失败") }
-                    .let { persist(it.copy(phase = MigrationPhase.Partial)) }
+                changeEntry(inFlight, entry.position) {
+                    it.copy(status = MigrationTrackStatus.Failed, error = "添加失败")
+                }
             }
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Exception) {
             changeEntry(inFlight, entry.position) {
                 it.copy(status = MigrationTrackStatus.Uncertain, error = error.message ?: "请重试")
-            }.let { persist(it.copy(phase = MigrationPhase.Partial)) }
+            }
         }
     }
 
