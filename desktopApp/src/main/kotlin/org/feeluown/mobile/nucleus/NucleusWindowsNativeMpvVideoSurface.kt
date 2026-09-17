@@ -15,6 +15,7 @@ import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
 import org.feeluown.mobile.VideoPlaybackPayload
 import org.feeluown.mobile.desktop.desktopWindowsVideoHostHandle
+import org.feeluown.mobile.desktop.hideDesktopWindowsVideoHost
 
 /**
  * Selects the Windows-native mpv HWND presentation path while leaving Linux/macOS on the existing
@@ -56,7 +57,10 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
         key(hwnd) {
             NativeView(
                 factory = {
-                    nucleusHwndPlatformView(handle = { hwnd })
+                    nucleusHwndPlatformView(
+                        handle = { hwnd },
+                        onDispose = { hideDesktopWindowsVideoHost(hwnd) },
+                    )
                 },
                 modifier = modifier.fillMaxSize(),
             )
