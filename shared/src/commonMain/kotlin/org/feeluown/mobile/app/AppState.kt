@@ -11,10 +11,19 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class PlaylistMigrationOpenTarget {
+    Review,
+    Result,
+}
+
+@Serializable
 sealed interface AppRoute : NavKey {
     @Serializable data object Home : AppRoute
     @Serializable data object PlaybackHistory : AppRoute
-    @Serializable data object PlaylistMigration : AppRoute
+    @Serializable data class PlaylistMigration(
+        val taskId: String? = null,
+        val target: PlaylistMigrationOpenTarget? = null,
+    ) : AppRoute
     @Serializable data object Search : AppRoute
     @Serializable data object AudioRecognition : AppRoute
     @Serializable data object Feature : AppRoute
@@ -40,6 +49,7 @@ private fun AppRoute.routeKind(): AppRoute = when (this) {
     is AppRoute.VideoDetail -> AppRoute.Video
     is AppRoute.PlaylistDetail -> AppRoute.Playlist
     is AppRoute.MediaItemDetail -> AppRoute.MediaItem
+    is AppRoute.PlaylistMigration -> AppRoute.PlaylistMigration()
     else -> this
 }
 
@@ -189,7 +199,12 @@ class FuoAppViewModel private constructor(
     }
 
     fun openPlaylistMigration() {
-        navigator.navigate(AppRoute.PlaylistMigration)
+        navigator.navigate(AppRoute.PlaylistMigration())
+    }
+
+    fun openPlaylistMigrationTask(taskId: String, target: PlaylistMigrationOpenTarget) {
+        if (taskId.isBlank()) return
+        navigator.navigate(AppRoute.PlaylistMigration(taskId = taskId, target = target))
     }
 
     fun closeRecognition() {
