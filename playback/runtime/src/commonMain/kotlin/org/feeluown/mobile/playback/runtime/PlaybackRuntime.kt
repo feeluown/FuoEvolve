@@ -91,19 +91,16 @@ class DefaultPlaybackRuntime(
     )
 
     override fun toggle() {
-        when (state.value.status) {
-            PlaybackSessionStatus.Playing -> engine.pause()
-            PlaybackSessionStatus.Paused -> {
-                if (state.value.currentTrack != null) engine.resume()
-            }
-            PlaybackSessionStatus.Idle,
-            PlaybackSessionStatus.Loading,
-            PlaybackSessionStatus.Error,
-            PlaybackSessionStatus.Ended -> queueActions.startCurrent()
+        if (state.value.status == PlaybackSessionStatus.Playing) {
+            engine.pause()
+        } else {
+            playOrResume()
         }
     }
 
-    override fun play() {
+    override fun play() = playOrResume()
+
+    private fun playOrResume() {
         when (state.value.status) {
             PlaybackSessionStatus.Playing -> Unit
             PlaybackSessionStatus.Paused -> {

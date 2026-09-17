@@ -17,5 +17,4 @@ internal fun createPlaybackRuntimeSession(
     transportCoordinator = transportCoordinator,
     startFailureSource = startFailureSource,
     scope = scope,
-    resumePlayback = playbackEngine::resume,
 )
