@@ -15,7 +15,7 @@ class FuoEvolveApplication : Application() {
         super.onCreate()
         installAndroidAppLogger(this)
         installPlaylistMigrationBackgroundScheduler { request ->
-            AndroidPlaylistMigrationWorker.enqueue(applicationContext, request.taskId)
+            AndroidPlaylistMigrationWorker.enqueue(applicationContext, request)
         }
     }
 
