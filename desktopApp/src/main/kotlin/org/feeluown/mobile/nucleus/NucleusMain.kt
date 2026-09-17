@@ -285,6 +285,11 @@ fun main(args: Array<String>) {
                 }
             }
 
+            PlaylistMigrationBackgroundHost(
+                uiScope = uiScope,
+                showWindow = showWindow,
+            )
+
             if (playbackSmokeFile != null) {
                 LaunchedEffect(playbackSmokeFile) {
                     check(playbackSmokeFile.isFile) {
@@ -358,7 +363,7 @@ private fun NucleusDecoratedWindowScope.nucleusOpenGlRenderContextParameters():
     val taoHandle = nucleusWindow.unsafe.taoHandle ?: return null
     val handles = runCatching { NucleusVideoNativeInterop.nativeLinuxHandles(taoHandle) }.getOrNull()
     if (handles == null || handles.size != 3 || handles[0] !in 1L..2L || handles[1] == 0L) {
-        AppLogger.w("DesktopVideo", "Tao Linux native display handles are unavailable")
+        AppLogger.w("DesktopVideo", "Nucleus Tao Linux native display handles are unavailable")
         return null
     }
 
@@ -366,7 +371,7 @@ private fun NucleusDecoratedWindowScope.nucleusOpenGlRenderContextParameters():
         NucleusVideoNativeInterop.taoGetProcAddressFunctionPointer()
     }.getOrDefault(0L)
     if (taoGetProcAddress == 0L) {
-        AppLogger.w("DesktopVideo", "Tao GL proc address is unavailable")
+        AppLogger.w("DesktopVideo", "Nucleus Tao GL proc address is unavailable")
         return null
     }
 
