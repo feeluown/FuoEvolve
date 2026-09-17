@@ -138,7 +138,8 @@ class PlaylistMigrationFeatureController(
     /**
      * Executes a bounded amount of one background stage. A stale conversion worker is never
      * allowed to cross Review and start destination writing, and a stale writing worker never
-     * starts conversion work.
+     * starts conversion work. A stale worker also emits no progress for a phase it does not own,
+     * which prevents delayed platform callbacks from producing misleading terminal notifications.
      */
     suspend fun runBackgroundSlice(
         taskId: String,
@@ -149,8 +150,8 @@ class PlaylistMigrationFeatureController(
         require(maxSteps > 0)
         ready.await()
         val initial = tasks.value.firstOrNull { it.id == taskId } ?: return false
-        onProgress(initial)
         if (!stage.accepts(initial.phase)) return false
+        onProgress(initial)
         repeat(maxSteps) {
             val current = tasks.value.firstOrNull { it.id == taskId } ?: return false
             if (!stage.accepts(current.phase)) return false
