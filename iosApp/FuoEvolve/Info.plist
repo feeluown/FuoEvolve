@@ -33,9 +33,15 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>org.feeluown.mobile.playlist-migration.processing</string>
+        <string>org.feeluown.mobile.playlist-migration.*</string>
+    </array>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
+        <string>processing</string>
     </array>
     <key>UILaunchScreen</key>
     <dict/>
