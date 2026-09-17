@@ -39,7 +39,7 @@ internal class AndroidPlaylistMigrationWorker(
 
         return try {
             val needsContinuation = controller.runBackgroundSlice(taskId, MAX_STEPS_PER_SLICE) { task ->
-                setForeground(createForegroundInfo(taskId, task))
+                setForeground(createForegroundInfo(taskId, task.backgroundProgress()))
             }
             if (needsContinuation) enqueueContinuation(applicationContext, taskId)
             Result.success()
@@ -51,8 +51,10 @@ internal class AndroidPlaylistMigrationWorker(
         }
     }
 
-    private fun createForegroundInfo(taskId: String, task: PlaylistMigrationTask?): ForegroundInfo {
-        val progress = task?.notificationProgress()
+    private fun createForegroundInfo(
+        taskId: String,
+        progress: PlaylistMigrationBackgroundProgress?,
+    ): ForegroundInfo {
         val openAppIntent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -65,13 +67,17 @@ internal class AndroidPlaylistMigrationWorker(
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setContentTitle(progress?.title ?: "正在迁移歌单")
-            .setContentText(progress?.text ?: "正在准备迁移")
+            .setContentText(progress?.detail ?: "正在准备迁移")
             .setContentIntent(contentIntent)
-            .setOngoing(true)
+            .setOngoing(progress?.terminal != true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setProgress(progress?.total ?: 0, progress?.completed ?: 0, progress?.indeterminate != false)
+            .setProgress(
+                progress?.total ?: 0,
+                progress?.completed ?: 0,
+                progress?.indeterminate != false,
+            )
             .build()
         val notificationId = NOTIFICATION_ID_BASE + (taskId.hashCode() and NOTIFICATION_ID_MASK)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -94,84 +100,6 @@ internal class AndroidPlaylistMigrationWorker(
                 description = "显示歌单迁移进度"
                 setSound(null, null)
             },
-        )
-    }
-
-    private data class NotificationProgress(
-        val title: String,
-        val text: String,
-        val completed: Int,
-        val total: Int,
-        val indeterminate: Boolean,
-    )
-
-    private fun PlaylistMigrationTask.notificationProgress(): NotificationProgress = when (phase) {
-        MigrationPhase.Loading -> NotificationProgress(
-            title = "正在迁移 ${source.title}",
-            text = "正在读取歌曲 · 已读取 ${entries.size} 首",
-            completed = 0,
-            total = 0,
-            indeterminate = true,
-        )
-        MigrationPhase.Matching -> {
-            val completed = entries.count { it.status != MigrationTrackStatus.Pending }
-            NotificationProgress(
-                title = "正在迁移 ${source.title}",
-                text = "正在匹配歌曲 · $completed/${entries.size}",
-                completed = completed,
-                total = entries.size.coerceAtLeast(1),
-                indeterminate = entries.isEmpty(),
-            )
-        }
-        MigrationPhase.Writing -> {
-            val writable = entries.filter { it.selected != null && it.status != MigrationTrackStatus.Skipped }
-            val completed = writable.count {
-                it.status == MigrationTrackStatus.Added ||
-                    it.status == MigrationTrackStatus.Failed ||
-                    it.status == MigrationTrackStatus.Uncertain
-            }
-            NotificationProgress(
-                title = "正在迁移 ${source.title}",
-                text = "正在写入歌曲 · $completed/${writable.size}",
-                completed = completed,
-                total = writable.size.coerceAtLeast(1),
-                indeterminate = writable.isEmpty(),
-            )
-        }
-        MigrationPhase.Complete -> NotificationProgress(
-            title = "歌单迁移完成",
-            text = "已迁移 $addedCount 首${if (skippedCount > 0) " · 跳过 $skippedCount 首" else ""}",
-            completed = 1,
-            total = 1,
-            indeterminate = false,
-        )
-        MigrationPhase.Partial -> NotificationProgress(
-            title = "歌单迁移需要处理",
-            text = "已迁移 $addedCount 首 · $failedCount 首待重试",
-            completed = addedCount,
-            total = (addedCount + failedCount).coerceAtLeast(1),
-            indeterminate = false,
-        )
-        MigrationPhase.Review -> NotificationProgress(
-            title = "歌单迁移等待确认",
-            text = "有 $unresolvedCount 首需要确认",
-            completed = 0,
-            total = 0,
-            indeterminate = true,
-        )
-        MigrationPhase.Destination -> NotificationProgress(
-            title = "歌单迁移等待确认",
-            text = "请选择目标歌单",
-            completed = 0,
-            total = 0,
-            indeterminate = true,
-        )
-        MigrationPhase.Paused -> NotificationProgress(
-            title = "歌单迁移已暂停",
-            text = "已迁移 $addedCount 首",
-            completed = 0,
-            total = 0,
-            indeterminate = true,
         )
     }
 
