@@ -50,3 +50,14 @@ jobs:
 
       - name: Run Kotlin Multiplatform tests
         run: ./gradlew --warning-mode all ciIosTest
+
+      - name: Compile iOS app
+        run: |
+          xcodebuild \
+            -project iosApp/FuoEvolve.xcodeproj \
+            -scheme FuoEvolve \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
