@@ -139,13 +139,19 @@ class PlaylistMigrationFeatureController(
      * Returns true only when another slice is still useful. Review, destination choice, partial
      * failure and explicit pause remain user-visible stopping points rather than retry loops.
      */
-    suspend fun runBackgroundSlice(taskId: String, maxSteps: Int = 24): Boolean {
+    suspend fun runBackgroundSlice(
+        taskId: String,
+        maxSteps: Int = 24,
+        onProgress: suspend (PlaylistMigrationTask) -> Unit = {},
+    ): Boolean {
         require(maxSteps > 0)
         ready.await()
+        tasks.value.firstOrNull { it.id == taskId }?.let { onProgress(it) }
         repeat(maxSteps) {
             val current = tasks.value.firstOrNull { it.id == taskId } ?: return false
             if (current.phase !in BACKGROUND_RUNNABLE_PHASES) return false
             val next = coordinator.step(taskId)
+            onProgress(next)
             if (next.phase !in BACKGROUND_RUNNABLE_PHASES) return false
         }
         return tasks.value.firstOrNull { it.id == taskId }?.phase in BACKGROUND_RUNNABLE_PHASES
