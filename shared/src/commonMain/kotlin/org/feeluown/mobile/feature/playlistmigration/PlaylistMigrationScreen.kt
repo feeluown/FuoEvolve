@@ -38,6 +38,7 @@ fun PlaylistMigrationScreen(
     onBack: () -> Unit,
     initialTaskId: String? = null,
     initialTarget: PlaylistMigrationOpenTarget? = null,
+    onPrepareBackgroundWork: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val tasks by controller.tasks.collectAsStateWithLifecycle()
@@ -80,7 +81,6 @@ fun PlaylistMigrationScreen(
         choosingSource = false
     }
     val task = tasks.firstOrNull { it.id == taskId }
-    val selectedEntry = task?.entries?.firstOrNull { it.position == selectedPosition }
     val sourcePlaylist = playlists.firstOrNull { it.id == sourcePlaylistId && it.providerId == sourceId }
 
     LazyColumn(modifier = modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -164,6 +164,7 @@ fun PlaylistMigrationScreen(
                             onClick = {
                                 val selected = sourcePlaylist ?: return@Button
                                 val target = targetId ?: return@Button
+                                onPrepareBackgroundWork()
                                 previousIds = tasks.mapTo(mutableSetOf()) { it.id }
                                 controller.start(selected, target)
                             },
@@ -225,6 +226,7 @@ fun PlaylistMigrationScreen(
                             OutlinedTextField(value = destinationName, onValueChange = { destinationName = it },
                                 label = { Text("新歌单名称") }, placeholder = { Text(task.source.title) }, modifier = Modifier.fillMaxWidth())
                             Button(enabled = !busy, onClick = {
+                                onPrepareBackgroundWork()
                                 controller.createDestination(task.id, destinationName.ifBlank { task.source.title })
                             }) { Text("创建并迁移") }
                         } else if (task.creationAttempted) {
@@ -233,7 +235,13 @@ fun PlaylistMigrationScreen(
                         Text("选择已有歌单", style = MaterialTheme.typography.titleMedium)
                         OutlinedButton(onClick = { controller.loadPlaylists(task.targetProviderId) }) { Text("刷新歌单") }
                         playlists.filter { it.providerId == task.targetProviderId && it.isOwnedByCurrentUser != false }.forEach { playlist ->
-                            OutlinedButton(onClick = { controller.chooseDestination(task.id, playlist) }, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = {
+                                    onPrepareBackgroundWork()
+                                    controller.chooseDestination(task.id, playlist)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
                                 Text(playlist.title)
                             }
                         }
@@ -272,7 +280,10 @@ fun PlaylistMigrationScreen(
                         Text("已添加 ${task.addedCount} 首 · 跳过 ${task.skippedCount} 首 · 失败 ${task.failedCount} 首")
                         task.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         if (task.phase == MigrationPhase.Paused || task.phase == MigrationPhase.Partial) {
-                            Button(onClick = { controller.retry(task.id) }) { Text("继续迁移") }
+                            Button(onClick = {
+                                onPrepareBackgroundWork()
+                                controller.retry(task.id)
+                            }) { Text("继续迁移") }
                         }
                         if (task.phase == MigrationPhase.Complete) Text("已完成", color = MaterialTheme.colorScheme.primary)
                     }
