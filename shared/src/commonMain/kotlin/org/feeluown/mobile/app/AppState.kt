@@ -21,6 +21,10 @@ sealed interface AppRoute : NavKey {
     @Serializable data object Home : AppRoute
     @Serializable data object PlaybackHistory : AppRoute
     @Serializable data object PlaylistMigration : AppRoute
+    @Serializable data class PlaylistMigrationDetail(
+        val taskId: String,
+        val target: PlaylistMigrationOpenTarget,
+    ) : AppRoute
     @Serializable data object Search : AppRoute
     @Serializable data object AudioRecognition : AppRoute
     @Serializable data object Feature : AppRoute
@@ -41,6 +45,7 @@ sealed interface AppRoute : NavKey {
 }
 
 private fun AppRoute.routeKind(): AppRoute = when (this) {
+    is AppRoute.PlaylistMigrationDetail -> AppRoute.PlaylistMigration
     is AppRoute.FeatureDetail -> AppRoute.Feature
     is AppRoute.TrackDetail -> AppRoute.Track
     is AppRoute.VideoDetail -> AppRoute.Video
@@ -199,9 +204,9 @@ class FuoAppViewModel private constructor(
     }
 
     fun openPlaylistMigrationTask(taskId: String, target: PlaylistMigrationOpenTarget) {
-        if (taskId.isBlank()) return
-        focusPlaylistMigrationTask(taskId, target)
-        navigator.navigate(AppRoute.PlaylistMigration)
+        val normalizedTaskId = taskId.trim()
+        if (normalizedTaskId.isEmpty()) return
+        navigator.navigate(AppRoute.PlaylistMigrationDetail(normalizedTaskId, target))
     }
 
     fun closeRecognition() {
