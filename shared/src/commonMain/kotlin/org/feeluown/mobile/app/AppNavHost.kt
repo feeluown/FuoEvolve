@@ -279,6 +279,7 @@ internal fun AppNavHost(
                                             onBack = { appViewModel.onBack() },
                                             initialTaskId = detail?.taskId,
                                             initialTarget = detail?.target,
+                                            onPrepareBackgroundWork = platform.onPreparePlaylistMigrationBackground,
                                         )
                                     }
                                 }
