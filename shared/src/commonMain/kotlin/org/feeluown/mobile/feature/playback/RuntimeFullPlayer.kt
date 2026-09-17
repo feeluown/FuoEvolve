@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,7 +52,9 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -133,6 +134,7 @@ private fun PlaybackSessionStatus.toPlayerStatus(): PlayerStatus = when (this) {
     PlaybackSessionStatus.Ended -> PlayerStatus.Ended
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RuntimeFullPlayerContent(
     playbackSession: PlaybackSession,
@@ -227,7 +229,7 @@ private fun RuntimeFullPlayerContent(
     Surface(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val compactPortrait = maxHeight < 720.dp || maxHeight < maxWidth * 1.55f
-            val portraitSpacing = if (compactPortrait) 8.dp else 14.dp
+            val portraitSpacing = if (compactPortrait) 8.dp else 12.dp
             val portraitBottomPadding = if (compactPortrait) 28.dp else 82.dp
             val portraitHorizontalPadding = if (compactPortrait) 16.dp else 20.dp
             Column(
@@ -240,16 +242,15 @@ private fun RuntimeFullPlayerContent(
                 verticalArrangement = Arrangement.spacedBy(portraitSpacing),
             ) {
                 RuntimePlayerHeader(currentTrack)
-                Row(
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                PrimaryTabRow(
+                    selectedTabIndex = pagerState.currentPage,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     PlayerVisualTab.entries.forEach { tab ->
-                        FilterChip(
+                        Tab(
                             selected = pagerState.currentPage == tab.ordinal,
                             onClick = { scope.launch { pagerState.animateScrollToPage(tab.ordinal) } },
-                            label = { Text(tab.title) },
+                            text = { Text(tab.title) },
                         )
                     }
                 }
@@ -293,20 +294,28 @@ private fun RuntimeFullPlayerContent(
 @Composable
 private fun RuntimePlayerHeader(currentTrack: MusicTrack?) {
     val navigation = LocalPlaybackNavigationPort.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        IconButton(onClick = navigation::closeFullPlayer) {
-            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起播放器")
-        }
         Text(
             text = "正在播放",
+            modifier = Modifier.padding(horizontal = 104.dp),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
+        IconButton(
+            onClick = navigation::closeFullPlayer,
+            modifier = Modifier.align(Alignment.CenterStart),
+        ) {
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起播放器")
+        }
         Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
