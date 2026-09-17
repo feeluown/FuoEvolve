@@ -33,6 +33,16 @@ fun desktopWindowsVideoHostHandle(): Long {
     }
 }
 
+/**
+ * Keeps the process-wide host from becoming an orphaned visible top-level window after NativeView
+ * detaches it. Nucleus shows the HWND again when the same host is attached on the next video screen.
+ */
+fun hideDesktopWindowsVideoHost(hwnd: Long) {
+    if (!isWindowsDesktopRuntime() || hwnd == 0L) return
+    WindowsVideoHostBindings.hideWindow(hwnd)
+}
+
+/** mpv documents Win32 --wid as the HWND cast to uint32_t. */
 internal fun windowsMpvWidValue(hwnd: Long): String =
     (hwnd and 0xFFFF_FFFFL).toString()
 
@@ -64,6 +74,16 @@ private object WindowsVideoHostBindings {
             ValueLayout.ADDRESS,
         ),
     )
+    private val showWindow: MethodHandle = linker.downcallHandle(
+        user32.find("ShowWindow").orElseThrow {
+            UnsatisfiedLinkError("ShowWindow is unavailable")
+        },
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+        ),
+    )
 
     fun createHostWindow(): Long = Arena.ofConfined().use { strings ->
         val className = strings.allocateFrom("STATIC")
@@ -84,11 +104,16 @@ private object WindowsVideoHostBindings {
         ) as MemorySegment
         hwnd.address()
     }
+
+    fun hideWindow(hwnd: Long) {
+        showWindow.invokeExact(MemorySegment.ofAddress(hwnd), SW_HIDE) as Int
+    }
 }
 
 private const val WS_POPUP: Int = Int.MIN_VALUE
 private const val WS_CLIPCHILDREN = 0x02000000
 private const val WS_CLIPSIBLINGS = 0x04000000
 private const val SS_BLACKRECT = 0x00000004
+private const val SW_HIDE = 0
 private const val WINDOWS_VIDEO_HOST_STYLE =
     WS_POPUP or WS_CLIPCHILDREN or WS_CLIPSIBLINGS or SS_BLACKRECT
