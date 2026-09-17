@@ -159,6 +159,7 @@ private class HomeCatalogBinding(
     override val state: StateFlow<CoreHomeCatalogSnapshot<ProviderInfo, ProviderFeature>> = delegate.uiState
         .map(ProviderCatalogUiState::toHomeCatalogSnapshot)
         .stateIn(scope, SharingStarted.Eagerly, delegate.uiState.value.toHomeCatalogSnapshot())
+    override fun providerId(provider: ProviderInfo): String = provider.providerId
 }
 
 private class HomeContentBinding(
