@@ -2,12 +2,14 @@ package org.feeluown.mobile
 
 import kotlinx.coroutines.delay
 
-/** Reuses the playback match ranking, but never resolves a playback URL for a migration. */
+/** Reuses playback's search ranking, but never resolves a playback URL for a migration. */
 class ProviderPlaylistMigrationAdapter(
     private val catalog: ProviderCatalogRepository,
     private val library: ProviderLibraryRepository,
     private val replacement: PlaybackReplacementProviderPort,
 ) : PlaylistMigrationProvider {
+    suspend fun features(): List<ProviderFeature> = catalog.features()
+
     override suspend fun loadPage(playlist: MigrationPlaylist, offset: Int): MigrationPage {
         val detail = catalog.playlistDetailPage(playlist.toProviderPlaylist(), offset)
         return MigrationPage(
@@ -29,8 +31,7 @@ class ProviderPlaylistMigrationAdapter(
         val before = ownedPlaylists(providerId).mapTo(mutableSetOf()) { it.id }
         val result = library.createPlaylist(providerId, name)
         if (!result.success) error(result.message.ifBlank { "创建歌单失败" })
-        // The existing mutation contract doesn't return a playlist ID. Only accept a newly
-        // discovered ID; matching by name alone may accidentally select an older playlist.
+        // Only a new playlist ID may complete creation; pre-existing names are ambiguous.
         repeat(3) { attempt ->
             val created = ownedPlaylists(providerId).filter { it.title == name && it.id !in before }
             if (created.size == 1) return created.single().toMigrationPlaylist()
@@ -61,7 +62,7 @@ class ProviderPlaylistMigrationAdapter(
     }
 
     suspend fun ownedPlaylists(providerId: String): List<ProviderPlaylist> {
-        val features = catalog.features().filter {
+        val features = features().filter {
             it.providerId == providerId && it.category == ProviderFeatureCategory.MinePlaylists &&
                 it.contentType == ProviderContentType.Playlists
         }
