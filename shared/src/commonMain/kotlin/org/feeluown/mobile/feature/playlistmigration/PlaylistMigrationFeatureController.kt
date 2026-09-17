@@ -166,7 +166,8 @@ class PlaylistMigrationFeatureController(
     private suspend fun providerFeatures(): List<ProviderFeature> = provider.features()
 
     private fun run(taskId: String) {
-        tasks.value.firstOrNull { it.id == taskId }?.let(::enqueuePlaylistMigrationBackground)
+        val task = tasks.value.firstOrNull { it.id == taskId }
+        if (task != null && enqueuePlaylistMigrationBackground(task)) return
         if (jobs[taskId]?.isActive == true) return
         jobs[taskId] = scope.launch {
             try {
