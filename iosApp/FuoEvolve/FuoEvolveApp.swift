@@ -86,6 +86,7 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
     private let processingIdentifier = "org.feeluown.mobile.playlist-migration.processing"
     private let continuedPrefix = "org.feeluown.mobile.playlist-migration."
     private let pendingKey = "playlistMigration.pendingBackgroundTasks"
+    private let workKeySeparator: Character = "|"
     private var registeredContinuedIdentifiers = Set<String>()
     private var immediateBackgroundTasks: [String: UIBackgroundTaskIdentifier] = [:]
 
@@ -102,59 +103,67 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
                 task.setTaskCompleted(success: false)
                 return
             }
-            guard let taskId = self.pendingTasks().keys.first else {
+            guard
+                let workKey = self.pendingTasks().keys.first,
+                let work = self.parseWorkKey(workKey)
+            else {
                 processingTask.setTaskCompleted(success: true)
                 return
             }
             processingTask.expirationHandler = { [weak self] in
                 self?.scheduleDeferredProcessing()
             }
-            self.runUntilBlocked(taskId: taskId, onProgress: nil) { success, needsMore in
+            self.runUntilBlocked(
+                taskId: work.taskId,
+                stage: work.stage,
+                onProgress: nil
+            ) { success, needsMore in
                 if needsMore {
                     self.scheduleDeferredProcessing()
                 } else {
-                    self.finish(taskId: taskId)
+                    self.finish(taskId: work.taskId, stage: work.stage)
                 }
                 processingTask.setTaskCompleted(success: success)
             }
         }
 
         if #available(iOS 26.0, *) {
-            for (taskId, _) in pendingTasks() {
-                registerContinuedTask(taskId: taskId)
+            for workKey in pendingTasks().keys {
+                guard let work = parseWorkKey(workKey) else { continue }
+                registerContinuedTask(taskId: work.taskId, stage: work.stage)
             }
         }
     }
 
-    func enqueue(taskId: String, sourceTitle: String) {
-        remember(taskId: taskId, sourceTitle: sourceTitle)
+    func enqueue(taskId: String, sourceTitle: String, stage: String) {
+        remember(taskId: taskId, sourceTitle: sourceTitle, stage: stage)
         if #available(iOS 26.0, *), UIApplication.shared.applicationState == .active {
-            submitContinuedTask(taskId: taskId, sourceTitle: sourceTitle)
+            submitContinuedTask(taskId: taskId, sourceTitle: sourceTitle, stage: stage)
         } else {
-            startImmediateFallback(taskId: taskId)
+            startImmediateFallback(taskId: taskId, stage: stage)
         }
     }
 
     @available(iOS 26.0, *)
-    private func submitContinuedTask(taskId: String, sourceTitle: String) {
-        let identifier = continuedIdentifier(taskId)
-        registerContinuedTask(taskId: taskId)
+    private func submitContinuedTask(taskId: String, sourceTitle: String, stage: String) {
+        let identifier = continuedIdentifier(taskId: taskId, stage: stage)
+        registerContinuedTask(taskId: taskId, stage: stage)
         let request = BGContinuedProcessingTaskRequest(
             identifier: identifier,
-            title: "迁移歌单",
+            title: stage == "Writing" ? "写入歌单" : "转换歌单",
             subtitle: sourceTitle.isEmpty ? "正在准备迁移" : sourceTitle
         )
         request.strategy = .queue
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
-            startImmediateFallback(taskId: taskId)
+            startImmediateFallback(taskId: taskId, stage: stage)
         }
     }
 
     @available(iOS 26.0, *)
-    private func registerContinuedTask(taskId: String) {
-        let identifier = continuedIdentifier(taskId)
+    private func registerContinuedTask(taskId: String, stage: String) {
+        let identifier = continuedIdentifier(taskId: taskId, stage: stage)
         guard registeredContinuedIdentifiers.insert(identifier).inserted else { return }
         let registered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: identifier,
@@ -167,7 +176,7 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
                 task.setTaskCompleted(success: false)
                 return
             }
-            self.runContinued(taskId: taskId, task: continuedTask)
+            self.runContinued(taskId: taskId, stage: stage, task: continuedTask)
         }
         if !registered {
             registeredContinuedIdentifiers.remove(identifier)
@@ -175,7 +184,11 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
     }
 
     @available(iOS 26.0, *)
-    private func runContinued(taskId: String, task: BGContinuedProcessingTask) {
+    private func runContinued(
+        taskId: String,
+        stage: String,
+        task: BGContinuedProcessingTask
+    ) {
         var expired = false
         task.expirationHandler = { [weak self] in
             expired = true
@@ -187,6 +200,7 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
         }
         runUntilBlocked(
             taskId: taskId,
+            stage: stage,
             onProgress: { progress in
                 let total = progress.indeterminate ? 100 : max(1, Int(progress.total))
                 let completed = progress.indeterminate ? 0 : min(total, Int(progress.completed))
@@ -204,45 +218,52 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
                 return
             }
             if needsMore {
-                self.runContinued(taskId: taskId, task: task)
+                self.runContinued(taskId: taskId, stage: stage, task: task)
             } else {
-                self.finish(taskId: taskId)
+                self.finish(taskId: taskId, stage: stage)
                 task.setTaskCompleted(success: success)
             }
         }
     }
 
-    private func startImmediateFallback(taskId: String) {
-        if immediateBackgroundTasks[taskId] == nil {
+    private func startImmediateFallback(taskId: String, stage: String) {
+        let key = workKey(taskId: taskId, stage: stage)
+        if immediateBackgroundTasks[key] == nil {
             var token = UIBackgroundTaskIdentifier.invalid
             token = UIApplication.shared.beginBackgroundTask(withName: "Playlist migration") { [weak self] in
                 if token != .invalid {
                     UIApplication.shared.endBackgroundTask(token)
                 }
-                self?.immediateBackgroundTasks.removeValue(forKey: taskId)
+                self?.immediateBackgroundTasks.removeValue(forKey: key)
                 self?.scheduleDeferredProcessing()
             }
-            immediateBackgroundTasks[taskId] = token
+            immediateBackgroundTasks[key] = token
         }
-        runUntilBlocked(taskId: taskId, onProgress: nil) { [weak self] _, needsMore in
+        runUntilBlocked(taskId: taskId, stage: stage, onProgress: nil) { [weak self] _, needsMore in
             guard let self else { return }
             if needsMore {
-                self.runUntilBlocked(taskId: taskId, onProgress: nil) { _, stillNeedsMore in
-                    if stillNeedsMore { self.scheduleDeferredProcessing() } else { self.finish(taskId: taskId) }
+                self.runUntilBlocked(taskId: taskId, stage: stage, onProgress: nil) { _, stillNeedsMore in
+                    if stillNeedsMore {
+                        self.scheduleDeferredProcessing()
+                    } else {
+                        self.finish(taskId: taskId, stage: stage)
+                    }
                 }
             } else {
-                self.finish(taskId: taskId)
+                self.finish(taskId: taskId, stage: stage)
             }
         }
     }
 
     private func runUntilBlocked(
         taskId: String,
+        stage: String,
         onProgress: ((PlaylistMigrationBackgroundProgress) -> Void)?,
         completion: @escaping (Bool, Bool) -> Void
     ) {
         PlaylistMigrationBackgroundSchedulerKt.runPlaylistMigrationBackgroundSlice(
             taskId: taskId,
+            stage: stage,
             maxSteps: 24,
             onProgress: { progress in onProgress?(progress) },
             completionHandler: { needsContinuation, error in
@@ -264,21 +285,24 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
         }
     }
 
-    private func finish(taskId: String) {
+    private func finish(taskId: String, stage: String) {
+        let key = workKey(taskId: taskId, stage: stage)
         var pending = pendingTasks()
-        pending.removeValue(forKey: taskId)
+        pending.removeValue(forKey: key)
         UserDefaults.standard.set(pending, forKey: pendingKey)
-        if let token = immediateBackgroundTasks.removeValue(forKey: taskId), token != .invalid {
+        if let token = immediateBackgroundTasks.removeValue(forKey: key), token != .invalid {
             UIApplication.shared.endBackgroundTask(token)
         }
         if #available(iOS 26.0, *) {
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: continuedIdentifier(taskId))
+            BGTaskScheduler.shared.cancel(
+                taskRequestWithIdentifier: continuedIdentifier(taskId: taskId, stage: stage)
+            )
         }
     }
 
-    private func remember(taskId: String, sourceTitle: String) {
+    private func remember(taskId: String, sourceTitle: String, stage: String) {
         var pending = pendingTasks()
-        pending[taskId] = sourceTitle
+        pending[workKey(taskId: taskId, stage: stage)] = sourceTitle
         UserDefaults.standard.set(pending, forKey: pendingKey)
     }
 
@@ -286,11 +310,26 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
         UserDefaults.standard.dictionary(forKey: pendingKey) as? [String: String] ?? [:]
     }
 
-    private func continuedIdentifier(_ taskId: String) -> String {
-        let safeId = taskId.map { character -> Character in
+    private func workKey(taskId: String, stage: String) -> String {
+        stage + String(workKeySeparator) + taskId
+    }
+
+    private func parseWorkKey(_ key: String) -> (stage: String, taskId: String)? {
+        guard let separator = key.firstIndex(of: workKeySeparator) else { return nil }
+        let stage = String(key[..<separator])
+        let taskId = String(key[key.index(after: separator)...])
+        guard !stage.isEmpty, !taskId.isEmpty else { return nil }
+        return (stage, taskId)
+    }
+
+    private func continuedIdentifier(taskId: String, stage: String) -> String {
+        let safeTaskId = taskId.map { character -> Character in
             character.isLetter || character.isNumber || character == "-" ? character : "-"
         }
-        return continuedPrefix + String(safeId)
+        let safeStage = stage.lowercased().map { character -> Character in
+            character.isLetter || character.isNumber || character == "-" ? character : "-"
+        }
+        return continuedPrefix + String(safeStage) + "." + String(safeTaskId)
     }
 }
 
