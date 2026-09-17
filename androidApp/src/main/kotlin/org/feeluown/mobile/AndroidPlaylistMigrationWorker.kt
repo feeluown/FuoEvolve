@@ -118,9 +118,12 @@ internal class AndroidPlaylistMigrationWorker(
             PlaylistMigrationBackgroundStage.Writing -> PlaylistMigrationOpenTarget.Result
         }
         val uri = Uri.parse("fuo://playlist-migration/$taskId?target=${target.name}")
-        val openAppIntent = Intent(Intent.ACTION_VIEW, uri, applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
+        val openAppIntent = Intent(
+            Intent.ACTION_VIEW,
+            uri,
+            applicationContext,
+            PlaylistMigrationDeepLinkActivity::class.java,
+        )
         return PendingIntent.getActivity(
             applicationContext,
             taskId.hashCode() xor stage.ordinal,
