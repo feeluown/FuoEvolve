@@ -29,6 +29,17 @@ class AppShellPolicyTest {
     }
 
     @Test
+    fun playlistMigrationDetailUsesQueueTrack() {
+        val route = AppRoute.PlaylistMigrationDetail(
+            taskId = "migration-123",
+            target = PlaylistMigrationOpenTarget.Review,
+        )
+
+        assertTrue(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
+        assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false))
+    }
+
+    @Test
     fun playbackHistoryUsesQueueTrack() {
         assertTrue(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
         assertFalse(AppRoute.PlaybackHistory.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false))
