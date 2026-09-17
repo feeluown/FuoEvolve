@@ -53,7 +53,7 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
             // automatic selection instead of forcing the OpenGL/EGL interop backend.
             if (
                 name == "gpu-hwdec-interop" &&
-                handle in nativeWindowsVideoHosts
+                nativeWindowsVideoHosts.containsKey(handle)
             ) {
                 return 0
             }
