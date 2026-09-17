@@ -1,7 +1,6 @@
 package org.feeluown.mobile
 
 import android.content.Context
-import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -34,8 +33,8 @@ internal class AndroidPlaylistMigrationWorker(
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (failure: Exception) {
-            Log.w(TAG, "Playlist migration background slice failed: $taskId", failure)
-            Result.retry()
+            AppLogger.w(TAG, "Playlist migration background slice failed: $taskId", failure)
+            if (runAttemptCount >= MAX_RETRY_ATTEMPTS) Result.failure() else Result.retry()
         }
     }
 
@@ -43,6 +42,7 @@ internal class AndroidPlaylistMigrationWorker(
         private const val TAG = "PlaylistMigration"
         private const val KEY_TASK_ID = "task_id"
         private const val MAX_STEPS_PER_SLICE = 24
+        private const val MAX_RETRY_ATTEMPTS = 3
         private const val RETRY_BACKOFF_SECONDS = 30L
         private const val UNIQUE_WORK_PREFIX = "playlist-migration-"
 
