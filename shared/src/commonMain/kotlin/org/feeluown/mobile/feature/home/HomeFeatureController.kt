@@ -44,6 +44,7 @@ interface HomeFeatureController {
     fun openSettings(providerId: String? = null)
     fun openSearch()
     fun openPlaybackHistory()
+    fun openPlaylistMigration() = Unit
     fun setHomeSection(section: HomeSection)
     fun setMineSection(section: MineSection)
     fun setPlaylistFilter(filter: PlaylistFilter)
@@ -118,6 +119,7 @@ private class BoundHomeFeatureController(
     }
     override fun openSearch() = navigator.navigate(AppRoute.Search)
     override fun openPlaybackHistory() = navigator.navigate(AppRoute.PlaybackHistory)
+    override fun openPlaylistMigration() = navigator.navigate(AppRoute.PlaylistMigration)
     override fun setHomeSection(section: HomeSection) = owner.setHomeSection(section.toCore())
     override fun setMineSection(section: MineSection) = owner.setMineSection(section.toCore())
     override fun setPlaylistFilter(filter: PlaylistFilter) = owner.setPlaylistFilter(filter.toCore())
@@ -157,7 +159,6 @@ private class HomeCatalogBinding(
     override val state: StateFlow<CoreHomeCatalogSnapshot<ProviderInfo, ProviderFeature>> = delegate.uiState
         .map(ProviderCatalogUiState::toHomeCatalogSnapshot)
         .stateIn(scope, SharingStarted.Eagerly, delegate.uiState.value.toHomeCatalogSnapshot())
-    override fun providerId(provider: ProviderInfo) = provider.providerId
 }
 
 private class HomeContentBinding(
