@@ -14,6 +14,7 @@ import kotlinx.serialization.Serializable
 sealed interface AppRoute : NavKey {
     @Serializable data object Home : AppRoute
     @Serializable data object PlaybackHistory : AppRoute
+    @Serializable data object PlaylistMigration : AppRoute
     @Serializable data object Search : AppRoute
     @Serializable data object AudioRecognition : AppRoute
     @Serializable data object Feature : AppRoute
@@ -185,6 +186,10 @@ class FuoAppViewModel private constructor(
 
     fun openPlaybackHistory() {
         navigator.navigate(AppRoute.PlaybackHistory)
+    }
+
+    fun openPlaylistMigration() {
+        navigator.navigate(AppRoute.PlaylistMigration)
     }
 
     fun closeRecognition() {
