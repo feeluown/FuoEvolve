@@ -16,28 +16,24 @@ import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopMpvNativeApi
 import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
-import org.feeluown.mobile.DesktopWindowsD3D11VideoController
 import org.feeluown.mobile.DesktopWindowsNativeVideoController
 import org.feeluown.mobile.VideoPlaybackPayload
 import org.feeluown.mobile.desktop.hideDesktopWindowsVideoHost
 
 /**
  * Selects the Windows-native mpv HWND presentation path while leaving Linux/macOS on the existing
- * Nucleus GPU integrations. The previous Windows D3D11/TextureView implementation remains compiled
- * in [NucleusMpvVideoSurface] as a fallback if a usable controller has no native host.
+ * Nucleus GPU integrations. Windows does not fall back to the old D3D11/TextureView pipeline.
  */
 internal fun createNucleusMpvVideoSurface(
     nativeApi: DesktopMpvNativeApi,
 ): DesktopPlatformVideoSurface =
     if (isWindowsDesktopRuntime()) {
-        NucleusWindowsNativeMpvVideoSurface(NucleusMpvVideoSurface(nativeApi))
+        NucleusWindowsNativeMpvVideoSurface()
     } else {
         NucleusMpvVideoSurface(nativeApi)
     }
 
-private class NucleusWindowsNativeMpvVideoSurface(
-    private val fallbackSurface: DesktopPlatformVideoSurface,
-) : DesktopPlatformVideoSurface {
+private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface {
     @Composable
     override fun Content(
         controller: DesktopPlatformVideoController,
@@ -50,26 +46,16 @@ private class NucleusWindowsNativeMpvVideoSurface(
                 ?: 0L
         }
         if (hwnd == 0L) {
-            if (controller is DesktopWindowsD3D11VideoController) {
-                LaunchedEffect(controller) {
-                    AppLogger.w(
-                        "DesktopVideo",
-                        "Windows native video host is unavailable; falling back to D3D11 TextureView",
-                    )
-                }
-                fallbackSurface.Content(controller, payload, modifier)
-            } else {
-                LaunchedEffect(controller) {
-                    AppLogger.e(
-                        "DesktopVideo",
-                        "Windows native mpv video host HWND is unavailable; " +
-                            "controller=${controller.javaClass.name}; " +
-                            "error=${controller.state.value.errorMessage ?: "none"}",
-                    )
-                }
-                Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("视频播放器初始化失败，请导出诊断日志", color = Color.White)
-                }
+            LaunchedEffect(controller) {
+                AppLogger.e(
+                    "DesktopVideo",
+                    "Windows native mpv video host HWND is unavailable; " +
+                        "controller=${controller.javaClass.name}; " +
+                        "error=${controller.state.value.errorMessage ?: "none"}",
+                )
+            }
+            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("视频播放器初始化失败，请导出诊断日志", color = Color.White)
             }
             return
         }
