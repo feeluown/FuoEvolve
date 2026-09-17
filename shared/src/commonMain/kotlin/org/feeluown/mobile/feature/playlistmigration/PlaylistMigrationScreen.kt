@@ -44,6 +44,7 @@ fun PlaylistMigrationScreen(
     val tasks by controller.tasks.collectAsStateWithLifecycle()
     val sources by controller.sources.collectAsStateWithLifecycle()
     val targets by controller.targets.collectAsStateWithLifecycle()
+    val creatableProviderIds by controller.creatableProviderIds.collectAsStateWithLifecycle()
     val playlists by controller.playlists.collectAsStateWithLifecycle()
     val alternatives by controller.searchResults.collectAsStateWithLifecycle()
     val busy by controller.busy.collectAsStateWithLifecycle()
@@ -222,7 +223,12 @@ fun PlaylistMigrationScreen(
                     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("保存到哪里？", style = MaterialTheme.typography.headlineSmall)
                         Text("${task.entries.count { it.status == MigrationTrackStatus.Matched }} 首将迁移")
-                        if (!task.creationAttempted && task.phase == MigrationPhase.Destination) {
+                        if (task.targetProviderId !in creatableProviderIds) {
+                            Text("该平台暂不支持创建歌单，请先在对应平台创建，再回来刷新。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (task.targetProviderId in creatableProviderIds &&
+                            !task.creationAttempted && task.phase == MigrationPhase.Destination
+                        ) {
                             OutlinedTextField(value = destinationName, onValueChange = { destinationName = it },
                                 label = { Text("新歌单名称") }, placeholder = { Text(task.source.title) }, modifier = Modifier.fillMaxWidth())
                             Button(enabled = !busy, onClick = {
