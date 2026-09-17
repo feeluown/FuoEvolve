@@ -10,9 +10,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
+private val BACKGROUND_RUNNABLE_PHASES = setOf(
+    MigrationPhase.Loading,
+    MigrationPhase.Matching,
+    MigrationPhase.Writing,
+)
+
 /**
  * App-scoped feature owner. Screens observe state and dispatch actions; they never own a running
- * migration job. A process restart reloads checkpoints but intentionally waits for user resume.
+ * migration job. Durable platform schedulers may resume the same persisted checkpoints after a
+ * process restart without resubmitting already-confirmed writes.
  */
 class PlaylistMigrationFeatureController(
     val coordinator: PlaylistMigrationCoordinator,
@@ -124,7 +131,24 @@ class PlaylistMigrationFeatureController(
 
     fun retry(taskId: String) = action {
         val task = coordinator.retry(taskId)
-        if (task.phase in setOf(MigrationPhase.Loading, MigrationPhase.Matching, MigrationPhase.Writing)) run(task.id)
+        if (task.phase in BACKGROUND_RUNNABLE_PHASES) run(task.id)
+    }
+
+    /**
+     * Executes a bounded amount of checkpointed work for a durable platform scheduler.
+     * Returns true only when another slice is still useful. Review, destination choice, partial
+     * failure and explicit pause remain user-visible stopping points rather than retry loops.
+     */
+    suspend fun runBackgroundSlice(taskId: String, maxSteps: Int = 24): Boolean {
+        require(maxSteps > 0)
+        ready.await()
+        repeat(maxSteps) {
+            val current = tasks.value.firstOrNull { it.id == taskId } ?: return false
+            if (current.phase !in BACKGROUND_RUNNABLE_PHASES) return false
+            val next = coordinator.step(taskId)
+            if (next.phase !in BACKGROUND_RUNNABLE_PHASES) return false
+        }
+        return tasks.value.firstOrNull { it.id == taskId }?.phase in BACKGROUND_RUNNABLE_PHASES
     }
 
     fun clearError() { mutableError.value = null }
@@ -135,6 +159,7 @@ class PlaylistMigrationFeatureController(
     private suspend fun providerFeatures(): List<ProviderFeature> = provider.features()
 
     private fun run(taskId: String) {
+        enqueuePlaylistMigrationBackground(taskId)
         if (jobs[taskId]?.isActive == true) return
         jobs[taskId] = scope.launch {
             try {
