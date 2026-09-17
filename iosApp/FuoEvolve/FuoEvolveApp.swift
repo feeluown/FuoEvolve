@@ -5,6 +5,11 @@ import UIKit
 import UserNotifications
 import Shared
 
+private let playlistMigrationNotificationKindKey = "playlistMigration.kind"
+private let playlistMigrationNotificationKind = "result"
+private let playlistMigrationNotificationTaskIdKey = "playlistMigration.taskId"
+private let playlistMigrationNotificationTargetKey = "playlistMigration.target"
+
 @main
 struct FuoEvolveApp: App {
     @UIApplicationDelegateAdaptor(FuoEvolveAppDelegate.self) private var appDelegate
@@ -17,7 +22,7 @@ struct FuoEvolveApp: App {
     }
 }
 
-private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate {
+private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     private var routeChangeObserver: NSObjectProtocol?
 
     func application(
@@ -25,6 +30,7 @@ private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         _ = IOSOAuthDeviceCodeOutput.shared
+        UNUserNotificationCenter.current().delegate = self
         IosPlaylistMigrationBackgroundKt.installIosPlaylistMigrationBackgroundOutput(
             output: IOSPlaylistMigrationBackground.shared
         )
@@ -66,6 +72,39 @@ private final class FuoEvolveAppDelegate: NSObject, UIApplicationDelegate {
             identifier: identifier,
             completionHandler: completionHandler
         )
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        if notification.request.content.userInfo[playlistMigrationNotificationKindKey] as? String == playlistMigrationNotificationKind {
+            completionHandler([.banner, .list, .sound])
+        } else {
+            completionHandler([])
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        guard
+            userInfo[playlistMigrationNotificationKindKey] as? String == playlistMigrationNotificationKind,
+            let taskId = userInfo[playlistMigrationNotificationTaskIdKey] as? String,
+            let target = userInfo[playlistMigrationNotificationTargetKey] as? String
+        else {
+            completionHandler()
+            return
+        }
+        PlaylistMigrationNotificationNavigationKt.openPlaylistMigrationFromNotification(
+            taskId: taskId,
+            target: target
+        )
+        completionHandler()
     }
 }
 
@@ -137,6 +176,7 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
 
     func enqueue(taskId: String, sourceTitle: String, stage: String) {
         remember(taskId: taskId, sourceTitle: sourceTitle, stage: stage)
+        requestNotificationAuthorizationIfNeeded()
         if #available(iOS 26.0, *), UIApplication.shared.applicationState == .active {
             submitContinuedTask(taskId: taskId, sourceTitle: sourceTitle, stage: stage)
         } else {
@@ -261,15 +301,54 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
         onProgress: ((PlaylistMigrationBackgroundProgress) -> Void)?,
         completion: @escaping (Bool, Bool) -> Void
     ) {
+        var lastProgress: PlaylistMigrationBackgroundProgress?
         PlaylistMigrationBackgroundSchedulerKt.runPlaylistMigrationBackgroundSlice(
             taskId: taskId,
             stage: stage,
             maxSteps: 24,
-            onProgress: { progress in onProgress?(progress) },
-            completionHandler: { needsContinuation, error in
-                completion(error == nil, needsContinuation.boolValue)
+            onProgress: { progress in
+                lastProgress = progress
+                onProgress?(progress)
+            },
+            completionHandler: { [weak self] needsContinuation, error in
+                let needsMore = needsContinuation.boolValue
+                let success = error == nil
+                if success, !needsMore, let progress = lastProgress, progress.terminal {
+                    self?.publishTerminalNotification(progress, taskId: taskId, stage: stage)
+                }
+                completion(success, needsMore)
             }
         )
+    }
+
+    private func requestNotificationAuthorizationIfNeeded() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
+
+    private func publishTerminalNotification(
+        _ progress: PlaylistMigrationBackgroundProgress,
+        taskId: String,
+        stage: String
+    ) {
+        let content = UNMutableNotificationContent()
+        content.title = progress.title
+        content.body = progress.detail
+        content.sound = .default
+        content.userInfo = [
+            playlistMigrationNotificationKindKey: playlistMigrationNotificationKind,
+            playlistMigrationNotificationTaskIdKey: taskId,
+            playlistMigrationNotificationTargetKey: stage == "Writing" ? "Result" : "Review",
+        ]
+        let request = UNNotificationRequest(
+            identifier: "playlist-migration.result.\(stage.lowercased()).\(taskId)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     private func scheduleDeferredProcessing() {
