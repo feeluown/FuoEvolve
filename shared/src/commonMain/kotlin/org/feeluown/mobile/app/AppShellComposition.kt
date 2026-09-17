@@ -73,6 +73,7 @@ internal fun AppRoute.showsMiniPlayer(
     AppRoute.Home -> hasCurrentTrack
     AppRoute.PlaybackHistory,
     AppRoute.PlaylistMigration,
+    is AppRoute.PlaylistMigrationDetail,
     AppRoute.LocalPlaylist,
     AppRoute.LocalMusicCollection,
     is AppRoute.FeatureDetail,
