@@ -36,6 +36,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun PlaylistMigrationScreen(
     controller: PlaylistMigrationFeatureController,
     onBack: () -> Unit,
+    initialTaskId: String? = null,
+    initialTarget: PlaylistMigrationOpenTarget? = null,
     modifier: Modifier = Modifier,
 ) {
     val tasks by controller.tasks.collectAsStateWithLifecycle()
@@ -45,8 +47,9 @@ fun PlaylistMigrationScreen(
     val alternatives by controller.searchResults.collectAsStateWithLifecycle()
     val busy by controller.busy.collectAsStateWithLifecycle()
     val error by controller.error.collectAsStateWithLifecycle()
-    val notificationOpenRequest by playlistMigrationOpenRequest.collectAsStateWithLifecycle()
-    var taskId by rememberSaveable { mutableStateOf<String?>(null) }
+    val routeTaskId = initialTaskId?.trim()?.takeIf { it.isNotEmpty() }
+    val isRouteDetail = routeTaskId != null
+    var taskId by rememberSaveable(routeTaskId) { mutableStateOf(routeTaskId) }
     var choosingSource by rememberSaveable { mutableStateOf(false) }
     var sourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var targetId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -57,11 +60,12 @@ fun PlaylistMigrationScreen(
     var destinationName by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(controller) { controller.refreshProviders() }
-    LaunchedEffect(notificationOpenRequest?.sequence) {
-        notificationOpenRequest?.let { request ->
-            taskId = request.taskId
+    LaunchedEffect(routeTaskId, initialTarget) {
+        if (routeTaskId != null) {
+            taskId = routeTaskId
             choosingSource = false
             selectedPosition = null
+            query = ""
         }
     }
     LaunchedEffect(sourceId) {
@@ -83,7 +87,9 @@ fun PlaylistMigrationScreen(
         item {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 TextButton(onClick = {
-                    if (task != null || choosingSource) {
+                    if (isRouteDetail) {
+                        onBack()
+                    } else if (task != null || choosingSource) {
                         taskId = null
                         choosingSource = false
                         selectedPosition = null
@@ -243,7 +249,14 @@ fun PlaylistMigrationScreen(
                         val done = when (task.phase) {
                             MigrationPhase.Loading -> total
                             MigrationPhase.Matching -> task.entries.count { it.status != MigrationTrackStatus.Pending }
-                            else -> task.entries.count { it.status in setOf(MigrationTrackStatus.Added, MigrationTrackStatus.Skipped) }
+                            else -> task.entries.count {
+                                it.status in setOf(
+                                    MigrationTrackStatus.Added,
+                                    MigrationTrackStatus.Skipped,
+                                    MigrationTrackStatus.Failed,
+                                    MigrationTrackStatus.Uncertain,
+                                )
+                            }
                         }
                         Text("$done / ${task.sourceLoaded.thenCount(total)}")
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -264,11 +277,23 @@ fun PlaylistMigrationScreen(
                         if (task.phase == MigrationPhase.Complete) Text("已完成", color = MaterialTheme.colorScheme.primary)
                     }
                 }
-                items(task.entries.filter { it.status == MigrationTrackStatus.Failed || it.status == MigrationTrackStatus.Uncertain }, key = { it.position }) { entry ->
+                items(
+                    task.entries.filter {
+                        it.status in setOf(
+                            MigrationTrackStatus.Added,
+                            MigrationTrackStatus.Skipped,
+                            MigrationTrackStatus.Failed,
+                            MigrationTrackStatus.Uncertain,
+                        )
+                    },
+                    key = { it.position },
+                ) { entry ->
                     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                        Column(Modifier.padding(12.dp)) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(entry.source.title)
-                            Text(entry.error ?: "添加失败", color = MaterialTheme.colorScheme.error)
+                            Text(entry.status.userLabel(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            entry.selected?.let { selected -> Text("→ ${selected.title} · ${selected.artists}") }
+                            entry.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
