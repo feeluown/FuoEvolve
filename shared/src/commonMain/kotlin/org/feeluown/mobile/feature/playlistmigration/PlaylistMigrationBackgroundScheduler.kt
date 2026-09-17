@@ -1,5 +1,9 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+
 data class PlaylistMigrationBackgroundRequest(
     val taskId: String,
     val sourceTitle: String,
@@ -15,11 +19,17 @@ data class PlaylistMigrationBackgroundProgress(
     val terminal: Boolean,
 )
 
+private data class PlaylistMigrationBackgroundRunnerBinding(
+    val controller: PlaylistMigrationFeatureController,
+    val scope: CoroutineScope,
+)
+
 /**
  * Platform-owned durability hook. Common migration logic remains usable without a scheduler.
  * Each target maps this request to the OS-native user-visible background-work mechanism.
  */
 private var playlistMigrationBackgroundScheduler: ((PlaylistMigrationBackgroundRequest) -> Unit)? = null
+private var playlistMigrationBackgroundRunner: PlaylistMigrationBackgroundRunnerBinding? = null
 
 fun installPlaylistMigrationBackgroundScheduler(
     scheduler: ((PlaylistMigrationBackgroundRequest) -> Unit)?,
@@ -27,10 +37,67 @@ fun installPlaylistMigrationBackgroundScheduler(
     playlistMigrationBackgroundScheduler = scheduler
 }
 
+internal fun bindPlaylistMigrationBackgroundRunner(
+    controller: PlaylistMigrationFeatureController,
+    scope: CoroutineScope,
+) {
+    playlistMigrationBackgroundRunner = PlaylistMigrationBackgroundRunnerBinding(controller, scope)
+}
+
 internal fun enqueuePlaylistMigrationBackground(task: PlaylistMigrationTask) {
     playlistMigrationBackgroundScheduler?.invoke(
         PlaylistMigrationBackgroundRequest(task.id, task.source.title),
     )
+}
+
+/** Callback-shaped API for native platform schedulers such as iOS BackgroundTasks. */
+fun runPlaylistMigrationBackgroundSlice(
+    taskId: String,
+    maxSteps: Int,
+    onProgress: (PlaylistMigrationBackgroundProgress) -> Unit,
+    completionHandler: (Boolean, String?) -> Unit,
+) {
+    val binding = playlistMigrationBackgroundRunner
+    if (binding == null) {
+        completionHandler(false, "迁移服务尚未初始化")
+        return
+    }
+    binding.scope.launch {
+        try {
+            val needsContinuation = binding.controller.runBackgroundSlice(
+                taskId = taskId,
+                maxSteps = maxSteps.coerceAtLeast(1),
+                onProgress = { task -> onProgress(task.backgroundProgress()) },
+            )
+            completionHandler(needsContinuation, null)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (failure: Exception) {
+            completionHandler(false, failure.message ?: "迁移失败")
+        }
+    }
+}
+
+/** Platform cancellation is persisted as a normal checkpoint-safe pause. */
+fun pausePlaylistMigrationFromBackground(
+    taskId: String,
+    completionHandler: (String?) -> Unit,
+) {
+    val binding = playlistMigrationBackgroundRunner
+    if (binding == null) {
+        completionHandler("迁移服务尚未初始化")
+        return
+    }
+    binding.scope.launch {
+        try {
+            binding.controller.coordinator.pause(taskId)
+            completionHandler(null)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (failure: Exception) {
+            completionHandler(failure.message ?: "暂停迁移失败")
+        }
+    }
 }
 
 fun PlaylistMigrationTask.backgroundProgress(): PlaylistMigrationBackgroundProgress = when (phase) {
