@@ -18,6 +18,9 @@ interface AppUiGraph {
     val localMusic: LocalMusicFeatureController
     val localPlaylist: LocalPlaylistFeatureController
     val sharedResources: SharedResourceActionPort
+    /** The platform container, not an individual screen, owns the long-lived migration runner. */
+    val playlistMigration: PlaylistMigrationFeatureController?
+        get() = null
 }
 
 data class SearchRouteGraph(
@@ -56,6 +59,7 @@ fun createAppUiGraph(
     searchAppPort: SearchAppPort,
     recognitionController: RecognitionFeatureController,
     recognitionAppPort: RecognitionAppPort,
+    playlistMigrationFeatureController: PlaylistMigrationFeatureController? = null,
 ): AppUiGraph = EagerAppUiGraph(
     playbackSession = playbackSession,
     playback = createPlaybackUiGraph(
@@ -97,6 +101,7 @@ fun createAppUiGraph(
     localMusic = localMusicFeatureController,
     localPlaylist = localPlaylistFeatureController,
     sharedResources = sharedResourceActionPort,
+    playlistMigration = playlistMigrationFeatureController,
 )
 
 /**
@@ -118,6 +123,7 @@ internal fun createLazyAppUiGraph(
     localMusic: () -> LocalMusicFeatureController,
     localPlaylist: () -> LocalPlaylistFeatureController,
     sharedResources: () -> SharedResourceActionPort,
+    playlistMigration: () -> PlaylistMigrationFeatureController? = { null },
 ): AppUiGraph = LazyAppUiGraph(
     playbackSession = playbackSession,
     playback = playback,
@@ -133,6 +139,7 @@ internal fun createLazyAppUiGraph(
     localMusic = localMusic,
     localPlaylist = localPlaylist,
     sharedResources = sharedResources,
+    playlistMigration = playlistMigration,
 )
 
 private data class EagerAppUiGraph(
@@ -150,6 +157,7 @@ private data class EagerAppUiGraph(
     override val localMusic: LocalMusicFeatureController,
     override val localPlaylist: LocalPlaylistFeatureController,
     override val sharedResources: SharedResourceActionPort,
+    override val playlistMigration: PlaylistMigrationFeatureController?,
 ) : AppUiGraph
 
 private class LazyAppUiGraph(
@@ -167,6 +175,7 @@ private class LazyAppUiGraph(
     localMusic: () -> LocalMusicFeatureController,
     localPlaylist: () -> LocalPlaylistFeatureController,
     sharedResources: () -> SharedResourceActionPort,
+    playlistMigration: () -> PlaylistMigrationFeatureController?,
 ) : AppUiGraph {
     override val playbackSession: PlaybackSession by lazy(playbackSession)
     override val playback: PlaybackUiGraph by lazy(playback)
@@ -182,4 +191,5 @@ private class LazyAppUiGraph(
     override val localMusic: LocalMusicFeatureController by lazy(localMusic)
     override val localPlaylist: LocalPlaylistFeatureController by lazy(localPlaylist)
     override val sharedResources: SharedResourceActionPort by lazy(sharedResources)
+    override val playlistMigration: PlaylistMigrationFeatureController? by lazy(playlistMigration)
 }
