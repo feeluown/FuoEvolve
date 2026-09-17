@@ -176,6 +176,18 @@ internal class AndroidAppContainer(
         )
     }
 
+    private val playlistMigrationFeatureController: PlaylistMigrationFeatureController by lazy {
+        createPlaylistMigrationFeatureController(
+            storage = createAndroidMigrationDocumentStorage(context),
+            registry = providerGraph.registry,
+            catalog = providerGraph.content,
+            library = providerGraph.content,
+            search = providerGraph.search,
+            replacement = playbackProvider,
+            scope = appScope,
+        )
+    }
+
     private val localPlaylistFeatureController: LocalPlaylistFeatureOwner by lazy {
         createLocalPlaylistFeatureController(
             repository = localPlaylistRepository,
@@ -389,6 +401,7 @@ internal class AndroidAppContainer(
             searchAppPort = searchAppPort,
             recognitionController = recognitionController,
             recognitionAppPort = recognitionAppPort,
+            playlistMigrationFeatureController = playlistMigrationFeatureController,
         )
     }
 
