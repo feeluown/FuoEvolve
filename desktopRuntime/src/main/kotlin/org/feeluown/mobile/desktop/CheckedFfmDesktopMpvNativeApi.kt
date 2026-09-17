@@ -8,7 +8,8 @@ import org.feeluown.mobile.DesktopMpvNativeApi
 fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
     ensureEarlyPackagedResourcesDir()
     val delegate = createDesktopFfmMpvNativeApi()
-    val nativeWindowsVideoHandles = ConcurrentHashMap.newKeySet<Long>()
+    val nativeWindowsVideoHosts = ConcurrentHashMap<Long, Long>()
+    val pendingWindowsVideoHost = ThreadLocal.withInitial { 0L }
     return object : DesktopMpvNativeApi by delegate {
         override fun setOption(handle: Long, name: String, value: String): Int {
             if (
@@ -16,7 +17,9 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
                 name == "vo" &&
                 value == "libmpv"
             ) {
-                val hwnd = desktopWindowsVideoHostHandle()
+                val hwnd = nativeWindowsVideoHosts.computeIfAbsent(handle) {
+                    createDesktopWindowsVideoHostHandle()
+                }
                 val options = listOf(
                     "wid" to windowsMpvWidValue(hwnd),
                     "gpu-api" to "d3d11",
@@ -27,12 +30,20 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
                 )
                 for ((optionName, optionValue) in options) {
                     val result = delegate.setOption(handle, optionName, optionValue)
-                    if (result < 0) return result
+                    if (result < 0) {
+                        nativeWindowsVideoHosts.remove(handle, hwnd)
+                        if (pendingWindowsVideoHost.get() == hwnd) {
+                            pendingWindowsVideoHost.set(0L)
+                        }
+                        destroyDesktopWindowsVideoHost(hwnd)
+                        return result
+                    }
                 }
-                nativeWindowsVideoHandles += handle
+                pendingWindowsVideoHost.set(hwnd)
                 AppLogger.i(
                     "DesktopVideo",
-                    "configured native Windows mpv output with gpu-next/d3d11",
+                    "configured native Windows mpv output with gpu-next/d3d11 " +
+                        "hwnd=0x${hwnd.toString(16)}",
                 )
                 return 0
             }
@@ -42,16 +53,29 @@ fun createCheckedDesktopFfmMpvNativeApi(): DesktopMpvNativeApi {
             // automatic selection instead of forcing the OpenGL/EGL interop backend.
             if (
                 name == "gpu-hwdec-interop" &&
-                handle in nativeWindowsVideoHandles
+                handle in nativeWindowsVideoHosts
             ) {
                 return 0
             }
             return delegate.setOption(handle, name, value)
         }
 
+        override fun claimWindowsNativeVideoHostHandle(): Long {
+            val hwnd = pendingWindowsVideoHost.get()
+            pendingWindowsVideoHost.set(0L)
+            return hwnd
+        }
+
         override fun destroy(handle: Long) {
-            nativeWindowsVideoHandles.remove(handle)
-            delegate.destroy(handle)
+            val hwnd = nativeWindowsVideoHosts.remove(handle) ?: 0L
+            if (pendingWindowsVideoHost.get() == hwnd) {
+                pendingWindowsVideoHost.set(0L)
+            }
+            try {
+                delegate.destroy(handle)
+            } finally {
+                destroyDesktopWindowsVideoHost(hwnd)
+            }
         }
 
         override fun renderD3D11(renderContext: Long, renderTarget: Long): Boolean {

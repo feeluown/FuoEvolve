@@ -7,6 +7,23 @@ fun installDesktopFfmMpvVideoControllerFactory(
     openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) {
     installDesktopPlatformVideoControllerFactory {
-        DesktopFfmMpvVideoController(nativeApi, videoDecodeMode(), openGlRenderContextParameters)
+        val controller = DesktopFfmMpvVideoController(
+            nativeApi,
+            videoDecodeMode(),
+            openGlRenderContextParameters,
+        )
+        val windowsHostHandle = nativeApi.claimWindowsNativeVideoHostHandle()
+        if (windowsHostHandle == 0L) {
+            controller
+        } else {
+            WindowsNativeMpvVideoController(controller, windowsHostHandle)
+        }
     }
 }
+
+private class WindowsNativeMpvVideoController(
+    private val delegate: DesktopPlatformVideoController,
+    override val windowsNativeVideoHostHandle: Long,
+) :
+    DesktopPlatformVideoController by delegate,
+    DesktopWindowsNativeVideoController

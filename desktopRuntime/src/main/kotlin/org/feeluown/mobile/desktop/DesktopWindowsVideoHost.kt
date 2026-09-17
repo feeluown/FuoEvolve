@@ -8,38 +8,33 @@ import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
 import java.lang.invoke.MethodHandle
 
-private val windowsVideoHostLock = Any()
-
-@Volatile
-private var windowsVideoHostHandle: Long = 0L
-
 /**
- * Returns the process-wide HWND used as mpv's Win32 embedding parent.
+ * Creates the HWND used as mpv's Win32 embedding parent for one video controller.
  *
- * The host is intentionally long-lived. mpv owns a child HWND under it while a video controller is
- * active, while Nucleus reparents and sizes this host through NativeView. Windows tears the host down
- * with the process, avoiding cross-thread DestroyWindow calls during Compose/controller disposal.
+ * mpv creates and owns a child HWND under this host. Nucleus reparents and sizes the host through
+ * NativeView. Keeping one host per controller prevents overlapping controller lifetimes from sharing
+ * the same Win32 parent during navigation transitions.
  */
-fun desktopWindowsVideoHostHandle(): Long {
+fun createDesktopWindowsVideoHostHandle(): Long {
     if (!isWindowsDesktopRuntime()) return 0L
-    windowsVideoHostHandle.takeIf { it != 0L }?.let { return it }
-
-    return synchronized(windowsVideoHostLock) {
-        windowsVideoHostHandle.takeIf { it != 0L }?.let { return@synchronized it }
-        val hwnd = WindowsVideoHostBindings.createHostWindow()
-        check(hwnd != 0L) { "CreateWindowExA failed for the Windows mpv video host" }
-        windowsVideoHostHandle = hwnd
-        hwnd
-    }
+    val hwnd = WindowsVideoHostBindings.createHostWindow()
+    check(hwnd != 0L) { "CreateWindowExA failed for the Windows mpv video host" }
+    return hwnd
 }
 
 /**
- * Keeps the process-wide host from becoming an orphaned visible top-level window after NativeView
- * detaches it. Nucleus shows the HWND again when the same host is attached on the next video screen.
+ * Keeps a temporarily detached host from becoming an orphaned visible top-level window. Nucleus
+ * shows it again when the same controller is reattached.
  */
 fun hideDesktopWindowsVideoHost(hwnd: Long) {
     if (!isWindowsDesktopRuntime() || hwnd == 0L) return
     WindowsVideoHostBindings.hideWindow(hwnd)
+}
+
+/** Destroys the controller-owned host after mpv has destroyed its child window. */
+fun destroyDesktopWindowsVideoHost(hwnd: Long) {
+    if (!isWindowsDesktopRuntime() || hwnd == 0L) return
+    WindowsVideoHostBindings.destroyWindow(hwnd)
 }
 
 /** mpv documents Win32 --wid as the HWND cast to uint32_t. */
@@ -84,6 +79,15 @@ private object WindowsVideoHostBindings {
             ValueLayout.JAVA_INT,
         ),
     )
+    private val destroyWindow: MethodHandle = linker.downcallHandle(
+        user32.find("DestroyWindow").orElseThrow {
+            UnsatisfiedLinkError("DestroyWindow is unavailable")
+        },
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+        ),
+    )
 
     fun createHostWindow(): Long = Arena.ofConfined().use { strings ->
         val className = strings.allocateFrom("STATIC")
@@ -107,6 +111,10 @@ private object WindowsVideoHostBindings {
 
     fun hideWindow(hwnd: Long) {
         showWindow.invokeExact(MemorySegment.ofAddress(hwnd), SW_HIDE) as Int
+    }
+
+    fun destroyWindow(hwnd: Long) {
+        destroyWindow.invokeExact(MemorySegment.ofAddress(hwnd)) as Int
     }
 }
 

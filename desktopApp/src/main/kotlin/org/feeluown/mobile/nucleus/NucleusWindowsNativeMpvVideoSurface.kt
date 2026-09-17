@@ -13,8 +13,8 @@ import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopMpvNativeApi
 import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
+import org.feeluown.mobile.DesktopWindowsNativeVideoController
 import org.feeluown.mobile.VideoPlaybackPayload
-import org.feeluown.mobile.desktop.desktopWindowsVideoHostHandle
 import org.feeluown.mobile.desktop.hideDesktopWindowsVideoHost
 
 /**
@@ -38,9 +38,13 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
         payload: VideoPlaybackPayload?,
         modifier: Modifier,
     ) {
-        val hwnd = remember { desktopWindowsVideoHostHandle() }
+        val hwnd = remember(controller) {
+            (controller as? DesktopWindowsNativeVideoController)
+                ?.windowsNativeVideoHostHandle
+                ?: 0L
+        }
         if (hwnd == 0L) {
-            LaunchedEffect(Unit) {
+            LaunchedEffect(controller) {
                 AppLogger.e("DesktopVideo", "Windows native mpv video host HWND is unavailable")
             }
             Box(modifier.fillMaxSize())
@@ -50,7 +54,8 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
         LaunchedEffect(hwnd) {
             AppLogger.i(
                 "DesktopVideo",
-                "using native Windows mpv D3D11 window output hwnd=0x${hwnd.toString(16)}",
+                "using controller-scoped native Windows mpv D3D11 output " +
+                    "hwnd=0x${hwnd.toString(16)}",
             )
         }
 

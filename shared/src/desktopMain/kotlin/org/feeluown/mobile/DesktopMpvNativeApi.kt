@@ -19,6 +19,12 @@ interface DesktopMpvNativeApi {
     fun destroy(handle: Long)
     fun errorString(error: Int): String?
 
+    /**
+     * Claims the controller-scoped Win32 parent HWND prepared while constructing a video controller
+     * on the current thread. Backends that do not use native Win32 video output return 0.
+     */
+    fun claimWindowsNativeVideoHostHandle(): Long = 0L
+
     fun createSoftwareRenderContext(handle: Long): Long
     fun createOpenGlRenderContext(
         handle: Long,
