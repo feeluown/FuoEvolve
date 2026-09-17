@@ -391,7 +391,6 @@ private class DesktopAppContainer(
             transportCoordinator = playbackFeatureOwner.transport,
             startFailureSource = playbackFeatureOwner.startFailureSource,
             scope = scope,
-            resumePlayback = playbackFeatureOwner.transport::startCurrent,
         )
     }
 

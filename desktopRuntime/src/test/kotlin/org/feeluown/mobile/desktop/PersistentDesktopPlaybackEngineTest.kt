@@ -2,6 +2,7 @@ package org.feeluown.mobile.desktop
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,11 +36,13 @@ class PersistentDesktopPlaybackEngineTest {
         assertEquals(PlayerStatus.Paused, engine.state.value.status)
         assertEquals(restoredTrack.id, engine.state.value.currentTrack?.id)
         assertEquals(42_000L, engine.state.value.positionMs)
+        assertFalse(engine.hasEstablishedPlaybackSession)
 
         engine.prepareLoading(selectedTrack, PlaybackStartReason.USER_SELECTION)
 
         assertTrue(store.cleared)
         assertEquals(selectedTrack.id, delegate.preparedTrack?.id)
+        assertTrue(engine.hasEstablishedPlaybackSession)
         engine.close()
     }
 

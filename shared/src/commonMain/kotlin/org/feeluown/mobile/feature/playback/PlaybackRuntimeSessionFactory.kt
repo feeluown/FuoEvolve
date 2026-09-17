@@ -18,7 +18,7 @@ import org.feeluown.mobile.playback.runtime.PlaybackRuntimeQueueActions
 
 /**
  * Shared composition adapter from the application playback owners to the narrow PlaybackSession API.
- * Platform hosts only choose the resume transaction; state mapping and queue bridging stay identical.
+ * State mapping, engine transport, and queue bridging stay identical on every platform.
  *
  * This factory is public because Android's composition root lives in the separate :androidApp
  * Gradle module. The implementation details below remain internal to :shared.
@@ -29,7 +29,6 @@ fun createSharedPlaybackRuntimeSession(
     transportCoordinator: PlaybackTransportCoordinator,
     startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
-    resumePlayback: () -> Unit,
 ): PlaybackSession {
     val queueStateFlow = transportCoordinator.queueStateFlow
     val overlayFlow = if (queueStateFlow != null) {
@@ -81,7 +80,6 @@ fun createSharedPlaybackRuntimeSession(
             playbackEngine = playbackEngine,
             startFailureSource = startFailureSource,
             scope = scope,
-            resumePlayback = resumePlayback,
         ),
         overlay = overlay,
         queueActions = PlaybackCoordinatorQueueActions(transportCoordinator),
@@ -93,8 +91,10 @@ private class PlaybackRuntimeEngineAdapter(
     private val playbackEngine: PlaybackEngine,
     startFailureSource: PlaybackStartFailureSource,
     scope: CoroutineScope,
-    private val resumePlayback: () -> Unit,
 ) : PlaybackRuntimeEngine {
+    override val hasEstablishedPlaybackSession: Boolean
+        get() = playbackEngine.hasEstablishedPlaybackSession
+
     override val state: StateFlow<PlaybackRuntimeEngineState> = combine(
         playbackEngine.state,
         startFailureSource.startFailure,
@@ -111,7 +111,7 @@ private class PlaybackRuntimeEngineAdapter(
 
     override fun pause() = playbackEngine.pause()
 
-    override fun resume() = resumePlayback()
+    override fun resume() = playbackEngine.resume()
 
     override fun stop() = playbackEngine.stop()
 

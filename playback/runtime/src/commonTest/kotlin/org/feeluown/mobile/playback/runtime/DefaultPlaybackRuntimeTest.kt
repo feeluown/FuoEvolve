@@ -145,6 +145,26 @@ class DefaultPlaybackRuntimeTest {
         scope.cancel()
     }
 
+    @Test
+    fun pausedRestoredSessionStartsCurrentWhenNativeSessionIsMissing() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val engine = FakeEngine(
+            PlaybackRuntimeEngineState(
+                status = PlaybackSessionStatus.Paused,
+                currentTrack = track("a"),
+            ),
+        ).apply { hasEstablishedPlaybackSession = false }
+        val overlay = MutableStateFlow(PlaybackRuntimeOverlay(currentTrack = track("a")))
+        val queueActions = FakeQueueActions()
+        val runtime = DefaultPlaybackRuntime(engine, overlay, queueActions, scope)
+
+        runtime.play()
+
+        assertEquals(0, engine.resumeCalls)
+        assertEquals(1, queueActions.startCurrentCalls)
+        scope.cancel()
+    }
+
     private fun track(id: String) = TrackRef(
         id = id,
         title = "Track $id",
@@ -156,6 +176,7 @@ class DefaultPlaybackRuntimeTest {
     private class FakeEngine(initial: PlaybackRuntimeEngineState) : PlaybackRuntimeEngine {
         val mutableState = MutableStateFlow(initial)
         override val state = mutableState
+        override var hasEstablishedPlaybackSession = true
         var pauseCalls = 0
         var resumeCalls = 0
         var stopCalls = 0
