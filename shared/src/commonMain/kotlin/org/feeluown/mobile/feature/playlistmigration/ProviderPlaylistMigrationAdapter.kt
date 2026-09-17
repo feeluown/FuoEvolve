@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /** Reuses playback's search ranking, but never resolves a playback URL for a migration. */
@@ -8,6 +9,9 @@ class ProviderPlaylistMigrationAdapter(
     private val library: ProviderLibraryRepository,
     private val replacement: PlaybackReplacementProviderPort,
 ) : PlaylistMigrationProvider {
+    /** One snapshot per destination, refreshed whenever the write result is ambiguous. */
+    private val targetSnapshots = mutableMapOf<String, MutableSet<String>>()
+
     suspend fun features(): List<ProviderFeature> = catalog.features()
 
     override suspend fun loadPage(playlist: MigrationPlaylist, offset: Int): MigrationPage {
@@ -42,6 +46,7 @@ class ProviderPlaylistMigrationAdapter(
     }
 
     override suspend fun targetTracks(playlist: MigrationPlaylist): Set<String> {
+        targetSnapshots[playlist.id]?.let { return it.toSet() }
         val ids = mutableSetOf<String>()
         var offset = 0
         while (true) {
@@ -52,13 +57,25 @@ class ProviderPlaylistMigrationAdapter(
             check(next > offset) { "无法读取目标歌单" }
             offset = next
         }
-        return ids
+        targetSnapshots[playlist.id] = ids
+        return ids.toSet()
     }
 
     override suspend fun addTrack(playlist: MigrationPlaylist, track: MigrationTrack): Boolean {
         require(track.providerId == playlist.providerId) { "只能添加目标平台的歌曲" }
-        val result = library.addTrackToPlaylist(playlist.toProviderPlaylist(), track.toMusicTrack())
-        return result.success
+        return try {
+            val result = library.addTrackToPlaylist(playlist.toProviderPlaylist(), track.toMusicTrack())
+            if (result.success) targetSnapshots[playlist.id]?.add(track.id)
+            else targetSnapshots.remove(playlist.id)
+            result.success
+        } catch (cancel: CancellationException) {
+            targetSnapshots.remove(playlist.id)
+            throw cancel
+        } catch (failure: Exception) {
+            // A timeout may mean the server added the song. Re-read the full list before retry.
+            targetSnapshots.remove(playlist.id)
+            throw failure
+        }
     }
 
     suspend fun ownedPlaylists(providerId: String): List<ProviderPlaylist> {
