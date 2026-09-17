@@ -45,6 +45,7 @@ class PlaylistMigrationFeatureController(
     val error: StateFlow<String?> = mutableError.asStateFlow()
 
     init {
+        bindPlaylistMigrationBackgroundRunner(this, scope)
         scope.launch {
             try {
                 coordinator.initialize()
