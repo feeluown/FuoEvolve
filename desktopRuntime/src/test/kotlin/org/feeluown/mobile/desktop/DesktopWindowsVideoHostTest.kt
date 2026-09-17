@@ -2,6 +2,7 @@ package org.feeluown.mobile.desktop
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 
 class DesktopWindowsVideoHostTest {
     @Test
@@ -14,5 +15,17 @@ class DesktopWindowsVideoHostTest {
             "4294967295",
             windowsMpvWidValue(-1L),
         )
+    }
+
+    @Test
+    fun `Windows video host can be created and destroyed`() {
+        if (!isWindowsDesktopRuntime()) return
+
+        val hwnd = createDesktopWindowsVideoHostHandle()
+        try {
+            assertNotEquals(0L, hwnd)
+        } finally {
+            destroyDesktopWindowsVideoHost(hwnd)
+        }
     }
 }
