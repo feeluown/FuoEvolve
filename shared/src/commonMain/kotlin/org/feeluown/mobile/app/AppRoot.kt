@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -12,6 +13,13 @@ fun AppRoot(
     windowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content -> content() },
 ) {
     val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
+
+    DisposableEffect(appViewModel) {
+        val token = installPlaylistMigrationNotificationNavigator { request ->
+            appViewModel.openPlaylistMigrationTask(request.taskId, request.target)
+        }
+        onDispose { uninstallPlaylistMigrationNotificationNavigator(token) }
+    }
 
     FuoTheme(
         themeMode = appUiState.themeMode,

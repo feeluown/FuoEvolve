@@ -159,6 +159,12 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".PlaylistMigrationDeepLinkActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".AppUpdateSavePermissionActivity"
             android:excludeFromRecents="true"
             android:exported="false"
@@ -207,6 +213,10 @@
             android:name=".FuoDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <receiver
             android:name=".OAuthUserCodeCopyReceiver"

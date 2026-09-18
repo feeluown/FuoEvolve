@@ -19,9 +19,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -53,6 +57,10 @@ internal fun AppShell(
         initialValue = uiGraph.playbackSession.state.value.status == PlaybackSessionStatus.Loading,
     )
     val resourceHeroCoordinator = remember { ResourceHeroCoordinator() }
+    // Measure only the player, not its surrounding navigation-bar inset. Each route's Scaffold
+    // already consumes its own system insets, so reserving the inset twice creates a blank gap.
+    var miniPlayerHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val layoutInfo = remember(maxWidth, maxHeight) { appLayoutInfoFor(maxWidth, maxHeight) }
@@ -62,6 +70,9 @@ internal fun AppShell(
                 hasCurrentTrack = playback.currentTrack != null,
                 hasQueueTrack = playback.queue.currentQueueTrack != null,
             ) == true
+        val miniPlayerBottomPadding = with(density) {
+            miniPlayerContentPadding(miniPlayerVisible, miniPlayerHeightPx.toDp())
+        }
         val showShellNavigationRail = shouldShowShellNavigationRail(
             layoutInfo = layoutInfo,
             isFullPlayerOpen = playback.isFullPlayerOpen,
@@ -145,12 +156,16 @@ internal fun AppShell(
                                         .weight(1f)
                                         .fillMaxHeight(),
                                 ) {
+                                    // Reserve space for the floating player at the one shared
+                                    // navigation boundary, including routes with a fixed bottom CTA.
                                     AppNavHost(
                                         backStack = appUiState.backStack,
                                         appViewModel = appViewModel,
                                         uiGraph = uiGraph,
                                         platform = platform,
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(bottom = miniPlayerBottomPadding),
                                     )
                                     if (miniPlayerVisible) {
                                         Box(
@@ -158,7 +173,9 @@ internal fun AppShell(
                                                 .align(Alignment.BottomCenter)
                                                 .windowInsetsPadding(bottomOverlayInsets),
                                         ) {
-                                            PlaybackMiniPlayerOverlay()
+                                            Box(Modifier.onSizeChanged { miniPlayerHeightPx = it.height }) {
+                                                PlaybackMiniPlayerOverlay()
+                                            }
                                         }
                                     }
                                     AppGlobalOverlays(uiGraph)

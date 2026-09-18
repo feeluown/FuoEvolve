@@ -79,6 +79,12 @@ class MainActivity : ComponentActivity() {
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
             ) { appUiGraph.providerAuth.startYtmusicTvOAuthLogin() }
+            val migrationNotificationPermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission(),
+            ) {
+                // Permission controls notification visibility only. WorkManager foreground work is
+                // still allowed to start after the user's explicit migration action if denied.
+            }
 
             val lifecycleOwner = LocalLifecycleOwner.current
             val appUiState by appViewModel.uiState.collectAsStateWithLifecycle()
@@ -240,6 +246,16 @@ class MainActivity : ComponentActivity() {
                                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             } else {
                                 appUiGraph.providerAuth.startYtmusicTvOAuthLogin()
+                            }
+                        },
+                        onPreparePlaylistMigrationBackground = {
+                            val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                ContextCompat.checkSelfPermission(
+                                    this@MainActivity,
+                                    Manifest.permission.POST_NOTIFICATIONS,
+                                ) != PackageManager.PERMISSION_GRANTED
+                            if (needsPermission) {
+                                migrationNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                         },
                         onImportLocalPlaylistFile = {

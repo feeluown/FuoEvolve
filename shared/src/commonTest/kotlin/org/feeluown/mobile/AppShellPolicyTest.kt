@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
+import androidx.compose.ui.unit.dp
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -22,6 +24,17 @@ class AppShellPolicyTest {
                 source = "netease",
                 sourceType = TrackSourceType.Provider.name,
             )
+        )
+
+        assertTrue(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
+        assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = false))
+    }
+
+    @Test
+    fun playlistMigrationDetailUsesQueueTrack() {
+        val route = AppRoute.PlaylistMigrationDetail(
+            taskId = "migration-123",
+            target = PlaylistMigrationOpenTarget.Review,
         )
 
         assertTrue(route.showsMiniPlayer(hasCurrentTrack = false, hasQueueTrack = true))
@@ -61,5 +74,13 @@ class AppShellPolicyTest {
         ).forEach { route ->
             assertFalse(route.showsMiniPlayer(hasCurrentTrack = true, hasQueueTrack = true))
         }
+    }
+
+    @Test
+    fun miniPlayerInsetTracksActualHeightAndVisibility() {
+        assertEquals(112.dp, miniPlayerContentPadding(visible = true, measuredHeight = 112.dp))
+        assertEquals(80.dp, miniPlayerContentPadding(visible = true, measuredHeight = 80.dp))
+        assertEquals(0.dp, miniPlayerContentPadding(visible = false, measuredHeight = 112.dp))
+        assertEquals(0.dp, miniPlayerContentPadding(visible = true, measuredHeight = (-1).dp))
     }
 }

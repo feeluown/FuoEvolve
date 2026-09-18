@@ -12,6 +12,10 @@ private val MediumHeightUpperBound = 900.dp
 private val PersistentNavigationMinWidth = 900.dp
 private val FullPlayerTwoPaneMinHeight = 600.dp
 
+/** Reserve only the measured mini player; page scaffolds independently handle system bars. */
+internal fun miniPlayerContentPadding(visible: Boolean, measuredHeight: Dp): Dp =
+    if (visible) measuredHeight.coerceAtLeast(0.dp) else 0.dp
+
 internal fun appLayoutInfoFor(maxWidth: Dp, maxHeight: Dp): AppLayoutInfo {
     val widthSizeClass = when {
         maxWidth < CompactWidthUpperBound -> AppWidthSizeClass.Compact
@@ -72,6 +76,8 @@ internal fun AppRoute.showsMiniPlayer(
 ): Boolean = when (this) {
     AppRoute.Home -> hasCurrentTrack
     AppRoute.PlaybackHistory,
+    AppRoute.PlaylistMigration,
+    is AppRoute.PlaylistMigrationDetail,
     AppRoute.LocalPlaylist,
     AppRoute.LocalMusicCollection,
     is AppRoute.FeatureDetail,

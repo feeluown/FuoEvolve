@@ -14,6 +14,9 @@ class FuoEvolveApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         installAndroidAppLogger(this)
+        installPlaylistMigrationBackgroundScheduler { request ->
+            AndroidPlaylistMigrationWorker.enqueue(applicationContext, request)
+        }
     }
 
     private fun container(): AndroidAppContainer =
@@ -36,6 +39,7 @@ class FuoEvolveApplication : Application() {
         get() = container().appViewModel
 
     override fun onTerminate() {
+        installPlaylistMigrationBackgroundScheduler(null)
         containerHolder?.close()
         containerHolder = null
         super.onTerminate()

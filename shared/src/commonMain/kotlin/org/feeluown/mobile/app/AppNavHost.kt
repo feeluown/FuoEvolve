@@ -267,6 +267,22 @@ internal fun AppNavHost(
                                     repository = uiGraph.home.listeningHistory,
                                     onBack = { appViewModel.onBack() },
                                 )
+                                AppRoute.PlaylistMigration,
+                                is AppRoute.PlaylistMigrationDetail -> {
+                                    val migration = uiGraph.playlistMigration
+                                    if (migration == null) {
+                                        StaleRouteKindGuard { appViewModel.onBack() }
+                                    } else {
+                                        val detail = route as? AppRoute.PlaylistMigrationDetail
+                                        PlaylistMigrationScreen(
+                                            controller = migration,
+                                            onBack = { appViewModel.onBack() },
+                                            initialTaskId = detail?.taskId,
+                                            initialTarget = detail?.target,
+                                            onPrepareBackgroundWork = platform.onPreparePlaylistMigrationBackground,
+                                        )
+                                    }
+                                }
                                 AppRoute.Search -> SearchRoute(
                                     graph = uiGraph.search,
                                     onOpenRecognition = appViewModel::openRecognition,

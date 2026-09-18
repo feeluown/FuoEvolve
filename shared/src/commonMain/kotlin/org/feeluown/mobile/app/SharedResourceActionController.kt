@@ -49,6 +49,7 @@ private class DefaultSharedResourceActionController(
     override val feedback: StateFlow<String?> = mutableFeedback.asStateFlow()
 
     override fun open(text: String) {
+        if (openPlaylistMigrationNotificationLink(text)) return
         val resource = parseSharedResource(text)
         if (resource == null) {
             val query = sharedSearchQuery(text)
@@ -117,4 +118,22 @@ private class DefaultSharedResourceActionController(
             providerUrl = providerUrl,
         )
     }
+}
+
+private fun openPlaylistMigrationNotificationLink(text: String): Boolean {
+    val normalized = text.trim()
+    val prefix = "fuo://playlist-migration/"
+    if (!normalized.startsWith(prefix)) return false
+    val payload = normalized.removePrefix(prefix)
+    val taskId = payload.substringBefore('?').trim()
+    val target = payload.substringAfter('?', "")
+        .split('&')
+        .firstNotNullOfOrNull { part ->
+            val key = part.substringBefore('=')
+            if (key == "target") part.substringAfter('=', "") else null
+        }
+        ?.takeIf(String::isNotBlank)
+        ?: return true
+    if (taskId.isNotBlank()) openPlaylistMigrationFromNotification(taskId, target)
+    return true
 }

@@ -99,6 +99,8 @@ fun createAppBackCoordinator(
             when (route) {
                 AppRoute.Home -> false
                 AppRoute.PlaybackHistory -> navigator.pop(AppRoute.PlaybackHistory)
+                AppRoute.PlaylistMigration,
+                is AppRoute.PlaylistMigrationDetail -> navigator.pop(AppRoute.PlaylistMigration)
                 AppRoute.Search -> {
                     searchAppPort.closeSearch()
                     true

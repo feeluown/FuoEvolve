@@ -17,5 +17,7 @@ data class AppPlatformBindings(
     val appVersionInfo: String? = null,
     val hasImagePermission: Boolean = true,
     val onRequestImagePermission: () -> Unit = {},
+    /** Called from an explicit migration action before an OS-visible long task is scheduled. */
+    val onPreparePlaylistMigrationBackground: () -> Unit = {},
     val desktopVideoSettingsAvailable: Boolean = false,
 )

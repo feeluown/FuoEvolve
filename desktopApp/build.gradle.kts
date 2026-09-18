@@ -392,6 +392,7 @@ dependencies {
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
     implementation("dev.nucleusframework:nucleus.media-control:2.5.15")
     implementation("dev.nucleusframework:nucleus.notification-common:2.5.15")
+    implementation("dev.nucleusframework:nucleus.taskbar-progress-tao:2.5.15")
     implementation("dev.nucleusframework:nucleus.launcher-windows:2.5.15")
     implementation("dev.nucleusframework:composenativetray:2.1.6")
 
