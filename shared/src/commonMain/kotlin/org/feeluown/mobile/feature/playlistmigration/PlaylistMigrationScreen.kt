@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -380,11 +381,7 @@ fun PlaylistMigrationScreen(
                 else -> {
                     item("result") {
                         MigrationPanel {
-                            MigrationHeading(
-                                "迁移记录",
-                                task.phase.migrationLabel(),
-                                task.destination?.title ?: task.source.title,
-                            )
+                            MigrationHeading("迁移记录", task.phase.migrationLabel(), task.destination?.title ?: task.source.title)
                             Text("已添加 ${task.addedCount} 首 · 已跳过 ${task.skippedCount} 首", style = MaterialTheme.typography.bodyLarge)
                             val failed = task.entries.count { it.status == MigrationTrackStatus.Failed }
                             val uncertain = task.entries.count { it.status == MigrationTrackStatus.Uncertain }
@@ -412,7 +409,7 @@ fun PlaylistMigrationScreen(
 }
 
 @Composable
-private fun MigrationPanel(content: @Composable Column.() -> Unit) {
+private fun MigrationPanel(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
