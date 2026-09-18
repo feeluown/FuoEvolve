@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.runtime.Composable
@@ -41,6 +40,7 @@ internal fun PlaylistMigrationProgressIndicator(
     val total = progress.total.coerceAtLeast(1)
     val completed = progress.completed.coerceIn(0, total)
     val actual = migrationActualFraction(completed, total)
+    val inFlight = migrationInFlightFraction(completed, total)
     // Reinitialise on task/stage changes, but not after every checkpoint. Animatable retains
     // its current frame when a newer checkpoint cancels the previous interpolation.
     val animated = remember(progress.taskId, progress.stage) { Animatable(actual) }
@@ -49,7 +49,6 @@ internal fun PlaylistMigrationProgressIndicator(
         if (actual > animated.value) {
             animated.animateTo(actual, animationSpec = catchUpSpec)
         }
-        val inFlight = migrationInFlightFraction(completed, total)
         if (inFlight > animated.value) {
             // Gradually fill at most 90% of the next song's segment. A slow request stops
             // below the next checkpoint; a fast request smoothly catches up without jumping.
@@ -59,5 +58,9 @@ internal fun PlaylistMigrationProgressIndicator(
             )
         }
     }
-    LinearWavyProgressIndicator(progress = { animated.value }, modifier = modifier)
+    // Even if a theme motion spring overshoots, do not render ahead of a real checkpoint.
+    LinearWavyProgressIndicator(
+        progress = { animated.value.coerceIn(0f, inFlight) },
+        modifier = modifier,
+    )
 }
