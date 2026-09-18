@@ -183,7 +183,7 @@ internal class AndroidAppContainer(
             catalog = providerGraph.content,
             library = providerGraph.content,
             search = providerGraph.search,
-            replacement = playbackProvider,
+            candidateProvider = createPlaylistMigrationCandidateProvider(playbackProvider),
             scope = appScope,
         )
     }

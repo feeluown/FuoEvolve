@@ -59,6 +59,8 @@ data class PlaylistMigrationTask(
     val nextOffset: Int = 0,
     val sourceLoaded: Boolean = false,
     val destination: MigrationPlaylist? = null,
+    /** Separates destination snapshots between independent write passes. */
+    val writePass: Int = 0,
     /** Set *before* the create request; an ambiguous response must never create a second playlist. */
     val creationAttempted: Boolean = false,
     val requestedDestinationName: String? = null,
@@ -80,14 +82,27 @@ interface PlaylistMigrationStore {
     suspend fun save(task: PlaylistMigrationTask)
 }
 
+/** Candidate matching owned by playlist migration; app composition adapts playback to this port. */
+interface PlaylistMigrationCandidateProvider {
+    suspend fun candidates(track: MigrationTrack, targetProviderId: String): List<MigrationCandidate>
+}
+
 /** A page is checkpointed before the next page is requested. */
 data class MigrationPage(val tracks: List<MigrationTrack>, val nextOffset: Int, val hasMore: Boolean)
 
 /** All IDs passed to the write methods must belong to targetProviderId. */
-interface PlaylistMigrationProvider {
+interface PlaylistMigrationProvider : PlaylistMigrationCandidateProvider {
     suspend fun loadPage(playlist: MigrationPlaylist, offset: Int): MigrationPage
-    suspend fun candidates(track: MigrationTrack, targetProviderId: String): List<MigrationCandidate>
     suspend fun createPlaylist(providerId: String, name: String): MigrationPlaylist
-    suspend fun targetTracks(playlist: MigrationPlaylist): Set<String>
-    suspend fun addTrack(playlist: MigrationPlaylist, track: MigrationTrack): Boolean
+    suspend fun targetTracks(
+        taskId: String,
+        writePass: Int,
+        playlist: MigrationPlaylist,
+    ): Set<String>
+    suspend fun addTrack(
+        taskId: String,
+        writePass: Int,
+        playlist: MigrationPlaylist,
+        track: MigrationTrack,
+    ): Boolean
 }

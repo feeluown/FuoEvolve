@@ -130,10 +130,16 @@ class PlaylistMigrationCoordinator(
         when (task.phase) {
             MigrationPhase.Paused -> {
                 val next = requireNotNull(task.resumePhase)
-                persist(task.copy(phase = next, resumePhase = null, error = null))
+                persist(task.copy(
+                    phase = next,
+                    writePass = if (next == MigrationPhase.Writing) task.writePass + 1 else task.writePass,
+                    resumePhase = null,
+                    error = null,
+                ))
             }
             MigrationPhase.Partial -> persist(task.copy(
                 phase = MigrationPhase.Writing,
+                writePass = task.writePass + 1,
                 error = null,
                 entries = task.entries.map { entry ->
                     when (entry.status) {
@@ -211,7 +217,7 @@ class PlaylistMigrationCoordinator(
         val selected = requireNotNull(entry.selected)
         require(selected.providerId == task.targetProviderId)
         // Reconcile *before* every retry. This also avoids re-adding songs already in an existing list.
-        val existing = provider.targetTracks(destination)
+        val existing = provider.targetTracks(task.id, task.writePass, destination)
         if (selected.id in existing) return changeEntry(task, entry.position) {
             it.copy(status = MigrationTrackStatus.Added, error = null)
         }
@@ -221,7 +227,7 @@ class PlaylistMigrationCoordinator(
             it.copy(status = MigrationTrackStatus.Adding, error = null)
         }
         return try {
-            if (provider.addTrack(destination, selected)) {
+            if (provider.addTrack(task.id, task.writePass, destination, selected)) {
                 changeEntry(inFlight, entry.position) { it.copy(status = MigrationTrackStatus.Added, error = null) }
             } else {
                 changeEntry(inFlight, entry.position) {

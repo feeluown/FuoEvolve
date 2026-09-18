@@ -146,7 +146,7 @@ private class DesktopAppContainer(
             catalog = providerGraph.content,
             library = providerGraph.content,
             search = providerGraph.search,
-            replacement = playbackProvider,
+            candidateProvider = createPlaylistMigrationCandidateProvider(playbackProvider),
             scope = scope,
         )
     }

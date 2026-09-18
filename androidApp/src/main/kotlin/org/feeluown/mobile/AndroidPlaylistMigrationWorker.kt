@@ -142,7 +142,7 @@ internal class AndroidPlaylistMigrationWorker(
                 "歌单迁移",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "显示歌单转换和写入进度"
+                description = "显示歌单迁移进度"
                 setSound(null, null)
             },
         )
@@ -157,8 +157,8 @@ internal class AndroidPlaylistMigrationWorker(
     }
 
     private fun PlaylistMigrationBackgroundStage.initialTitle(): String = when (this) {
-        PlaylistMigrationBackgroundStage.Conversion -> "正在转换歌单"
-        PlaylistMigrationBackgroundStage.Writing -> "正在写入目标歌单"
+        PlaylistMigrationBackgroundStage.Conversion -> "正在找歌"
+        PlaylistMigrationBackgroundStage.Writing -> "正在迁移歌单"
     }
 
     companion object {

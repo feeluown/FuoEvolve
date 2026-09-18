@@ -128,15 +128,18 @@ class PlaylistMigrationCoordinatorTest {
         val partial = workflow.runUntilBlocked("task")
 
         assertEquals(MigrationPhase.Partial, partial.phase)
+        assertEquals(0, partial.writePass)
         assertEquals(MigrationTrackStatus.Failed, partial.entries[0].status)
         assertEquals(MigrationTrackStatus.Added, partial.entries[1].status)
         assertEquals(2, provider.addCalls)
 
         workflow.retry("task")
+        assertEquals(1, workflow.tasks.value.single().writePass)
         val completed = workflow.runUntilBlocked("task")
         assertEquals(MigrationPhase.Complete, completed.phase)
         assertEquals(2, completed.addedCount)
         assertEquals(3, provider.addCalls)
+        assertEquals(listOf(0, 0, 1), provider.targetWritePasses)
     }
 
     @Test
@@ -184,6 +187,7 @@ class PlaylistMigrationCoordinatorTest {
         var createFails = false
         var createCalls = 0
         var addCalls = 0
+        val targetWritePasses = mutableListOf<Int>()
         override suspend fun loadPage(playlist: MigrationPlaylist, offset: Int): MigrationPage {
             requestedPages += offset
             if (failPageOnce == offset) { failPageOnce = null; error("网络中断") }
@@ -199,8 +203,20 @@ class PlaylistMigrationCoordinatorTest {
             if (createFails) error("响应超时")
             return MigrationPlaylist("playlist:qqmusic:new", name, providerId)
         }
-        override suspend fun targetTracks(playlist: MigrationPlaylist): Set<String> = written.toSet()
-        override suspend fun addTrack(playlist: MigrationPlaylist, track: MigrationTrack): Boolean {
+        override suspend fun targetTracks(
+            taskId: String,
+            writePass: Int,
+            playlist: MigrationPlaylist,
+        ): Set<String> {
+            targetWritePasses += writePass
+            return written.toSet()
+        }
+        override suspend fun addTrack(
+            taskId: String,
+            writePass: Int,
+            playlist: MigrationPlaylist,
+            track: MigrationTrack,
+        ): Boolean {
             addCalls++
             if (rejectOnce == track.id) { rejectOnce = null; return false }
             written += track.id

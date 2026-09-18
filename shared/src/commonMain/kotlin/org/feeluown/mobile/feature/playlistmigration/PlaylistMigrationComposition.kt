@@ -13,13 +13,13 @@ fun createPlaylistMigrationFeatureController(
     catalog: ProviderCatalogRepository,
     library: ProviderLibraryRepository,
     search: ProviderSearchRepository,
-    replacement: PlaybackReplacementProviderPort,
+    candidateProvider: PlaylistMigrationCandidateProvider,
     scope: CoroutineScope,
 ): PlaylistMigrationFeatureController {
     val adapter = ProviderPlaylistMigrationAdapter(
         catalog = catalog,
         library = library,
-        replacement = replacement,
+        candidateProvider = candidateProvider,
     )
     return PlaylistMigrationFeatureController(
         coordinator = PlaylistMigrationCoordinator(

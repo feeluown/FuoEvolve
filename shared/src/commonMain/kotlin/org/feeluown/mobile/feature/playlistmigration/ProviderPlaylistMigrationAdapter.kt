@@ -7,10 +7,10 @@ import kotlinx.coroutines.delay
 class ProviderPlaylistMigrationAdapter(
     private val catalog: ProviderCatalogRepository,
     private val library: ProviderLibraryRepository,
-    private val replacement: PlaybackReplacementProviderPort,
+    private val candidateProvider: PlaylistMigrationCandidateProvider,
 ) : PlaylistMigrationProvider {
-    /** One snapshot per destination, refreshed whenever the write result is ambiguous. */
-    private val targetSnapshots = mutableMapOf<String, MutableSet<String>>()
+    /** Snapshots are scoped to a task and write pass so another pass never reuses stale state. */
+    private val targetSnapshots = mutableMapOf<TargetSnapshotKey, MutableSet<String>>()
 
     suspend fun features(): List<ProviderFeature> = catalog.features()
 
@@ -24,12 +24,7 @@ class ProviderPlaylistMigrationAdapter(
     }
 
     override suspend fun candidates(track: MigrationTrack, targetProviderId: String): List<MigrationCandidate> =
-        replacement.replacementCandidates(
-            track = track.toMusicTrack(),
-            smartReplacementProviderIds = setOf(targetProviderId),
-            smartReplacementMinScore = 0.0,
-        ).filter { it.track.source == targetProviderId }
-            .map { MigrationCandidate(it.track.toMigrationTrack(), it.score) }
+        candidateProvider.candidates(track, targetProviderId)
 
     override suspend fun createPlaylist(providerId: String, name: String): MigrationPlaylist {
         val before = ownedPlaylists(providerId).mapTo(mutableSetOf()) { it.id }
@@ -45,8 +40,13 @@ class ProviderPlaylistMigrationAdapter(
         error("歌单可能已创建，请手动选择")
     }
 
-    override suspend fun targetTracks(playlist: MigrationPlaylist): Set<String> {
-        targetSnapshots[playlist.id]?.let { return it.toSet() }
+    override suspend fun targetTracks(
+        taskId: String,
+        writePass: Int,
+        playlist: MigrationPlaylist,
+    ): Set<String> {
+        val snapshotKey = TargetSnapshotKey(taskId, writePass, playlist.id)
+        targetSnapshots[snapshotKey]?.let { return it.toSet() }
         val ids = mutableSetOf<String>()
         var offset = 0
         while (true) {
@@ -57,23 +57,29 @@ class ProviderPlaylistMigrationAdapter(
             check(next > offset) { "无法读取目标歌单" }
             offset = next
         }
-        targetSnapshots[playlist.id] = ids
+        targetSnapshots[snapshotKey] = ids
         return ids.toSet()
     }
 
-    override suspend fun addTrack(playlist: MigrationPlaylist, track: MigrationTrack): Boolean {
+    override suspend fun addTrack(
+        taskId: String,
+        writePass: Int,
+        playlist: MigrationPlaylist,
+        track: MigrationTrack,
+    ): Boolean {
         require(track.providerId == playlist.providerId) { "歌曲来源与目标不匹配" }
+        val snapshotKey = TargetSnapshotKey(taskId, writePass, playlist.id)
         return try {
             val result = library.addTrackToPlaylist(playlist.toProviderPlaylist(), track.toMusicTrack())
-            if (result.success) targetSnapshots[playlist.id]?.add(track.id)
-            else targetSnapshots.remove(playlist.id)
+            if (result.success) targetSnapshots[snapshotKey]?.add(track.id)
+            else targetSnapshots.remove(snapshotKey)
             result.success
         } catch (cancel: CancellationException) {
-            targetSnapshots.remove(playlist.id)
+            targetSnapshots.remove(snapshotKey)
             throw cancel
         } catch (failure: Exception) {
             // A timeout may mean the server added the song. Re-read the full list before retry.
-            targetSnapshots.remove(playlist.id)
+            targetSnapshots.remove(snapshotKey)
             throw failure
         }
     }
@@ -98,6 +104,12 @@ class ProviderPlaylistMigrationAdapter(
         }.distinctBy { it.id }
     }
 }
+
+private data class TargetSnapshotKey(
+    val taskId: String,
+    val writePass: Int,
+    val playlistId: String,
+)
 
 internal fun ProviderPlaylist.toMigrationPlaylist() = MigrationPlaylist(
     id = id,

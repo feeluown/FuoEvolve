@@ -157,15 +157,15 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
                 stage: work.stage,
                 onProgress: nil
             ) { success, needsMore in
-                if needsMore {
-                    self.scheduleDeferredProcessing()
-                } else {
+                // Keep the durable work item when the common runner was not ready or failed.
+                // Only a successful terminal stage may be removed from the retry queue.
+                if success && !needsMore {
                     self.finish(taskId: work.taskId, stage: work.stage)
-                    // BGProcessingTask has one stable identifier on pre-iOS 26 systems. Process
-                    // one durable work item per launch, then explicitly schedule the next pending
-                    // migration stage instead of leaving it stranded until the app is foregrounded.
-                    self.scheduleDeferredProcessing()
                 }
+                // BGProcessingTask has one stable identifier on pre-iOS 26 systems. Process
+                // one durable work item per launch, then explicitly schedule the next pending
+                // migration stage instead of leaving it stranded until the app is foregrounded.
+                self.scheduleDeferredProcessing()
                 processingTask.setTaskCompleted(success: success)
             }
         }
@@ -194,7 +194,7 @@ private final class IOSPlaylistMigrationBackground: NSObject, IosPlaylistMigrati
         registerContinuedTask(taskId: taskId, stage: stage)
         let request = BGContinuedProcessingTaskRequest(
             identifier: identifier,
-            title: stage == "Writing" ? "写入歌单" : "转换歌单",
+            title: stage == "Writing" ? "迁移歌单" : "正在找歌",
             subtitle: sourceTitle.isEmpty ? "正在准备迁移" : sourceTitle
         )
         request.strategy = .queue
