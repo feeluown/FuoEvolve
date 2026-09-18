@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
+/** Common spacing is shared by screen gutters, groups and component padding. */
 internal object FuoSpacing {
     val xs = 4.dp
     val sm = 8.dp
@@ -56,15 +57,7 @@ internal object FuoSpacing {
     val xxl = 32.dp
 }
 
-/**
- * App motion entry point.
- *
- * New interaction and transition motion should consume the Material motion scheme through these
- * helpers instead of introducing local tween/spring constants. This keeps custom UI aligned with
- * Material 3 Expressive and leaves one theme-level seam for a future animation-speed preference.
- *
- * Duration tokens are retained temporarily for transitions that have not been migrated yet.
- */
+/** Motion entry point; fixed durations are compatibility tokens for existing transitions only. */
 internal object FuoMotion {
     const val pageTransitionMillis = 300
     const val pageFadeMillis = 180
@@ -142,7 +135,6 @@ internal fun FuoSectionCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val indication = LocalIndication.current
     val interactiveModifier = if (onClick == null) {
         modifier
     } else {
@@ -151,7 +143,7 @@ internal fun FuoSectionCard(
             .fuoPressFeedback(interactionSource = interactionSource, enabled = enabled)
             .clickable(
                 interactionSource = interactionSource,
-                indication = indication,
+                indication = LocalIndication.current,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
@@ -159,9 +151,10 @@ internal fun FuoSectionCard(
     }
     Surface(
         modifier = interactiveModifier,
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = if (onClick == null) fuoSectionColor() else fuoInteractiveColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = MaterialTheme.shapes.medium,
+        shape = FuoVisualTokens.group,
+        tonalElevation = FuoElevation.content,
     ) {
         Column(
             modifier = Modifier.padding(FuoSpacing.lg),
@@ -183,7 +176,6 @@ internal fun FuoListItem(
     onClick: (() -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val indication = LocalIndication.current
     val itemModifier = if (onClick == null) {
         modifier
     } else {
@@ -191,7 +183,7 @@ internal fun FuoListItem(
             .fuoPressFeedback(interactionSource = interactionSource, enabled = enabled)
             .clickable(
                 interactionSource = interactionSource,
-                indication = indication,
+                indication = LocalIndication.current,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
@@ -205,12 +197,12 @@ internal fun FuoListItem(
         trailingContent = trailingContent,
         colors = if (selected) {
             ListItemDefaults.colors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                containerColor = FuoSurfaceColors.selected(MaterialTheme.colorScheme),
                 headlineColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 supportingColor = MaterialTheme.colorScheme.onSecondaryContainer,
             )
         } else {
-            ListItemDefaults.colors()
+            ListItemDefaults.colors(containerColor = Color.Transparent)
         },
     )
 }
@@ -232,8 +224,8 @@ internal fun FuoSettingRow(
         leadingContent = leadingContent,
         trailingContent = trailingContent,
         headlineContent = { Text(title) },
-        supportingContent = supportingText?.let { text ->
-            { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        supportingContent = supportingText?.let { description ->
+            { Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
     )
 }
@@ -246,7 +238,6 @@ internal fun FuoMetadataChip(
     onClick: (() -> Unit)? = null,
 ) {
     val chipModifier = modifier.height(AssistChipDefaults.Height)
-    val chipShape = AssistChipDefaults.shape
     val chipColors = AssistChipDefaults.assistChipColors()
     val chipBorder = AssistChipDefaults.assistChipBorder(enabled = true)
     if (onClick != null) {
@@ -254,10 +245,10 @@ internal fun FuoMetadataChip(
             modifier = chipModifier,
             onClick = onClick,
             label = { Text(label, maxLines = 1) },
-            leadingIcon = leadingIcon?.let { icon ->
-                { Icon(icon, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
+            leadingIcon = leadingIcon?.let { image ->
+                { Icon(image, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
             },
-            shape = chipShape,
+            shape = AssistChipDefaults.shape,
             colors = chipColors,
             border = chipBorder,
         )
@@ -266,12 +257,12 @@ internal fun FuoMetadataChip(
             modifier = chipModifier,
             color = chipColors.containerColor,
             contentColor = chipColors.labelColor,
-            shape = chipShape,
+            shape = AssistChipDefaults.shape,
             border = chipBorder,
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(horizontal = FuoSpacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 leadingIcon?.let {
@@ -304,32 +295,23 @@ internal fun FuoEmptyState(
 ) {
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = fuoSectionColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = MaterialTheme.shapes.medium,
+        shape = FuoVisualTokens.group,
+        tonalElevation = FuoElevation.content,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(FuoSpacing.xl),
+            modifier = Modifier.fillMaxWidth().padding(FuoSpacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
         ) {
             icon?.let {
-                Icon(
-                    imageVector = it,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+                Icon(it, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center,
-            )
+            Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             supportingText?.let {
                 Text(
-                    text = it,
+                    it,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -353,12 +335,10 @@ internal fun FuoIconButton(
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier
-            .fuoInteractive()
-            .semantics {
-                this.contentDescription = contentDescription
-                role = Role.Button
-            },
+        modifier = modifier.fuoInteractive().semantics {
+            this.contentDescription = contentDescription
+            role = Role.Button
+        },
         content = content,
     )
 }
@@ -383,10 +363,8 @@ internal fun FuoSearchField(
                 expanded = false,
                 onExpandedChange = {},
                 enabled = enabled,
-                placeholder = { androidx.compose.material3.Text(placeholder) },
-                leadingIcon = {
-                    androidx.compose.material3.Icon(Icons.Filled.Search, contentDescription = null)
-                },
+                placeholder = { Text(placeholder) },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = trailingContent,
             )
         },
