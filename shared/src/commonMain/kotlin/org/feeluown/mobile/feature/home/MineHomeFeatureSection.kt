@@ -14,9 +14,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -81,10 +87,7 @@ fun MineHomeSection(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp),
         ) {
-            MineOwnerChips(
-                home = home,
-                includeSecondary = wide,
-            )
+            MineOwnerChips(home = home, includeSecondary = wide)
             val sectionContent: @Composable () -> Unit = {
                 when (state.mineSection) {
                     MineSection.Playlists, MineSection.Songs -> MineOwnerPlaylists(home, !wide, Modifier.fillMaxSize())
@@ -101,35 +104,23 @@ fun MineHomeSection(
                 }
             }
             if (wide) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    sectionContent()
-                }
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) { sectionContent() }
             } else {
                 PullToRefreshBox(
                     isRefreshing = isPullRefreshing,
-                    onRefresh = {
-                        refreshRequested = true
-                        home.refreshMine()
-                    },
+                    onRefresh = { refreshRequested = true; home.refreshMine() },
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                ) {
-                    sectionContent()
-                }
+                ) { sectionContent() }
             }
         }
     }
 }
 
 @Composable
-private fun MineOwnerChips(
-    home: HomeFeatureController,
-    includeSecondary: Boolean,
-) {
+private fun MineOwnerChips(home: HomeFeatureController, includeSecondary: Boolean) {
     val state by home.uiState.collectAsStateWithLifecycle()
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -144,15 +135,20 @@ private fun MineOwnerChips(
                 else if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) MineFilterChips(home)
             }
         }
-        if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) {
-            TextButton(onClick = home::openPlaylistMigration) { Text("歌单迁移") }
-        }
-        TextButton(onClick = home::openPlaybackHistory) {
-            Text(
-                text = "播放记录",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Box {
+            IconButton(onClick = { menuExpanded = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("歌单迁移") },
+                    onClick = { menuExpanded = false; home.openPlaylistMigration() },
+                )
+                DropdownMenuItem(
+                    text = { Text("播放记录") },
+                    onClick = { menuExpanded = false; home.openPlaybackHistory() },
+                )
+            }
         }
     }
 }
@@ -184,10 +180,7 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     val fileActions = LocalLocalPlaylistFileActions.current
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     var initialPlaylistLoadPending by rememberSaveable {
-        mutableStateOf(
-            state.isLoading ||
-                (state.minePlaylistSections.isEmpty() && state.mineFavoritePlaylistSections.isEmpty()),
-        )
+        mutableStateOf(state.isLoading || (state.minePlaylistSections.isEmpty() && state.mineFavoritePlaylistSections.isEmpty()))
     }
     var initialPlaylistLoadStarted by rememberSaveable { mutableStateOf(false) }
     var createLocal by remember { mutableStateOf(false) }
@@ -218,26 +211,19 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
                 range = ListeningTimeRange.All,
                 limit = 500,
             )
-        }.onSuccess { stats ->
-            playlistHistoryStats = stats
-        }
+        }.onSuccess { stats -> playlistHistoryStats = stats }
     }
 
     LaunchedEffect(state.homeSection, state.mineSection, state.isLoading) {
         if (!initialPlaylistLoadPending || state.homeSection != HomeSection.Mine ||
             (state.mineSection != MineSection.Playlists && state.mineSection != MineSection.Songs)
-        ) {
-            return@LaunchedEffect
-        }
+        ) return@LaunchedEffect
         if (state.isLoading) {
             initialPlaylistLoadStarted = true
             return@LaunchedEffect
         }
         if (!initialPlaylistLoadStarted) return@LaunchedEffect
-
-        if (state.playlistFilter != PlaylistFilter.Local) {
-            listState.scrollToItem(0)
-        }
+        if (state.playlistFilter != PlaylistFilter.Local) listState.scrollToItem(0)
         initialPlaylistLoadPending = false
     }
 
@@ -248,20 +234,16 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (state.playlistFilter == PlaylistFilter.UserPlaylists) {
-                if (frequent.isNotEmpty()) {
-                    item("mine-frequent") {
-                        Text("我的常听", style = MaterialTheme.typography.titleMedium)
-                    }
-                    addProviderPlaylistGridRows(
-                        playlists = frequent,
-                        columns = gridColumns,
-                        spacing = gridSpacing,
-                        keyPrefix = "mine-frequent-grid",
-                        onClick = { home.openPlaylist(it, home.categoryForMinePlaylist(it)) },
-                        maxRows = 2,
-                    )
-                }
+            if (state.playlistFilter == PlaylistFilter.UserPlaylists && frequent.isNotEmpty()) {
+                item("mine-frequent") { Text("我的常听", style = MaterialTheme.typography.titleMedium) }
+                addProviderPlaylistGridRows(
+                    playlists = frequent,
+                    columns = gridColumns,
+                    spacing = gridSpacing,
+                    keyPrefix = "mine-frequent-grid",
+                    onClick = { home.openPlaylist(it, home.categoryForMinePlaylist(it)) },
+                    maxRows = 2,
+                )
             }
             if (state.playlistFilter == PlaylistFilter.Local) {
                 item("local-header") {
@@ -392,10 +374,7 @@ private fun MineOwnerMediaItems(home: HomeFeatureController, type: ProviderConte
 
 private fun mineKey(playlist: ProviderPlaylist) = "${playlist.providerId}::${playlist.id}"
 
-private fun mineHistoryStat(
-    playlist: ProviderPlaylist,
-    stats: List<ListeningResourceStat>,
-): ListeningResourceStat? {
+private fun mineHistoryStat(playlist: ProviderPlaylist, stats: List<ListeningResourceStat>): ListeningResourceStat? {
     stats.firstOrNull { stat ->
         stat.resource.sourceId == playlist.providerId && stat.resource.sourceResourceId == playlist.id
     }?.let { return it }
@@ -404,19 +383,14 @@ private fun mineHistoryStat(
     return stats.filter { it.resource.sourceResourceId == playlist.id }.singleOrNull()
 }
 
-private fun mineSortPlaylists(
-    playlists: List<ProviderPlaylist>,
-    stats: List<ListeningResourceStat>,
-) = playlists.withIndex().sortedWith(
-    compareByDescending<IndexedValue<ProviderPlaylist>> {
-        mineHistoryStat(it.value, stats)?.lastPlayedAtMillis ?: 0L
-    }.thenBy { it.index },
-).map { it.value }
+private fun mineSortPlaylists(playlists: List<ProviderPlaylist>, stats: List<ListeningResourceStat>) =
+    playlists.withIndex().sortedWith(
+        compareByDescending<IndexedValue<ProviderPlaylist>> {
+            mineHistoryStat(it.value, stats)?.lastPlayedAtMillis ?: 0L
+        }.thenBy { it.index },
+    ).map { it.value }
 
-private fun mineFrequentPlaylists(
-    state: HomeFeatureUiState,
-    stats: List<ListeningResourceStat>,
-): List<ProviderPlaylist> =
+private fun mineFrequentPlaylists(state: HomeFeatureUiState, stats: List<ListeningResourceStat>): List<ProviderPlaylist> =
     (state.minePlaylistSections + state.mineFavoritePlaylistSections)
         .filterNot { it.isLoginRequired }
         .flatMap { it.playlists }
