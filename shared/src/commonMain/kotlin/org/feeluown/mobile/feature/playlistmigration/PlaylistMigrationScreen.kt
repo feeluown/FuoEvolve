@@ -23,7 +23,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -365,14 +364,7 @@ fun PlaylistMigrationScreen(
                                 progress.detail,
                             )
                             Spacer(Modifier.height(8.dp))
-                            if (progress.indeterminate) {
-                                LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            } else {
-                                LinearWavyProgressIndicator(
-                                    progress = { progress.completed.toFloat() / progress.total.coerceAtLeast(1) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
+                            PlaylistMigrationProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth())
                             Text("离开页面不会丢失进度。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                             OutlinedButton(onClick = { controller.pause(task.id) }, enabled = !busy) { Text("暂停") }
                         }
