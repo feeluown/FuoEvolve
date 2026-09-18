@@ -66,9 +66,9 @@ val LocalReplacementActionPort = staticCompositionLocalOf<ReplacementActionPort>
 }
 
 /**
- * When the app shell owns the floating mini player, legacy Scaffold bottom-bar slots emit no
- * layout. AppShell measures the actual player and reserves its height once for all routes;
- * feature screens must not add their own mini-player padding.
+ * Route scaffolds still declare the mini player as a bottom bar. When the app shell owns the
+ * floating player, those legacy slots intentionally emit no layout so route content can continue
+ * underneath the rounded player card.
  */
 internal val LocalPlaybackMiniPlayerHostedByShell = staticCompositionLocalOf { false }
 
