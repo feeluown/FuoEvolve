@@ -43,7 +43,7 @@ val LocalPlaybackPresentationPort = staticCompositionLocalOf<PlaybackPresentatio
 val LocalPlaybackQueueUiPort = staticCompositionLocalOf<PlaybackQueueUiPort> {
     error("PlaybackQueueUiPort is not provided")
 }
-val LocalPlaybackSleepTimerPort = staticCompositionLocalOf<SleepTimerUiPort> {
+val LocalPlaybackSleepTimerPort = staticCompositionLocalOf<PlaybackSleepTimerPort> {
     error("PlaybackSleepTimerPort is not provided")
 }
 val LocalDownloadActionPort = staticCompositionLocalOf<DownloadActionPort> {
@@ -66,9 +66,9 @@ val LocalReplacementActionPort = staticCompositionLocalOf<ReplacementActionPort>
 }
 
 /**
- * Legacy Scaffold bottom-bar slots are empty while AppShell owns the floating player. AppShell
- * measures the actual player and reserves that height once for every route through AppNavHost.
- * Individual feature screens must not add their own mini-player padding.
+ * When the app shell owns the floating mini player, legacy Scaffold bottom-bar slots emit no
+ * layout. AppShell measures the actual player and reserves its height once for all routes;
+ * feature screens must not add their own mini-player padding.
  */
 internal val LocalPlaybackMiniPlayerHostedByShell = staticCompositionLocalOf { false }
 
@@ -85,7 +85,7 @@ fun ProvideNarrowPlaybackUi(
         null
     }
     val sleepTimerStateFlow = graph.sleepTimer.sleepTimerStateFlow
-    val observedSleepTimer = if (sleepTimerStateFlow != null) {
+    val observedSleepTimerState = if (sleepTimerStateFlow != null) {
         val state by sleepTimerStateFlow.collectAsStateWithLifecycle()
         state
     } else {
@@ -110,9 +110,9 @@ fun ProvideNarrowPlaybackUi(
             }
         }
     } ?: graph.queue
-    val observedSleepTimer = remember(graph.sleepTimer, observedSleepTimer) {
+    val observedSleepTimer = remember(graph.sleepTimer, observedSleepTimerState) {
         object : PlaybackSleepTimerPort by graph.sleepTimer {
-            override val sleepTimerState: SleepTimerState = observedSleepTimer
+            override val sleepTimerState: SleepTimerState = observedSleepTimerState
         }
     }
     val observedReplacement = remember(graph.replacement, observedReplacementCandidateState) {
