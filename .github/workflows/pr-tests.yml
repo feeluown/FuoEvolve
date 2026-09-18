@@ -2,6 +2,12 @@ name: PR Tests
 
 "on":
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
   workflow_dispatch:
     inputs:
       pr_number:
@@ -96,7 +102,8 @@ jobs:
     needs: [context, android]
     if: >-
       needs.context.outputs.internal == 'true' &&
-      (github.event_name == 'pull_request' || needs.context.outputs.package == 'true')
+      ((github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+       (github.event_name == 'workflow_dispatch' && needs.context.outputs.package == 'true'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -187,7 +194,10 @@ jobs:
   desktop-package:
     name: Desktop packages
     needs: [context, desktop]
-    if: github.event_name == 'workflow_dispatch' && needs.context.outputs.package == 'true'
+    if: >-
+      needs.context.outputs.internal == 'true' &&
+      ((github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+       (github.event_name == 'workflow_dispatch' && needs.context.outputs.package == 'true'))
     uses: ./.github/workflows/desktop-packaging.yml
     with:
       checkout_ref: ${{ needs.context.outputs.checkout_ref }}
