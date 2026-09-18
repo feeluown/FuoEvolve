@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -141,9 +143,9 @@ fun PlaylistMigrationScreen(
                 task == null && !choosingSource && !isRouteDetail -> "开始迁移"
                 task == null && choosingSource -> "开始找歌"
                 task?.phase == MigrationPhase.Review -> "下一步 · 选择目标歌单"
-                pickingDestination && chosenDestination != null -> "开始写入"
+                pickingDestination && chosenDestination != null -> "开始迁移"
                 task?.phase == MigrationPhase.Paused && !pickingDestination -> "继续迁移"
-                task?.phase == MigrationPhase.Partial -> "重试失败歌曲"
+                task?.phase == MigrationPhase.Partial -> "重试"
                 else -> null
             }
             if (label != null) {
@@ -186,11 +188,15 @@ fun PlaylistMigrationScreen(
             }
         },
     ) { insets ->
-        LazyColumn(
+        Box(
             modifier = Modifier.fillMaxSize().padding(insets),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentAlignment = Alignment.TopCenter,
         ) {
+            LazyColumn(
+                modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             error?.let { message ->
                 item("error") {
                     MigrationPanel {
@@ -210,10 +216,11 @@ fun PlaylistMigrationScreen(
                 task == null && !choosingSource -> {
                     item("intro") {
                         MigrationPanel {
-                            MigrationHeading("跨平台迁移", "换个平台，继续听", "先找到对应的歌曲，确认匹配后再写入目标歌单。")
+                            MigrationStepRail(activeStep = 0)
+                            MigrationHeading("", "换个地方，继续听", "选歌单，核对歌曲，再迁移。")
                         }
                     }
-                    item("history") { MigrationHeading("", "迁移记录", "退出页面也能从这里继续。") }
+                    item("history") { MigrationHeading("", "迁移记录", null) }
                     if (tasks.isEmpty()) {
                         item("empty") { MigrationPanel { Text("还没有迁移记录", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
                     }
@@ -229,42 +236,44 @@ fun PlaylistMigrationScreen(
                                 Text("${entry.source.providerName} → ${targets.firstOrNull { it.providerId == entry.targetProviderId }?.providerName ?: entry.targetProviderId}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                                 Text(entry.phase.migrationLabel(), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                                 if (entry.phase in setOf(MigrationPhase.Writing, MigrationPhase.Complete, MigrationPhase.Partial)) {
-                                    Text("已添加 ${entry.addedCount} 首 · 跳过 ${entry.skippedCount} 首", style = MaterialTheme.typography.bodySmall)
+                                    Text("已迁移 ${entry.addedCount} 首 · 跳过 ${entry.skippedCount} 首", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
                     }
                 }
                 task == null -> {
-                    item("source-heading") { MigrationHeading("第 1 步 · 选择歌单", "从哪里迁移？", "选择一个来源平台和歌单。") }
-                    item("source-label") { Text("来源平台", style = MaterialTheme.typography.titleSmall) }
+                    item("steps") { MigrationStepRail(activeStep = 0) }
+                    item("source-heading") { MigrationHeading("", "选择歌单", "选择来源、歌单和目标。") }
+                    item("source-label") { Text("来源", style = MaterialTheme.typography.titleSmall) }
                     items(sources, key = { "source:${it.providerId}" }) { source ->
                         MigrationChoice(source.providerName, null, source.providerId == sourceId) {
                             sourceId = source.providerId
                         }
                     }
                     if (sourceId != null) {
-                        item("playlist-label") { Text("选择歌单", style = MaterialTheme.typography.titleSmall) }
+                        item("playlist-label") { Text("歌单", style = MaterialTheme.typography.titleSmall) }
                         items(playlists.filter { it.providerId == sourceId }, key = { "playlist:${it.providerId}:${it.id}" }) { playlist ->
-                            MigrationChoice(playlist.title, playlist.trackCount?.let { "$it 首歌曲" }, playlist.id == sourcePlaylistId) {
+                            MigrationChoice(playlist.title, playlist.trackCount?.let { "$it 首" }, playlist.id == sourcePlaylistId) {
                                 sourcePlaylistId = playlist.id
                             }
                         }
                     }
-                    item("target-heading") { MigrationHeading("第 2 步 · 目标平台", "要迁移到哪里？", "只显示支持添加歌曲的平台。") }
+                    item("target-heading") { Text("目标", style = MaterialTheme.typography.titleSmall) }
                     items(targets.filter { it.providerId != sourceId }, key = { "target:${it.providerId}" }) { target ->
                         MigrationChoice(target.providerName, null, target.providerId == targetId) { targetId = target.providerId }
                     }
                 }
                 task.phase == MigrationPhase.Review -> {
+                    item("steps") { MigrationStepRail(activeStep = 1) }
                     item("review-heading") {
-                        MigrationHeading("第 3 步 · 检查匹配", "确认这些歌曲", "已匹配 ${task.entries.count { it.status == MigrationTrackStatus.Matched }} 首 · 待处理 ${task.unresolvedCount} 首")
+                        MigrationHeading("", "核对歌曲", "已匹配 ${task.entries.count { it.status == MigrationTrackStatus.Matched }} · 待处理 ${task.unresolvedCount}")
                     }
                     if (task.unresolvedCount > 0) {
                         item("unresolved") {
                             MigrationPanel {
-                                Text("请调整未匹配的歌曲，或者明确跳过。", style = MaterialTheme.typography.bodyMedium)
-                                OutlinedButton(onClick = { controller.skipUnresolved(task.id) }, enabled = !busy) { Text("跳过所有待处理歌曲") }
+                                Text("还有待处理歌曲", style = MaterialTheme.typography.bodyMedium)
+                                OutlinedButton(onClick = { controller.skipUnresolved(task.id) }, enabled = !busy) { Text("全部跳过") }
                             }
                         }
                     }
@@ -296,7 +305,7 @@ fun PlaylistMigrationScreen(
                                     }
                                     OutlinedTextField(
                                         value = query, onValueChange = { query = it },
-                                        label = { Text("搜索其他歌曲") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                                        label = { Text("搜索歌曲") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                                     )
                                     OutlinedButton(enabled = query.isNotBlank() && !busy, onClick = {
                                         searchedPosition = entry.position
@@ -308,7 +317,7 @@ fun PlaylistMigrationScreen(
                                             selectedPosition = null
                                         }) { Text("${alternative.title} · ${alternative.artists}", maxLines = 2) }
                                     }
-                                    TextButton(onClick = { controller.skip(task.id, entry.position); selectedPosition = null }) { Text("跳过这首") }
+                                    TextButton(onClick = { controller.skip(task.id, entry.position); selectedPosition = null }) { Text("跳过") }
                                 } else {
                                     Text("点击切换匹配", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -318,7 +327,8 @@ fun PlaylistMigrationScreen(
                 }
                 pickingDestination -> {
                     item("destination-heading") {
-                        MigrationHeading("第 4 步 · 保存歌单", "保存到哪里？", "选好目标歌单后，再确认开始写入。")
+                        MigrationStepRail(activeStep = 2)
+                        MigrationHeading("", "选择目标歌单", null)
                     }
                     if (task.targetProviderId in creatableProviderIds && !task.creationAttempted && task.phase == MigrationPhase.Destination) {
                         item("create") {
@@ -326,59 +336,74 @@ fun PlaylistMigrationScreen(
                                 Text("新建歌单", style = MaterialTheme.typography.titleMedium)
                                 OutlinedTextField(
                                     value = destinationName, onValueChange = { destinationName = it },
-                                    label = { Text("歌单名称") }, placeholder = { Text(task.source.title) },
+                                    label = { Text("名称") }, placeholder = { Text(task.source.title) },
                                     modifier = Modifier.fillMaxWidth(), singleLine = true,
                                 )
                                 Button(enabled = !busy, onClick = {
                                     onPrepareBackgroundWork()
                                     controller.createDestination(task.id, destinationName.ifBlank { task.source.title })
-                                }) { Text("创建并开始写入") }
+                                }) { Text("新建并迁移") }
                             }
                         }
                     } else if (task.creationAttempted) {
-                        item("creation-warning") { MigrationPanel { Text("创建结果待确认，请刷新并选择已创建的歌单，避免重复创建。") } }
+                        item("creation-warning") { MigrationPanel { Text("请先确认创建结果，再选择歌单。") } }
                     } else {
-                        item("creation-unsupported") { MigrationPanel { Text("该平台暂不支持应用内创建，请先在对应平台创建歌单，再回来刷新。") } }
+                        item("creation-unsupported") { MigrationPanel { Text("暂不支持新建，请先创建，再刷新。") } }
                     }
                     item("existing-head") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("选择已有歌单", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                            Text("已有歌单", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                             TextButton(onClick = { controller.loadPlaylists(task.targetProviderId) }, enabled = !busy) { Text("刷新") }
                         }
                     }
                     items(playlists.filter { it.providerId == task.targetProviderId && it.isOwnedByCurrentUser != false },
                         key = { "destination:${it.providerId}:${it.id}" }) { playlist ->
-                        MigrationChoice(playlist.title, playlist.trackCount?.let { "$it 首歌曲" }, playlist.id == destinationPlaylistId) {
+                        MigrationChoice(playlist.title, playlist.trackCount?.let { "$it 首" }, playlist.id == destinationPlaylistId) {
                             destinationPlaylistId = playlist.id
                         }
                     }
-                    item("destination-tip") { Text("找不到歌单？请先在目标平台创建，然后点击刷新。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+                    item("destination-tip") { Text("找不到？先创建后刷新。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
                 }
                 task.phase in setOf(MigrationPhase.Loading, MigrationPhase.Matching, MigrationPhase.Writing) -> {
                     item("progress") {
                         val progress = task.backgroundProgress()
                         MigrationPanel {
+                            MigrationStepRail(activeStep = if (task.phase == MigrationPhase.Writing) 2 else 1)
                             MigrationHeading(
-                                if (task.phase == MigrationPhase.Writing) "第 5 步 · 写入歌曲" else "正在转换",
-                                progress.title,
-                                progress.detail,
+                                "",
+                                if (task.phase == MigrationPhase.Writing) "正在迁移" else "正在找歌",
+                                task.destination?.title ?: task.source.title,
                             )
-                            Spacer(Modifier.height(8.dp))
                             PlaylistMigrationProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth())
-                            Text("离开页面不会丢失进度。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                            Text(progress.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                            Text("自动保存", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                             OutlinedButton(onClick = { controller.pause(task.id) }, enabled = !busy) { Text("暂停") }
+                        }
+                    }
+                }
+                task.phase == MigrationPhase.Paused -> {
+                    item("paused") {
+                        val progress = task.backgroundProgress()
+                        MigrationPanel {
+                            MigrationStepRail(activeStep = if (task.resumePhase == MigrationPhase.Writing) 2 else 1)
+                            MigrationHeading("", "已暂停", task.destination?.title ?: task.source.title)
+                            PlaylistMigrationProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth())
+                            Text(progress.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                            Text("自动保存", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
                 else -> {
                     item("result") {
                         MigrationPanel {
-                            MigrationHeading("迁移记录", task.phase.migrationLabel(), task.destination?.title ?: task.source.title)
-                            Text("已添加 ${task.addedCount} 首 · 已跳过 ${task.skippedCount} 首", style = MaterialTheme.typography.bodyLarge)
+                            MigrationStepRail(activeStep = 2)
+                            MigrationHeading("", "迁移结果", task.destination?.title ?: task.source.title)
+                            Text(task.phase.migrationLabel(), style = MaterialTheme.typography.headlineSmall)
+                            Text("已迁移 ${task.addedCount} · 已跳过 ${task.skippedCount}", style = MaterialTheme.typography.bodyLarge)
                             val failed = task.entries.count { it.status == MigrationTrackStatus.Failed }
                             val uncertain = task.entries.count { it.status == MigrationTrackStatus.Uncertain }
                             if (failed > 0 || uncertain > 0) {
-                                Text("失败 $failed 首 · 待核对 $uncertain 首", color = MaterialTheme.colorScheme.error)
+                                Text("失败 $failed · 待核对 $uncertain", color = MaterialTheme.colorScheme.error)
                             }
                             task.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         }
@@ -396,6 +421,46 @@ fun PlaylistMigrationScreen(
                 }
             }
             item("end") { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+}
+
+@Composable
+private fun MigrationStepRail(activeStep: Int) {
+    val steps = listOf("选歌单", "核对歌曲", "迁移歌单")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        steps.forEachIndexed { index, label ->
+            Surface(
+                color = if (index == activeStep) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                contentColor = if (index == activeStep) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                shape = MaterialTheme.shapes.large,
+            ) {
+                Text(
+                    text = "${index + 1} $label",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
+            if (index < steps.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
         }
     }
 }
@@ -447,11 +512,11 @@ private fun MigrationChoice(title: String, subtitle: String?, selected: Boolean,
 private fun MigrationPhase.migrationLabel(): String = when (this) {
     MigrationPhase.Loading -> "正在读取歌单"
     MigrationPhase.Matching -> "正在找歌"
-    MigrationPhase.Review -> "等待检查匹配"
+    MigrationPhase.Review -> "待核对"
     MigrationPhase.Destination -> "等待选择目标歌单"
-    MigrationPhase.Writing -> "正在写入歌曲"
-    MigrationPhase.Complete -> "迁移完成"
-    MigrationPhase.Partial -> "部分歌曲未成功"
+    MigrationPhase.Writing -> "正在迁移"
+    MigrationPhase.Complete -> "已完成"
+    MigrationPhase.Partial -> "部分完成"
     MigrationPhase.Paused -> "已暂停 · 可继续"
 }
 
@@ -461,8 +526,8 @@ private fun MigrationTrackStatus.migrationLabel(): String = when (this) {
     MigrationTrackStatus.NeedsReview -> "待确认"
     MigrationTrackStatus.Missing -> "未找到"
     MigrationTrackStatus.Skipped -> "已跳过"
-    MigrationTrackStatus.Adding -> "正在添加"
-    MigrationTrackStatus.Added -> "已添加"
-    MigrationTrackStatus.Failed -> "添加失败"
+    MigrationTrackStatus.Adding -> "正在迁移"
+    MigrationTrackStatus.Added -> "已迁移"
+    MigrationTrackStatus.Failed -> "迁移失败"
     MigrationTrackStatus.Uncertain -> "待核对"
 }

@@ -161,7 +161,7 @@ class PlaylistMigrationCoordinator(
         val page = provider.loadPage(task.source, task.nextOffset)
         require(!page.hasMore || page.nextOffset > task.nextOffset) { "歌单分页没有前进" }
         val newEntries = page.tracks.mapIndexed { index, track ->
-            require(track.providerId == task.source.providerId) { "来源歌曲平台不一致" }
+            require(track.providerId == task.source.providerId) { "来源歌曲不一致" }
             MigrationEntry(task.entries.size + index, track)
         }
         return persist(task.copy(
@@ -225,7 +225,7 @@ class PlaylistMigrationCoordinator(
                 changeEntry(inFlight, entry.position) { it.copy(status = MigrationTrackStatus.Added, error = null) }
             } else {
                 changeEntry(inFlight, entry.position) {
-                    it.copy(status = MigrationTrackStatus.Failed, error = "添加失败")
+                    it.copy(status = MigrationTrackStatus.Failed, error = "迁移失败")
                 }
             }
         } catch (cancel: CancellationException) {

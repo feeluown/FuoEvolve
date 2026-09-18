@@ -136,7 +136,7 @@ fun PlaylistMigrationTask.backgroundProgress(
     MigrationPhase.Loading -> PlaylistMigrationBackgroundProgress(
         taskId = id,
         stage = PlaylistMigrationBackgroundStage.Conversion,
-        title = "正在转换 $sourceTitle",
+        title = "正在找歌 $sourceTitle",
         detail = "正在读取歌曲 · 已读取 ${entries.size} 首",
         completed = 0,
         total = 0,
@@ -149,7 +149,7 @@ fun PlaylistMigrationTask.backgroundProgress(
         PlaylistMigrationBackgroundProgress(
             taskId = id,
             stage = PlaylistMigrationBackgroundStage.Conversion,
-            title = "正在转换 $sourceTitle",
+            title = "正在找歌 $sourceTitle",
             detail = "正在匹配歌曲 · $completedCount/${entries.size}",
             completed = completedCount,
             total = entries.size.coerceAtLeast(1),
@@ -161,11 +161,11 @@ fun PlaylistMigrationTask.backgroundProgress(
     MigrationPhase.Review -> PlaylistMigrationBackgroundProgress(
         taskId = id,
         stage = PlaylistMigrationBackgroundStage.Conversion,
-        title = "转换完成，等待确认",
+        title = "找歌完成，等待确认",
         detail = if (unresolvedCount > 0) {
             "有 $unresolvedCount 首需要确认，点击检查匹配"
         } else {
-            "请确认匹配结果后再写入目标歌单"
+            "请确认匹配结果后再迁移到目标歌单"
         },
         completed = entries.size,
         total = entries.size.coerceAtLeast(1),
@@ -176,7 +176,7 @@ fun PlaylistMigrationTask.backgroundProgress(
     MigrationPhase.Destination -> PlaylistMigrationBackgroundProgress(
         taskId = id,
         stage = PlaylistMigrationBackgroundStage.Conversion,
-        title = "转换结果已确认",
+        title = "匹配结果已确认",
         detail = "请选择目标歌单",
         completed = entries.size,
         total = entries.size.coerceAtLeast(1),
@@ -194,8 +194,8 @@ fun PlaylistMigrationTask.backgroundProgress(
         PlaylistMigrationBackgroundProgress(
             taskId = id,
             stage = PlaylistMigrationBackgroundStage.Writing,
-            title = "正在写入目标歌单",
-            detail = "已写入 $addedCount / ${writable.size}",
+            title = "正在迁移 ${destination?.title ?: "歌单"}",
+            detail = "已迁移 $addedCount / ${writable.size}",
             completed = completedCount,
             total = writable.size.coerceAtLeast(1),
             indeterminate = writable.isEmpty(),
@@ -206,8 +206,8 @@ fun PlaylistMigrationTask.backgroundProgress(
     MigrationPhase.Complete -> PlaylistMigrationBackgroundProgress(
         taskId = id,
         stage = PlaylistMigrationBackgroundStage.Writing,
-        title = "目标歌单写入完成",
-        detail = "已写入 $addedCount 首${if (skippedCount > 0) " · 跳过 $skippedCount 首" else ""}，点击查看结果",
+        title = "迁移完成",
+        detail = "已迁移 $addedCount 首${if (skippedCount > 0) " · 跳过 $skippedCount 首" else ""}，点击查看结果",
         completed = entries.count { it.selected != null && it.status != MigrationTrackStatus.Skipped },
         total = entries.count { it.selected != null && it.status != MigrationTrackStatus.Skipped }.coerceAtLeast(1),
         indeterminate = false,
@@ -219,8 +219,8 @@ fun PlaylistMigrationTask.backgroundProgress(
         PlaylistMigrationBackgroundProgress(
             taskId = id,
             stage = PlaylistMigrationBackgroundStage.Writing,
-            title = "目标歌单写入需要处理",
-            detail = "已写入 $addedCount 首 · $failedCount 首待处理，点击查看结果",
+            title = "迁移需要处理",
+            detail = "已迁移 $addedCount 首 · $failedCount 首待处理，点击查看结果",
             completed = writable.count {
                 it.status == MigrationTrackStatus.Added ||
                     it.status == MigrationTrackStatus.Failed ||
@@ -237,18 +237,31 @@ fun PlaylistMigrationTask.backgroundProgress(
             MigrationPhase.Writing -> PlaylistMigrationBackgroundStage.Writing
             else -> expectedStage ?: PlaylistMigrationBackgroundStage.Conversion
         }
+        val writable = entries.filter { it.selected != null && it.status != MigrationTrackStatus.Skipped }
+        val completed = when (stage) {
+            PlaylistMigrationBackgroundStage.Conversion -> entries.count { it.status != MigrationTrackStatus.Pending }
+            PlaylistMigrationBackgroundStage.Writing -> writable.count {
+                it.status == MigrationTrackStatus.Added ||
+                    it.status == MigrationTrackStatus.Failed ||
+                    it.status == MigrationTrackStatus.Uncertain
+            }
+        }
+        val total = when (stage) {
+            PlaylistMigrationBackgroundStage.Conversion -> entries.size
+            PlaylistMigrationBackgroundStage.Writing -> writable.size
+        }
         PlaylistMigrationBackgroundProgress(
             taskId = id,
             stage = stage,
-            title = if (stage == PlaylistMigrationBackgroundStage.Writing) "目标歌单写入已暂停" else "歌曲转换已暂停",
-            detail = if (stage == PlaylistMigrationBackgroundStage.Writing) {
-                "已写入 $addedCount 首，点击查看"
+            title = "迁移已暂停",
+            detail = if (total > 0) {
+                if (stage == PlaylistMigrationBackgroundStage.Writing) "已迁移 $addedCount / $total" else "已找到 $completed / $total"
             } else {
-                "已保存转换进度，点击查看"
+                "自动保存"
             },
-            completed = 0,
-            total = 0,
-            indeterminate = true,
+            completed = completed,
+            total = total.coerceAtLeast(1),
+            indeterminate = total == 0,
             terminal = true,
             openTarget = if (stage == PlaylistMigrationBackgroundStage.Writing) {
                 PlaylistMigrationOpenTarget.Result

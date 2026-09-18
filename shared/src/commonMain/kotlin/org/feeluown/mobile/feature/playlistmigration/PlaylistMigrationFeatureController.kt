@@ -97,8 +97,8 @@ class PlaylistMigrationFeatureController(
     }
 
     fun start(source: ProviderPlaylist, targetProviderId: String) = action {
-        require(source.providerId != targetProviderId) { "请选择其他平台" }
-        require(targets.value.any { it.providerId == targetProviderId }) { "该平台暂不支持迁移" }
+        require(source.providerId != targetProviderId) { "请选择其他目标" }
+        require(targets.value.any { it.providerId == targetProviderId }) { "当前目标暂不支持迁移" }
         val task = coordinator.create(
             id = "migration-${Random.nextLong(1, Long.MAX_VALUE).toString(36)}",
             source = source.toMigrationPlaylist(),
@@ -132,7 +132,7 @@ class PlaylistMigrationFeatureController(
         val current = requireNotNull(tasks.value.firstOrNull { it.id == taskId })
         require(registry.providerCapabilities().any {
             it.providerId == current.targetProviderId && it.canCreateMigrationDestination()
-        }) { "该平台暂不支持创建歌单，请先手动创建后选择" }
+        }) { "当前目标暂不支持新建歌单，请先创建后选择" }
         val task = coordinator.createDestination(taskId, name.trim())
         if (task.phase == MigrationPhase.Writing) run(task.id)
     }

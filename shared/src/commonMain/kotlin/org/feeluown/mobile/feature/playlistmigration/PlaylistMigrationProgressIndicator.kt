@@ -3,8 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -26,14 +25,13 @@ internal fun migrationInFlightFraction(completed: Int, total: Int): Float {
     return ((done + InFlightSongFraction) / total).coerceIn(0f, 1f)
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun PlaylistMigrationProgressIndicator(
     progress: PlaylistMigrationBackgroundProgress,
     modifier: Modifier = Modifier,
 ) {
     if (progress.indeterminate) {
-        LinearWavyProgressIndicator(modifier = modifier)
+        LinearProgressIndicator(modifier = modifier)
         return
     }
 
@@ -59,7 +57,7 @@ internal fun PlaylistMigrationProgressIndicator(
         }
     }
     // Even if a theme motion spring overshoots, do not render ahead of a real checkpoint.
-    LinearWavyProgressIndicator(
+    LinearProgressIndicator(
         progress = { animated.value.coerceIn(0f, inFlight) },
         modifier = modifier,
     )

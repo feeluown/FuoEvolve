@@ -44,7 +44,7 @@ class PlaylistMigrationBackgroundSchedulerTest {
         val progress = task.backgroundProgress(PlaylistMigrationBackgroundStage.Conversion)
 
         assertEquals("migration-123", progress.taskId)
-        assertEquals("转换完成，等待确认", progress.title)
+        assertEquals("找歌完成，等待确认", progress.title)
         assertEquals(PlaylistMigrationBackgroundStage.Conversion, progress.stage)
         assertEquals(PlaylistMigrationOpenTarget.Review, progress.openTarget)
         assertTrue(progress.terminal)
@@ -77,7 +77,7 @@ class PlaylistMigrationBackgroundSchedulerTest {
 
         val progress = task.backgroundProgress(PlaylistMigrationBackgroundStage.Writing)
 
-        assertEquals("已写入 1 / 2", progress.detail)
+        assertEquals("已迁移 1 / 2", progress.detail)
         assertEquals(2, progress.completed)
         assertEquals(2, progress.total)
         assertFalse(progress.terminal)

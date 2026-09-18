@@ -62,7 +62,7 @@ class ProviderPlaylistMigrationAdapter(
     }
 
     override suspend fun addTrack(playlist: MigrationPlaylist, track: MigrationTrack): Boolean {
-        require(track.providerId == playlist.providerId) { "只能添加目标平台的歌曲" }
+        require(track.providerId == playlist.providerId) { "歌曲来源与目标不匹配" }
         return try {
             val result = library.addTrackToPlaylist(playlist.toProviderPlaylist(), track.toMusicTrack())
             if (result.success) targetSnapshots[playlist.id]?.add(track.id)
