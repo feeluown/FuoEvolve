@@ -8,13 +8,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -117,63 +116,50 @@ fun ProviderVideoDetailRoute(video: ProviderVideo) {
         val screenModifier = if (state.isFullscreen) {
             Modifier.fillMaxSize().background(Color.Black)
         } else {
-            Modifier.fillMaxSize().padding(paddingValues)
+            Modifier.fillMaxSize().padding(paddingValues).verticalScroll(rememberScrollState())
         }
-        BoxWithConstraints(modifier = screenModifier) {
-            // An HWND embedded by NativeView does not inherit Compose scroll clipping. Keep the
-            // video in a bounded, stationary viewport and scroll only the metadata below it.
-            // Limit its height on wide desktop windows so the details remain reachable.
-            val videoHeight = minOf(
-                maxWidth / providerVideoAspectRatio(playbackState, metadata),
-                maxHeight * 0.62f,
+        Column(
+            modifier = screenModifier,
+            verticalArrangement = if (state.isFullscreen) Arrangement.Center else Arrangement.spacedBy(16.dp),
+        ) {
+            ProviderOwnedVideoFrame(
+                payload = state.payload,
+                controller = platformController,
+                playbackState = playbackState,
+                fullscreen = state.isFullscreen,
+                onToggleFullscreen = owner::toggleFullscreen,
+                modifier = if (state.isFullscreen) {
+                    Modifier.fillMaxWidth().weight(1f)
+                } else {
+                    Modifier.fillMaxWidth().aspectRatio(providerVideoAspectRatio(playbackState, metadata))
+                },
             )
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = if (state.isFullscreen) Arrangement.Center else Arrangement.spacedBy(0.dp),
-            ) {
-                ProviderOwnedVideoFrame(
-                    payload = state.payload,
-                    controller = platformController,
-                    playbackState = playbackState,
-                    fullscreen = state.isFullscreen,
-                    onToggleFullscreen = owner::toggleFullscreen,
-                    modifier = if (state.isFullscreen) {
-                        Modifier.fillMaxWidth().weight(1f)
-                    } else {
-                        Modifier.fillMaxWidth().height(videoHeight)
-                    },
-                )
-                if (!state.isFullscreen) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        state.errorMessage?.let { ProviderContentMessage(it) }
-                        playbackState.errorMessage?.let { ProviderContentMessage(it) }
-                        Text(
-                            text = displayVideo.title.ifBlank { "未命名视频" },
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        if (displayVideo.artists.isNotBlank()) {
-                            Text(displayVideo.artists, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (!state.isFullscreen) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.errorMessage?.let { ProviderContentMessage(it) }
+                    playbackState.errorMessage?.let { ProviderContentMessage(it) }
+                    Text(
+                        text = displayVideo.title.ifBlank { "未命名视频" },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (displayVideo.artists.isNotBlank()) {
+                        Text(displayVideo.artists, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    val meta = metadata
+                    if (meta != null) {
+                        val summary = buildList {
+                            meta.publishedAt?.takeIf { it.isNotBlank() }?.let(::add)
+                            meta.stats.take(3).forEach { stat -> add("${stat.label} ${formatProviderVideoStat(stat.value)}") }
+                        }.joinToString(" · ")
+                        if (summary.isNotBlank()) {
+                            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        val meta = metadata
-                        if (meta != null) {
-                            val summary = buildList {
-                                meta.publishedAt?.takeIf { it.isNotBlank() }?.let(::add)
-                                meta.stats.take(3).forEach { stat -> add("${stat.label} ${formatProviderVideoStat(stat.value)}") }
-                            }.joinToString(" · ")
-                            if (summary.isNotBlank()) {
-                                Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            if (meta.description.isNotBlank()) {
-                                Text(meta.description, style = MaterialTheme.typography.bodyMedium)
-                            }
+                        if (meta.description.isNotBlank()) {
+                            Text(meta.description, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
