@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -63,6 +64,7 @@ import org.feeluown.mobile.DesktopOpenGlRenderContextParameters
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.PlayerStatus
+import org.feeluown.mobile.ProvideDesktopVideoFullscreenHandler
 import org.feeluown.mobile.TrackSourceType
 import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.desktop.DesktopMpvPlaybackEngine
@@ -343,15 +345,20 @@ fun main(args: Array<String>) {
             val openGlRenderContextParameters = remember {
                 nucleusOpenGlRenderContextParameters()
             }
-            DesktopAppHost(
-                nativeMpvApi = mpvNativeApi,
-                audioCaptureApi = audioCaptureApi,
-                externalInputs = appExternalInputs,
-                openGlRenderContextParameters = openGlRenderContextParameters,
-                windowContentWrapper = { content ->
-                    FuoDesktopWindowContent(content)
-                },
-            )
+            val fullscreenHandler = remember(nucleusWindow) {
+                { fullscreen: Boolean -> nucleusWindow.setFullscreen(fullscreen) }
+            }
+            ProvideDesktopVideoFullscreenHandler(fullscreenHandler) {
+                DesktopAppHost(
+                    nativeMpvApi = mpvNativeApi,
+                    audioCaptureApi = audioCaptureApi,
+                    externalInputs = appExternalInputs,
+                    openGlRenderContextParameters = openGlRenderContextParameters,
+                    windowContentWrapper = { content ->
+                        FuoDesktopWindowContent(content)
+                    },
+                )
+            }
         }
     }
 }
@@ -386,6 +393,7 @@ private fun NucleusDecoratedWindowScope.nucleusOpenGlRenderContextParameters():
 private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
     content: @Composable () -> Unit,
 ) {
+    val isFullscreen by nucleusWindow.fullscreenFlow.collectAsState()
     val colorScheme = MaterialTheme.colorScheme
     val titleBarColors = TitleBarColors(
         background = colorScheme.surfaceContainer,
@@ -406,9 +414,11 @@ private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
             metrics = TitleBarMetrics(height = 48.dp),
         ),
     ) {
-        WindowBackground(colorScheme.surface)
+        WindowBackground(if (isFullscreen) Color.Black else colorScheme.surface)
+        // Keep a single WindowScaffold/content slot: switching between separate branches would
+        // dispose NativeView and its controller during fullscreen and restart video playback.
         WindowScaffold(
-            titleBar = {
+            titleBar = if (isFullscreen) null else ({
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -421,7 +431,7 @@ private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
                         renderer = WindowControlsRenderer.Platform,
                     )
                 }
-            },
+            }),
             titleBarPlacement = TitleBarPlacement.Docked,
         ) { contentPadding ->
             Box(

@@ -23,8 +23,12 @@ class WindowsVideoHostNativeImageMetadataTest {
                 """{"returnType":"void*","parameterTypes":["jint","void*","void*","jint","jint","jint","jint","jint","void*","void*","void*","void*"]}""",
             "ShowWindow" to
                 """{"returnType":"jint","parameterTypes":["void*","jint"]}""",
-            "DestroyWindow" to
+            "DestroyWindow / DeleteObject" to
                 """{"returnType":"jint","parameterTypes":["void*"]}""",
+            "CreateRectRgn" to
+                """{"returnType":"void*","parameterTypes":["jint","jint","jint","jint"]}""",
+            "SetWindowRgn" to
+                """{"returnType":"jint","parameterTypes":["void*","void*","jint"]}""",
         )
         requiredSignatures.forEach { (function, signature) ->
             assertTrue(

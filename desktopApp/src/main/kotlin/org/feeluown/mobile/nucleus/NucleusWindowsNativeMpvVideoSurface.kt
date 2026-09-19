@@ -9,15 +9,21 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import dev.nucleusframework.window.tao.NativeView
 import dev.nucleusframework.window.tao.nucleusHwndPlatformView
+import kotlin.math.ceil
+import kotlin.math.floor
 import org.feeluown.mobile.AppLogger
 import org.feeluown.mobile.DesktopMpvNativeApi
 import org.feeluown.mobile.DesktopPlatformVideoController
 import org.feeluown.mobile.DesktopPlatformVideoSurface
 import org.feeluown.mobile.DesktopWindowsNativeVideoController
 import org.feeluown.mobile.VideoPlaybackPayload
+import org.feeluown.mobile.desktop.clipDesktopWindowsVideoHost
 import org.feeluown.mobile.desktop.hideDesktopWindowsVideoHost
 
 /**
@@ -32,6 +38,38 @@ internal fun createNucleusMpvVideoSurface(
     } else {
         NucleusMpvVideoSurface(nativeApi)
     }
+
+/** A Win32 window region, expressed in the original (unclipped) video HWND's local pixels. */
+internal data class WindowsVideoClipRect(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+)
+
+/**
+ * Compose computes the window-clipped bounds, including scroll clipping ancestors. Keep the HWND
+ * at its original position and size and express only the visible intersection as an HRGN.
+ * Round inward so fractional DPI coordinates never leak a pixel into adjacent UI.
+ */
+internal fun windowsVideoClipRect(
+    full: Rect,
+    visible: Rect,
+    widthPx: Int,
+    heightPx: Int,
+): WindowsVideoClipRect {
+    val width = widthPx.coerceAtLeast(0)
+    val height = heightPx.coerceAtLeast(0)
+    val left = ceil(visible.left - full.left).toInt().coerceIn(0, width)
+    val top = ceil(visible.top - full.top).toInt().coerceIn(0, height)
+    val right = floor(visible.right - full.left).toInt().coerceIn(0, width)
+    val bottom = floor(visible.bottom - full.top).toInt().coerceIn(0, height)
+    return if (right > left && bottom > top) {
+        WindowsVideoClipRect(left, top, right, bottom)
+    } else {
+        WindowsVideoClipRect(0, 0, 0, 0)
+    }
+}
 
 private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface {
     @Composable
@@ -77,6 +115,30 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
                     )
                 },
                 modifier = modifier.fillMaxSize(),
+                content = {
+                    // NativeView synchronizes the *unclipped* host geometry in its parent's
+                    // onGloballyPositioned callback. This child callback then applies the region
+                    // without shifting mpv's video origin or changing its output dimensions.
+                    // boundsInWindow(true) intersects every Compose clipping ancestor and the
+                    // client viewport, even during scroll, window resize and fullscreen layout.
+                    Box(
+                        Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
+                            val clip = windowsVideoClipRect(
+                                full = coordinates.boundsInWindow(clipBounds = false),
+                                visible = coordinates.boundsInWindow(clipBounds = true),
+                                widthPx = coordinates.size.width,
+                                heightPx = coordinates.size.height,
+                            )
+                            clipDesktopWindowsVideoHost(
+                                hwnd,
+                                clip.left,
+                                clip.top,
+                                clip.right,
+                                clip.bottom,
+                            )
+                        },
+                    )
+                },
             )
         }
     }
