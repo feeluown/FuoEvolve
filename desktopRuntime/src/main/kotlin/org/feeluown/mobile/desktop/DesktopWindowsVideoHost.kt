@@ -117,6 +117,7 @@ private object WindowsVideoHostBindings {
             ValueLayout.JAVA_INT,
             ValueLayout.JAVA_INT,
             ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
         ),
     )
     private val setWindowRgn: MethodHandle = linker.downcallHandle(
@@ -158,8 +159,7 @@ private object WindowsVideoHostBindings {
     }
 
     fun clipWindow(hwnd: Long, left: Int, top: Int, right: Int, bottom: Int) {
-        // An empty HRGN clips all pixels and hit-testing; unlike SW_HIDE it does not race with
-        // Nucleus's own ShowWindow call during reattachment or disposal.
+        // Empty HRGN clips pixels and hit-testing even if Nucleus shows a freshly attached host.
         val region = createRectRgn.invokeExact(left, top, right, bottom) as MemorySegment
         check(region.address() != 0L) { "CreateRectRgn failed for Windows video host" }
         val result = setWindowRgn.invokeExact(MemorySegment.ofAddress(hwnd), region, 1) as Int
@@ -168,6 +168,10 @@ private object WindowsVideoHostBindings {
             deleteObject.invokeExact(region) as Int
             error("SetWindowRgn failed for Windows video host")
         }
+        showWindow.invokeExact(
+            MemorySegment.ofAddress(hwnd),
+            if (right > left && bottom > top) SW_SHOWNA else SW_HIDE,
+        ) as Int
     }
 
     fun hideWindow(hwnd: Long) {
@@ -184,5 +188,6 @@ private const val WS_CLIPCHILDREN = 0x02000000
 private const val WS_CLIPSIBLINGS = 0x04000000
 private const val SS_BLACKRECT = 0x00000004
 private const val SW_HIDE = 0
+private const val SW_SHOWNA = 8
 private const val WINDOWS_VIDEO_HOST_STYLE =
     WS_POPUP or WS_CLIPCHILDREN or WS_CLIPSIBLINGS or SS_BLACKRECT
