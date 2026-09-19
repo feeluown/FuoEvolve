@@ -418,7 +418,7 @@ private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
         // Keep a single WindowScaffold/content slot: switching between separate branches would
         // dispose NativeView and its controller during fullscreen and restart video playback.
         WindowScaffold(
-            titleBar = if (isFullscreen) null else {
+            titleBar = if (isFullscreen) null else ({
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -431,7 +431,7 @@ private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
                         renderer = WindowControlsRenderer.Platform,
                     )
                 }
-            },
+            }),
             titleBarPlacement = TitleBarPlacement.Docked,
         ) { contentPadding ->
             Box(
