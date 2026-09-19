@@ -218,14 +218,14 @@ fun main(args: Array<String>) {
                 Item(
                     label = "上一首",
                     icon = Icons.Default.SkipPrevious,
-                    isEnabled = trayPlaybackCanToggle(trayPlaybackState),
+                    isEnabled = trayPlaybackState.canGoPrevious,
                 ) {
                     uiScope.launch { trayPlaybackController.previous() }
                 }
                 Item(
                     label = "下一首",
                     icon = Icons.Default.SkipNext,
-                    isEnabled = isPlaybackNextEnabled(trayPlaybackState),
+                    isEnabled = trayPlaybackState.canGoNext,
                 ) {
                     uiScope.launch { trayPlaybackController.next() }
                 }
@@ -459,7 +459,7 @@ internal fun nucleusTrayCanRestoreWindow(
     return when {
         normalized.contains("windows") -> true
         normalized.contains("mac") || normalized.contains("darwin") -> true
-        normalized.contains("linux") -> true
+        normalized.contains("linux") -> linuxStatusNotifierProbe()
         else -> false
     }
 }
