@@ -414,38 +414,32 @@ private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
             metrics = TitleBarMetrics(height = 48.dp),
         ),
     ) {
-        if (isFullscreen) {
-            // A docked title bar reserves space even when its buttons are hidden. Use the entire
-            // native fullscreen client area for video, keeping controls in the Compose scene.
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
-                content()
-            }
-        } else {
-            WindowBackground(colorScheme.surface)
-            WindowScaffold(
-                titleBar = {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .background(colorScheme.surfaceContainer)
-                            .windowDragArea(),
-                    ) {
-                        WindowControls(
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                            renderer = WindowControlsRenderer.Platform,
-                        )
-                    }
-                },
-                titleBarPlacement = TitleBarPlacement.Docked,
-            ) { contentPadding ->
+        WindowBackground(if (isFullscreen) Color.Black else colorScheme.surface)
+        // Keep a single WindowScaffold/content slot: switching between separate branches would
+        // dispose NativeView and its controller during fullscreen and restart video playback.
+        WindowScaffold(
+            titleBar = if (isFullscreen) null else {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(contentPadding),
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .background(colorScheme.surfaceContainer)
+                        .windowDragArea(),
                 ) {
-                    content()
+                    WindowControls(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        renderer = WindowControlsRenderer.Platform,
+                    )
                 }
+            },
+            titleBarPlacement = TitleBarPlacement.Docked,
+        ) { contentPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(contentPadding),
+            ) {
+                content()
             }
         }
     }
