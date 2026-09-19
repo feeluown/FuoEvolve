@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -63,6 +64,7 @@ import org.feeluown.mobile.DesktopOpenGlRenderContextParameters
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.PlaybackPayload
 import org.feeluown.mobile.PlayerStatus
+import org.feeluown.mobile.ProvideDesktopVideoFullscreenHandler
 import org.feeluown.mobile.TrackSourceType
 import org.feeluown.mobile.createDesktopPlaybackResumeStore
 import org.feeluown.mobile.desktop.DesktopMpvPlaybackEngine
@@ -216,14 +218,14 @@ fun main(args: Array<String>) {
                 Item(
                     label = "上一首",
                     icon = Icons.Default.SkipPrevious,
-                    isEnabled = trayPlaybackState.canGoPrevious,
+                    isEnabled = trayPlaybackCanToggle(trayPlaybackState),
                 ) {
                     uiScope.launch { trayPlaybackController.previous() }
                 }
                 Item(
                     label = "下一首",
                     icon = Icons.Default.SkipNext,
-                    isEnabled = trayPlaybackState.canGoNext,
+                    isEnabled = isPlaybackNextEnabled(trayPlaybackState),
                 ) {
                     uiScope.launch { trayPlaybackController.next() }
                 }
@@ -343,15 +345,20 @@ fun main(args: Array<String>) {
             val openGlRenderContextParameters = remember {
                 nucleusOpenGlRenderContextParameters()
             }
-            DesktopAppHost(
-                nativeMpvApi = mpvNativeApi,
-                audioCaptureApi = audioCaptureApi,
-                externalInputs = appExternalInputs,
-                openGlRenderContextParameters = openGlRenderContextParameters,
-                windowContentWrapper = { content ->
-                    FuoDesktopWindowContent(content)
-                },
-            )
+            val fullscreenHandler = remember(nucleusWindow) {
+                { fullscreen: Boolean -> nucleusWindow.setFullscreen(fullscreen) }
+            }
+            ProvideDesktopVideoFullscreenHandler(fullscreenHandler) {
+                DesktopAppHost(
+                    nativeMpvApi = mpvNativeApi,
+                    audioCaptureApi = audioCaptureApi,
+                    externalInputs = appExternalInputs,
+                    openGlRenderContextParameters = openGlRenderContextParameters,
+                    windowContentWrapper = { content ->
+                        FuoDesktopWindowContent(content)
+                    },
+                )
+            }
         }
     }
 }
@@ -386,6 +393,7 @@ private fun NucleusDecoratedWindowScope.nucleusOpenGlRenderContextParameters():
 private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
     content: @Composable () -> Unit,
 ) {
+    val isFullscreen by nucleusWindow.fullscreenFlow.collectAsState()
     val colorScheme = MaterialTheme.colorScheme
     val titleBarColors = TitleBarColors(
         background = colorScheme.surfaceContainer,
@@ -406,30 +414,38 @@ private fun NucleusDecoratedWindowScope.FuoDesktopWindowContent(
             metrics = TitleBarMetrics(height = 48.dp),
         ),
     ) {
-        WindowBackground(colorScheme.surface)
-        WindowScaffold(
-            titleBar = {
+        if (isFullscreen) {
+            // A docked title bar reserves space even when its buttons are hidden. Use the entire
+            // native fullscreen client area for video, keeping controls in the Compose scene.
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                content()
+            }
+        } else {
+            WindowBackground(colorScheme.surface)
+            WindowScaffold(
+                titleBar = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .background(colorScheme.surfaceContainer)
+                            .windowDragArea(),
+                    ) {
+                        WindowControls(
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                            renderer = WindowControlsRenderer.Platform,
+                        )
+                    }
+                },
+                titleBarPlacement = TitleBarPlacement.Docked,
+            ) { contentPadding ->
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .background(colorScheme.surfaceContainer)
-                        .windowDragArea(),
+                        .fillMaxSize()
+                        .padding(contentPadding),
                 ) {
-                    WindowControls(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        renderer = WindowControlsRenderer.Platform,
-                    )
+                    content()
                 }
-            },
-            titleBarPlacement = TitleBarPlacement.Docked,
-        ) { contentPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(contentPadding),
-            ) {
-                content()
             }
         }
     }
@@ -443,7 +459,7 @@ internal fun nucleusTrayCanRestoreWindow(
     return when {
         normalized.contains("windows") -> true
         normalized.contains("mac") || normalized.contains("darwin") -> true
-        normalized.contains("linux") -> linuxStatusNotifierProbe()
+        normalized.contains("linux") -> true
         else -> false
     }
 }
