@@ -23,6 +23,24 @@ fun createDesktopWindowsVideoHostHandle(): Long {
 }
 
 /**
+ * Restricts the host to a window-local rectangle without moving or shrinking its mpv child.
+ * The region must be relative to the *unclipped* host HWND, not to the intersection origin:
+ * moving the host to the visible origin instead would shift or stretch the video image.
+ * The host remains alive while completely clipped, so playback and its controller persist.
+ * Called on the Compose/UI thread, after NativeView has synchronized the host's frame.
+ */
+fun clipDesktopWindowsVideoHost(
+    hwnd: Long,
+    leftPx: Int,
+    topPx: Int,
+    rightPx: Int,
+    bottomPx: Int,
+) {
+    if (!isWindowsDesktopRuntime() || hwnd == 0L) return
+    WindowsVideoHostBindings.clipWindow(hwnd, leftPx, topPx, rightPx, bottomPx)
+}
+
+/**
  * Keeps a temporarily detached host from becoming an orphaned visible top-level window. Nucleus
  * shows it again when the same controller is reattached.
  */
@@ -49,6 +67,7 @@ private object WindowsVideoHostBindings {
     private val arena = Arena.global()
     private val linker = Linker.nativeLinker()
     private val user32 = SymbolLookup.libraryLookup("user32", arena)
+    private val gdi32 = SymbolLookup.libraryLookup("gdi32", arena)
     private val createWindowExA: MethodHandle = linker.downcallHandle(
         user32.find("CreateWindowExA").orElseThrow {
             UnsatisfiedLinkError("CreateWindowExA is unavailable")
@@ -88,6 +107,35 @@ private object WindowsVideoHostBindings {
             ValueLayout.ADDRESS,
         ),
     )
+    private val createRectRgn: MethodHandle = linker.downcallHandle(
+        gdi32.find("CreateRectRgn").orElseThrow {
+            UnsatisfiedLinkError("CreateRectRgn is unavailable")
+        },
+        FunctionDescriptor.of(
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+        ),
+    )
+    private val setWindowRgn: MethodHandle = linker.downcallHandle(
+        user32.find("SetWindowRgn").orElseThrow {
+            UnsatisfiedLinkError("SetWindowRgn is unavailable")
+        },
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+        ),
+    )
+    private val deleteObject: MethodHandle = linker.downcallHandle(
+        gdi32.find("DeleteObject").orElseThrow {
+            UnsatisfiedLinkError("DeleteObject is unavailable")
+        },
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+    )
 
     fun createHostWindow(): Long = Arena.ofConfined().use { strings ->
         val className = strings.allocateFrom("STATIC")
@@ -107,6 +155,19 @@ private object WindowsVideoHostBindings {
             MemorySegment.NULL,
         ) as MemorySegment
         hwnd.address()
+    }
+
+    fun clipWindow(hwnd: Long, left: Int, top: Int, right: Int, bottom: Int) {
+        // An empty HRGN clips all pixels and hit-testing; unlike SW_HIDE it does not race with
+        // Nucleus's own ShowWindow call during reattachment or disposal.
+        val region = createRectRgn.invokeExact(left, top, right, bottom) as MemorySegment
+        check(region.address() != 0L) { "CreateRectRgn failed for Windows video host" }
+        val result = setWindowRgn.invokeExact(MemorySegment.ofAddress(hwnd), region, 1) as Int
+        if (result == 0) {
+            // SetWindowRgn transfers ownership only on success.
+            deleteObject.invokeExact(region) as Int
+            error("SetWindowRgn failed for Windows video host")
+        }
     }
 
     fun hideWindow(hwnd: Long) {
