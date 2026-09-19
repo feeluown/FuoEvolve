@@ -117,7 +117,6 @@ private object WindowsVideoHostBindings {
             ValueLayout.JAVA_INT,
             ValueLayout.JAVA_INT,
             ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_INT,
         ),
     )
     private val setWindowRgn: MethodHandle = linker.downcallHandle(
