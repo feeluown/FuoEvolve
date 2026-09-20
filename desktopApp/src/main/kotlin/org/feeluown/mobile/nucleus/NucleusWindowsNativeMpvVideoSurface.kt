@@ -5,8 +5,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -45,7 +48,9 @@ internal data class WindowsVideoClipRect(
     val top: Int,
     val right: Int,
     val bottom: Int,
-)
+) {
+    val hasVisibleArea: Boolean get() = right > left && bottom > top
+}
 
 /**
  * Compose computes the window-clipped bounds, including scroll clipping ancestors. Keep the HWND
@@ -107,39 +112,63 @@ private class NucleusWindowsNativeMpvVideoSurface : DesktopPlatformVideoSurface 
         }
 
         key(hwnd) {
-            NativeView(
-                factory = {
-                    nucleusHwndPlatformView(
-                        handle = { hwnd },
-                        onDispose = { hideDesktopWindowsVideoHost(hwnd) },
+            var nativeViewAttached by remember { mutableStateOf(false) }
+            // Nucleus maintains a separate top-level DirectComposition overlay whose region is
+            // the FULL NativeView frame, regardless of SetWindowRgn on our video HWND. Removing
+            // the NativeView when fully outside the scroll/window viewport also removes its
+            // overlay region and its offscreen controls/hit targets. Do not dispose the mpv
+            // controller: it owns the HWND and playback continues until the viewport re-enters.
+            Box(
+                modifier = modifier.fillMaxSize().onGloballyPositioned { coordinates ->
+                    val clip = windowsVideoClipRect(
+                        full = coordinates.boundsInWindow(clipBounds = false),
+                        visible = coordinates.boundsInWindow(clipBounds = true),
+                        widthPx = coordinates.size.width,
+                        heightPx = coordinates.size.height,
                     )
+                    if (!clip.hasVisibleArea && nativeViewAttached) {
+                        // Hide before detaching, so the unparented WS_POPUP cannot flash outside
+                        // the app while Nucleus removes its overlay and child HWND attachment.
+                        clipDesktopWindowsVideoHost(hwnd, 0, 0, 0, 0)
+                    }
+                    if (nativeViewAttached != clip.hasVisibleArea) {
+                        nativeViewAttached = clip.hasVisibleArea
+                    }
                 },
-                modifier = modifier.fillMaxSize(),
-                content = {
-                    // NativeView synchronizes the *unclipped* host geometry in its parent's
-                    // onGloballyPositioned callback. This child callback then applies the region
-                    // without shifting mpv's video origin or changing its output dimensions.
-                    // boundsInWindow(true) intersects every Compose clipping ancestor and the
-                    // client viewport, even during scroll, window resize and fullscreen layout.
-                    Box(
-                        Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
-                            val clip = windowsVideoClipRect(
-                                full = coordinates.boundsInWindow(clipBounds = false),
-                                visible = coordinates.boundsInWindow(clipBounds = true),
-                                widthPx = coordinates.size.width,
-                                heightPx = coordinates.size.height,
+            ) {
+                if (nativeViewAttached) {
+                    NativeView(
+                        factory = {
+                            nucleusHwndPlatformView(
+                                handle = { hwnd },
+                                onDispose = { hideDesktopWindowsVideoHost(hwnd) },
                             )
-                            clipDesktopWindowsVideoHost(
-                                hwnd,
-                                clip.left,
-                                clip.top,
-                                clip.right,
-                                clip.bottom,
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        content = {
+                            // NativeView first synchronizes the full host frame. Its child then
+                            // applies the visible HRGN without shifting mpv's video origin.
+                            Box(
+                                Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
+                                    val clip = windowsVideoClipRect(
+                                        full = coordinates.boundsInWindow(clipBounds = false),
+                                        visible = coordinates.boundsInWindow(clipBounds = true),
+                                        widthPx = coordinates.size.width,
+                                        heightPx = coordinates.size.height,
+                                    )
+                                    clipDesktopWindowsVideoHost(
+                                        hwnd,
+                                        clip.left,
+                                        clip.top,
+                                        clip.right,
+                                        clip.bottom,
+                                    )
+                                },
                             )
                         },
                     )
-                },
-            )
+                }
+            }
         }
     }
 }
