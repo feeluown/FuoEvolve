@@ -69,4 +69,33 @@ class WindowsVideoClipRectTest {
             ),
         )
     }
+
+    @Test
+    fun scrollOutAndBackDetachesAndReattachesNativeOverlay() {
+        val full = Rect(0f, -120f, 640f, 240f)
+        val views = listOf(
+            Rect(0f, -120f, 640f, 240f),
+            Rect(0f, 0f, 640f, 240f),
+            Rect.Zero,
+            Rect(0f, 180f, 640f, 240f),
+        )
+        assertEquals(
+            listOf(true, true, false, true),
+            views.map { visible ->
+                windowsVideoClipRect(full, visible, 640, 360).hasVisibleArea
+            },
+        )
+    }
+
+    @Test
+    fun subpixelIntersectionDoesNotLeaveClickableOverlay() {
+        val clip = windowsVideoClipRect(
+            full = Rect(0f, 0f, 100f, 100f),
+            visible = Rect(99.1f, 0f, 99.9f, 100f),
+            widthPx = 100,
+            heightPx = 100,
+        )
+        assertEquals(WindowsVideoClipRect(0, 0, 0, 0), clip)
+        assertEquals(false, clip.hasVisibleArea)
+    }
 }
