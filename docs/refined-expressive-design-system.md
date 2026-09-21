@@ -34,6 +34,22 @@ Fuo Green (`#246B43`) is the brand seed, not a literal control/surface color. Co
 
 Consume `FuoMotion` and `MaterialTheme.motionScheme` for new components. Avoid introducing further hard-coded tweens; keep existing constants only for compatibility until their call sites are migrated. Do not animate large blurred surfaces or start permanent animations in list cells.
 
-## Phase boundaries
+## Implementation phases
 
-Phase 1 introduces/uses design tokens and shared primitives. Home layout, full player composition, platform-specific window architecture and feature flows belong to later phases. Validate on Android and desktop, and with light/dark/dynamic and fixed palettes before marking this change ready for review.
+### Phase 1 — foundation
+
+The shared `MaterialExpressiveTheme` installs the typography and shape tokens. Shared section cards, list rows and empty states use semantic surfaces and group shapes, without changing feature state or navigation.
+
+### Phase 2 — first impressions
+
+- The recommendation and discovery pages now begin with a compact editorial introduction; existing source content, actions, login prompts and pull-to-refresh remain intact.
+- Content modules use predictable 16 dp spacing on compact screens and 24 dp on wide layouts. Song rows rely on spacing rather than a divider after every track.
+- Personalized recommendation tiles use two columns on compact screens, and at most five on wide layouts. Large decorative icon tiles use neutral interactive surfaces so album artwork carries the visual emphasis.
+- The mini player uses the floating surface role, 24 dp rounded container, 12 dp artwork corners and 2 dp elevation. Its measured height and the existing shared-element/lyrics/playback behavior remain intact.
+- Shared full-player controls use a prominent rounded-square play button, Material motion for artwork and progress, muted timing labels, and semantic surfaces for playback parts. Full-player navigation, queue and seek callbacks are unchanged.
+
+Phase 2 deliberately avoids platform-window changes, heavy blur and changes to playback/domain state. Further full-screen layout refinements and other feature pages can be handled separately rather than mixing them with the visual-system foundation.
+
+## Verification
+
+Run the repository PR test workflows on Android, iOS, Linux, macOS and Windows, and inspect compact/wide layouts, large text, light/dark themes, system dynamic color, alternate theme presets and cover-derived player colors before declaring the visual update ready for review.
