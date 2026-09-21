@@ -43,7 +43,7 @@ The shared `MaterialExpressiveTheme` installs the typography and shape tokens. S
 ### Phase 2 — first impressions
 
 - The recommendation and discovery pages now begin with a compact editorial introduction; existing source content, actions, login prompts and pull-to-refresh remain intact.
-- Content modules use predictable 16 dp spacing on compact screens and 24 dp on wide layouts. Song rows rely on spacing rather than a divider after every track.
+- Artwork grids use 16 dp spacing on compact screens and 12 dp on wide layouts. The lazy feed retains an 8 dp item gap so song rows stay compact without a divider after every track; feature headers provide additional separation.
 - Personalized recommendation tiles use two columns on compact screens, and at most five on wide layouts. Large decorative icon tiles use neutral interactive surfaces so album artwork carries the visual emphasis.
 - The mini player uses the floating surface role, 24 dp rounded container, 12 dp artwork corners and 2 dp elevation. Its measured height and the existing shared-element/lyrics/playback behavior remain intact.
 - Shared full-player controls use a prominent rounded-square play button, Material motion for artwork and progress, muted timing labels, and semantic surfaces for playback parts. Full-player navigation, queue and seek callbacks are unchanged.
