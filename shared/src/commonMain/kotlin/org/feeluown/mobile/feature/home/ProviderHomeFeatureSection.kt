@@ -16,7 +16,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,7 +60,9 @@ fun ProviderContentHomeFeatureSection(
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(if (layoutInfo.useWideLayout) FuoSpacing.xl else FuoSpacing.lg),
+                // This gap applies to *every* lazy item, including individual tracks.
+                // Keep songs compact; feature headers and artwork cards provide section rhythm.
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
             ) {
                 if (sections.isEmpty()) {
                     item(key = "empty:${section.name}") { EmptyProviderContentHint(title) }
