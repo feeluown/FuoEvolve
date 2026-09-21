@@ -4,11 +4,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -43,6 +45,19 @@ private var desktopPlatformVideoControllerFactory: () -> DesktopPlatformVideoCon
 }
 
 private var desktopPlatformVideoSurface: DesktopPlatformVideoSurface? = null
+
+// Scoped to the window's composition, so secondary windows cannot toggle the wrong native window.
+private val LocalDesktopVideoFullscreenHandler = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
+
+@Composable
+fun ProvideDesktopVideoFullscreenHandler(
+    onFullscreenChange: (Boolean) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    CompositionLocalProvider(LocalDesktopVideoFullscreenHandler provides onFullscreenChange) {
+        content()
+    }
+}
 
 fun installDesktopPlatformVideoControllerFactory(factory: () -> DesktopPlatformVideoController) {
     desktopPlatformVideoControllerFactory = factory
@@ -132,4 +147,13 @@ actual fun PlatformVideoPlayer(
 actual fun PlatformVideoFullscreenEffect(
     isFullscreen: Boolean,
     isLandscapeVideo: Boolean,
-) = Unit
+) {
+    val setFullscreen = LocalDesktopVideoFullscreenHandler.current
+    DisposableEffect(isFullscreen, setFullscreen) {
+        if (isFullscreen) setFullscreen(true)
+        onDispose {
+            // Also restore the OS window when navigating away while video is fullscreen.
+            if (isFullscreen) setFullscreen(false)
+        }
+    }
+}
