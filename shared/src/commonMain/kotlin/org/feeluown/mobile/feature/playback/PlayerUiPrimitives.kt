@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -57,6 +58,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -86,10 +88,12 @@ fun PlayerSharedCover(
             )
         }
     }
+    val coverSpatialSpec = FuoMotion.slowSpatialSpec<IntOffset>()
+    val coverEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
     Box(modifier = sharedModifier) {
         AnimatedContent(
             targetState = displayedTrack,
-            transitionSpec = { playerCoverTransition(transitionDirection) },
+            transitionSpec = { playerCoverTransition(transitionDirection, coverSpatialSpec, coverEffectsSpec) },
             modifier = Modifier.fillMaxSize(),
             contentKey = { it.coverUrl },
             label = "player cover transition",
@@ -103,19 +107,23 @@ fun PlayerSharedCover(
     }
 }
 
-/** Keep cover changes spatial, with a subtler fade than the player surface transition. */
-private fun playerCoverTransition(direction: TrackChangeDirection): ContentTransform {
+/** Motion tokens are read in composition, then passed into the non-composable transition lambda. */
+private fun playerCoverTransition(
+    direction: TrackChangeDirection,
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform {
     val directionMultiplier = if (direction == TrackChangeDirection.Next) 1 else -1
     return (
         slideInHorizontally(
             initialOffsetX = { width -> width * directionMultiplier },
-            animationSpec = FuoMotion.slowSpatialSpec(),
-        ) + fadeIn(animationSpec = FuoMotion.defaultEffectsSpec())
+            animationSpec = spatialSpec,
+        ) + fadeIn(animationSpec = effectsSpec)
         ) togetherWith (
         slideOutHorizontally(
             targetOffsetX = { width -> -width * directionMultiplier },
-            animationSpec = FuoMotion.slowSpatialSpec(),
-        ) + fadeOut(animationSpec = FuoMotion.defaultEffectsSpec())
+            animationSpec = spatialSpec,
+        ) + fadeOut(animationSpec = effectsSpec)
         )
 }
 
@@ -125,11 +133,7 @@ enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
-fun QueueRepeatModeHeader(
-    isFmQueue: Boolean,
-    repeatMode: RepeatMode,
-    onRepeat: () -> Unit,
-) {
+fun QueueRepeatModeHeader(isFmQueue: Boolean, repeatMode: RepeatMode, onRepeat: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -177,9 +181,7 @@ fun RepeatModeTextButton(repeatMode: RepeatMode, onRepeat: () -> Unit) {
         selected = repeatMode != RepeatMode.OFF,
         onClick = onRepeat,
         label = { Text(repeatMode.label, maxLines = 1) },
-        leadingIcon = {
-            Icon(repeatIcon, contentDescription = null, modifier = Modifier.size(18.dp))
-        },
+        leadingIcon = { Icon(repeatIcon, contentDescription = null, modifier = Modifier.size(18.dp)) },
     )
 }
 
@@ -275,19 +277,11 @@ fun RoundControlButton(
     val buttonSize = if (size < 48.dp) 48.dp else size
     val buttonModifier = Modifier.size(buttonSize)
     if (prominent || selected) {
-        FilledIconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = buttonModifier,
-        ) {
+        FilledIconButton(onClick = onClick, enabled = enabled, modifier = buttonModifier) {
             Icon(imageVector, contentDescription = contentDescription, modifier = Modifier.size(iconSize))
         }
     } else {
-        FilledTonalIconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = buttonModifier,
-        ) {
+        FilledTonalIconButton(onClick = onClick, enabled = enabled, modifier = buttonModifier) {
             Icon(imageVector, contentDescription = contentDescription, modifier = Modifier.size(iconSize))
         }
     }
