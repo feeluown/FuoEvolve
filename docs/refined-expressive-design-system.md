@@ -45,7 +45,7 @@ The shared `MaterialExpressiveTheme` installs the typography and shape tokens. S
 - The recommendation and discovery pages now begin with a compact editorial introduction; existing source content, actions, login prompts and pull-to-refresh remain intact.
 - Artwork grids use 16 dp spacing on compact screens and 12 dp on wide layouts. The lazy feed retains an 8 dp item gap so song rows stay compact without a divider after every track; feature headers provide additional separation.
 - Personalized recommendation tiles use two columns on compact screens, and at most five on wide layouts. Large decorative icon tiles use neutral interactive surfaces so album artwork carries the visual emphasis.
-- The mini player uses the floating surface role, 24 dp rounded container, 12 dp artwork corners and 2 dp elevation. Its measured height and the existing shared-element/lyrics/playback behavior remain intact.
+- The mini player uses the floating surface role, 24 dp rounded container, 12 dp artwork corners and 2 dp elevation. Its measured height, lyrics and playback behavior remain intact; no shared-element transition is used.
 - Shared full-player controls use a prominent rounded-square play button, Material motion for artwork and progress, muted timing labels, and semantic surfaces for playback parts. Full-player navigation, queue and seek callbacks are unchanged.
 
 Phase 2 deliberately avoids platform-window changes, heavy blur and changes to playback/domain state. Further full-screen layout refinements and other feature pages can be handled separately rather than mixing them with the visual-system foundation.
@@ -57,7 +57,8 @@ Phase 2 deliberately avoids platform-window changes, heavy blur and changes to p
 - Mine uses the same section-header/action pattern as recommendation content, with consistent grid gaps and filter chips that remain usable on compact widths.
 - Search uses a lighter top surface, tonal recognition action, capsule history items and compact result rhythm; result rows no longer rely on separators between every item.
 - Full player metadata follows title → artist/album → part/source/quality. Portrait content is bounded on large screens, landscape content is centered, and artwork can grow without making transport controls drift apart.
-- These changes remain presentation-only: playback state, queue semantics, search dispatch, navigation, provider actions and user theme choices are unchanged.
+- These changes remain presentation-only: playback state, queue semantics, search dispatch, provider actions and user theme choices are unchanged.
+- Navigation deliberately uses regular page/overlay transitions only. Hero/shared-element animations and predictive-back gesture previews are removed to reduce cross-screen state coupling and rendering regressions.
 
 Phase 3 still requires visual inspection on real compact and wide surfaces before the PR should leave Draft.
 
