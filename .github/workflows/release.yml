@@ -265,6 +265,82 @@ jobs:
           generate_release_notes: true
           make_latest: true
 
+  publish-aur:
+    name: Publish AUR source package
+    needs:
+      - publish-release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Render source-based AUR package
+        run: bash scripts/render-aur-package.sh "$GITHUB_REF_NAME" "$GITHUB_SHA" build/aur
+
+      - name: Verify AUR package payload
+        run: |
+          set -euo pipefail
+          test -s build/aur/PKGBUILD
+          test -s build/aur/.SRCINFO
+          grep -Fq "pkgver = ${GITHUB_REF_NAME}" build/aur/.SRCINFO
+          grep -Fq "archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" build/aur/PKGBUILD
+          if find build/aur -maxdepth 1 -type f ! -name PKGBUILD ! -name .SRCINFO -print -quit | grep -q .; then
+            echo "::error::AUR payload contains files other than PKGBUILD and .SRCINFO"
+            find build/aur -maxdepth 1 -type f -print
+            exit 1
+          fi
+
+      - name: Configure AUR SSH authentication
+        run: |
+          set -euo pipefail
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY is not configured"
+            exit 1
+          fi
+
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" | sed 's/\r$//' > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan -H aur.archlinux.org >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          cat > "$HOME/.ssh/config" <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+          EOF
+          chmod 600 "$HOME/.ssh/config"
+
+      - name: Publish PKGBUILD to AUR
+        run: |
+          set -euo pipefail
+          aur_dir=build/aur-repo
+          git clone ssh://aur@aur.archlinux.org/fuoevolve.git "$aur_dir"
+
+          cp build/aur/PKGBUILD "$aur_dir/PKGBUILD"
+          cp build/aur/.SRCINFO "$aur_dir/.SRCINFO"
+
+          git -C "$aur_dir" config user.name "FuoEvolve Release Bot"
+          git -C "$aur_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$aur_dir" add PKGBUILD .SRCINFO
+
+          if git -C "$aur_dir" diff --cached --quiet; then
+            echo "AUR package already matches release ${GITHUB_REF_NAME}; nothing to push."
+            exit 0
+          fi
+
+          git -C "$aur_dir" commit -m "Update to ${GITHUB_REF_NAME}"
+          git -C "$aur_dir" push origin HEAD:master
+
   publish-fdroid-pages:
     name: Publish F-Droid repository to Pages
     needs: publish-release
