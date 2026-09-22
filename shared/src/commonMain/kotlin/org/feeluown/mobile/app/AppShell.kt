@@ -1,7 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -38,7 +36,6 @@ private val AppShellHomeSections = listOf(
     HomeSection.Mine to "我的",
 )
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun AppShell(
     appViewModel: FuoAppViewModel,
@@ -56,7 +53,6 @@ internal fun AppShell(
     }.collectAsStateWithLifecycle(
         initialValue = uiGraph.playbackSession.state.value.status == PlaybackSessionStatus.Loading,
     )
-    val resourceHeroCoordinator = remember { ResourceHeroCoordinator() }
     // Measure only the player, not its surrounding navigation-bar inset. Each route's Scaffold
     // already consumes its own system insets, so reserving the inset twice creates a blank gap.
     var miniPlayerHeightPx by remember { mutableIntStateOf(0) }
@@ -119,16 +115,7 @@ internal fun AppShell(
                     coverImageUrl = playback.presentation.currentTrack?.coverUrl,
                     isLoading = isPlaybackLoading,
                 ) {
-                    SharedTransitionLayout(Modifier.fillMaxSize()) {
-                        // NavDisplay may start predictive-pop visuals before onBack is dispatched.
-                        // While the full player owns Back, keep underlying routes out of the shared
-                        // transition scope so their resource-cover Hero cannot render above it.
-                        val appSharedTransitionScope = if (playback.isFullPlayerOpen) null else this
-                        CompositionLocalProvider(
-                            LocalAppSharedTransitionScope provides appSharedTransitionScope,
-                            LocalResourceHeroCoordinator provides resourceHeroCoordinator,
-                        ) {
-                            Row(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxSize()) {
                                 if (showShellNavigationRail) {
                                     Box(Modifier.windowInsetsPadding(shellRailInsets)) {
                                         HomeSectionRail(
