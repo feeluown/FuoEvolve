@@ -272,6 +272,9 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    concurrency:
+      group: fuoevolve-aur-publish
+      cancel-in-progress: false
     permissions:
       contents: read
     env:
@@ -330,6 +333,18 @@ jobs:
           set -euo pipefail
           aur_dir=build/aur-repo
           git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/fuoevolve.git "$aur_dir"
+
+          current_version=""
+          if [ -s "$aur_dir/.SRCINFO" ]; then
+            current_version="$(awk -F' = ' '$1 ~ /^[[:space:]]*pkgver$/ { print $2; exit }' "$aur_dir/.SRCINFO")"
+          fi
+          if [ -n "$current_version" ] && [ "$current_version" != "$GITHUB_REF_NAME" ]; then
+            newest_version="$(printf '%s\n%s\n' "$current_version" "$GITHUB_REF_NAME" | sort -V | tail -n 1)"
+            if [ "$newest_version" = "$current_version" ]; then
+              echo "AUR already has newer version $current_version; skipping older release $GITHUB_REF_NAME."
+              exit 0
+            fi
+          fi
 
           find "$aur_dir" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp build/aur/PKGBUILD "$aur_dir/PKGBUILD"
