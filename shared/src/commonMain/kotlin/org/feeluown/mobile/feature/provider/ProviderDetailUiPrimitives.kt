@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,10 +23,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+/** Shared editorial heading for recommendation, collection and library sections. */
 @Composable
 fun ProviderFeatureHeader(
     feature: ProviderFeature,
@@ -38,51 +39,41 @@ fun ProviderFeatureHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(top = FuoSpacing.lg, bottom = FuoSpacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
+        Column(
             modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
         ) {
             Text(
-                modifier = Modifier.weight(1f, fill = false),
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = providerLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (onPlayAll != null) {
-                PlayAllButton(onClick = onPlayAll)
-            }
-            if (action != null) {
-                TextButton(onClick = action) { Text(actionLabel) }
+            if (providerLabel.isNotBlank()) {
+                Text(
+                    text = providerLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
+        if (onPlayAll != null) PlayAllButton(onClick = onPlayAll)
+        if (action != null) TextButton(onClick = action) { Text(actionLabel) }
     }
 }
 
 @Composable
 fun PlayAllButton(onClick: () -> Unit, enabled: Boolean = true) {
     TextButton(onClick = onClick, enabled = enabled) {
-        Icon(
-            Icons.Filled.PlayArrow,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.size(4.dp))
+        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(FuoSpacing.xs))
         Text("播放全部")
     }
 }
@@ -94,16 +85,13 @@ fun ShareTextButton(payload: SharePayload?) {
         onClick = { if (payload != null) onShare(payload) },
         enabled = payload != null,
     ) {
-        Icon(
-            Icons.Filled.Share,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.size(4.dp))
+        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(FuoSpacing.xs))
         Text("分享")
     }
 }
 
+/** One detail header for provider playlists, artists, albums and other collection pages. */
 @Composable
 internal fun ProviderDetailHeader(
     track: MusicTrack,
@@ -123,54 +111,52 @@ internal fun ProviderDetailHeader(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                top = if (resolvedHeroKey != null) 24.dp else 8.dp,
-                bottom = 4.dp,
+                top = if (resolvedHeroKey != null) FuoSpacing.xl else FuoSpacing.sm,
+                bottom = FuoSpacing.sm,
             ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
     ) {
         if (stacked) {
             CoverBox(
                 track = track,
-                modifier = Modifier
-                    .size(168.dp)
-                    .fuoNavigationHero(resolvedHeroKey),
+                cornerRadius = 12.dp,
+                modifier = Modifier.size(192.dp).fuoNavigationHero(resolvedHeroKey),
                 placeholder = placeholder,
             )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 CoverBox(
                     track = track,
-                    modifier = Modifier
-                        .size(112.dp)
-                        .fuoNavigationHero(resolvedHeroKey),
+                    cornerRadius = 12.dp,
+                    modifier = Modifier.size(120.dp).fuoNavigationHero(resolvedHeroKey),
                     placeholder = placeholder,
                 )
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
                 ) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -185,111 +171,97 @@ internal fun ProviderDetailHeader(
             }
         }
         if (description.isNotBlank()) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (descriptionExpanded.value) Int.MAX_VALUE else 4,
-                    overflow = TextOverflow.Ellipsis,
-                    onTextLayout = { result ->
-                        if (!descriptionExpanded.value) {
-                            descriptionOverflows.value = result.hasVisualOverflow
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = FuoSurfaceColors.section(MaterialTheme.colorScheme),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                shape = FuoVisualTokens.content,
+                tonalElevation = FuoElevation.content,
+            ) {
+                Column(
+                    modifier = Modifier.padding(FuoSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
+                ) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = if (descriptionExpanded.value) Int.MAX_VALUE else 4,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { result ->
+                            if (!descriptionExpanded.value) descriptionOverflows.value = result.hasVisualOverflow
+                        },
+                    )
+                    if (descriptionOverflows.value || descriptionExpanded.value) {
+                        TextButton(onClick = { descriptionExpanded.value = !descriptionExpanded.value }) {
+                            Text(if (descriptionExpanded.value) "收起简介" else "展开简介")
                         }
-                    },
-                )
-                if (descriptionOverflows.value || descriptionExpanded.value) {
-                    TextButton(
-                        onClick = { descriptionExpanded.value = !descriptionExpanded.value },
-                    ) {
-                        Text(if (descriptionExpanded.value) "收起简介" else "展开简介")
                     }
                 }
             }
         }
         if (action != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-            ) {
+            Box(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 action()
             }
         }
     }
 }
 
-fun ProviderFeature.isPrivateFm(): Boolean {
-    return id.endsWith("_radio")
-}
+fun ProviderFeature.isPrivateFm(): Boolean = id.endsWith("_radio")
 
-fun ProviderFeature.isDailySongs(): Boolean {
-    return id.endsWith("_daily_songs")
-}
+fun ProviderFeature.isDailySongs(): Boolean = id.endsWith("_daily_songs")
 
-fun ProviderFeature.isBilibiliRecommendedVideos(): Boolean {
-    return providerId == "bilibili" && id == "bilibili_recommended_videos"
-}
+fun ProviderFeature.isBilibiliRecommendedVideos(): Boolean =
+    providerId == "bilibili" && id == "bilibili_recommended_videos"
 
-fun ProviderFeature.isBilibiliDynamicVideos(): Boolean {
-    return providerId == "bilibili" && id == "bilibili_dynamic_videos"
-}
+fun ProviderFeature.isBilibiliDynamicVideos(): Boolean =
+    providerId == "bilibili" && id == "bilibili_dynamic_videos"
 
-fun ProviderFeature.isBilibiliWeeklyMustWatch(): Boolean {
-    return providerId == "bilibili" && id.substringBefore('|') == "bilibili_weekly_must_watch"
-}
+fun ProviderFeature.isBilibiliWeeklyMustWatch(): Boolean =
+    providerId == "bilibili" && id.substringBefore('|') == "bilibili_weekly_must_watch"
 
-fun ProviderFeature.isRecommendedNewSongs(): Boolean {
-    return providerId == "netease" && id == "netease_recommended_new_songs"
-}
+fun ProviderFeature.isRecommendedNewSongs(): Boolean =
+    providerId == "netease" && id == "netease_recommended_new_songs"
 
-fun ProviderFeature.toDisplayTrack(): MusicTrack {
-    return MusicTrack(
-        id = id,
-        title = title,
-        artists = providerName,
-        album = "",
-        source = providerId,
-        sourceType = TrackSourceType.Provider,
-        providerName = providerName,
-    )
-}
+fun ProviderFeature.toDisplayTrack(): MusicTrack = MusicTrack(
+    id = id,
+    title = title,
+    artists = providerName,
+    album = "",
+    source = providerId,
+    sourceType = TrackSourceType.Provider,
+    providerName = providerName,
+)
 
-fun ProviderPlaylist.toDisplayTrack(): MusicTrack {
-    return MusicTrack(
-        id = id,
-        title = title,
-        artists = providerName,
-        album = "",
-        source = providerId,
-        sourceType = TrackSourceType.Provider,
-        coverUrl = coverUrl,
-        providerName = providerName,
-        providerUrl = providerUrl,
-    )
-}
+fun ProviderPlaylist.toDisplayTrack(): MusicTrack = MusicTrack(
+    id = id,
+    title = title,
+    artists = providerName,
+    album = "",
+    source = providerId,
+    sourceType = TrackSourceType.Provider,
+    coverUrl = coverUrl,
+    providerName = providerName,
+    providerUrl = providerUrl,
+)
 
-fun ProviderMediaItem.toDisplayTrack(): MusicTrack {
-    return MusicTrack(
-        id = id,
-        title = title,
-        artists = providerName,
-        album = if (type == ProviderMediaItemType.Artist) "歌手" else "专辑",
-        source = providerId,
-        sourceType = TrackSourceType.Provider,
-        coverUrl = coverUrl,
-        providerName = providerName,
-        providerUrl = providerUrl,
-    )
-}
+fun ProviderMediaItem.toDisplayTrack(): MusicTrack = MusicTrack(
+    id = id,
+    title = title,
+    artists = providerName,
+    album = if (type == ProviderMediaItemType.Artist) "歌手" else "专辑",
+    source = providerId,
+    sourceType = TrackSourceType.Provider,
+    coverUrl = coverUrl,
+    providerName = providerName,
+    providerUrl = providerUrl,
+)
 
 @Composable
 fun ProviderLockedSummary(providers: List<ProviderFeature>, onClick: (ProviderFeature) -> Unit) {
     val label = providers.joinToString("、") { it.providerName }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = FuoSpacing.sm),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -301,9 +273,7 @@ fun ProviderLockedSummary(providers: List<ProviderFeature>, onClick: (ProviderFe
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        TextButton(onClick = { providers.firstOrNull()?.let(onClick) }) {
-            Text("登录")
-        }
+        TextButton(onClick = { providers.firstOrNull()?.let(onClick) }) { Text("登录") }
     }
 }
 
