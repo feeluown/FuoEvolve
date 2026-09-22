@@ -43,7 +43,8 @@ if grep -R '@[A-Z_][A-Z_]*@' "$output_dir/PKGBUILD" "$output_dir/.SRCINFO"; then
   echo "AUR package rendering left unresolved placeholders" >&2
   exit 1
 fi
-if grep -Eq 'releases/download/.*(pkg\.tar|\.pacman)|FuoEvolve-.*-linux-x64\.pkg\.tar' "$output_dir/PKGBUILD"; then
+if grep -Eq 'releases/download/.*(pkg\.tar|\.pacman)|FuoEvolve-.*-linux-x64\.pkg\.tar' \
+  "$output_dir/PKGBUILD" "$output_dir/.SRCINFO"; then
   echo "AUR PKGBUILD must build from source, not consume a release binary package" >&2
   exit 1
 fi
