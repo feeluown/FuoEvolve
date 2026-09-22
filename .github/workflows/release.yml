@@ -321,6 +321,7 @@ jobs:
             User aur
             IdentityFile ~/.ssh/aur
             IdentitiesOnly yes
+            BatchMode yes
           EOF
           chmod 600 "$HOME/.ssh/config"
 
@@ -328,14 +329,15 @@ jobs:
         run: |
           set -euo pipefail
           aur_dir=build/aur-repo
-          git clone ssh://aur@aur.archlinux.org/fuoevolve.git "$aur_dir"
+          git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/fuoevolve.git "$aur_dir"
 
+          find "$aur_dir" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp build/aur/PKGBUILD "$aur_dir/PKGBUILD"
           cp build/aur/.SRCINFO "$aur_dir/.SRCINFO"
 
           git -C "$aur_dir" config user.name "FuoEvolve Release Bot"
           git -C "$aur_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$aur_dir" add PKGBUILD .SRCINFO
+          git -C "$aur_dir" add -A
 
           if git -C "$aur_dir" diff --cached --quiet; then
             echo "AUR package already matches release ${GITHUB_REF_NAME}; nothing to push."
