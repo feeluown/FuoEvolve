@@ -47,6 +47,7 @@ build() {
   export DISPLAY=:99
   trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
 
+  local gradle_status=0
   ./gradlew \
     --no-daemon \
     --no-configuration-cache \
@@ -54,10 +55,11 @@ build() {
     --stacktrace \
     -PnativeMarch=compatibility \
     -Pfuoevolve.nucleus.bundleLinuxRuntime=false \
-    :desktopApp:packageGraalvmPacman
+    :desktopApp:packageGraalvmPacman || gradle_status=$?
 
   kill "$xvfb_pid" 2>/dev/null || true
   trap - EXIT
+  return "$gradle_status"
 }
 
 package() {
