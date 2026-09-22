@@ -292,7 +292,8 @@ jobs:
           test -s build/aur/PKGBUILD
           test -s build/aur/.SRCINFO
           grep -Fq "pkgver = ${GITHUB_REF_NAME}" build/aur/.SRCINFO
-          grep -Fq "archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" build/aur/PKGBUILD
+          grep -Fq 'archive/refs/tags/${pkgver}.tar.gz' build/aur/PKGBUILD
+          grep -Fq "archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" build/aur/.SRCINFO
           if find build/aur -maxdepth 1 -type f ! -name PKGBUILD ! -name .SRCINFO -print -quit | grep -q .; then
             echo "::error::AUR payload contains files other than PKGBUILD and .SRCINFO"
             find build/aur -maxdepth 1 -type f -print
