@@ -184,26 +184,15 @@ internal fun ProviderCatalogSettingsExpressive(
                         horizontalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Surface(
-                            shape = MaterialTheme.shapes.large,
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ) {
-                            Box(
-                                modifier = Modifier.size(48.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = (index + 1).toString(),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                        ProviderBrandIcon(providerId = provider.providerId, size = 48.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(provider.providerName, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "优先级 ${index + 1}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        Text(
-                            text = provider.providerName,
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
                         Icon(
                             Icons.Filled.DragHandle,
                             contentDescription = "长按拖动${provider.providerName}",
@@ -296,17 +285,23 @@ internal fun ProviderDetailSettingsExpressive(
             modifier = Modifier.padding(FuoSpacing.xl),
             verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs)) {
-                Text(provider.providerName, style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    expressiveProviderStatusText(enabled, auth),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (enabled) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(FuoSpacing.md),
+            ) {
+                ProviderBrandIcon(providerId = provider.providerId, size = 56.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs)) {
+                    Text(provider.providerName, style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        expressiveProviderStatusText(enabled, auth),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (enabled) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
             TonalToggleButton(
                 checked = enabled,
@@ -342,7 +337,7 @@ internal fun ProviderDetailSettingsExpressive(
         ExpressiveSettingsRow(
             title = if (auth.isLoggedIn) "已登录" else "未登录",
             supportingText = auth.userName.orEmpty().ifBlank { provider.providerName },
-            leadingContent = { Icon(Icons.Filled.ManageAccounts, contentDescription = null) },
+            leadingContent = { ProviderBrandIcon(providerId = provider.providerId, size = 48.dp) },
         )
         if (auth.isLoggedIn) {
             Box(Modifier.fillMaxWidth().padding(horizontal = FuoSpacing.lg, vertical = FuoSpacing.md)) {
