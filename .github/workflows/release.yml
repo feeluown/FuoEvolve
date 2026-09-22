@@ -284,7 +284,10 @@ jobs:
           fetch-depth: 0
 
       - name: Render source-based AUR package
-        run: bash scripts/render-aur-package.sh "$GITHUB_REF_NAME" "$GITHUB_SHA" build/aur
+        run: |
+          set -euo pipefail
+          release_commit="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          bash scripts/render-aur-package.sh "$GITHUB_REF_NAME" "$release_commit" build/aur
 
       - name: Verify AUR package payload
         run: |
