@@ -17,6 +17,31 @@ permissions:
   contents: read
 
 jobs:
+  aur-source-package:
+    name: AUR source package metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Render and verify AUR metadata
+        run: |
+          set -euo pipefail
+          tag="$(git tag --list '[0-9]*' --sort=-v:refname | head -n 1)"
+          test -n "$tag"
+          bash scripts/render-aur-package.sh "$tag" "$GITHUB_SHA" build/aur
+          test -s build/aur/PKGBUILD
+          test -s build/aur/.SRCINFO
+          grep -Fq "archive/refs/tags/${tag}.tar.gz" build/aur/PKGBUILD
+          if grep -Eq 'releases/download/.*(pkg\.tar|\.pacman)|FuoEvolve-.*-linux-x64\.pkg\.tar' build/aur/PKGBUILD; then
+            echo "::error::AUR metadata references a release binary package"
+            exit 1
+          fi
+
   android:
     name: Android
     uses: ./.github/workflows/android-tests.yml
