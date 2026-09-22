@@ -99,19 +99,19 @@ internal fun ProviderDetailHeader(
     subtitle: String,
     description: String,
     placeholder: CoverPlaceholder = CoverPlaceholder.Song,
-    heroKey: ResourceCoverHeroKey? = null,
     stacked: Boolean = false,
     action: (@Composable () -> Unit)? = null,
 ) {
     val descriptionExpanded = remember(description) { mutableStateOf(false) }
     val descriptionOverflows = remember(description) { mutableStateOf(false) }
-    val resolvedHeroKey = heroKey ?: track.detailCoverHeroKey(placeholder)
+    val providerCollectionHeader = track.sourceType == TrackSourceType.Provider &&
+        placeholder in setOf(CoverPlaceholder.Playlist, CoverPlaceholder.Artist, CoverPlaceholder.Album)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                top = if (resolvedHeroKey != null) FuoSpacing.xl else FuoSpacing.sm,
+                top = if (providerCollectionHeader) FuoSpacing.xl else FuoSpacing.sm,
                 bottom = FuoSpacing.sm,
             ),
         verticalArrangement = Arrangement.spacedBy(FuoSpacing.lg),
@@ -120,7 +120,7 @@ internal fun ProviderDetailHeader(
             CoverBox(
                 track = track,
                 cornerRadius = 12.dp,
-                modifier = Modifier.size(192.dp).fuoNavigationHero(resolvedHeroKey),
+                modifier = Modifier.size(192.dp),
                 placeholder = placeholder,
             )
             Column(verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
@@ -147,7 +147,7 @@ internal fun ProviderDetailHeader(
                 CoverBox(
                     track = track,
                     cornerRadius = 12.dp,
-                    modifier = Modifier.size(120.dp).fuoNavigationHero(resolvedHeroKey),
+                    modifier = Modifier.size(120.dp),
                     placeholder = placeholder,
                 )
                 Column(
