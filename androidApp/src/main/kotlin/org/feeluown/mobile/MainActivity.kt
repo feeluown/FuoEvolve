@@ -198,8 +198,7 @@ class MainActivity : ComponentActivity() {
                 pendingLocalPlaylistExport = null
             }
 
-            val pageBackEnabled = appUiState.backStack.size > 1 &&
-                appUiState.backStack.lastOrNull() != AppRoute.Settings
+            val pageBackEnabled = appUiState.backStack.size > 1
             BackHandler(enabled = appShellHandlesBack || pageBackEnabled) {
                 appViewModel.onBack()
             }
@@ -287,8 +286,7 @@ class MainActivity : ComponentActivity() {
             }
 
             BackHandler(
-                enabled = !appShellHandlesBack && !pageBackEnabled &&
-                    appUiState.backStack.lastOrNull() != AppRoute.Settings,
+                enabled = !appShellHandlesBack && !pageBackEnabled,
             ) {
                 finish()
             }
