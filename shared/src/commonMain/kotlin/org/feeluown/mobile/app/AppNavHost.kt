@@ -7,10 +7,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
@@ -18,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
@@ -30,6 +27,7 @@ import androidx.navigation3.scene.SceneInfo
 import androidx.navigation3.scene.SinglePaneSceneStrategy
 import androidx.navigation3.scene.rememberSceneState
 import androidx.navigation3.ui.NavDisplay
+import androidx.navigationevent.compose.rememberNavigationEventState
 
 private fun pageTransition(
     initialOffsetX: (Int) -> Int,
@@ -267,8 +265,13 @@ internal fun AppNavHost(
         },
         onBack = { appViewModel.onBack() },
     )
+    val navigationEventState = rememberNavigationEventState(
+        currentInfo = SceneInfo(sceneState.currentScene),
+        backInfo = sceneState.previousScenes.map { SceneInfo(it) },
+    )
     NavDisplay(
         sceneState = sceneState,
+        navigationEventState = navigationEventState,
         modifier = modifier,
         transitionSpec = { forwardPageTransition(pageSpatialSpec, pageEffectsSpec) },
         popTransitionSpec = { popPageTransition(pageSpatialSpec, pageEffectsSpec) },
