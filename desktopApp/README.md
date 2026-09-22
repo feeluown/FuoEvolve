@@ -56,7 +56,7 @@ CI runs the AppImage and distro-package branches in parallel. DEB, RPM and Pacma
 | Debian/Ubuntu Linux x64 | DEB | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by APT dependencies |
 | Fedora Linux x64 | RPM | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `rpmRequires` |
 | Arch Linux x64 | Pacman/Arch package | JNI bridge/helpers bundled; libmpv, Libsecret, WebKitGTK and audio libraries supplied by `pacmanDepends` |
-| Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 26.04 LTS baseline |
+| Portable Linux x64 | AppImage | Native audio/libmpv/Libsecret/WebKitGTK/TLS closures bundled; built against the Ubuntu 24.04 LTS compatibility baseline |
 
 No desktop artifact bundles a JVM.
 
@@ -86,7 +86,7 @@ Release tags such as `1.2.3` are embedded as the desktop package version and dis
 ## CI and release
 
 - `.github/workflows/desktop-tests.yml` validates shared desktop/runtime tests and native resource staging on Linux, Windows and macOS.
-- `.github/workflows/desktop-packaging.yml` produces the Windows NSIS installer, both macOS DMGs, and Linux AppImage/DEB/RPM/Arch packages. Linux AppImage and distro packages run in parallel on Ubuntu 26.04; DEB, RPM and Arch share one distro-package Native Image compilation.
+- `.github/workflows/desktop-packaging.yml` produces the Windows NSIS installer, both macOS DMGs, and Linux AppImage/DEB/RPM/Arch packages. Linux AppImage and distro packages run in parallel on Ubuntu 24.04; DEB, RPM and Arch share one distro-package Native Image compilation.
 - `master-canary.yml` publishes preview artifacts from `master` after the matching platform test workflow succeeds. iOS remains test-only and does not produce a Canary artifact.
 - `release.yml` publishes the same desktop package matrix alongside Android for release tags and includes SHA-256 checksums.
 
