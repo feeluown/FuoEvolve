@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -57,12 +56,10 @@ import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
 private val MiniPlayerPreviousControlBreakpoint = 420.dp
 
-/** Compact, elevated playback surface; the session and shared cover transition remain authoritative. */
+/** Compact, elevated playback surface; playback state and track-cover motion remain authoritative. */
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 internal fun RuntimeMiniPlayer(
     playbackSession: PlaybackSession,
-    isFullPlayerOpen: Boolean,
     transitionDirection: TrackChangeDirection,
     waveformAnimationDisabled: Boolean,
     onOpenFullPlayer: () -> Unit,
@@ -115,7 +112,6 @@ internal fun RuntimeMiniPlayer(
                         state.currentTrack?.let { track ->
                             RuntimeMiniPlayerCover(
                                 track = track,
-                                heroVisible = !isFullPlayerOpen,
                                 transitionDirection = transitionDirection,
                                 isLoading = isLoadingAudio,
                                 cornerRadius = 12.dp,
@@ -267,10 +263,8 @@ private fun RuntimeMiniPlayerLyricLine(state: PlaybackSessionState) {
 private data class RuntimeMiniPlayerLyricState(val index: Int, val text: String)
 
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 private fun RuntimeMiniPlayerCover(
     track: TrackRef,
-    heroVisible: Boolean,
     transitionDirection: TrackChangeDirection,
     isLoading: Boolean,
     cornerRadius: Dp,
@@ -284,20 +278,9 @@ private fun RuntimeMiniPlayerCover(
             displayedTrack = track
         }
     }
-    val sharedTransitionScope = LocalAppSharedTransitionScope.current
-    val sharedModifier = if (sharedTransitionScope == null) {
-        modifier
-    } else {
-        with(sharedTransitionScope) {
-            modifier.sharedElementWithCallerManagedVisibility(
-                sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = heroVisible,
-            )
-        }
-    }
     val coverSpatialSpec = FuoMotion.slowSpatialSpec<IntOffset>()
     val coverEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
-    Box(modifier = sharedModifier) {
+    Box(modifier = modifier) {
         AnimatedContent(
             targetState = displayedTrack,
             transitionSpec = {
