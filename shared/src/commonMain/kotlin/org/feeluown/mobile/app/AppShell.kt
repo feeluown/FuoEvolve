@@ -203,5 +203,3 @@ internal fun AppShell(
                 }
             }
         }
-    }
-}
