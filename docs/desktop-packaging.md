@@ -92,6 +92,8 @@ The two Linux branches execute in parallel. This restores the separation used by
 
 `master-canary.yml` invokes that workflow for preview builds after desktop tests complete. Android Canary packaging starts independently after Android tests; iOS remains test-only and no Canary application artifact is produced. `release.yml` invokes the same desktop workflow for release tags and publishes all seven desktop assets alongside the Android APK. The release job renames assets with the release tag and publishes `SHA256SUMS.txt`.
 
+Stable release tags also update the `fuoevolve` AUR package after the GitHub Release has been published. The AUR repository contains only `PKGBUILD` and `.SRCINFO`: its `source` points at the GitHub release tag source archive, and `build()` recompiles the desktop Native Image, JNI bridge, and Rust helpers from that source. The CI-produced `.pkg.tar.zst` release artifact is never used as an AUR source. Release automation requires an `AUR_SSH_PRIVATE_KEY` repository secret whose public key is registered with the AUR account allowed to maintain `fuoevolve`.
+
 ## Signing
 
 Desktop release artifacts currently use the same unsigned package output as Canary. Production signing/notarization remains a separate follow-up and does not require reintroducing JVM packaging:
