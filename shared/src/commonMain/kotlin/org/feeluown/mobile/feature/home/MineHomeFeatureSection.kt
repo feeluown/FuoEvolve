@@ -85,7 +85,7 @@ fun MineHomeSection(
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(if (wide) 6.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
         ) {
             MineOwnerChips(home = home, includeSecondary = wide)
             val sectionContent: @Composable () -> Unit = {
@@ -123,14 +123,14 @@ private fun MineOwnerChips(home: HomeFeatureController, includeSecondary: Boolea
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
         ) {
             MineChip(state.mineSection == MineSection.Playlists, { home.setMineSection(MineSection.Playlists) }, "歌单")
             MineChip(state.mineSection == MineSection.Artists, { home.setMineSection(MineSection.Artists) }, "歌手")
             MineChip(state.mineSection == MineSection.Albums, { home.setMineSection(MineSection.Albums) }, "专辑")
             MineChip(state.mineSection == MineSection.LocalMusic, { home.setMineSection(MineSection.LocalMusic) }, "本地")
             if (includeSecondary) {
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(FuoSpacing.md))
                 if (state.mineSection == MineSection.LocalMusic) LocalMusicViewModeTabs()
                 else if (state.mineSection == MineSection.Playlists || state.mineSection == MineSection.Songs) MineFilterChips(home)
             }
@@ -155,13 +155,19 @@ private fun MineOwnerChips(home: HomeFeatureController, includeSecondary: Boolea
 
 @Composable
 private fun MineChip(selected: Boolean, onClick: () -> Unit, label: String) {
-    FilterChip(selected = selected, onClick = onClick, label = { Text(label) }, modifier = Modifier.height(32.dp))
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        modifier = Modifier.height(40.dp),
+    )
 }
 
 @Composable
 private fun MineFilterChips(home: HomeFeatureController) {
-    val filter by home.uiState.collectAsStateWithLifecycle().let { state -> mutableStateOf(state.value.playlistFilter) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val state by home.uiState.collectAsStateWithLifecycle()
+    val filter = state.playlistFilter
+    Row(horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
         MineChip(filter == PlaylistFilter.UserPlaylists, { home.setPlaylistFilter(PlaylistFilter.UserPlaylists) }, "用户")
         MineChip(filter == PlaylistFilter.FavoritePlaylists, { home.setPlaylistFilter(PlaylistFilter.FavoritePlaylists) }, "收藏")
         MineChip(filter == PlaylistFilter.Local, { home.setPlaylistFilter(PlaylistFilter.Local) }, "本地")
@@ -176,7 +182,7 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
     val catalog by graph.providerCatalog.uiState.collectAsStateWithLifecycle()
     val layoutInfo = LocalAppLayoutInfo.current
     val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
-    val gridSpacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    val gridSpacing = if (layoutInfo.useWideLayout) FuoSpacing.md else FuoSpacing.lg
     val fileActions = LocalLocalPlaylistFileActions.current
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     var initialPlaylistLoadPending by rememberSaveable {
@@ -202,8 +208,7 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
         it.category == ProviderFeatureCategory.Mine && it.contentType == ProviderContentType.Songs && it.providerId in selectedMineIds
     }
 
-    // The legacy settings map is kept as a downgrade-compatible shadow only. It is a refresh signal
-    // here; ordering/ranking data is read exclusively from the new listening-history repository.
+    // Legacy settings remain a downgrade-compatible shadow; listening history owns ranking data.
     LaunchedEffect(state.minePlaylistSections, state.mineFavoritePlaylistSections, state.playlistPlaybackStats) {
         runCatching {
             graph.listeningHistory.topResources(
@@ -227,15 +232,21 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
         initialPlaylistLoadPending = false
     }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
         if (showFilter) MineFilterChips(home)
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
         ) {
             if (state.playlistFilter == PlaylistFilter.UserPlaylists && frequent.isNotEmpty()) {
-                item("mine-frequent") { Text("我的常听", style = MaterialTheme.typography.titleMedium) }
+                item("mine-frequent") {
+                    Text(
+                        "我的常听",
+                        modifier = Modifier.padding(top = FuoSpacing.lg, bottom = FuoSpacing.sm),
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                }
                 addProviderPlaylistGridRows(
                     playlists = frequent,
                     columns = gridColumns,
@@ -247,11 +258,17 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
             }
             if (state.playlistFilter == PlaylistFilter.Local) {
                 item("local-header") {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("本地歌单", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("本地歌单", style = MaterialTheme.typography.titleLarge)
                         Row {
                             TextButton(onClick = { createLocal = true }) { Text("新建") }
-                            TextButton(onClick = { fileActions.importFile?.invoke() }, enabled = fileActions.importFile != null) { Text("导入") }
+                            TextButton(onClick = { fileActions.importFile?.invoke() }, enabled = fileActions.importFile != null) {
+                                Text("导入")
+                            }
                         }
                     }
                 }
@@ -268,12 +285,14 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
             }
             visible.forEach { section ->
                 item("head:${section.feature.id}") {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        ProviderFeatureHeader(section.feature)
-                        if (home.creatablePlaylistProviders().any { it.providerId == section.feature.providerId }) {
-                            TextButton(onClick = { createProvider = section.feature.providerId }) { Text("新建") }
-                        }
-                    }
+                    // Keep the secondary action in the shared header so it never competes with
+                    // a full-width heading in an outer Row on narrow devices.
+                    val canCreate = home.creatablePlaylistProviders().any { it.providerId == section.feature.providerId }
+                    ProviderFeatureHeader(
+                        feature = section.feature,
+                        action = if (canCreate) ({ createProvider = section.feature.providerId }) else null,
+                        actionLabel = "新建",
+                    )
                 }
                 val errorMessage = section.errorMessage
                 if (errorMessage != null) item("err:${section.feature.id}") { ProviderContentMessage(errorMessage) }
@@ -287,7 +306,13 @@ private fun MineOwnerPlaylists(home: HomeFeatureController, showFilter: Boolean,
             }
             if (locked.isNotEmpty()) item("mine-locked") { ProviderLockedSummary(locked) { home.openSettings(it.providerId) } }
             if (state.playlistFilter == PlaylistFilter.UserPlaylists && songEntries.isNotEmpty()) {
-                item("mine-songs-head") { Text("我的歌曲", style = MaterialTheme.typography.titleMedium) }
+                item("mine-songs-head") {
+                    Text(
+                        "我的歌曲",
+                        modifier = Modifier.padding(top = FuoSpacing.lg, bottom = FuoSpacing.sm),
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                }
                 addProviderFeatureCoverRows(
                     features = songEntries,
                     columns = gridColumns,
@@ -351,9 +376,9 @@ private fun MineOwnerMediaItems(home: HomeFeatureController, type: ProviderConte
     val state by home.uiState.collectAsStateWithLifecycle()
     val layoutInfo = LocalAppLayoutInfo.current
     val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
-    val gridSpacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    val gridSpacing = if (layoutInfo.useWideLayout) FuoSpacing.md else FuoSpacing.lg
     val sections = state.mineSections.filter { it.feature.contentType == type }
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
         if (sections.isEmpty()) item { EmptyProviderContentHint(title) }
         sections.filterNot { it.isLoginRequired }.forEach { section ->
             item("head:${section.feature.id}") { ProviderFeatureHeader(section.feature) }
