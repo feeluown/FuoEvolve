@@ -39,7 +39,7 @@ find_shared_library() {
 is_base_system_library() {
   local name="$1"
   case "$name" in
-    ld-linux*.so*|ld-*.so*|libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|libutil.so.*|libnss_*.so.*)
+    ld-linux*.so*|ld-*.so*|libc.so.*|libm.so.*|libmvec.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|libutil.so.*|libnss_*.so.*)
       return 0
       ;;
     # Graphics-driver facing libraries must stay matched to the host stack.
