@@ -41,7 +41,13 @@ build() {
   export FUOEVOLVE_COMMIT_SHA='@COMMIT_SHA@'
 
   chmod +x gradlew
-  xvfb-run -a ./gradlew \
+
+  Xvfb :99 -screen 0 1280x1024x24 > "${srcdir}/xvfb.log" 2>&1 &
+  local xvfb_pid=$!
+  export DISPLAY=:99
+  trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+
+  ./gradlew \
     --no-daemon \
     --no-configuration-cache \
     --warning-mode all \
@@ -49,6 +55,9 @@ build() {
     -PnativeMarch=compatibility \
     -Pfuoevolve.nucleus.bundleLinuxRuntime=false \
     :desktopApp:packageGraalvmPacman
+
+  kill "$xvfb_pid" 2>/dev/null || true
+  trap - EXIT
 }
 
 package() {
