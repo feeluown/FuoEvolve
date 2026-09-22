@@ -40,7 +40,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 - **Windows**：支持 SMTC 系统媒体控制，使用 NSIS 安装包发行。
 - **macOS**：支持 Now Playing / Remote Command Center，提供 Apple Silicon 与 Intel DMG。
-- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage、DEB 与 Arch 包；Linux Native Image 固定使用 Ubuntu 26.04 LTS 构建基线。
+- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage、DEB 与 Arch 包；Linux Native Image 固定使用 Ubuntu 24.04 LTS 兼容性 构建基线。
 - **音视频播放**：通过 JNI 直接接入 libmpv，视频优先使用 GPU 渲染并提供软件回退。
 - **托盘生命周期**：关闭窗口后继续播放和下载，可从托盘 / 状态栏图标恢复窗口或退出应用。
 - **安全登录存储**：使用 Windows Credential Manager、macOS Keychain 和 Linux Secret Service / Libsecret。
@@ -65,7 +65,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | Android | **稳定版** | 签名 APK 与 F-Droid 发行 |
 | Windows | **稳定版** | x64 Native Image NSIS 安装包；生产签名后续补充 |
 | macOS | **稳定版** | Apple Silicon / Intel Native Image DMG；签名和公证后续补充 |
-| Linux | **稳定版** | Native Image AppImage、DEB 与 Arch 包；构建基线为 Ubuntu 26.04 LTS |
+| Linux | **稳定版** | Native Image AppImage、DEB 与 Arch 包；构建基线为 Ubuntu 24.04 LTS 兼容性 |
 
 ## 开发
 
