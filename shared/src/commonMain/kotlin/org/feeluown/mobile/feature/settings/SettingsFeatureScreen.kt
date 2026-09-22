@@ -154,7 +154,6 @@ fun SettingsFeatureScreen(
     val authState by providerAuth.uiState.collectAsStateWithLifecycle()
     val credentialBackupActions = LocalProviderCredentialBackupActions.current
     val layoutInfo = LocalAppLayoutInfo.current
-    val predictiveBackPreference = rememberPredictiveBackPreference()
     var backStack by remember { mutableStateOf<List<FeatureSettingsRoute>>(listOf(FeatureSettingsRoute.Main)) }
     var wideSelection by remember { mutableStateOf(FeatureSettingsCategory.Sources) }
 
@@ -223,7 +222,6 @@ fun SettingsFeatureScreen(
                             ThemeSettingsContent(
                                 state = settingsState,
                                 controller = settingsController,
-                                predictiveBackPreference = predictiveBackPreference,
                             )
                         }
                     }
@@ -275,8 +273,8 @@ fun SettingsFeatureScreen(
             }
         },
     )
-    PlatformLegacyBackHandler(
-        enabled = predictiveBackPreference.isSupported && !predictiveBackPreference.enabled,
+    PlatformBackHandler(
+        enabled = true,
         onBack = ::pop,
     )
 }
@@ -1148,7 +1146,6 @@ private fun AppearanceFeatureSettings(
 private fun ThemeSettingsContent(
     state: SettingsFeatureUiState,
     controller: SettingsFeatureController,
-    predictiveBackPreference: PredictiveBackPreference,
 ) {
     val settings = state.settings
     val enabled = !state.isBusy
@@ -1184,17 +1181,6 @@ private fun ThemeSettingsContent(
             enabled = enabled,
             onSelect = controller::setThemeColorSpec,
         )
-    }
-    if (predictiveBackPreference.isSupported) {
-        SettingsGroup(title = "导航") {
-            SettingsToggleRow(
-                title = "预测性返回手势",
-                supportingText = "返回手势过程中预览上一页",
-                checked = predictiveBackPreference.enabled,
-                enabled = enabled,
-                onCheckedChange = predictiveBackPreference.onEnabledChange,
-            )
-        }
     }
     SettingsGroup(title = "封面") {
         SettingsToggleRow(
