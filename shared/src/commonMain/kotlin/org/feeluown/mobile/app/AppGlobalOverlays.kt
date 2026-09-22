@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -28,7 +27,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
     val playback = uiGraph.playback
@@ -150,7 +148,6 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
         // only inside the full-player overlay so the branch follows usable pane space instead of raw
         // device orientation, while the rest of the app keeps the physical orientation signal.
         CompositionLocalProvider(
-            LocalAppSharedTransitionScope provides null,
             LocalAppLayoutInfo provides layoutInfo.copy(isLandscape = layoutInfo.useFullPlayerTwoPane),
         ) {
             Box(
