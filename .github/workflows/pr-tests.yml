@@ -36,7 +36,8 @@ jobs:
           bash scripts/render-aur-package.sh "$tag" "$GITHUB_SHA" build/aur
           test -s build/aur/PKGBUILD
           test -s build/aur/.SRCINFO
-          grep -Fq "archive/refs/tags/${tag}.tar.gz" build/aur/PKGBUILD
+          grep -Fq 'archive/refs/tags/${pkgver}.tar.gz' build/aur/PKGBUILD
+          grep -Fq "archive/refs/tags/${tag}.tar.gz" build/aur/.SRCINFO
           if grep -Eq 'releases/download/.*(pkg\.tar|\.pacman)|FuoEvolve-.*-linux-x64\.pkg\.tar' build/aur/PKGBUILD; then
             echo "::error::AUR metadata references a release binary package"
             exit 1
