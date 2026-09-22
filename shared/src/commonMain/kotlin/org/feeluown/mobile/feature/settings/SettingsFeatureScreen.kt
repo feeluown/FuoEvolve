@@ -274,7 +274,7 @@ fun SettingsFeatureScreen(
         },
     )
     PlatformBackHandler(
-        enabled = true,
+        enabled = backStack.size > 1,
         onBack = ::pop,
     )
 }
