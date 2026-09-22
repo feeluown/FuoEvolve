@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -153,7 +154,10 @@ private fun RuntimeFullPlayerContent(
             Box(modifier = Modifier.fillMaxSize()) {
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .align(Alignment.TopCenter)
+                        .widthIn(max = 1200.dp)
+                        .fillMaxWidth()
+                        .fillMaxHeight()
                         .statusBarsPadding()
                         .navigationBarsPadding()
                         .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 68.dp),
@@ -201,18 +205,11 @@ private fun RuntimeFullPlayerContent(
                                         isLoading = state.status == PlayerStatus.Loading,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .heightIn(max = 260.dp),
+                                            .heightIn(max = 320.dp),
                                     )
                                     RuntimePlayerTitleBlock(
                                         track = currentTrack,
                                         partLabel = currentPlaybackPartLabel(state),
-                                    )
-                                    Text(
-                                        text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                                 RuntimePlayerTransport(playbackSession, state, dense = false)
@@ -234,7 +231,10 @@ private fun RuntimeFullPlayerContent(
             val portraitHorizontalPadding = if (compactPortrait) 16.dp else 20.dp
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .align(Alignment.TopCenter)
+                    .widthIn(max = 640.dp)
+                    .fillMaxWidth()
+                    .fillMaxHeight()
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = portraitHorizontalPadding)
@@ -276,13 +276,6 @@ private fun RuntimeFullPlayerContent(
                 RuntimePlayerTitleBlock(
                     track = currentTrack,
                     partLabel = currentPlaybackPartLabel(state),
-                )
-                Text(
-                    text = currentTrack?.let(::artistAlbumLabel).orEmpty(),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 RuntimePlayerTransport(playbackSession, state, dense = compactPortrait)
             }
@@ -335,23 +328,28 @@ private fun RuntimePlayerTransport(
 ) {
     val presentation = LocalPlaybackPresentationPort.current
     val queue = LocalPlaybackQueueUiPort.current
-    ProgressBlock(
-        state = state,
-        onSeek = presentation::seekTo,
-        waveformAnimationDisabled = presentation.waveformAnimationDisabled,
-    )
-    PlayerControls(
-        state = state,
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        onPrevious = playbackSession::previous,
-        onToggle = playbackSession::toggle,
-        onNext = playbackSession::next,
-        dense = dense,
-        shuffleEnabled = queue.isShuffleEnabled,
-        shuffleAvailable = !queue.isFmQueueActive,
-        onShuffle = queue::toggleShuffle,
-        sleepTimerAction = { RuntimeSleepTimerAction() },
-    )
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
+    ) {
+        ProgressBlock(
+            state = state,
+            onSeek = presentation::seekTo,
+            waveformAnimationDisabled = presentation.waveformAnimationDisabled,
+        )
+        PlayerControls(
+            state = state,
+            modifier = Modifier.fillMaxWidth(),
+            onPrevious = playbackSession::previous,
+            onToggle = playbackSession::toggle,
+            onNext = playbackSession::next,
+            dense = dense,
+            shuffleEnabled = queue.isShuffleEnabled,
+            shuffleAvailable = !queue.isFmQueueActive,
+            onShuffle = queue::toggleShuffle,
+            sleepTimerAction = { RuntimeSleepTimerAction() },
+        )
+    }
 }
 
 @Composable
@@ -387,6 +385,7 @@ private fun RuntimePlayerTitleBlock(
     track: MusicTrack?,
     partLabel: String?,
 ) {
+    val subtitle = track?.let(::artistAlbumLabel).orEmpty()
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -394,9 +393,19 @@ private fun RuntimePlayerTitleBlock(
         Text(
             text = track?.title ?: "未播放",
             style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         partLabel?.let {
             Text(
                 text = it,
