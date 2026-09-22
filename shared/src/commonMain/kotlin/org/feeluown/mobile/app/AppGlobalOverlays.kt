@@ -19,6 +19,11 @@ internal fun AppGlobalOverlays(uiGraph: AppUiGraph) {
     val overlaySpatialSpec = FuoMotion.defaultSpatialSpec<IntOffset>()
     val overlayEffectsSpec = FuoMotion.fastEffectsSpec<Float>()
 
+    PlatformBackHandler(
+        enabled = playback.isFullPlayerOpen && !playback.navigation.isQueueOpen,
+        onBack = playback.navigation::closeFullPlayer,
+    )
+
     AnimatedVisibility(
         visible = playback.isFullPlayerOpen,
         modifier = Modifier.fillMaxSize(),
