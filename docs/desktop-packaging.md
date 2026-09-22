@@ -67,13 +67,13 @@ Desktop self-update is intentionally not implemented yet. These version values a
 
 ## Linux LTS baseline
 
-The Linux Native Image build is pinned to the **latest Ubuntu LTS, currently Ubuntu 26.04 LTS**. Both Linux workflow branches use the explicit `ubuntu-26.04` runner label and verify `VERSION_ID=26.04` before building so the native executable ABI cannot silently drift with `ubuntu-latest`.
+The Linux Native Image build is pinned to **Ubuntu 24.04 LTS as a compatibility baseline**. Both Linux packaging branches use the explicit `ubuntu-24.04` runner label and verify `VERSION_ID=24.04` before building so the native executable ABI and CPU baseline cannot silently drift with `ubuntu-latest` or a newer hosted image.
 
-The AppImage portable closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc and graphics-driver-facing libraries remain host ABI dependencies. WebKitGTK in this closure is required only by provider login.
+The AppImage portable closure includes libmpv, Libsecret client libraries, WebKitGTK subprocess/runtime libraries, GIO TLS support, the audio-capture closure, and their required user-space ELF dependencies. glibc-family libraries, including `libmvec`, and graphics-driver-facing libraries remain host ABI dependencies. WebKitGTK in this closure is required only by provider login.
 
-DEB packages declare the Ubuntu 26.04 runtime packages required by the application, including `libmpv2`, `libsecret-1-0`, `libwebkit2gtk-4.1-0`, ALSA, PipeWire and PulseAudio libraries. RPM packages currently target Fedora package naming through `rpmRequires`, including `mpv-libs`, `libsecret`, `webkit2gtk4.1`, `alsa-lib`, `pipewire-libs` and `pulseaudio-libs`. Arch packages declare their equivalents through `pacmanDepends`.
+DEB packages declare the Ubuntu 24.04 runtime packages required by the application, including `libmpv2`, `libsecret-1-0`, `libwebkit2gtk-4.1-0`, ALSA, PipeWire and PulseAudio libraries. RPM packages currently target Fedora package naming through `rpmRequires`, including `mpv-libs`, `libsecret`, `webkit2gtk4.1`, `alsa-lib`, `pipewire-libs` and `pulseaudio-libs`. Arch packages declare their equivalents through `pacmanDepends`.
 
-Ubuntu 26.04 is currently a public-preview GitHub-hosted runner image. This is intentional because the Linux Native Image policy is to track the newest released Ubuntu LTS rather than the `ubuntu-latest` alias. When a newer Ubuntu LTS becomes the target baseline, update the pinned runner, baseline verification, package dependency names, cache keys, and this documentation in the same change.
+Packaging also scans the extracted AppImage and DEB payloads with `readelf`. Any ELF that declares `GNU_PROPERTY_X86_ISA_1_NEEDED` above `x86-64-baseline` (v2, v3, or v4) fails the build. A future baseline upgrade must update the runner, dependency metadata, cache keys, documentation, and ISA compatibility policy together rather than automatically following the newest Ubuntu LTS.
 
 ## CI
 
