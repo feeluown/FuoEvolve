@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -62,10 +61,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 fun PlayerSharedCover(
     track: MusicTrack,
-    heroEnabled: Boolean,
     transitionDirection: TrackChangeDirection = TrackChangeDirection.Next,
     isLoading: Boolean = false,
     cornerRadius: androidx.compose.ui.unit.Dp = 12.dp,
@@ -77,20 +74,9 @@ fun PlayerSharedCover(
     LaunchedEffect(track.id, track.coverUrl, isLoading, targetCoverImage) {
         if (!isLoading || (hasCoverUrl && targetCoverImage != null)) displayedTrack = track
     }
-    val sharedTransitionScope = LocalAppSharedTransitionScope.current
-    val sharedModifier = if (sharedTransitionScope == null) {
-        modifier
-    } else {
-        with(sharedTransitionScope) {
-            modifier.sharedElementWithCallerManagedVisibility(
-                sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = heroEnabled,
-            )
-        }
-    }
     val coverSpatialSpec = FuoMotion.slowSpatialSpec<IntOffset>()
     val coverEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
-    Box(modifier = sharedModifier) {
+    Box(modifier = modifier) {
         AnimatedContent(
             targetState = displayedTrack,
             transitionSpec = { playerCoverTransition(transitionDirection, coverSpatialSpec, coverEffectsSpec) },
