@@ -1,7 +1,6 @@
 package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -353,13 +352,11 @@ private fun RuntimePlayerTransport(
 }
 
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 private fun RuntimePlayerCoverPage(
     track: MusicTrack?,
     isLoading: Boolean,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
-    val navigation = LocalPlaybackNavigationPort.current
     val queue = LocalPlaybackQueueUiPort.current
     BoxWithConstraints(modifier = modifier) {
         val coverSize = minOf(maxWidth, maxHeight * 0.82f)
@@ -370,7 +367,6 @@ private fun RuntimePlayerCoverPage(
         ) {
             PlayerSharedCover(
                 track = track ?: emptyDisplayTrack(),
-                heroEnabled = navigation.isFullPlayerOpen,
                 transitionDirection = queue.trackChangeDirection,
                 isLoading = isLoading,
                 cornerRadius = 22.dp,
