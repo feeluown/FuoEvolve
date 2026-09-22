@@ -61,7 +61,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun PlayerSharedCover(
+fun PlayerCover(
     track: MusicTrack,
     transitionDirection: TrackChangeDirection = TrackChangeDirection.Next,
     isLoading: Boolean = false,
