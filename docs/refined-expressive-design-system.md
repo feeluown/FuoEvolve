@@ -50,6 +50,17 @@ The shared `MaterialExpressiveTheme` installs the typography and shape tokens. S
 
 Phase 2 deliberately avoids platform-window changes, heavy blur and changes to playback/domain state. Further full-screen layout refinements and other feature pages can be handled separately rather than mixing them with the visual-system foundation.
 
+### Phase 3 — core page consistency
+
+- Collection detail pages share one header hierarchy: artwork first, then title/source metadata, optional description and actions. Wide layouts keep a bounded reading width rather than stretching metadata across the full window.
+- Local playlist and provider detail pages avoid repeating the same collection title in both app bar and content. Track lists use whitespace and typography instead of continuous row dividers.
+- Mine uses the same section-header/action pattern as recommendation content, with consistent grid gaps and filter chips that remain usable on compact widths.
+- Search uses a lighter top surface, tonal recognition action, capsule history items and compact result rhythm; result rows no longer rely on separators between every item.
+- Full player metadata follows title → artist/album → part/source/quality. Portrait content is bounded on large screens, landscape content is centered, and artwork can grow without making transport controls drift apart.
+- These changes remain presentation-only: playback state, queue semantics, search dispatch, navigation, provider actions and user theme choices are unchanged.
+
+Phase 3 still requires visual inspection on real compact and wide surfaces before the PR should leave Draft.
+
 ## Verification
 
 Run the repository PR test workflows on Android, iOS, Linux, macOS and Windows, and inspect compact/wide layouts, large text, light/dark themes, system dynamic color, alternate theme presets and cover-derived player colors before declaring the visual update ready for review.
