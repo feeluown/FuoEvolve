@@ -365,7 +365,7 @@ private fun RuntimePlayerCoverPage(
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            PlayerSharedCover(
+            PlayerCover(
                 track = track ?: emptyDisplayTrack(),
                 transitionDirection = queue.trackChangeDirection,
                 isLoading = isLoading,
