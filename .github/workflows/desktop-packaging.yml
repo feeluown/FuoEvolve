@@ -257,7 +257,7 @@ jobs:
 
   linux-x64:
     name: Linux x64 ${{ matrix.label }}
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 110
     strategy:
       fail-fast: false
@@ -283,7 +283,7 @@ jobs:
         run: |
           . /etc/os-release
           test "$ID" = "ubuntu"
-          test "$VERSION_ID" = "26.04"
+          test "$VERSION_ID" = "24.04"
           echo "Building Linux ${{ matrix.label }} against Ubuntu $VERSION_ID LTS baseline"
 
       - name: Prepare Git refs for versioning
@@ -311,16 +311,18 @@ jobs:
             ~/.cargo/git
             desktopApp/native/audio-fingerprint/target
             desktopApp/native/audio-capture/target
-          key: nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-${{ hashFiles('desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
+          key: nucleus-native-linux-ubuntu24.04-x64-${{ matrix.variant }}-rust-1.98.1-${{ hashFiles('desktopApp/native/audio-fingerprint/Cargo.toml', 'desktopApp/native/audio-fingerprint/src/**', 'shared/src/commonMain/resources/audio_recognition/afp.wasm', 'desktopApp/native/audio-capture/Cargo.toml', 'desktopApp/native/audio-capture/Cargo.lock', 'desktopApp/native/audio-capture/src/**') }}
           restore-keys: |
-            nucleus-native-linux-ubuntu26.04-x64-${{ matrix.variant }}-rust-1.98.1-
-            nucleus-native-linux-ubuntu26.04-x64-rust-1.98.1-
+            nucleus-native-linux-ubuntu24.04-x64-${{ matrix.variant }}-rust-1.98.1-
+            nucleus-native-linux-ubuntu24.04-x64-rust-1.98.1-
 
       - name: Install Linux native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            binutils \
+            file \
             libfuse2t64 \
             libasound2-dev \
             libmpv-dev \
@@ -381,6 +383,11 @@ jobs:
             grep -Fq 'WEBKIT_INJECTED_BUNDLE_PATH' "$ROOT/AppRun"
             grep -Fq 'GIO_EXTRA_MODULES' "$ROOT/AppRun"
             grep -Fq 'exec "$APPDIR/fuoevolve" "$@"' "$ROOT/AppRun"
+            if find "$ROOT/native" -type f -name 'libmvec.so*' -print -quit | grep -q .; then
+              echo "AppImage must not bundle glibc libmvec" >&2
+              exit 1
+            fi
+            bash "$GITHUB_WORKSPACE/desktopApp/packaging/linux/verify-x86-64-baseline.sh" "$ROOT"
           )
 
           du -h build/artifacts/FuoEvolve-linux-x64.AppImage
@@ -446,6 +453,10 @@ jobs:
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_mpv_bridge\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E 'libfuoevolve_audio_capture\.so$' >/dev/null
           dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep 'fuoevolve-audio-fingerprint' >/dev/null
+          rm -rf build/deb-verify
+          mkdir -p build/deb-verify
+          dpkg-deb -x build/artifacts/FuoEvolve-linux-x64.deb build/deb-verify
+          bash desktopApp/packaging/linux/verify-x86-64-baseline.sh build/deb-verify
           if dpkg-deb -c build/artifacts/FuoEvolve-linux-x64.deb | grep -E '(^|/)libmpv\.so([.0-9]*)?$|WebKitNetworkProcess$|libwebkit2gtk-4\.1\.so'; then
             echo "DEB unexpectedly bundles portable Linux runtime libraries" >&2
             exit 1
