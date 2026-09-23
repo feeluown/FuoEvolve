@@ -23,6 +23,7 @@ pkgbase = fuoevolve
 	depends = alsa-lib
 	depends = pipewire
 	depends = libpulse
+	conflicts = fuoevolve-bin
 	source = fuoevolve-@PKGVER@.tar.gz::https://github.com/feeluown/FuoEvolve/archive/refs/tags/@PKGVER@.tar.gz
 	sha256sums = @SOURCE_SHA256@
 
