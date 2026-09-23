@@ -1,0 +1,121 @@
+name: Publish AUR binary package
+
+"on":
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-aur-bin:
+    name: Publish fuoevolve-bin
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: fuoevolve-aur-bin-publish
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout released sources
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Verify triggering release tag
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected release tag: $RELEASE_TAG"
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            echo "::error::Trigger does not refer to an existing release tag: $RELEASE_TAG"
+            exit 1
+          fi
+          release_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [[ "$release_commit" != "$RELEASE_SHA" ]]; then
+            echo "::error::Release tag does not match the triggering workflow commit"
+            exit 1
+          fi
+
+      - name: Render binary AUR metadata
+        run: |
+          set -euo pipefail
+          bash scripts/render-aur-bin-package.sh "$RELEASE_TAG" build/aur-bin
+
+      - name: Verify binary AUR payload
+        run: |
+          set -euo pipefail
+          test -s build/aur-bin/PKGBUILD
+          test -s build/aur-bin/.SRCINFO
+          grep -Fq 'pkgname=fuoevolve-bin' build/aur-bin/PKGBUILD
+          grep -Fq "pkgver = ${RELEASE_TAG}" build/aur-bin/.SRCINFO
+          grep -Fq "releases/download/${RELEASE_TAG}/FuoEvolve-${RELEASE_TAG}-linux-x64.pkg.tar.zst" build/aur-bin/.SRCINFO
+          if find build/aur-bin -maxdepth 1 -type f ! -name PKGBUILD ! -name .SRCINFO -print -quit | grep -q .; then
+            echo '::error::Unexpected file in binary AUR payload'
+            exit 1
+          fi
+
+      - name: Configure AUR SSH authentication
+        run: |
+          set -euo pipefail
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo '::error::AUR_SSH_PRIVATE_KEY is not configured'
+            exit 1
+          fi
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" | sed 's/\r$//' > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan -H aur.archlinux.org >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          cat > "$HOME/.ssh/config" <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            BatchMode yes
+          EOF
+          chmod 600 "$HOME/.ssh/config"
+
+      - name: Publish PKGBUILD to AUR
+        run: |
+          set -euo pipefail
+          aur_dir=build/aur-bin-repo
+          git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/fuoevolve-bin.git "$aur_dir"
+
+          current_version=""
+          if [ -s "$aur_dir/.SRCINFO" ]; then
+            current_version="$(awk -F' = ' '$1 ~ /^[[:space:]]*pkgver$/ { print $2; exit }' "$aur_dir/.SRCINFO")"
+          fi
+          if [ -n "$current_version" ] && [ "$current_version" != "$RELEASE_TAG" ]; then
+            newest_version="$(printf '%s\n%s\n' "$current_version" "$RELEASE_TAG" | sort -V | tail -n 1)"
+            if [ "$newest_version" = "$current_version" ]; then
+              echo "AUR already has newer version $current_version; skipping $RELEASE_TAG."
+              exit 0
+            fi
+          fi
+
+          find "$aur_dir" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp build/aur-bin/PKGBUILD "$aur_dir/PKGBUILD"
+          cp build/aur-bin/.SRCINFO "$aur_dir/.SRCINFO"
+          git -C "$aur_dir" config user.name 'FuoEvolve Release Bot'
+          git -C "$aur_dir" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$aur_dir" add -A
+
+          if git -C "$aur_dir" diff --cached --quiet; then
+            echo "fuoevolve-bin already matches $RELEASE_TAG; nothing to push."
+            exit 0
+          fi
+          git -C "$aur_dir" commit -m "Update to ${RELEASE_TAG}"
+          git -C "$aur_dir" push origin HEAD:master
