@@ -101,19 +101,54 @@ mapfile -t release_tags < <(
         --jq 'sort_by(.publishedAt) | reverse | .[].tagName'
 )
 
+if (( ${#release_tags[@]} == 0 )); then
+    echo "::error::No published stable GitHub Releases were found" >&2
+    exit 1
+fi
+
+readonly LATEST_RELEASE_TAG="${release_tags[0]}"
+if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "$LATEST_RELEASE_TAG" != "${GITHUB_REF_NAME:-}" ]]; then
+    echo "::error::Latest stable Release is $LATEST_RELEASE_TAG, expected ${GITHUB_REF_NAME}; refusing to publish a stale manifest" >&2
+    exit 1
+fi
+
 downloaded=0
 latest_release_tag=""
 latest_release_asset_name=""
 latest_release_apk=""
 latest_release_published_at=""
 for tag in "${release_tags[@]}"; do
-    asset_name="$(
-        gh release view "$tag" \
-            --repo "$REPOSITORY" \
-            --json assets \
-            --jq '[.assets[].name | select(endswith("-android-signed.apk"))][0] // ""'
-    )"
+    asset_name=""
+    attempt_limit=1
+    if [[ "$tag" == "$LATEST_RELEASE_TAG" ]]; then
+        attempt_limit=6
+    fi
+    for ((attempt = 1; attempt <= attempt_limit; attempt++)); do
+        if asset_name="$(
+            gh release view "$tag" \
+                --repo "$REPOSITORY" \
+                --json assets \
+                --jq '[.assets[].name | select(endswith("-android-signed.apk"))][0] // ""'
+        )"; then
+            if [[ -n "$asset_name" ]]; then
+                break
+            fi
+        elif [[ "$tag" != "$LATEST_RELEASE_TAG" ]]; then
+            echo "::error::Failed to inspect GitHub Release $tag" >&2
+            exit 1
+        fi
+
+        if (( attempt < attempt_limit )); then
+            echo "Signed APK for latest Release $tag is not visible yet (attempt $attempt/$attempt_limit); retrying in 10 seconds" >&2
+            sleep 10
+        fi
+    done
+
     if [[ -z "$asset_name" ]]; then
+        if [[ "$tag" == "$LATEST_RELEASE_TAG" ]]; then
+            echo "::error::Latest Release $tag has no signed Android APK after $attempt_limit attempts; refusing to publish an older update manifest" >&2
+            exit 1
+        fi
         echo "Skipping $tag: no multi-ABI signed APK"
         continue
     fi
