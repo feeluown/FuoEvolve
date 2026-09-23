@@ -367,8 +367,8 @@ jobs:
     needs: publish-release
     if: >-
       always() &&
-      (github.event_name == 'workflow_dispatch' ||
-      needs.publish-release.result == 'success')
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+       (github.event_name == 'push' && needs.publish-release.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
