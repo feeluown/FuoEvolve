@@ -1,0 +1,25 @@
+pkgbase = fuoevolve-bin
+	pkgdesc = Open-source cross-platform music player based on FeelUOwn (prebuilt binary)
+	pkgver = @PKGVER@
+	pkgrel = 1
+	url = https://feeluown.github.io/FuoEvolve/
+	arch = x86_64
+	license = GPL-3.0-only
+	makedepends = libarchive
+	depends = gtk3
+	depends = libx11
+	depends = libxkbcommon
+	depends = libsecret
+	depends = mpv
+	depends = webkit2gtk-4.1
+	depends = alsa-lib
+	depends = pipewire
+	depends = libpulse
+	provides = fuoevolve=@PKGVER@
+	conflicts = fuoevolve
+	options = !strip
+	source = FuoEvolve-@PKGVER@-linux-x64.pkg.tar.zst::https://github.com/feeluown/FuoEvolve/releases/download/@PKGVER@/FuoEvolve-@PKGVER@-linux-x64.pkg.tar.zst
+	noextract = FuoEvolve-@PKGVER@-linux-x64.pkg.tar.zst
+	sha256sums = @BINARY_SHA256@
+
+pkgname = fuoevolve-bin

@@ -1,0 +1,67 @@
+name: AUR binary package tests
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  aur-bin-metadata:
+    name: Validate fuoevolve-bin package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install archive validation tools
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+
+      - name: Render and validate metadata
+        run: |
+          set -euo pipefail
+          tag="$(git tag --list '[0-9]*' --sort=-v:refname | head -n 1)"
+          test -n "$tag"
+          bash scripts/render-aur-bin-package.sh "$tag" build/aur-bin
+          test -s build/aur-bin/PKGBUILD
+          test -s build/aur-bin/.SRCINFO
+          grep -Fq 'pkgname=fuoevolve-bin' build/aur-bin/PKGBUILD
+          grep -Fq "conflicts=('fuoevolve')" build/aur-bin/PKGBUILD
+          grep -Fq "provides = fuoevolve=${tag}" build/aur-bin/.SRCINFO
+          grep -Fq "releases/download/${tag}/FuoEvolve-${tag}-linux-x64.pkg.tar.zst" build/aur-bin/.SRCINFO
+          grep -Fq 'noextract=(' build/aur-bin/PKGBUILD
+          grep -Fq "options=('!strip')" build/aur-bin/PKGBUILD
+          grep -Fq 'options = !strip' build/aur-bin/.SRCINFO
+
+          asset="FuoEvolve-${tag}-linux-x64.pkg.tar.zst"
+          checksum="$(awk -F' = ' '$1 ~ /^[[:space:]]*sha256sums$/ { print $2; exit }' build/aur-bin/.SRCINFO)"
+          [[ "$checksum" =~ ^[a-f0-9]{64}$ ]]
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/feeluown/FuoEvolve/releases/download/${tag}/${asset}" \
+            --output "$asset"
+          printf '%s  %s\n' "$checksum" "$asset" | sha256sum --check
+
+          bsdtar -tf "$asset" | grep -E '^(\./)?\.PKGINFO$' > /dev/null
+          mkdir -p build/aur-bin-payload
+          bsdtar \
+            --exclude='.PKGINFO' \
+            --exclude='.BUILDINFO' \
+            --exclude='.MTREE' \
+            --exclude='.INSTALL' \
+            --exclude='.CHANGELOG' \
+            -xf "$asset" -C build/aur-bin-payload
+          test -d build/aur-bin-payload/usr
+          test ! -e build/aur-bin-payload/.PKGINFO
+          test ! -e build/aur-bin-payload/.BUILDINFO
+          test ! -e build/aur-bin-payload/.MTREE
