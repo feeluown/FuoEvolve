@@ -48,6 +48,19 @@ jobs:
             exit 1
           fi
 
+      - name: Check four-part AUR source version
+        run: |
+          set -euo pipefail
+          tag=1.6.2.1
+          tag_commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          bash scripts/render-aur-package.sh "$tag" "$tag_commit" build/aur-four-part
+          grep -Fq "pkgver=$tag" build/aur-four-part/PKGBUILD
+          grep -Fq "pkgver = $tag" build/aur-four-part/.SRCINFO
+          if bash scripts/render-aur-package.sh 1.6.2.1.2 "$tag_commit" build/aur-invalid; then
+            echo "::error::Unsupported five-component release tag was accepted" >&2
+            exit 1
+          fi
+
   android:
     name: Android
     uses: ./.github/workflows/android-tests.yml
