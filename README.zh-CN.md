@@ -12,12 +12,17 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 ## 下载
 
-| 平台 | 正式版 | Canary / 预览版 |
-| --- | --- | --- |
-| **Android** | [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) · [F-Droid 仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | [最新 master 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
-| **Windows x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 NSIS 安装包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 NSIS 安装包 |
-| **macOS arm64 / x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 DMG | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 DMG |
-| **Linux x64** | 从 [GitHub Release](https://github.com/feeluown/FuoEvolve/releases/latest) 下载 AppImage / DEB / Arch 包 | 从 [Master Canary](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) 下载 AppImage / DEB / Arch 包 |
+| 平台 | 发布渠道 | 正式版 | Canary / 预览版 |
+| --- | --- | --- | --- |
+| **Android** | GitHub Releases | [已签名 APK](https://github.com/feeluown/FuoEvolve/releases/latest) | [最新 master 构建](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **Android** | F-Droid | [F-Droid 仓库](https://feeluown.github.io/FuoEvolve/fdroid/repo?fingerprint=8D8BE45A04CF3242C13B43361C9FFA1CA8FB2F39D1A43CE35BEADFA8DBFEFB74) | — |
+| **Windows x64** | GitHub Releases | [NSIS 安装包](https://github.com/feeluown/FuoEvolve/releases/latest) | [Master Canary（NSIS）](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **macOS arm64 / x64** | GitHub Releases | [DMG](https://github.com/feeluown/FuoEvolve/releases/latest) | [Master Canary（DMG）](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **Linux x64** | GitHub Releases | [AppImage / DEB / RPM / Arch 包](https://github.com/feeluown/FuoEvolve/releases/latest) | [Master Canary（AppImage / DEB / RPM / Arch）](https://github.com/feeluown/FuoEvolve/actions/workflows/master-canary.yml?query=branch%3Amaster) |
+| **Linux x64（Arch）** | AUR · 源码构建 | [`fuoevolve`](https://aur.archlinux.org/packages/fuoevolve) | — |
+| **Linux x64（Arch）** | AUR · 二进制重打包 | [`fuoevolve-bin`](https://aur.archlinux.org/packages/fuoevolve-bin) | — |
+
+AUR 提供两种互斥的安装方式：`fuoevolve` 使用 Release 对应的源码归档在本地编译；`fuoevolve-bin` 下载对应 GitHub Release 中的 Arch 二进制包并重新打包，二者不可同时安装。**AUR 包页面需在配置好发布权限并完成首次成功发布后才会出现**，具体见 [AUR 发布说明](docs/aur-publishing.md)。
 
 > 桌面端正式版使用 GraalVM Native Image，不再捆绑 JVM。Windows 与 macOS 安装包目前尚未完成生产签名 / 公证。
 
@@ -40,12 +45,12 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 
 - **Windows**：支持 SMTC 系统媒体控制，使用 NSIS 安装包发行。
 - **macOS**：支持 Now Playing / Remote Command Center，提供 Apple Silicon 与 Intel DMG。
-- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage、DEB 与 Arch 包；Linux Native Image 固定使用 Ubuntu 26.04 LTS 构建基线。
+- **Linux**：支持 MPRIS 与原生 Wayland/Tao，提供 AppImage、DEB、RPM 和 Arch 包，也可通过 AUR 安装；Linux Native Image 固定使用 Ubuntu 26.04 LTS 构建基线。
 - **音视频播放**：通过 JNI 直接接入 libmpv，视频优先使用 GPU 渲染并提供软件回退。
 - **托盘生命周期**：关闭窗口后继续播放和下载，可从托盘 / 状态栏图标恢复窗口或退出应用。
 - **安全登录存储**：使用 Windows Credential Manager、macOS Keychain 和 Linux Secret Service / Libsecret。
 
-正式版本 tag 会与 Android 一起发布完整桌面安装包，并附带 SHA-256 校验文件。桌面端暂不接入应用内自动更新，需要通过 GitHub Release 或 Canary 构建手动安装新版本。
+正式版本 tag 会与 Android 一起发布完整桌面安装包，并附带 SHA-256 校验文件。桌面端暂不接入应用内自动更新，可通过 GitHub Release、Canary 构建安装新版本，或在 AUR 上线后通过包管理器更新 Arch 安装包。
 
 ## 音乐源
 
@@ -65,7 +70,7 @@ FuoEvolve 是一个围绕 [FeelUOwn](https://github.com/feeluown/FeelUOwn) 生�
 | Android | **稳定版** | 签名 APK 与 F-Droid 发行 |
 | Windows | **稳定版** | x64 Native Image NSIS 安装包；生产签名后续补充 |
 | macOS | **稳定版** | Apple Silicon / Intel Native Image DMG；签名和公证后续补充 |
-| Linux | **稳定版** | Native Image AppImage、DEB 与 Arch 包；构建基线为 Ubuntu 26.04 LTS |
+| Linux | **稳定版** | Native Image AppImage、DEB、RPM 与 Arch 包；正在接入 AUR 源码包及二进制包发布；构建基线为 Ubuntu 26.04 LTS |
 
 ## 开发
 
