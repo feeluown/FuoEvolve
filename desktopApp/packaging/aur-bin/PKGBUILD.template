@@ -19,6 +19,7 @@ depends=(
   'libpulse'
 )
 makedepends=('libarchive')
+options=('!strip')
 _archive="FuoEvolve-${pkgver}-linux-x64.pkg.tar.zst"
 source=("${_archive}::https://github.com/feeluown/FuoEvolve/releases/download/${pkgver}/${_archive}")
 noextract=("${_archive}")
