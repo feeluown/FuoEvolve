@@ -37,10 +37,12 @@ jobs:
           test -s build/aur-bin/PKGBUILD
           test -s build/aur-bin/.SRCINFO
           grep -Fq 'pkgname=fuoevolve-bin' build/aur-bin/PKGBUILD
-          grep -Fq 'conflicts=(\x27fuoevolve\x27)' build/aur-bin/PKGBUILD || grep -Fq "conflicts=('fuoevolve')" build/aur-bin/PKGBUILD
+          grep -Fq "conflicts=('fuoevolve')" build/aur-bin/PKGBUILD
           grep -Fq "provides = fuoevolve=${tag}" build/aur-bin/.SRCINFO
           grep -Fq "releases/download/${tag}/FuoEvolve-${tag}-linux-x64.pkg.tar.zst" build/aur-bin/.SRCINFO
           grep -Fq 'noextract=(' build/aur-bin/PKGBUILD
+          grep -Fq "options=('!strip')" build/aur-bin/PKGBUILD
+          grep -Fq 'options = !strip' build/aur-bin/.SRCINFO
 
           asset="FuoEvolve-${tag}-linux-x64.pkg.tar.zst"
           checksum="$(awk -F' = ' '$1 ~ /^[[:space:]]*sha256sums$/ { print $2; exit }' build/aur-bin/.SRCINFO)"
