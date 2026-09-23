@@ -38,7 +38,7 @@ fun gitOutput(vararg args: String): String? = providers.exec {
     commandLine("git", *args)
 }.standardOutput.asText.get().trim().takeIf(String::isNotBlank)
 
-private val versionPattern = Regex("\\d+\\.\\d+\\.\\d+")
+private val versionPattern = Regex("\\d+(?:\\.\\d+){2,3}")
 private val exactTaggedVersion = gitOutput(
     "describe",
     "--tags",
@@ -46,9 +46,9 @@ private val exactTaggedVersion = gitOutput(
     "--match",
     "[0-9]*",
     "HEAD",
-)?.let { tag -> versionPattern.find(tag)?.value }
+)?.let { tag -> versionPattern.matchEntire(tag)?.value }
 private val latestTaggedVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
-    ?.let { tag -> versionPattern.find(tag)?.value }
+    ?.let { tag -> versionPattern.matchEntire(tag)?.value }
 
 val desktopPackageVersion = providers.gradleProperty("fuoevolve.packageVersion")
     .orElse(providers.environmentVariable("FUOEVOLVE_PACKAGE_VERSION"))
