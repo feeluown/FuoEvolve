@@ -5,7 +5,7 @@ tag="${1:?release tag is required}"
 commit_sha="${2:?release commit SHA is required}"
 output_dir="${3:?output directory is required}"
 
-if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ ! "$tag" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]]; then
   echo "Unsupported AUR release tag: $tag" >&2
   exit 1
 fi
