@@ -65,3 +65,11 @@ jobs:
           test ! -e build/aur-bin-payload/.PKGINFO
           test ! -e build/aur-bin-payload/.BUILDINFO
           test ! -e build/aur-bin-payload/.MTREE
+
+      - name: Check four-part AUR binary version
+        run: |
+          set -euo pipefail
+          tag=1.6.2.1
+          bash scripts/render-aur-bin-package.sh "$tag" build/aur-bin-four-part
+          grep -Fq "pkgver=$tag" build/aur-bin-four-part/PKGBUILD
+          grep -Fq "pkgver = $tag" build/aur-bin-four-part/.SRCINFO
