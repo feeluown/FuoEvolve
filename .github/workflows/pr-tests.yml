@@ -28,12 +28,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate release shell scripts
+        run: bash -n scripts/build-fdroid-pages.sh scripts/write-update-manifest.sh scripts/render-aur-package.sh scripts/render-aur-bin-package.sh
+
       - name: Render and verify AUR metadata
         run: |
           set -euo pipefail
           tag="$(git tag --list '[0-9]*' --sort=-v:refname | head -n 1)"
           test -n "$tag"
-          bash scripts/render-aur-package.sh "$tag" "$GITHUB_SHA" build/aur
+          tag_commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          bash scripts/render-aur-package.sh "$tag" "$tag_commit" build/aur
+          grep -Fq "FUOEVOLVE_COMMIT_SHA='${tag_commit}'" build/aur/PKGBUILD
           test -s build/aur/PKGBUILD
           test -s build/aur/.SRCINFO
           grep -Fq 'archive/refs/tags/${pkgver}.tar.gz' build/aur/PKGBUILD
