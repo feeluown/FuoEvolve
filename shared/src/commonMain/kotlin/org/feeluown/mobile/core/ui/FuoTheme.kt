@@ -6,8 +6,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -93,8 +91,7 @@ internal fun ProvidePlaybackColorEnvironment(
         preserveWhileLoading = isLoading,
     )
     val hasCoverColor = dynamicCoverColorEnabled &&
-        (isLoading || !coverImageUrl.isNullOrBlank()) &&
-        coverColorSeed != null
+        (isLoading || !coverImageUrl.isNullOrBlank()) && coverColorSeed != null
     val coverColorScheme = remember(
         coverColorSeed,
         darkTheme,
@@ -199,11 +196,7 @@ internal fun ambientPlaybackColorScheme(
         ),
         primaryContainer = primaryContainer,
         onPrimaryContainer = ensureThemeContrast(
-            lerp(
-                base.onPrimaryContainer,
-                cover.onPrimaryContainer,
-                PLAYBACK_AMBIENT_ACCENT_BLEND,
-            ),
+            lerp(base.onPrimaryContainer, cover.onPrimaryContainer, PLAYBACK_AMBIENT_ACCENT_BLEND),
             listOf(primaryContainer),
         ),
         inversePrimary = lerp(
@@ -218,27 +211,15 @@ internal fun ambientPlaybackColorScheme(
         ),
         secondaryContainer = secondaryContainer,
         onSecondaryContainer = ensureThemeContrast(
-            lerp(
-                base.onSecondaryContainer,
-                cover.onSecondaryContainer,
-                PLAYBACK_AMBIENT_ACCENT_BLEND,
-            ),
+            lerp(base.onSecondaryContainer, cover.onSecondaryContainer, PLAYBACK_AMBIENT_ACCENT_BLEND),
             listOf(secondaryContainer),
         ),
         surfaceVariant = surfaceVariant,
         onSurfaceVariant = ensureThemeContrast(
-            lerp(
-                base.onSurfaceVariant,
-                cover.onSurfaceVariant,
-                PLAYBACK_AMBIENT_SURFACE_BLEND,
-            ),
+            lerp(base.onSurfaceVariant, cover.onSurfaceVariant, PLAYBACK_AMBIENT_SURFACE_BLEND),
             listOf(surfaceVariant),
         ),
-        surfaceTint = lerp(
-            base.surfaceTint,
-            cover.surfaceTint,
-            PLAYBACK_AMBIENT_ACCENT_BLEND,
-        ),
+        surfaceTint = lerp(base.surfaceTint, cover.surfaceTint, PLAYBACK_AMBIENT_ACCENT_BLEND),
         onSurface = ensureThemeContrast(
             base.onSurface,
             listOf(
@@ -253,11 +234,7 @@ internal fun ambientPlaybackColorScheme(
             ),
         ),
         outline = lerp(base.outline, cover.outline, PLAYBACK_AMBIENT_SURFACE_BLEND),
-        outlineVariant = lerp(
-            base.outlineVariant,
-            cover.outlineVariant,
-            PLAYBACK_AMBIENT_SURFACE_BLEND,
-        ),
+        outlineVariant = lerp(base.outlineVariant, cover.outlineVariant, PLAYBACK_AMBIENT_SURFACE_BLEND),
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,
         surfaceContainerHighest = surfaceContainerHighest,
@@ -266,6 +243,7 @@ internal fun ambientPlaybackColorScheme(
     )
 }
 
+/** The same refined type/shape system applies to app pages and cover-scoped playback themes. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun FuoExpressiveTheme(
@@ -275,8 +253,8 @@ private fun FuoExpressiveTheme(
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         motionScheme = MotionScheme.expressive(),
-        shapes = FuoShapes,
-        typography = FuoTypography,
+        shapes = FuoVisualTokens.shapes,
+        typography = FuoVisualTokens.typography,
         content = content,
     )
 }
@@ -345,9 +323,6 @@ private fun rememberCoverColorSeed(
     return coverColorSeed
 }
 
-private val FuoShapes = Shapes()
-private val FuoTypography = Typography()
-
 internal fun resolvedDarkTheme(themeMode: ThemeMode, systemDark: Boolean): Boolean {
     return when (themeMode) {
         ThemeMode.System -> systemDark
@@ -368,13 +343,7 @@ private fun fuoColorScheme(
     } else {
         null
     }
-    return remember(
-        themeColorScheme,
-        darkTheme,
-        paletteStyle,
-        colorSpec,
-        platformPrimary,
-    ) {
+    return remember(themeColorScheme, darkTheme, paletteStyle, colorSpec, platformPrimary) {
         if (platformPrimary != null) {
             val generated = generatedColorScheme(
                 seedColor = platformPrimary,
@@ -444,7 +413,7 @@ internal fun themeSeedColor(preset: ThemeColorScheme): Color {
     return when (preset) {
         ThemeColorScheme.Dynamic -> themeSeedColor(ThemeColorScheme.ExpressiveDefault)
         ThemeColorScheme.ExpressiveDefault -> Color(0xFF6750A4)
-        ThemeColorScheme.FuoGreen -> Color(0xFF246B43)
+        ThemeColorScheme.FuoGreen -> FuoVisualTokens.brandSeed
         ThemeColorScheme.OceanBlue -> Color(0xFF0066B3)
         ThemeColorScheme.Violet -> Color(0xFF7650B4)
         ThemeColorScheme.Rose -> Color(0xFFB13F66)
@@ -457,23 +426,19 @@ internal fun generatedColorScheme(
     darkTheme: Boolean,
     paletteStyle: ThemePaletteStyle,
     colorSpec: ThemeColorSpec,
-): ColorScheme {
-    return dynamicColorScheme(
-        seedColor = seedColor,
-        isDark = darkTheme,
-        style = paletteStyle.toMaterialKolorPaletteStyle(),
-        specVersion = colorSpec.toMaterialKolorSpecVersion(),
-    )
-}
+): ColorScheme = dynamicColorScheme(
+    seedColor = seedColor,
+    isDark = darkTheme,
+    style = paletteStyle.toMaterialKolorPaletteStyle(),
+    specVersion = colorSpec.toMaterialKolorSpecVersion(),
+)
 
-internal fun expressiveColorScheme(seedColor: Color, darkTheme: Boolean): ColorScheme {
-    return generatedColorScheme(
-        seedColor = seedColor,
-        darkTheme = darkTheme,
-        paletteStyle = ThemePaletteStyle.Expressive,
-        colorSpec = ThemeColorSpec.Expressive_2025,
-    )
-}
+internal fun expressiveColorScheme(seedColor: Color, darkTheme: Boolean): ColorScheme = generatedColorScheme(
+    seedColor = seedColor,
+    darkTheme = darkTheme,
+    paletteStyle = ThemePaletteStyle.Expressive,
+    colorSpec = ThemeColorSpec.Expressive_2025,
+)
 
 private fun ThemePaletteStyle.toMaterialKolorPaletteStyle(): PaletteStyle = when (this) {
     ThemePaletteStyle.TonalSpot -> PaletteStyle.TonalSpot
@@ -524,13 +489,8 @@ internal fun colorContrastRatio(foreground: Color, background: Color): Double {
 private fun relativeLuminance(color: Color): Double {
     fun linearize(component: Float): Double {
         val value = component.toDouble()
-        return if (value <= 0.03928) {
-            value / 12.92
-        } else {
-            ((value + 0.055) / 1.055).pow(2.4)
-        }
+        return if (value <= 0.03928) value / 12.92 else ((value + 0.055) / 1.055).pow(2.4)
     }
-
     return linearize(color.red) * 0.2126 +
         linearize(color.green) * 0.7152 +
         linearize(color.blue) * 0.0722

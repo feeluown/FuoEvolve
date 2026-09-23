@@ -155,7 +155,6 @@ private fun PlaybackMiniPlayerContent() {
     PlaybackDynamicColorTheme(emphasis = PlaybackColorEmphasis.Ambient) {
         RuntimeMiniPlayer(
             playbackSession = LocalPlaybackSession.current,
-            isFullPlayerOpen = graph.navigation.isFullPlayerOpen,
             transitionDirection = graph.queue.trackChangeDirection,
             waveformAnimationDisabled = presentation.waveformAnimationDisabled,
             onOpenFullPlayer = graph.navigation::openFullPlayer,

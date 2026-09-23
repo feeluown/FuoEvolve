@@ -1,6 +1,5 @@
 package org.feeluown.mobile
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -26,11 +25,10 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -126,7 +124,7 @@ internal fun SearchFeatureScreen(
                 Box(
                     modifier = Modifier
                         .weight(0.34f)
-                        .widthIn(min = 280.dp, max = 360.dp)
+                        .widthIn(min = 300.dp, max = 380.dp)
                         .fillMaxHeight(),
                 ) {
                     Column(
@@ -153,7 +151,7 @@ internal fun SearchFeatureScreen(
                                 }
                             },
                         )
-                        OutlinedButton(
+                        FilledTonalButton(
                             modifier = Modifier.fillMaxWidth(),
                             onClick = onOpenRecognition,
                         ) {
@@ -210,14 +208,14 @@ internal fun SearchFeatureScreen(
             topBar = {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 3.dp,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 0.dp,
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                            .padding(horizontal = FuoSpacing.md, vertical = FuoSpacing.sm),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Row(
@@ -288,6 +286,7 @@ internal fun SearchFeatureScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
                 ) {
                     searchResultItems(actions, downloadStates, uiState)
                 }
@@ -365,10 +364,9 @@ private fun SearchHistoryChip(
             onClick = onClick,
             onLongClick = onLongPress,
         ),
-        shape = MaterialTheme.shapes.small,
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Text(
             text = keyword,
@@ -387,7 +385,10 @@ private fun SearchResultList(
     uiState: SearchUiState,
     modifier: Modifier,
 ) {
-    LazyColumn(modifier = modifier) {
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
+    ) {
         searchResultItems(actions, downloadStates, uiState, compactTop = true)
     }
 }
@@ -401,8 +402,9 @@ private fun ProviderSearchTabs(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = FuoSpacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
     ) {
         ProviderSearchTab.entries.forEach { tab ->
             FilterChip(
@@ -482,7 +484,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.comprehensiveItems(
             key = { _, hit -> "best:list:${bestMatchKey(hit)}" },
         ) { _, hit ->
             bestMatchListRow(hit, uiState, actions, downloadStates)
-            HorizontalDivider()
         }
     }
 
@@ -503,7 +504,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.comprehensiveItems(
                 onOpenDetail = actions.onOpenTrackDetail(track),
                 onAddToPlaylist = actions.onAddToPlaylist(track),
             )
-            HorizontalDivider()
         }
     }
 
@@ -670,7 +670,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.songs(
                 onOpenDetail = actions.onOpenTrackDetail(track),
                 onAddToPlaylist = actions.onAddToPlaylist(track),
             )
-            HorizontalDivider()
         }
     }
 }

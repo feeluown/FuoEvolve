@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -17,7 +16,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,7 +29,7 @@ fun ProviderContentHomeFeatureSection(
     val graph = LocalHomeFeatureUiGraph.current
     val layoutInfo = LocalAppLayoutInfo.current
     val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
-    val gridSpacing = if (layoutInfo.useWideLayout) 8.dp else 12.dp
+    val gridSpacing = if (layoutInfo.useWideLayout) FuoSpacing.md else FuoSpacing.lg
     val gridPreviewCapacity = gridColumns * 2
     val title = if (section == HomeSection.Recommend) "推荐" else "探索"
     val sections = if (section == HomeSection.Recommend) state.recommendSections else state.exploreSections
@@ -46,9 +44,7 @@ fun ProviderContentHomeFeatureSection(
     val showPageLoading = initialLoadPending
 
     LaunchedEffect(state.isLoading, sections.isEmpty()) {
-        if (sections.isNotEmpty()) {
-            initialLoadPending = false
-        }
+        if (sections.isNotEmpty()) initialLoadPending = false
         if (state.isLoading) {
             initialLoadObserved = true
         } else {
@@ -62,13 +58,17 @@ fun ProviderContentHomeFeatureSection(
             loading = showPageLoading,
             modifier = Modifier.fillMaxSize(),
         ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (sections.isEmpty()) {
-                        item { EmptyProviderContentHint(title) }
-                    } else if (section == HomeSection.Music) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                // This gap applies to *every* lazy item, including individual tracks.
+                // Keep songs compact; feature headers and artwork cards provide section rhythm.
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+            ) {
+                if (sections.isEmpty()) {
+                    item(key = "empty:${section.name}") { EmptyProviderContentHint(title) }
+                } else {
+                    item(key = "intro:${section.name}") { RefinedHomeIntro(section) }
+                    if (section == HomeSection.Music) {
                         val entrySections = visibleSections.filter {
                             it.feature.contentType == ProviderContentType.Songs ||
                                 it.feature.contentType == ProviderContentType.Videos ||
@@ -204,7 +204,6 @@ fun ProviderContentHomeFeatureSection(
                                             { graph.playlists.openPlaylistTargetPicker(track) }
                                         } else null,
                                     )
-                                    HorizontalDivider()
                                 }
                                 contentSection.playlists.isNotEmpty() -> addProviderPlaylistGridRows(
                                     playlists = contentSection.playlists,
@@ -230,20 +229,19 @@ fun ProviderContentHomeFeatureSection(
                             }
                         }
                     }
-                    if (lockedProviders.isNotEmpty()) {
-                        item(key = "locked-providers:${section.name}") {
-                            ProviderLockedSummary(lockedProviders) { home.openSettings(it.providerId) }
-                        }
+                }
+                if (lockedProviders.isNotEmpty()) {
+                    item(key = "locked-providers:${section.name}") {
+                        ProviderLockedSummary(lockedProviders) { home.openSettings(it.providerId) }
                     }
+                }
             }
         }
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(FuoSpacing.md)) {
         if (layoutInfo.useWideLayout) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                pageContent()
-            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) { pageContent() }
         } else {
             PullToRefreshBox(
                 isRefreshing = isPullRefreshing,

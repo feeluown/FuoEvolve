@@ -60,8 +60,6 @@ class MainActivity : ComponentActivity() {
             val appViewModel = fuoApplication.appViewModel
             val appUiGraph = fuoApplication.appUiGraph
             val providerCredentialBackup = fuoApplication.providerCredentialBackup
-            remember { AndroidPredictiveBackPreference.initialize(this@MainActivity); Unit }
-            val predictiveBackEnabled by AndroidPredictiveBackPreference.enabled
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions(),
@@ -200,9 +198,8 @@ class MainActivity : ComponentActivity() {
                 pendingLocalPlaylistExport = null
             }
 
-            val useLegacyPageBack = AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
-                appUiState.backStack.size > 1 && appUiState.backStack.lastOrNull() != AppRoute.Settings
-            BackHandler(enabled = appShellHandlesBack || useLegacyPageBack) {
+            val pageBackEnabled = appUiState.backStack.size > 1
+            BackHandler(enabled = appShellHandlesBack || pageBackEnabled) {
                 appViewModel.onBack()
             }
 
@@ -289,10 +286,9 @@ class MainActivity : ComponentActivity() {
             }
 
             BackHandler(
-                enabled = !appShellHandlesBack && AndroidPredictiveBackPreference.isSupported && !predictiveBackEnabled &&
-                    appUiState.backStack.lastOrNull() != AppRoute.Settings,
+                enabled = !appShellHandlesBack && !pageBackEnabled,
             ) {
-                if (appUiState.backStack.size > 1) appViewModel.onBack() else finish()
+                finish()
             }
         }
     }

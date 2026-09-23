@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -44,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -58,17 +56,10 @@ import org.feeluown.mobile.playback.api.PlaybackSessionStatus
 
 private val MiniPlayerPreviousControlBreakpoint = 420.dp
 
-/**
- * Controller-free MiniPlayer implementation backed by the app-scoped playback session.
- *
- * Full-player visibility and cover-transition direction are still app-shell presentation details;
- * C2 will move those alongside the remaining FullPlayer/queue/lyrics UI state.
- */
+/** Compact, elevated playback surface; playback state and track-cover motion remain authoritative. */
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 internal fun RuntimeMiniPlayer(
     playbackSession: PlaybackSession,
-    isFullPlayerOpen: Boolean,
     transitionDirection: TrackChangeDirection,
     waveformAnimationDisabled: Boolean,
     onOpenFullPlayer: () -> Unit,
@@ -83,8 +74,8 @@ internal fun RuntimeMiniPlayer(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                horizontal = if (isWideLayout) 0.dp else 8.dp,
-                vertical = if (isWideLayout) 0.dp else 4.dp,
+                horizontal = if (isWideLayout) 0.dp else FuoSpacing.sm,
+                vertical = if (isWideLayout) 0.dp else FuoSpacing.xs,
             ),
     ) {
         Surface(
@@ -102,39 +93,34 @@ internal fun RuntimeMiniPlayer(
                     role = Role.Button,
                     onClick = onOpenFullPlayer,
                 ),
-            shape = if (isWideLayout) MaterialTheme.shapes.medium else MaterialTheme.shapes.extraLarge,
-            color = if (isWideLayout) {
-                MaterialTheme.colorScheme.surfaceContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            },
+            shape = if (isWideLayout) FuoVisualTokens.group else FuoVisualTokens.floating,
+            color = FuoSurfaceColors.floating(MaterialTheme.colorScheme),
             contentColor = MaterialTheme.colorScheme.onSurface,
-            tonalElevation = if (isWideLayout) 3.dp else 5.dp,
+            tonalElevation = FuoElevation.floating,
         ) {
             Column {
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                     val showPrevious = shouldShowMiniPlayerPreviousControl(maxWidth, isWideLayout)
                     Row(
                         modifier = Modifier.padding(
-                            horizontal = if (isWideLayout) 12.dp else 14.dp,
-                            vertical = if (isWideLayout) 8.dp else 8.dp,
+                            horizontal = FuoSpacing.lg,
+                            vertical = FuoSpacing.sm,
                         ),
-                        horizontalArrangement = Arrangement.spacedBy(if (isWideLayout) 12.dp else 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FuoSpacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         state.currentTrack?.let { track ->
                             RuntimeMiniPlayerCover(
                                 track = track,
-                                heroVisible = !isFullPlayerOpen,
                                 transitionDirection = transitionDirection,
                                 isLoading = isLoadingAudio,
-                                cornerRadius = if (isWideLayout) 10.dp else 18.dp,
-                                modifier = Modifier.size(if (isWideLayout) 48.dp else 64.dp),
+                                cornerRadius = 12.dp,
+                                modifier = Modifier.size(if (isWideLayout) 48.dp else 56.dp),
                             )
                         }
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
                         ) {
                             Text(
                                 text = state.currentTrack?.title ?: "未播放",
@@ -143,7 +129,6 @@ internal fun RuntimeMiniPlayer(
                                 } else {
                                     MaterialTheme.typography.titleMedium
                                 },
-                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -165,7 +150,7 @@ internal fun RuntimeMiniPlayer(
                             RuntimeMiniPlayerLyricLine(state)
                         }
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (showPrevious) {
@@ -201,8 +186,8 @@ internal fun RuntimeMiniPlayer(
                     waveformAnimationDisabled = waveformAnimationDisabled,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = if (isWideLayout) 12.dp else 16.dp)
-                        .padding(bottom = if (isWideLayout) 6.dp else 8.dp),
+                        .padding(horizontal = FuoSpacing.lg)
+                        .padding(bottom = FuoSpacing.sm),
                 )
             }
         }
@@ -221,9 +206,7 @@ private fun RuntimeMiniPlayerProgress(
     modifier: Modifier = Modifier,
 ) {
     if (isLoadingAudio) {
-        LinearProgressIndicator(
-            modifier = modifier.height(4.dp),
-        )
+        LinearProgressIndicator(modifier = modifier.height(4.dp))
         return
     }
     val duration = state.durationMs.takeIf { it > 0 } ?: return
@@ -277,16 +260,11 @@ private fun RuntimeMiniPlayerLyricLine(state: PlaybackSessionState) {
     }
 }
 
-private data class RuntimeMiniPlayerLyricState(
-    val index: Int,
-    val text: String,
-)
+private data class RuntimeMiniPlayerLyricState(val index: Int, val text: String)
 
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 private fun RuntimeMiniPlayerCover(
     track: TrackRef,
-    heroVisible: Boolean,
     transitionDirection: TrackChangeDirection,
     isLoading: Boolean,
     cornerRadius: Dp,
@@ -300,20 +278,9 @@ private fun RuntimeMiniPlayerCover(
             displayedTrack = track
         }
     }
-    val sharedTransitionScope = LocalAppSharedTransitionScope.current
-    val sharedModifier = if (sharedTransitionScope == null) {
-        modifier
-    } else {
-        with(sharedTransitionScope) {
-            modifier.sharedElementWithCallerManagedVisibility(
-                sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = heroVisible,
-            )
-        }
-    }
     val coverSpatialSpec = FuoMotion.slowSpatialSpec<IntOffset>()
     val coverEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
-    Box(modifier = sharedModifier) {
+    Box(modifier = modifier) {
         AnimatedContent(
             targetState = displayedTrack,
             transitionSpec = {
@@ -330,9 +297,7 @@ private fun RuntimeMiniPlayerCover(
             PlatformCoverArt(
                 title = animatedTrack.title,
                 imageUrl = animatedTrack.coverUrl,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(cornerRadius)),
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(cornerRadius)),
                 placeholder = CoverPlaceholder.Song,
             )
         }

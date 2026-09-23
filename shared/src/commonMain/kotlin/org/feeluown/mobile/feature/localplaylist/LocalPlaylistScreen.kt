@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,9 +15,9 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -75,7 +76,8 @@ fun LocalPlaylistScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(displayPlaylist.title.ifBlank { "本地歌单" }, maxLines = 1) },
+                // The collection name belongs in the artwork header rather than being repeated here.
+                title = { Text("本地歌单", maxLines = 1) },
                 navigationIcon = {
                     AdaptiveDetailNavigationIcon {
                         IconButton(onClick = actions::close) {
@@ -147,13 +149,20 @@ fun LocalPlaylistScreen(
                 LoadingIndicator(uiState.isLoading)
                 uiState.selectedError?.let { ProviderContentMessage(it) }
                 LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
                 ) {
                     if (uiState.selectedTracks.isEmpty() && !uiState.isLoading) {
-                        item { ProviderContentMessage("歌单暂无歌曲") }
-                    } else {
+                        item(key = "playlist-empty") { ProviderContentMessage("歌单暂无歌曲") }
+                    } else if (uiState.selectedTracks.isNotEmpty()) {
+                        item(key = "playlist-tracks-heading") {
+                            Text(
+                                text = "歌曲 · ${uiState.selectedTracks.size} 首",
+                                modifier = Modifier.padding(vertical = FuoSpacing.sm),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                         itemsIndexed(
                             uiState.selectedTracks,
                             key = { _, track -> track.id },
@@ -190,7 +199,6 @@ fun LocalPlaylistScreen(
                                     null
                                 },
                             )
-                            HorizontalDivider()
                         }
                     }
                 }

@@ -15,7 +15,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.currentCompositeKeyHashCode
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,7 +27,6 @@ fun ProviderPlaylistGrid(
     onClick: (ProviderPlaylist) -> Unit,
     onMore: (() -> Unit)? = null,
     maxRows: Int? = null,
-    heroScopeKey: String? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     val columns = layoutInfo.gridColumns.coerceAtLeast(1)
@@ -37,8 +35,7 @@ fun ProviderPlaylistGrid(
     val isLimited = maxRows != null || onMore != null
     val hasMore = isLimited && playlists.size > capacity
     val visiblePlaylists = if (hasMore) playlists.take(capacity) else playlists
-    val resolvedHeroScopeKey = heroScopeKey ?: "composition:${currentCompositeKeyHashCode}"
-    val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing),
@@ -52,14 +49,11 @@ fun ProviderPlaylistGrid(
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 row.forEach { playlist ->
-                    val identity = playlist.coverHeroKey()
-                    val occurrence = heroOccurrences[identity] ?: 0
-                    heroOccurrences[identity] = occurrence + 1
+
                     ProviderPlaylistCard(
                         playlist = playlist,
                         onClick = { onClick(playlist) },
                         modifier = Modifier.weight(1f),
-                        heroSourceId = identity.forSource(resolvedHeroScopeKey, occurrence).sourceInstanceId,
                     )
                 }
                 repeat(columns - row.size) {
@@ -78,39 +72,30 @@ internal fun LazyListScope.addProviderPlaylistGridRows(
     onClick: (ProviderPlaylist) -> Unit,
     onMore: (() -> Unit)? = null,
     maxRows: Int? = null,
-    heroScopeKey: String = keyPrefix,
 ) {
     val normalizedColumns = columns.coerceAtLeast(1)
     val capacity = normalizedColumns * (maxRows ?: 2)
     val isLimited = maxRows != null || onMore != null
     val hasMore = isLimited && playlists.size > capacity
     val visiblePlaylists = if (hasMore) playlists.take(capacity) else playlists
-    val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
 
     if (hasMore && onMore != null) {
         item("$keyPrefix:more") { ProviderCollectionMoreAction(onMore) }
     }
     visiblePlaylists.chunked(normalizedColumns).forEachIndexed { rowIndex, row ->
-        val rowItems = row.map { playlist ->
-            val identity = playlist.coverHeroKey()
-            val occurrence = heroOccurrences[identity] ?: 0
-            heroOccurrences[identity] = occurrence + 1
-            playlist to identity.forSource(heroScopeKey, occurrence).sourceInstanceId
-        }
         item("$keyPrefix:row:$rowIndex") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
-                rowItems.forEach { (playlist, heroSourceId) ->
+                row.forEach { playlist ->
                     ProviderPlaylistCard(
                         playlist = playlist,
                         onClick = { onClick(playlist) },
                         modifier = Modifier.weight(1f),
-                        heroSourceId = heroSourceId,
                     )
                 }
-                repeat(normalizedColumns - rowItems.size) {
+                repeat(normalizedColumns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -135,20 +120,14 @@ fun ProviderPlaylistCard(
     playlist: ProviderPlaylist,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    heroSourceId: String? = null,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
-    val heroCoordinator = LocalResourceHeroCoordinator.current
-    val heroKey = playlist.coverHeroKey().copy(sourceInstanceId = heroSourceId)
     Column(
         modifier = modifier
             .fuoInteractive()
             .clickable(
                 role = Role.Button,
-                onClick = {
-                    heroCoordinator?.activate(heroKey)
-                    onClick()
-                },
+                onClick = onClick,
             )
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
@@ -156,8 +135,7 @@ fun ProviderPlaylistCard(
             track = playlist.toDisplayTrack(),
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .fuoNavigationHero(heroKey),
+                .aspectRatio(1f),
             placeholder = CoverPlaceholder.Playlist,
         )
         Spacer(Modifier.height(if (isWideLayout) 4.dp else 8.dp))
@@ -187,7 +165,6 @@ fun ProviderMediaItemGrid(
     onItemVisible: ((Int) -> Unit)? = null,
     onMore: (() -> Unit)? = null,
     maxRows: Int? = null,
-    heroScopeKey: String? = null,
 ) {
     val layoutInfo = LocalAppLayoutInfo.current
     val columns = layoutInfo.gridColumns.coerceAtLeast(1)
@@ -196,8 +173,7 @@ fun ProviderMediaItemGrid(
     val isLimited = maxRows != null || onMore != null
     val hasMore = isLimited && items.size > capacity
     val visibleItems = if (hasMore) items.take(capacity) else items
-    val resolvedHeroScopeKey = heroScopeKey ?: "composition:${currentCompositeKeyHashCode}"
-    val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing),
@@ -217,14 +193,11 @@ fun ProviderMediaItemGrid(
                             onItemVisible(index)
                         }
                     }
-                    val identity = item.coverHeroKey()
-                    val occurrence = heroOccurrences[identity] ?: 0
-                    heroOccurrences[identity] = occurrence + 1
+
                     ProviderMediaItemCard(
                         item = item,
                         onClick = { onClick(item) },
                         modifier = Modifier.weight(1f),
-                        heroSourceId = identity.forSource(resolvedHeroScopeKey, occurrence).sourceInstanceId,
                     )
                 }
                 repeat(columns - row.size) {
@@ -243,28 +216,20 @@ internal fun LazyListScope.addProviderMediaItemGridRows(
     onClick: (ProviderMediaItem) -> Unit,
     maxRows: Int? = null,
     onItemVisible: ((Int) -> Unit)? = null,
-    heroScopeKey: String = keyPrefix,
 ) {
     val normalizedColumns = columns.coerceAtLeast(1)
     val capacity = normalizedColumns * (maxRows ?: 2)
     val isLimited = maxRows != null
     val hasMore = isLimited && items.size > capacity
     val visibleItems = if (hasMore) items.take(capacity) else items
-    val heroOccurrences = mutableMapOf<ResourceCoverHeroKey, Int>()
 
     visibleItems.chunked(normalizedColumns).forEachIndexed { rowIndex, row ->
-        val rowItems = row.map { item ->
-            val identity = item.coverHeroKey()
-            val occurrence = heroOccurrences[identity] ?: 0
-            heroOccurrences[identity] = occurrence + 1
-            item to identity.forSource(heroScopeKey, occurrence).sourceInstanceId
-        }
         item("$keyPrefix:row:$rowIndex") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
-                rowItems.forEachIndexed { columnIndex, (item, heroSourceId) ->
+                row.forEachIndexed { columnIndex, item ->
                     val index = rowIndex * normalizedColumns + columnIndex
                     if (onItemVisible != null) {
                         LaunchedEffect(index, items.size) {
@@ -275,10 +240,9 @@ internal fun LazyListScope.addProviderMediaItemGridRows(
                         item = item,
                         onClick = { onClick(item) },
                         modifier = Modifier.weight(1f),
-                        heroSourceId = heroSourceId,
                     )
                 }
-                repeat(normalizedColumns - rowItems.size) {
+                repeat(normalizedColumns - row.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
@@ -291,20 +255,14 @@ fun ProviderMediaItemCard(
     item: ProviderMediaItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    heroSourceId: String? = null,
 ) {
     val isWideLayout = LocalAppLayoutInfo.current.useWideLayout
-    val heroCoordinator = LocalResourceHeroCoordinator.current
-    val heroKey = item.coverHeroKey().copy(sourceInstanceId = heroSourceId)
     Column(
         modifier = modifier
             .fuoInteractive()
             .clickable(
                 role = Role.Button,
-                onClick = {
-                    heroCoordinator?.activate(heroKey)
-                    onClick()
-                },
+                onClick = onClick,
             )
             .padding(vertical = if (isWideLayout) 2.dp else 6.dp),
     ) {
@@ -312,8 +270,7 @@ fun ProviderMediaItemCard(
             track = item.toDisplayTrack(),
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
-                .fuoNavigationHero(heroKey),
+                .aspectRatio(1f),
             placeholder = when (item.type) {
                 ProviderMediaItemType.Artist -> CoverPlaceholder.Artist
                 ProviderMediaItemType.Album -> CoverPlaceholder.Album

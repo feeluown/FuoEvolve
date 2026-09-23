@@ -42,19 +42,11 @@ Common interactive surfaces use `fuoPressFeedback` with the same `MutableInterac
 
 Use the more prominent scale only for compact, visually raised surfaces such as the mini player. Material buttons keep their built-in interaction behavior unless a custom interaction specifically needs extra feedback.
 
-## Hero transitions
+## Navigation transitions
 
-Hero transitions are reserved for a stable visual object that exists on both sides of a navigation or presentation change. They complement the existing page transition instead of replacing it.
+Navigation uses regular forward/pop transitions and full-player overlay enter/exit motion. Shared-element/Hero transitions and predictive-back gesture animations are intentionally not used because their extra state coupling caused navigation and rendering regressions across adaptive layouts.
 
-- Provider playlist, album, and artist cards share only their cover image with the corresponding detail header.
-- Resource identity remains resource type + provider ID + resource ID. A per-card source instance token disambiguates duplicate renderings of the same resource on one page so forward and pop transitions return to the card that was actually clicked.
-- Source instance tokens are derived deterministically from the resource container's stable Compose composition key plus the resource occurrence within that container. Recreating the source page therefore produces the same shared-element key instead of a new random token.
-- The source instance token belongs only to the UI Hero layer and is not added to provider/domain models or navigation routes.
-- Navigation Hero elements use the app-level `SharedTransitionLayout` together with Navigation3's `LocalNavAnimatedContentScope`, so normal pop and predictive-back navigation can drive the same shared element.
-- Playlist, album, and artist detail loading progress is overlay-only and does not remeasure the Hero header. The destination keeps a stable target position while refreshed metadata arrives.
-- The full player intentionally does not participate in shared-cover Hero transitions; it keeps the normal overlay enter/exit motion.
-
-Feature entries without a real cover and track rows whose primary click action is playback should not be forced into a Hero transition merely for decoration.
+Artwork may still animate when the playing track itself changes; that motion is local to the player and does not bind two screens together.
 
 ## Animation speed setting
 

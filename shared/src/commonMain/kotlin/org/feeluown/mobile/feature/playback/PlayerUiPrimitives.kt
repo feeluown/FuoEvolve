@@ -2,10 +2,9 @@ package org.feeluown.mobile
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
@@ -59,41 +57,29 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
-fun PlayerSharedCover(
+fun PlayerCover(
     track: MusicTrack,
-    heroEnabled: Boolean,
     transitionDirection: TrackChangeDirection = TrackChangeDirection.Next,
     isLoading: Boolean = false,
-    cornerRadius: androidx.compose.ui.unit.Dp = 8.dp,
+    cornerRadius: androidx.compose.ui.unit.Dp = 12.dp,
     modifier: Modifier = Modifier,
 ) {
     val targetCoverImage = rememberPlatformCoverImage(track.coverUrl, maxSizePx = 768)
     val hasCoverUrl = !track.coverUrl.isNullOrBlank()
     var displayedTrack by remember { mutableStateOf(track) }
     LaunchedEffect(track.id, track.coverUrl, isLoading, targetCoverImage) {
-        if (!isLoading || (hasCoverUrl && targetCoverImage != null)) {
-            displayedTrack = track
-        }
+        if (!isLoading || (hasCoverUrl && targetCoverImage != null)) displayedTrack = track
     }
-    val sharedTransitionScope = LocalAppSharedTransitionScope.current
-    val sharedModifier = if (sharedTransitionScope == null) {
-        modifier
-    } else {
-        with(sharedTransitionScope) {
-            modifier.sharedElementWithCallerManagedVisibility(
-                sharedContentState = rememberSharedContentState("player-cover:${track.id}"),
-                visible = heroEnabled,
-            )
-        }
-    }
-    Box(modifier = sharedModifier) {
+    val coverSpatialSpec = FuoMotion.slowSpatialSpec<IntOffset>()
+    val coverEffectsSpec = FuoMotion.defaultEffectsSpec<Float>()
+    Box(modifier = modifier) {
         AnimatedContent(
             targetState = displayedTrack,
-            transitionSpec = { playerCoverTransition(transitionDirection) },
+            transitionSpec = { playerCoverTransition(transitionDirection, coverSpatialSpec, coverEffectsSpec) },
             modifier = Modifier.fillMaxSize(),
             contentKey = { it.coverUrl },
             label = "player cover transition",
@@ -107,18 +93,23 @@ fun PlayerSharedCover(
     }
 }
 
-private fun playerCoverTransition(direction: TrackChangeDirection): ContentTransform {
+/** Motion tokens are read in composition, then passed into the non-composable transition lambda. */
+private fun playerCoverTransition(
+    direction: TrackChangeDirection,
+    spatialSpec: FiniteAnimationSpec<IntOffset>,
+    effectsSpec: FiniteAnimationSpec<Float>,
+): ContentTransform {
     val directionMultiplier = if (direction == TrackChangeDirection.Next) 1 else -1
     return (
         slideInHorizontally(
             initialOffsetX = { width -> width * directionMultiplier },
-            animationSpec = tween(FuoMotion.coverTransitionMillis),
-        ) + fadeIn(animationSpec = tween(FuoMotion.coverFadeMillis))
+            animationSpec = spatialSpec,
+        ) + fadeIn(animationSpec = effectsSpec)
         ) togetherWith (
         slideOutHorizontally(
             targetOffsetX = { width -> -width * directionMultiplier },
-            animationSpec = tween(FuoMotion.coverTransitionMillis),
-        ) + fadeOut(animationSpec = tween(FuoMotion.coverFadeMillis))
+            animationSpec = spatialSpec,
+        ) + fadeOut(animationSpec = effectsSpec)
         )
 }
 
@@ -128,11 +119,7 @@ enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
-fun QueueRepeatModeHeader(
-    isFmQueue: Boolean,
-    repeatMode: RepeatMode,
-    onRepeat: () -> Unit,
-) {
+fun QueueRepeatModeHeader(isFmQueue: Boolean, repeatMode: RepeatMode, onRepeat: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -144,17 +131,10 @@ fun QueueRepeatModeHeader(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (isFmQueue) {
-                FmModeBadge()
-            } else {
-                RepeatModeTextButton(
-                    repeatMode = repeatMode,
-                    onRepeat = onRepeat,
-                )
-            }
+            if (isFmQueue) FmModeBadge() else RepeatModeTextButton(repeatMode, onRepeat)
         }
     }
 }
@@ -164,12 +144,12 @@ fun FmModeBadge() {
     Surface(
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
-        tonalElevation = 1.dp,
+        tonalElevation = FuoElevation.content,
         shape = MaterialTheme.shapes.extraLarge,
     ) {
         Text(
             text = "FM",
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = FuoSpacing.md, vertical = FuoSpacing.sm),
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
         )
@@ -177,10 +157,7 @@ fun FmModeBadge() {
 }
 
 @Composable
-fun RepeatModeTextButton(
-    repeatMode: RepeatMode,
-    onRepeat: () -> Unit,
-) {
+fun RepeatModeTextButton(repeatMode: RepeatMode, onRepeat: () -> Unit) {
     val repeatIcon = when (repeatMode) {
         RepeatMode.OFF -> Icons.Filled.Repeat
         RepeatMode.QUEUE -> Icons.Filled.Repeat
@@ -190,13 +167,7 @@ fun RepeatModeTextButton(
         selected = repeatMode != RepeatMode.OFF,
         onClick = onRepeat,
         label = { Text(repeatMode.label, maxLines = 1) },
-        leadingIcon = {
-            Icon(
-                imageVector = repeatIcon,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-        },
+        leadingIcon = { Icon(repeatIcon, contentDescription = null, modifier = Modifier.size(18.dp)) },
     )
 }
 
@@ -226,8 +197,8 @@ fun PlayerControls(
     sleepTimerAction: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier = modifier.animateContentSize(animationSpec = tween(220)),
-        horizontalArrangement = if (compact) Arrangement.spacedBy(8.dp) else Arrangement.SpaceEvenly,
+        modifier = modifier.animateContentSize(animationSpec = FuoMotion.defaultSpatialSpec()),
+        horizontalArrangement = if (compact) Arrangement.spacedBy(FuoSpacing.sm) else Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!compact && onShuffle != null) {
@@ -273,12 +244,7 @@ fun PlayerControls(
         )
         if (!compact) {
             sleepTimerAction?.invoke()
-            if (onRepeat != null) {
-                RepeatModeTextButton(
-                    repeatMode = repeatMode,
-                    onRepeat = onRepeat,
-                )
-            }
+            if (onRepeat != null) RepeatModeTextButton(repeatMode, onRepeat)
         }
     }
 }
@@ -297,32 +263,17 @@ fun RoundControlButton(
     val buttonSize = if (size < 48.dp) 48.dp else size
     val buttonModifier = Modifier.size(buttonSize)
     if (prominent || selected) {
-        FilledIconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = buttonModifier,
-        ) {
-            Icon(
-                imageVector = imageVector,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(iconSize),
-            )
+        FilledIconButton(onClick = onClick, enabled = enabled, modifier = buttonModifier) {
+            Icon(imageVector, contentDescription = contentDescription, modifier = Modifier.size(iconSize))
         }
     } else {
-        FilledTonalIconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = buttonModifier,
-        ) {
-            Icon(
-                imageVector = imageVector,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(iconSize),
-            )
+        FilledTonalIconButton(onClick = onClick, enabled = enabled, modifier = buttonModifier) {
+            Icon(imageVector, contentDescription = contentDescription, modifier = Modifier.size(iconSize))
         }
     }
 }
 
+/** The primary playback affordance has a rounded-square silhouette; small controls stay round. */
 @Composable
 fun PlayPauseButton(
     isPlaying: Boolean,
@@ -333,13 +284,14 @@ fun PlayPauseButton(
     prominent: Boolean = false,
 ) {
     val buttonSize = if (size < 48.dp) 48.dp else size
+    val shape = if (prominent) FuoVisualTokens.floating else MaterialTheme.shapes.extraLarge
     if (isLoading) {
         Surface(
             modifier = Modifier.size(buttonSize),
-            color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+            color = if (prominent) MaterialTheme.colorScheme.primary else FuoSurfaceColors.interactive(MaterialTheme.colorScheme),
             contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-            tonalElevation = if (prominent) 3.dp else 1.dp,
-            shape = CircleShape,
+            tonalElevation = FuoElevation.content,
+            shape = shape,
         ) {
             Box(contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
@@ -352,33 +304,27 @@ fun PlayPauseButton(
         return
     }
     val content: @Composable () -> Unit = {
-        PlayPauseMorphIcon(
-            isPlaying = isPlaying,
-            modifier = Modifier.size(iconSize),
-        )
+        PlayPauseMorphIcon(isPlaying = isPlaying, modifier = Modifier.size(iconSize))
     }
     if (prominent) {
         FilledIconButton(
             onClick = onClick,
             modifier = Modifier.size(buttonSize),
-            shape = CircleShape,
+            shape = shape,
             content = content,
         )
     } else {
         FilledTonalIconButton(
             onClick = onClick,
             modifier = Modifier.size(buttonSize),
-            shape = CircleShape,
+            shape = shape,
             content = content,
         )
     }
 }
 
 @Composable
-private fun PlayPauseMorphIcon(
-    isPlaying: Boolean,
-    modifier: Modifier = Modifier,
-) {
+private fun PlayPauseMorphIcon(isPlaying: Boolean, modifier: Modifier = Modifier) {
     val morphProgress by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
         animationSpec = FuoMotion.defaultSpatialSpec(),
@@ -386,18 +332,13 @@ private fun PlayPauseMorphIcon(
     )
     val color = LocalContentColor.current
     val description = if (isPlaying) "暂停" else "播放"
-    Canvas(
-        modifier = modifier.semantics { contentDescription = description },
-    ) {
+    Canvas(modifier = modifier.semantics { contentDescription = description }) {
         val scaleX = size.width / 24f
         val scaleY = size.height / 24f
         fun lerp(start: Float, end: Float): Float = start + (end - start) * morphProgress
         fun drawMorphPolygon(play: FloatArray, pause: FloatArray) {
             val path = Path()
-            path.moveTo(
-                lerp(play[0], pause[0]) * scaleX,
-                lerp(play[1], pause[1]) * scaleY,
-            )
+            path.moveTo(lerp(play[0], pause[0]) * scaleX, lerp(play[1], pause[1]) * scaleY)
             var index = 2
             while (index < play.size) {
                 path.lineTo(
@@ -409,7 +350,6 @@ private fun PlayPauseMorphIcon(
             path.close()
             drawPath(path = path, color = color)
         }
-
         drawMorphPolygon(
             play = floatArrayOf(7f, 4.5f, 18.5f, 12f, 7f, 12f, 7f, 4.5f),
             pause = floatArrayOf(6.5f, 5f, 10.5f, 5f, 10.5f, 19f, 6.5f, 19f),
@@ -436,11 +376,7 @@ internal fun PlaybackProgressIndicator(
             progress = progress,
             modifier = modifier,
             amplitude = { value ->
-                if (isPlaying) {
-                    WavyProgressIndicatorDefaults.indicatorAmplitude(value)
-                } else {
-                    0f
-                }
+                if (isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(value) else 0f
             },
         )
     }
@@ -464,7 +400,7 @@ fun ProgressBlock(
     }
     val animatedSeekPosition by animateFloatAsState(
         targetValue = seekPosition.coerceIn(0f, duration.toFloat()),
-        animationSpec = tween(FuoMotion.progressAnimationMillis),
+        animationSpec = FuoMotion.fastEffectsSpec(),
         label = "player progress",
     )
     val displayedSeekPosition = if (isSeeking) seekPosition else animatedSeekPosition
@@ -499,15 +435,17 @@ fun ProgressBlock(
             )
         },
     )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(
             formatMs(if (isSeeking) seekPosition.toLong() else state.positionMs),
             style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(formatMs(state.durationMs), style = MaterialTheme.typography.labelMedium)
+        Text(
+            formatMs(state.durationMs),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -518,10 +456,8 @@ fun PlaybackPartList(
     onPartClick: (Int) -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 56.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 56.dp, bottom = FuoSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
     ) {
         Text(
             text = "分 P 列表",
@@ -536,20 +472,20 @@ fun PlaybackPartList(
                     .fuoInteractive()
                     .clickable(role = Role.Button) { onPartClick(index) },
                 color = if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer
+                    FuoSurfaceColors.selected(MaterialTheme.colorScheme)
                 } else {
-                    MaterialTheme.colorScheme.surface
+                    FuoSurfaceColors.section(MaterialTheme.colorScheme)
                 },
                 contentColor = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                    MaterialTheme.colorScheme.onSecondaryContainer
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                shape = MaterialTheme.shapes.small,
+                shape = FuoVisualTokens.content,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = FuoSpacing.md, vertical = FuoSpacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -566,10 +502,7 @@ fun PlaybackPartList(
                         modifier = Modifier.weight(1f),
                     )
                     part.durationMs?.takeIf { it > 0 }?.let {
-                        Text(
-                            text = formatMs(it),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        Text(text = formatMs(it), style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

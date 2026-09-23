@@ -256,7 +256,6 @@ fun ProviderPlaylistDetailRoute(playlist: ProviderPlaylist, category: ProviderFe
                     }.joinToString(" · "),
                     description = displayPlaylist.description,
                     placeholder = CoverPlaceholder.Playlist,
-                    heroKey = playlist.coverHeroKey(),
                     stacked = stacked,
                     action = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -463,7 +462,6 @@ fun ProviderMediaItemDetailRoute(item: ProviderMediaItem) {
                     }.joinToString(" · "),
                     description = displayItem.description,
                     placeholder = if (isArtist) CoverPlaceholder.Artist else CoverPlaceholder.Album,
-                    heroKey = item.coverHeroKey(),
                     stacked = stacked,
                     action = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
