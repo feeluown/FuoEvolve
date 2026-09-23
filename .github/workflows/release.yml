@@ -268,7 +268,7 @@ jobs:
   publish-aur:
     name: Publish AUR source package
     needs:
-      - build-desktop-release
+      - publish-release
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
