@@ -5,6 +5,7 @@ pkgdesc='Open-source cross-platform music player based on FeelUOwn'
 arch=('x86_64')
 url='https://feeluown.github.io/FuoEvolve/'
 license=('GPL-3.0-only')
+conflicts=('fuoevolve-bin')
 depends=(
   'gtk3'
   'libx11'
