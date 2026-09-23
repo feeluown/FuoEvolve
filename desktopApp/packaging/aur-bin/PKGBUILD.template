@@ -27,7 +27,7 @@ sha256sums=('@BINARY_SHA256@')
 package() {
   # The upstream release archive is a completed pacman package. Repackage only
   # its installed files; makepkg must generate metadata for fuoevolve-bin itself.
-  if ! bsdtar -tf "${srcdir}/${_archive}" | grep -Eq '^(\./)?\.PKGINFO$'; then
+  if ! bsdtar -tf "${srcdir}/${_archive}" | grep -E '^(\./)?\.PKGINFO$' > /dev/null; then
     echo 'Release asset is not a valid Arch package: missing .PKGINFO' >&2
     return 1
   fi
