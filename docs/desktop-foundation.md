@@ -49,7 +49,7 @@ Desktop packages are produced only from `desktopApp`:
 - Linux x64 RPM.
 - Linux x64 Arch/Pacman package.
 
-The four Linux package formats use the pinned Ubuntu 26.04 LTS Native Image baseline. AppImage is built in its own portable-runtime branch. DEB, RPM and Arch/Pacman are built together in the distro branch, share one GraalVM Native Image compilation, package only application-owned native helpers, and declare their external native runtime dependencies through their respective package-manager metadata (`debDepends`, `rpmRequires`, and `pacmanDepends`).
+The four Linux package formats use the pinned Ubuntu 24.04 LTS Native Image compatibility baseline. AppImage is built in its own portable-runtime branch. DEB, RPM and Arch/Pacman are built together in the distro branch, share one GraalVM Native Image compilation, package only application-owned native helpers, and declare their external native runtime dependencies through their respective package-manager metadata (`debDepends`, `rpmRequires`, and `pacmanDepends`).
 
 No desktop package contains a bundled JVM.
 
@@ -65,7 +65,7 @@ Desktop CI runs on Linux, Windows, and macOS and validates:
 - packaged native-resource staging;
 - platform-specific libmpv runtime preparation.
 
-The reusable packaging workflow additionally verifies NSIS/DMG/AppImage/DEB/RPM/Arch output and their required native package contents. The Linux distro packaging job verifies DEB, RPM and Arch after one shared Native Image build, while AppImage uses its separate portable-runtime build. Release tags publish the same package matrix alongside Android.
+The reusable packaging workflow additionally verifies NSIS/DMG/AppImage/DEB/RPM/Arch output and their required native package contents. Linux AppImage and distro payloads are rejected if any packaged ELF declares an x86-64 ISA requirement above baseline. The Linux distro packaging job verifies DEB, RPM and Arch after one shared Native Image build, while AppImage uses its separate portable-runtime build. Release tags publish the same package matrix alongside Android.
 
 ## Linux Wayland requirement
 
