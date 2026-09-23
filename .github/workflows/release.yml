@@ -268,7 +268,7 @@ jobs:
   publish-aur:
     name: Publish AUR source package
     needs:
-      - build-desktop-release
+      - publish-release
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -367,8 +367,8 @@ jobs:
     needs: publish-release
     if: >-
       always() &&
-      (github.event_name == 'workflow_dispatch' ||
-      needs.publish-release.result == 'success')
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+       (github.event_name == 'push' && needs.publish-release.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
@@ -410,8 +410,11 @@ jobs:
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: build/pages
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}

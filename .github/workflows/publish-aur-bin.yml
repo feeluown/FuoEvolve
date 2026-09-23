@@ -6,6 +6,7 @@ name: Publish AUR binary package
     types: [completed]
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -13,7 +14,8 @@ jobs:
     name: Publish fuoevolve-bin
     if: >-
       github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -26,13 +28,32 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Check GitHub Release publication
+        id: published_release
+        env:
+          RELEASE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          publish_conclusion="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RELEASE_RUN_ID}/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "Publish release") | .conclusion' | tail -n 1
+          )"
+          if [[ "$publish_conclusion" != "success" ]]; then
+            echo "GitHub Release publication was not successful (${publish_conclusion:-missing}); skipping binary AUR publication."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout released sources
+        if: steps.published_release.outputs.publish == 'true'
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Verify triggering release tag
+        if: steps.published_release.outputs.publish == 'true'
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -50,11 +71,13 @@ jobs:
           fi
 
       - name: Render binary AUR metadata
+        if: steps.published_release.outputs.publish == 'true'
         run: |
           set -euo pipefail
           bash scripts/render-aur-bin-package.sh "$RELEASE_TAG" build/aur-bin
 
       - name: Verify binary AUR payload
+        if: steps.published_release.outputs.publish == 'true'
         run: |
           set -euo pipefail
           test -s build/aur-bin/PKGBUILD
@@ -68,6 +91,7 @@ jobs:
           fi
 
       - name: Configure AUR SSH authentication
+        if: steps.published_release.outputs.publish == 'true'
         run: |
           set -euo pipefail
           if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
@@ -89,6 +113,7 @@ jobs:
           chmod 600 "$HOME/.ssh/config"
 
       - name: Publish PKGBUILD to AUR
+        if: steps.published_release.outputs.publish == 'true'
         run: |
           set -euo pipefail
           aur_dir=build/aur-bin-repo
