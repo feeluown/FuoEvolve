@@ -17,6 +17,7 @@ pkgbase = fuoevolve-bin
 	depends = libpulse
 	provides = fuoevolve=@PKGVER@
 	conflicts = fuoevolve
+	options = !strip
 	source = FuoEvolve-@PKGVER@-linux-x64.pkg.tar.zst::https://github.com/feeluown/FuoEvolve/releases/download/@PKGVER@/FuoEvolve-@PKGVER@-linux-x64.pkg.tar.zst
 	noextract = FuoEvolve-@PKGVER@-linux-x64.pkg.tar.zst
 	sha256sums = @BINARY_SHA256@
