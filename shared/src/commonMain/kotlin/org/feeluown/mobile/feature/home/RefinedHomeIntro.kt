@@ -5,43 +5,42 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 
-/** A calm editorial entry point; artwork in the content grid remains the visual focus. */
+/** Lightweight editorial context; content shelves remain the visual focus of Home. */
 @Composable
 internal fun RefinedHomeIntro(section: HomeSection) {
     val isRecommendation = section == HomeSection.Recommend
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = FuoSurfaceColors.section(MaterialTheme.colorScheme),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = FuoVisualTokens.group,
-        tonalElevation = FuoElevation.content,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = FuoSpacing.lg, bottom = FuoSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(FuoSpacing.xs),
     ) {
-        Column(
-            modifier = Modifier.padding(FuoSpacing.xl),
-            verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
-        ) {
-            Text(
-                text = if (isRecommendation) "为你精选" else "探索音乐",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = if (isRecommendation) "找到此刻喜欢的旋律" else "换个方向，听点新的",
-                style = MaterialTheme.typography.headlineMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = if (isRecommendation) "从每日推荐开始，继续发现好音乐" else "发现不同音源里的歌单、专辑与新声音",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            text = if (isRecommendation) "推荐" else "探索",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = if (isRecommendation) "此刻想听什么？" else "换个方向，发现新声音",
+            style = MaterialTheme.typography.headlineSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = if (isRecommendation) {
+                "从播放记录和已启用音源中整理适合现在播放的内容"
+            } else {
+                "从榜单、歌单、新歌、新碟和歌手中主动探索"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
