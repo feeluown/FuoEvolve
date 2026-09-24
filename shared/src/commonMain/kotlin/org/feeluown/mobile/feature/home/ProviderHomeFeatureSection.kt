@@ -46,10 +46,25 @@ fun ProviderContentHomeFeatureSection(
         sections.filter { it.isLoginRequired }.map { it.feature }.distinctBy { it.providerId }
     }
     var refreshRequested by remember(section) { mutableStateOf(false) }
+    var recentTracks by remember(section) { mutableStateOf<List<ListeningResourceStat>>(emptyList()) }
     var initialLoadPending by remember(section) { mutableStateOf(sections.isEmpty()) }
     var initialLoadObserved by remember(section) { mutableStateOf(state.isLoading) }
     val isPullRefreshing = refreshRequested && state.isLoading
     val showPageLoading = initialLoadPending
+
+    LaunchedEffect(graph.listeningHistory, section, state.recommendSections) {
+        if (section == HomeSection.Recommend) {
+            runCatching {
+                graph.listeningHistory.recentResources(
+                    range = ListeningTimeRange.All,
+                    limit = HOME_SHELF_PREVIEW_LIMIT,
+                    resourceType = ListeningResourceType.Track,
+                ).filterNot { stat ->
+                    stat.resource.sourceId == "local" || stat.resource.sourceId == "downloaded"
+                }
+            }.onSuccess { recentTracks = it }
+        }
+    }
 
     LaunchedEffect(state.isLoading, sections.isEmpty()) {
         if (sections.isNotEmpty()) initialLoadPending = false
@@ -76,6 +91,29 @@ fun ProviderContentHomeFeatureSection(
                     item(key = "intro:${section.name}") { RefinedHomeIntro(section) }
 
                     if (section == HomeSection.Recommend) {
+                        if (recentTracks.isNotEmpty() && visibleSections.isNotEmpty()) {
+                            item(key = "header:continue-listening") {
+                                ProviderFeatureHeader(
+                                    feature = visibleSections.first().feature,
+                                    title = "继续听",
+                                    providerLabel = "来自播放记录",
+                                    action = home::openPlaybackHistory,
+                                    actionLabel = "查看记录",
+                                )
+                            }
+                            item(key = "shelf:continue-listening") {
+                                HomeRecentTrackShelf(
+                                    resources = recentTracks,
+                                    onClick = { resource ->
+                                        graph.playbackQueue.playTracks(
+                                            tracks = listOf(resource.toHomeHistoryTrack()),
+                                            index = 0,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+
                         val actionSections = visibleSections
                             .filter {
                                 it.homeContentRole() == HomeContentRole.DailyRecommendation ||
@@ -428,3 +466,16 @@ private fun androidx.compose.foundation.lazy.LazyListScope.addHomeFallbackSectio
         }
     }
 }
+
+
+private fun ListeningResourceSnapshot.toHomeHistoryTrack(): MusicTrack = MusicTrack(
+    id = sourceResourceId,
+    title = title,
+    artists = subtitle,
+    album = "",
+    source = sourceId,
+    sourceType = TrackSourceType.Provider,
+    coverUrl = coverUrl,
+    providerId = sourceId,
+    providerName = sourceId,
+)
