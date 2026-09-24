@@ -36,6 +36,7 @@ fun ProviderContentHomeFeatureSection(
 ) {
     val state = home.uiState.collectAsStateWithLifecycle().value
     val graph = LocalHomeFeatureUiGraph.current
+    val catalogState = graph.providerCatalog.uiState.collectAsStateWithLifecycle().value
     val layoutInfo = LocalAppLayoutInfo.current
     val gridColumns = layoutInfo.gridColumns.coerceAtLeast(1)
     val gridSpacing = if (layoutInfo.useWideLayout) FuoSpacing.md else FuoSpacing.lg
@@ -52,15 +53,15 @@ fun ProviderContentHomeFeatureSection(
     val isPullRefreshing = refreshRequested && state.isLoading
     val showPageLoading = initialLoadPending
 
-    LaunchedEffect(graph.listeningHistory, section, state.recommendSections) {
+    LaunchedEffect(graph.listeningHistory, section, state.recommendSections, catalogState.enabledProviderIds) {
         if (section == HomeSection.Recommend) {
             runCatching {
                 graph.listeningHistory.recentResources(
                     range = ListeningTimeRange.All,
                     limit = HOME_SHELF_PREVIEW_LIMIT,
                     resourceType = ListeningResourceType.Track,
-                ).filterNot { stat ->
-                    stat.resource.sourceId == "local" || stat.resource.sourceId == "downloaded"
+                ).filter { stat ->
+                    stat.resource.sourceId in catalogState.enabledProviderIds
                 }
             }.onSuccess { recentTracks = it }
         }
@@ -106,7 +107,13 @@ fun ProviderContentHomeFeatureSection(
                                     resources = recentTracks,
                                     onClick = { resource ->
                                         graph.playbackQueue.playTracks(
-                                            tracks = listOf(resource.toHomeHistoryTrack()),
+                                            tracks = listOf(
+                                                resource.toHomeHistoryTrack(
+                                                    catalogState.providers
+                                                        .firstOrNull { it.providerId == resource.sourceId }
+                                                        ?.providerName,
+                                                ),
+                                            ),
                                             index = 0,
                                         )
                                     },
@@ -468,7 +475,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.addHomeFallbackSectio
 }
 
 
-private fun ListeningResourceSnapshot.toHomeHistoryTrack(): MusicTrack = MusicTrack(
+private fun ListeningResourceSnapshot.toHomeHistoryTrack(providerDisplayName: String?): MusicTrack = MusicTrack(
     id = sourceResourceId,
     title = title,
     artists = subtitle,
@@ -477,5 +484,5 @@ private fun ListeningResourceSnapshot.toHomeHistoryTrack(): MusicTrack = MusicTr
     sourceType = TrackSourceType.Provider,
     coverUrl = coverUrl,
     providerId = sourceId,
-    providerName = sourceId,
+    providerName = providerDisplayName,
 )
