@@ -23,7 +23,18 @@ fun gitOutput(vararg args: String): String? = runCatching {
     }.standardOutput.asText.get().trim()
     output.takeIf { it.isNotBlank() }
 }.getOrNull()
-val gitVersionName = gitOutput("describe", "--tags", "--match", "[0-9]*", "--always", "--dirty")
+val releaseVersionPattern = Regex("""\d+(?:\.\d+){2,3}""")
+val githubRefType = providers.environmentVariable("GITHUB_REF_TYPE").orNull
+val githubRefName = providers.environmentVariable("GITHUB_REF_NAME").orNull
+val ciReleaseVersionName = if (githubRefType == "tag") {
+    requireNotNull(githubRefName?.takeIf(releaseVersionPattern::matches)) {
+        "Release tag must be a 3- or 4-component numeric version: ${githubRefName.orEmpty()}"
+    }
+} else {
+    null
+}
+val gitVersionName = ciReleaseVersionName
+    ?: gitOutput("describe", "--tags", "--match", "[0-9]*", "--always", "--dirty")
     ?: "0.1.0"
 // versionCode tracks master commit count at the branch point so feature-branch
 // commits do not bump it (avoids install conflicts across branches).
