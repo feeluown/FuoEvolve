@@ -38,25 +38,30 @@ fun gitOutput(vararg args: String): String? = providers.exec {
     commandLine("git", *args)
 }.standardOutput.asText.get().trim().takeIf(String::isNotBlank)
 
-private val versionPattern = Regex("\\d+(?:\\.\\d+){2,3}")
-private val exactTaggedVersion = gitOutput(
-    "describe",
-    "--tags",
-    "--exact-match",
-    "--match",
-    "[0-9]*",
-    "HEAD",
-)?.let { tag -> versionPattern.matchEntire(tag)?.value }
-private val latestTaggedVersion = gitOutput("describe", "--tags", "--match", "[0-9]*", "--abbrev=0")
-    ?.let { tag -> versionPattern.matchEntire(tag)?.value }
+private val releaseVersionPattern = Regex("\\d+(?:\\.\\d+){2,3}")
+private fun gitReleaseTags(vararg args: String): List<String> {
+    val output = gitOutput("tag", *args) ?: return emptyList()
+    return output.lineSequence()
+        .map(String::trim)
+        .filter(releaseVersionPattern::matches)
+        .toList()
+}
+private fun nativePackageVersion(version: String): String =
+    version.split('.').take(3).joinToString(".")
+
+private val exactTaggedVersion = gitReleaseTags("--points-at", "HEAD", "--list", "[0-9]*", "--sort=-version:refname")
+    .firstOrNull()
+private val latestTaggedVersion = gitReleaseTags("--merged", "HEAD", "--list", "[0-9]*", "--sort=-version:refname")
+    .firstOrNull()
+private val inferredReleaseVersion = exactTaggedVersion ?: latestTaggedVersion ?: "0.1.0"
 
 val desktopPackageVersion = providers.gradleProperty("fuoevolve.packageVersion")
     .orElse(providers.environmentVariable("FUOEVOLVE_PACKAGE_VERSION"))
     .orNull
     ?.takeIf(String::isNotBlank)
-    ?: exactTaggedVersion
-    ?: latestTaggedVersion
-    ?: "0.1.0"
+    ?.let(::nativePackageVersion)
+    ?: nativePackageVersion(inferredReleaseVersion)
+
 val desktopCommitSha = providers.environmentVariable("FUOEVOLVE_COMMIT_SHA")
     .orElse(providers.environmentVariable("GITHUB_SHA"))
     .orNull
@@ -73,9 +78,9 @@ val desktopVersionLabel = providers.environmentVariable("FUOEVOLVE_DESKTOP_VERSI
     ?.trim()
     ?.takeIf(String::isNotBlank)
     ?: if (desktopVersionChannel == "stable") {
-        desktopPackageVersion
+        exactTaggedVersion ?: inferredReleaseVersion
     } else {
-        "$desktopPackageVersion-canary+${desktopCommitSha.take(8)}"
+        "$inferredReleaseVersion-canary+${desktopCommitSha.take(8)}"
     }
 
 val generatedDesktopVersionResourceDir = layout.buildDirectory.dir("generated/resources/desktopVersion")
