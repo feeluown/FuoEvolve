@@ -20,6 +20,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private const val HOME_TRACK_PREVIEW_LIMIT = 6
 private const val HOME_SHELF_PREVIEW_LIMIT = 12
+private const val HOME_HISTORY_QUERY_LIMIT = 500
 
 private data class HomeTrackPreviewEntry(
     val section: ProviderContentSection,
@@ -59,11 +60,11 @@ fun ProviderContentHomeFeatureSection(
             runCatching {
                 graph.listeningHistory.recentResources(
                     range = ListeningTimeRange.All,
-                    limit = HOME_SHELF_PREVIEW_LIMIT,
+                    limit = HOME_HISTORY_QUERY_LIMIT,
                     resourceType = ListeningResourceType.Track,
                 ).filter { stat ->
                     stat.resource.sourceId in catalogState.enabledProviderIds
-                }
+                }.take(HOME_SHELF_PREVIEW_LIMIT)
             }.onSuccess { recentTracks = it }
         }
     }
@@ -485,6 +486,6 @@ private fun ListeningResourceSnapshot.toHomeHistoryTrack(providerDisplayName: St
     source = sourceId,
     sourceType = TrackSourceType.Provider,
     coverUrl = coverUrl,
-    providerId = sourceId,
+    providerId = sourceResourceId,
     providerName = providerDisplayName,
 )
