@@ -14,8 +14,68 @@ permissions:
   contents: read
 
 jobs:
+  release-preflight:
+    name: Validate release identity
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag and versionCode progression
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version_pattern='^[0-9]+(\.[0-9]+){2,3}$'
+          if [[ ! "$tag" =~ $version_pattern ]]; then
+            echo "::error::Release tag must be a 3- or 4-component numeric version: $tag"
+            exit 1
+          fi
+
+          mapfile -t release_tags < <(
+            (git tag --list '[0-9]*' | grep -E "$version_pattern" || true) | sort -V
+          )
+          if (( ${#release_tags[@]} == 0 )); then
+            echo "::error::No numeric release tags were found"
+            exit 1
+          fi
+
+          latest_index=$((${#release_tags[@]} - 1))
+          latest_tag="${release_tags[$latest_index]}"
+          if [[ "$latest_tag" != "$tag" ]]; then
+            echo "::error::Release tag $tag is not the newest numeric version; newest is $latest_tag"
+            exit 1
+          fi
+
+          mapfile -t same_commit_tags < <(
+            (git tag --points-at "$GITHUB_SHA" --list '[0-9]*' | grep -E "$version_pattern" || true) | sort -V
+          )
+          if (( ${#same_commit_tags[@]} != 1 )) || [[ "${same_commit_tags[0]:-}" != "$tag" ]]; then
+            echo "::error::Release commit must have exactly one numeric version tag. Found: ${same_commit_tags[*]:-none}"
+            exit 1
+          fi
+
+          if (( latest_index > 0 )); then
+            previous_tag="${release_tags[$((latest_index - 1))]}"
+            if ! git merge-base --is-ancestor "$previous_tag" "$GITHUB_SHA"; then
+              echo "::error::Release $tag is not descended from previous release $previous_tag"
+              exit 1
+            fi
+            previous_count="$(git rev-list --count "$previous_tag")"
+            current_count="$(git rev-list --count "$GITHUB_SHA")"
+            if (( current_count <= previous_count )); then
+              echo "::error::Release $tag would not advance Android versionCode: current=$current_count previous=$previous_count"
+              exit 1
+            fi
+          fi
+
   android-tests:
     name: Android tests
+    needs: release-preflight
     if: github.event_name == 'push'
     uses: ./.github/workflows/android-tests.yml
     secrets:
@@ -23,11 +83,13 @@ jobs:
 
   desktop-tests:
     name: Desktop tests
+    needs: release-preflight
     if: github.event_name == 'push'
     uses: ./.github/workflows/desktop-tests.yml
 
   ios-tests:
     name: iOS tests
+    needs: release-preflight
     if: github.event_name == 'push'
     uses: ./.github/workflows/ios-tests.yml
 
@@ -110,6 +172,22 @@ jobs:
           fi
           asset_path="build/artifacts/fuo-evolve-${tag}-android-signed.apk"
           cp "${apks[0]}" "$asset_path"
+
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          aapt="$(find "$android_sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          test -n "$aapt"
+          badging="$("$aapt" dump badging "$asset_path")"
+          apk_version_name="$(sed -n "s/^package:.* versionName='\([^\']*\)'.*/\1/p" <<< "$badging")"
+          apk_version_code="$(sed -n "s/^package:.* versionCode='\([^\']*\)'.*/\1/p" <<< "$badging")"
+          if [[ "$apk_version_name" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::APK versionName $apk_version_name does not match release tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if [[ ! "$apk_version_code" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::APK versionCode is invalid: $apk_version_code"
+            exit 1
+          fi
+          echo "Validated Android release identity: versionName=$apk_version_name versionCode=$apk_version_code"
           echo "path=$asset_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload release APK asset
