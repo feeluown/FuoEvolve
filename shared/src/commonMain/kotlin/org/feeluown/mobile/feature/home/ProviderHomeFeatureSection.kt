@@ -47,13 +47,14 @@ fun ProviderContentHomeFeatureSection(
         sections.filter { it.isLoginRequired }.map { it.feature }.distinctBy { it.providerId }
     }
     var refreshRequested by remember(section) { mutableStateOf(false) }
+    var historyRefreshToken by remember(section) { mutableStateOf(0) }
     var recentTracks by remember(section) { mutableStateOf<List<ListeningResourceStat>>(emptyList()) }
     var initialLoadPending by remember(section) { mutableStateOf(sections.isEmpty()) }
     var initialLoadObserved by remember(section) { mutableStateOf(state.isLoading) }
     val isPullRefreshing = refreshRequested && state.isLoading
     val showPageLoading = initialLoadPending
 
-    LaunchedEffect(graph.listeningHistory, section, refreshRequested, catalogState.enabledProviderIds) {
+    LaunchedEffect(graph.listeningHistory, section, historyRefreshToken, catalogState.enabledProviderIds) {
         if (section == HomeSection.Recommend) {
             runCatching {
                 graph.listeningHistory.recentResources(
@@ -385,6 +386,7 @@ fun ProviderContentHomeFeatureSection(
                 isRefreshing = isPullRefreshing,
                 onRefresh = {
                     refreshRequested = true
+                    historyRefreshToken += 1
                     home.refreshHome(section)
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
