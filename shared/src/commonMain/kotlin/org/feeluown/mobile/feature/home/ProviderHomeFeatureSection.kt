@@ -62,9 +62,13 @@ fun ProviderContentHomeFeatureSection(
                     range = ListeningTimeRange.All,
                     limit = HOME_HISTORY_QUERY_LIMIT,
                     resourceType = ListeningResourceType.Track,
-                ).filter { stat ->
-                    stat.resource.sourceId in catalogState.enabledProviderIds
-                }.take(HOME_SHELF_PREVIEW_LIMIT)
+                ).let { resources ->
+                    selectHomeRecentTracks(
+                        resources = resources,
+                        enabledProviderIds = catalogState.enabledProviderIds,
+                        limit = HOME_SHELF_PREVIEW_LIMIT,
+                    )
+                }
             }.onSuccess { recentTracks = it }
         }
     }
@@ -476,16 +480,3 @@ private fun androidx.compose.foundation.lazy.LazyListScope.addHomeFallbackSectio
         }
     }
 }
-
-
-private fun ListeningResourceSnapshot.toHomeHistoryTrack(providerDisplayName: String?): MusicTrack = MusicTrack(
-    id = sourceResourceId,
-    title = title,
-    artists = subtitle,
-    album = "",
-    source = sourceId,
-    sourceType = TrackSourceType.Provider,
-    coverUrl = coverUrl,
-    providerId = sourceResourceId,
-    providerName = providerDisplayName,
-)
