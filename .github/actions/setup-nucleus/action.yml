@@ -171,26 +171,41 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        exact_tag="$(git describe --tags --exact-match --match '[0-9]*' HEAD 2>/dev/null || true)"
-        latest_tag="$(git describe --tags --match '[0-9]*' --abbrev=0 2>/dev/null || true)"
-        version_pattern='[0-9]+\.[0-9]+\.[0-9]+'
-        package_version="$(printf '%s\n' "${exact_tag:-$latest_tag}" | grep -oE "$version_pattern" | head -n 1 || true)"
-        package_version="${package_version:-0.1.0}"
-        commit_sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"
-        if [ -n "$exact_tag" ]; then
+        version_pattern='^[0-9]+(\.[0-9]+){2,3}$'
+        if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+          release_version="${GITHUB_REF_NAME:-}"
+          if [[ ! "$release_version" =~ $version_pattern ]]; then
+            echo "::error::Release tag must be a 3- or 4-component numeric version: $release_version" >&2
+            exit 1
+          fi
           channel=stable
-          version_label="$package_version"
         else
+          release_version="$(
+            (git tag --merged HEAD --list '[0-9]*' || true) |
+              grep -E "$version_pattern" |
+              sort -V |
+              tail -n 1
+          )"
+          release_version="${release_version:-0.1.0}"
           channel=canary
-          version_label="${package_version}-canary+${commit_sha:0:8}"
         fi
+
+        IFS=. read -r version_major version_minor version_patch _ <<< "$release_version"
+        package_version="${version_major}.${version_minor}.${version_patch}"
+        commit_sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+        if [[ "$channel" == "stable" ]]; then
+          version_label="$release_version"
+        else
+          version_label="${release_version}-canary+${commit_sha:0:8}"
+        fi
+
         {
           echo "FUOEVOLVE_PACKAGE_VERSION=$package_version"
           echo "FUOEVOLVE_DESKTOP_CHANNEL=$channel"
           echo "FUOEVOLVE_DESKTOP_VERSION_LABEL=$version_label"
           echo "FUOEVOLVE_COMMIT_SHA=$commit_sha"
         } >> "$GITHUB_ENV"
-        echo "Desktop version: $version_label ($channel, $commit_sha)"
+        echo "Desktop version: $version_label ($channel, package=$package_version, $commit_sha)"
 
     - name: Install packaging tools (Linux)
       if: runner.os == 'Linux' && inputs.packaging-tools == 'true'
