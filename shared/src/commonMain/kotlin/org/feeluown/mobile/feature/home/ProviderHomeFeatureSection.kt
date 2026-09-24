@@ -53,7 +53,7 @@ fun ProviderContentHomeFeatureSection(
     val isPullRefreshing = refreshRequested && state.isLoading
     val showPageLoading = initialLoadPending
 
-    LaunchedEffect(graph.listeningHistory, section, state.recommendSections, catalogState.enabledProviderIds) {
+    LaunchedEffect(graph.listeningHistory, section, refreshRequested, catalogState.enabledProviderIds) {
         if (section == HomeSection.Recommend) {
             runCatching {
                 graph.listeningHistory.recentResources(
