@@ -177,8 +177,8 @@ jobs:
           aapt="$(find "$android_sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
           test -n "$aapt"
           badging="$("$aapt" dump badging "$asset_path")"
-          apk_version_name="$(sed -n "s/^package:.* versionName='\([^\']*\)'.*/\1/p" <<< "$badging")"
-          apk_version_code="$(sed -n "s/^package:.* versionCode='\([^\']*\)'.*/\1/p" <<< "$badging")"
+          apk_version_name="$(sed -n "s/^package:.* versionName='\([^']*\)'.*/\1/p" <<< "$badging")"
+          apk_version_code="$(sed -n "s/^package:.* versionCode='\([^']*\)'.*/\1/p" <<< "$badging")"
           if [[ "$apk_version_name" != "$GITHUB_REF_NAME" ]]; then
             echo "::error::APK versionName $apk_version_name does not match release tag $GITHUB_REF_NAME"
             exit 1
