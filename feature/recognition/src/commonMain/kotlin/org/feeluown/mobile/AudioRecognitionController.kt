@@ -161,7 +161,7 @@ internal class AudioRecognitionController(
                 } else {
                     RecognitionUiState.Capturing(
                         capturedMs = 0,
-                        windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
+                        windowDurationMs = AUDIO_RECOGNITION_WINDOW_STRIDE_MS,
                     )
                 }
             }
