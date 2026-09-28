@@ -7,6 +7,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 
@@ -170,10 +171,12 @@ class DefaultAudioRecognitionRepositoryTest {
             override suspend fun capture(onSamples: (FloatArray) -> Unit) {
                 onSamples(firstWindow)
                 chunksDelivered += 1
+                yield()
                 repeat(AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS + 5) {
                     if (cancelled) return
                     onSamples(stride)
                     chunksDelivered += 1
+                    yield()
                 }
             }
 
@@ -191,6 +194,7 @@ class DefaultAudioRecognitionRepositoryTest {
         val matcher = object : AudioRecognitionMatcher {
             override suspend fun match(sessionId: String, fingerprint: String): List<RecognizedSong> {
                 matcherCalls += 1
+                delay(5_000)
                 return emptyList()
             }
         }
@@ -206,9 +210,9 @@ class DefaultAudioRecognitionRepositoryTest {
         assertEquals(emptyList(), result)
         assertEquals(AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS, chunksDelivered)
         assertEquals(1, cancelCount)
-        assertEquals(1, matcherCalls)
-        val matching = events.filterIsInstance<AudioRecognitionEvent.Matching>()
-        assertEquals(AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS, matching.single().attempt)
+        assertEquals(2, matcherCalls)
+        val matchingAttempts = events.filterIsInstance<AudioRecognitionEvent.Matching>().map { it.attempt }
+        assertEquals(listOf(1, AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS), matchingAttempts)
         val captureAttempts = events.filterIsInstance<AudioRecognitionEvent.Capturing>().map { it.attempt }
         assertTrue(captureAttempts.all { it <= AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS })
     }
