@@ -95,6 +95,22 @@ class IosPlatformRepositoriesTest {
     }
 
     @Test
+    fun audioRecognitionStopsAfterSixIosWindows() = runTest {
+        val output = FakeAudioRecognitionOutput(noMatchAttempts = 10)
+        val repository = IosAudioRecognitionRepository(output)
+        val events = mutableListOf<AudioRecognitionEvent>()
+
+        val songs = repository.recognize(events::add)
+
+        assertEquals(emptyList(), songs)
+        assertTrue(output.cancelled)
+        assertEquals(
+            (1..6).toList(),
+            events.filterIsInstance<AudioRecognitionEvent.NoMatch>().map { it.attempt },
+        )
+    }
+
+    @Test
     fun audioRecognitionPropagatesNativeErrorAndCancelsOutput() = runTest {
         val errorOutput = FakeAudioRecognitionOutput(error = "request timeout")
         val repository = IosAudioRecognitionRepository(errorOutput)
@@ -152,6 +168,7 @@ class IosPlatformRepositoriesTest {
         private val resultJson: String? = null,
         private val error: String? = null,
         private val waitForCancellation: Boolean = false,
+        private val noMatchAttempts: Int = 0,
     ) : IosAudioRecognitionOutput {
         var cancelled = false
 
@@ -166,6 +183,12 @@ class IosPlatformRepositoriesTest {
             completionHandler: (String?, String?) -> Unit,
         ) {
             if (waitForCancellation) return
+            if (noMatchAttempts > 0) {
+                for (attempt in 1..noMatchAttempts) {
+                    eventHandler("no_match", attempt.toString(), "0")
+                    if (cancelled) return
+                }
+            }
             eventHandler("capturing", "1", "2000")
             eventHandler("matching", "1", "6000")
             completionHandler(resultJson, error)
