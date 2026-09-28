@@ -24,7 +24,10 @@ sealed interface AudioRecognitionEvent {
 
     data class Matching(val attempt: Int) : AudioRecognitionEvent
 
-    data class NoMatch(val attempt: Int) : AudioRecognitionEvent
+    data class NoMatch(
+        val attempt: Int,
+        val nextWindowDurationMs: Long = AUDIO_RECOGNITION_WINDOW_MS,
+    ) : AudioRecognitionEvent
 
     data class Success(val songs: List<RecognizedSong>) : AudioRecognitionEvent
 
@@ -68,7 +71,7 @@ object UnsupportedAudioRecognitionRepository : AudioRecognitionRepository {
 
 const val AUDIO_RECOGNITION_WINDOW_MS = 6_000L
 const val AUDIO_RECOGNITION_WINDOW_STRIDE_MS = 2_000L
-const val AUDIO_RECOGNITION_MAX_ATTEMPTS = 16
+const val AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS = 16
 const val AUDIO_RECOGNITION_SAMPLE_RATE = 48_000
 const val AUDIO_RECOGNITION_FINGERPRINT_SAMPLE_RATE = 8_000
 const val AUDIO_RECOGNITION_WINDOW_SAMPLES =
