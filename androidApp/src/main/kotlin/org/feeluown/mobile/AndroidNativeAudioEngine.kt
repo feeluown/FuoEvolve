@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import kotlin.math.abs
 
 class AndroidNativeAudioEngine(
@@ -528,17 +527,27 @@ class AndroidNativeAudioEngine(
             return
         }
         updateColorOsTranslationAction(platformLyrics.translationLyric != null)
-        val lyricInfo = buildLockScreenLyricInfo(track, platformLyrics)
-        if (lyricInfo.toByteArray(Charsets.UTF_8).size > MAX_LYRIC_INFO_BYTES) {
+        val lyricGeneration = currentExtras
+            ?.getLong(COLOR_OS_SESSION_GENERATION_EXTRA)
+            ?.takeIf { it > 0L }
+            ?: currentItem.colorOsSessionGeneration()
+            ?: mutableState.value.playbackGeneration.coerceAtLeast(1L)
+        val lyricInfo = buildColorOsLyricInfo(
+            packageName = context.packageName,
+            track = track,
+            lyrics = platformLyrics,
+            generation = lyricGeneration,
+        )
+        if (!isColorOsLyricInfoWithinLimit(lyricInfo)) {
             AppLogger.w(TAG, "ColorOS lyricInfo too large; skipped trackId=${track.id}")
             pendingLockScreenLyrics = null
             updateColorOsTranslationAction(false)
             clearCurrentLockScreenLyrics(pending.trackId)
             return
         }
-        if (currentExtras?.getString(OPLUS_LYRIC_INFO_KEY) == lyricInfo) return
+        if (currentExtras?.getString(COLOR_OS_LYRIC_INFO_KEY) == lyricInfo) return
         val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
-            putString(OPLUS_LYRIC_INFO_KEY, lyricInfo)
+            putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo)
         }
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
             .onSuccess {
@@ -558,11 +567,11 @@ class AndroidNativeAudioEngine(
         val currentItem = controller.currentMediaItem ?: return
         if (trackId != null && !currentItem.matchesTrack(trackId)) return
         val currentExtras = currentItem.mediaMetadata.extras ?: return
-        if (!currentExtras.containsKey(OPLUS_LYRIC_INFO_KEY)) return
+        if (!currentExtras.containsKey(COLOR_OS_LYRIC_INFO_KEY)) return
         val currentIndex = controller.currentMediaItemIndex
         if (currentIndex < 0) return
         val extras = Bundle(currentExtras).apply {
-            remove(OPLUS_LYRIC_INFO_KEY)
+            remove(COLOR_OS_LYRIC_INFO_KEY)
         }
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
             .onFailure { throwable ->
@@ -613,37 +622,8 @@ class AndroidNativeAudioEngine(
     private fun MediaItem.matchesGeneration(generation: Long): Boolean =
         mediaId.startsWith("$generation:")
 
-    private fun buildLockScreenLyricInfo(track: MusicTrack, lyrics: PlatformTimedLyrics): String {
-        val providerTrackId = track.providerId?.takeIf(String::isNotBlank) ?: track.id
-        val trackKey = listOf(
-            track.source,
-            providerTrackId,
-            track.title,
-            track.artists,
-            track.durationMs?.toString().orEmpty(),
-        )
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .joinToString("|")
-            .ifBlank { track.id }
-        return JSONObject()
-            .put("songName", track.title)
-            .put("artist", track.artists)
-            .put("songId", track.id)
-            .put("lyricType", 0)
-            .put("lyric", lyrics.lyric)
-            .put("noLyric", false)
-            .put("provider", context.packageName)
-            .put("source", "fuoevolve")
-            .put("trackKey", trackKey)
-            .put("sessionGeneration", mutableState.value.playbackGeneration.coerceAtLeast(1L))
-            .apply {
-                track.album.takeIf(String::isNotBlank)?.let { put("album", it) }
-                lyrics.rawLyric?.let { put("rawLyric", it) }
-                lyrics.translationLyric?.let { put("translationLyric", it) }
-            }
-            .toString()
-    }
+    private fun MediaItem.colorOsSessionGeneration(): Long? =
+        mediaId.split(':', limit = 3).getOrNull(1)?.toLongOrNull()?.takeIf { it > 0L }
 
     private fun updatePosition() {
         applyPendingResumeSeek()
@@ -715,8 +695,7 @@ class AndroidNativeAudioEngine(
 
     private companion object {
         private const val TAG = "FuoAudioEngine"
-        private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
         private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
-        private const val MAX_LYRIC_INFO_BYTES = 480 * 1024
+        private const val COLOR_OS_SESSION_GENERATION_EXTRA = "coloros_session_generation"
     }
 }
