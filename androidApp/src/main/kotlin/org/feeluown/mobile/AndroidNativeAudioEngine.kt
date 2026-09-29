@@ -539,16 +539,17 @@ class AndroidNativeAudioEngine(
             lyrics = platformLyrics,
             generation = lyricGeneration,
         )
-        if (!isColorOsLyricInfoWithinLimit(lyricInfo)) {
-            AppLogger.w(TAG, "ColorOS lyricInfo too large; skipped trackId=${track.id}")
+        if (currentExtras?.getString(COLOR_OS_LYRIC_INFO_KEY) == lyricInfo) return
+        val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
+            putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo)
+        }
+        val candidateMetadata = currentItem.mediaMetadata.buildUpon().setExtras(extras).build()
+        if (!isColorOsMetadataWithinLimit(candidateMetadata)) {
+            AppLogger.w(TAG, "ColorOS metadata too large; skipped trackId=${track.id}")
             pendingLockScreenLyrics = null
             updateColorOsTranslationAction(false)
             clearCurrentLockScreenLyrics(pending.trackId)
             return
-        }
-        if (currentExtras?.getString(COLOR_OS_LYRIC_INFO_KEY) == lyricInfo) return
-        val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
-            putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo)
         }
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
             .onSuccess {

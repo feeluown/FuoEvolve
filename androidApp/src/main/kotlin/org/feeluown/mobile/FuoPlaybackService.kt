@@ -624,19 +624,6 @@ class FuoPlaybackService : MediaSessionService() {
             putString("replacement_strategy", track.replacementStrategy.orEmpty())
             putDouble("replacement_score", track.replacementScore ?: 0.0)
             putString("lyrics", payload.lyrics.orEmpty())
-            platformLyrics?.let { lyrics ->
-                val lyricInfo = buildColorOsLyricInfo(
-                    packageName = packageName,
-                    track = track,
-                    lyrics = lyrics,
-                    generation = mediaSerial,
-                )
-                if (isColorOsLyricInfoWithinLimit(lyricInfo)) {
-                    putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo)
-                } else {
-                    AppLogger.w(TAG, "initial ColorOS lyricInfo too large; skipped trackId=${track.id}")
-                }
-            }
             putString("audio_quality", payload.audioQuality.orEmpty())
             putString("playback_parts", JSONArray().apply {
                 parts.forEach { part -> put(org.json.JSONObject().put("id", part.id).put("title", part.title).put("duration_ms", part.durationMs)) }
@@ -645,18 +632,34 @@ class FuoPlaybackService : MediaSessionService() {
             putLong("playback_generation", activeGeneration)
             putLong("coloros_session_generation", mediaSerial)
         }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artists)
+            .setAlbumTitle(track.album)
+            .setArtworkUri(track.coverUrl?.let(Uri::parse))
+            .setExtras(extras)
+            .build()
+        val metadataWithLyrics = platformLyrics?.let { lyrics ->
+            val lyricInfo = buildColorOsLyricInfo(
+                packageName = packageName,
+                track = track,
+                lyrics = lyrics,
+                generation = mediaSerial,
+            )
+            metadata.buildUpon()
+                .setExtras(Bundle(extras).apply { putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo) })
+                .build()
+        }
+        val selectedMetadata = if (metadataWithLyrics == null || isColorOsMetadataWithinLimit(metadataWithLyrics)) {
+            metadataWithLyrics ?: metadata
+        } else {
+            AppLogger.w(TAG, "initial ColorOS metadata too large; skipped trackId=${track.id}")
+            metadata
+        }
         return MediaItem.Builder()
             .setMediaId("$activeGeneration:$mediaSerial:${track.id}")
             .setUri(url)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artists)
-                    .setAlbumTitle(track.album)
-                    .setArtworkUri(track.coverUrl?.let(Uri::parse))
-                    .setExtras(extras)
-                    .build()
-            )
+            .setMediaMetadata(selectedMetadata)
             .build()
     }
 

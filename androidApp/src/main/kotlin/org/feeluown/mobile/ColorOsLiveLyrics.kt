@@ -1,11 +1,13 @@
 package org.feeluown.mobile
 
+import android.os.Parcel
+import androidx.media3.common.MediaMetadata
 import org.json.JSONObject
 
 internal const val COLOR_OS_LYRIC_INFO_KEY = "lyricInfo"
 internal const val COLOR_OS_TOGGLE_TRANSLATION_ACTION =
     "io.github.andrealtb.lockscreenlyrics.action.TOGGLE_TRANSLATION"
-internal const val COLOR_OS_MAX_LYRIC_INFO_BYTES = 480 * 1024
+internal const val COLOR_OS_MAX_METADATA_BYTES = 480 * 1024
 
 internal fun buildColorOsLyricInfo(
     packageName: String,
@@ -45,5 +47,12 @@ internal fun buildColorOsLyricInfo(
         .toString()
 }
 
-internal fun isColorOsLyricInfoWithinLimit(lyricInfo: String): Boolean =
-    lyricInfo.toByteArray(Charsets.UTF_8).size <= COLOR_OS_MAX_LYRIC_INFO_BYTES
+internal fun isColorOsMetadataWithinLimit(metadata: MediaMetadata): Boolean {
+    val parcel = Parcel.obtain()
+    return try {
+        parcel.writeBundle(metadata.toBundle())
+        parcel.dataSize() <= COLOR_OS_MAX_METADATA_BYTES
+    } finally {
+        parcel.recycle()
+    }
+}
