@@ -17,6 +17,10 @@ class FuoEvolveApplication : Application() {
         installPlaylistMigrationBackgroundScheduler { request ->
             AndroidPlaylistMigrationWorker.enqueue(applicationContext, request)
         }
+        // Admit this app into the ColorOS lock-screen lyric module's player union. The module reads
+        // the admission long before playback starts (media history, AOD panel, lyric entrance), so
+        // it must not wait for the playback service.
+        ColorOsBridgeBindings.publish(this, "application-start")
     }
 
     private fun container(): AndroidAppContainer =

@@ -19,6 +19,7 @@
 
     <queries>
         <package android:name="io.github.proify.lyricon" />
+        <package android:name="io.github.andrealtb.lockscreenlyrics" />
     </queries>
 
     <application

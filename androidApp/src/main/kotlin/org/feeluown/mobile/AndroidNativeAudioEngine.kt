@@ -2,7 +2,6 @@ package org.feeluown.mobile
 
 import android.content.ComponentName
 import android.content.Context
-import android.net.Uri
 import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -38,7 +37,6 @@ class AndroidNativeAudioEngine(
     private var lastPersistedIdentity: String? = null
     private var lastPersistedPositionMs: Long = restoredSession?.positionMs ?: 0L
     private var restoredRepublishSerial = 0L
-    private var metadataRevision = 0L
 
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
     override val resolvesResourcesInternally: Boolean = true
@@ -543,20 +541,23 @@ class AndroidNativeAudioEngine(
         val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
             putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo)
         }
-        val candidateMetadata = currentItem.mediaMetadata.buildUpon().setExtras(extras).build()
-        if (!isColorOsMetadataWithinLimit(candidateMetadata)) {
+        val updatedItem = currentItem.withColorOsExtras(extras)
+        if (!isColorOsMetadataWithinLimit(updatedItem.mediaMetadata)) {
             AppLogger.w(TAG, "ColorOS metadata too large; skipped trackId=${track.id}")
             pendingLockScreenLyrics = null
             updateColorOsTranslationAction(false)
             clearCurrentLockScreenLyrics(pending.trackId)
             return
         }
-        replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
+        replaceMediaItemMetadata(controller, currentIndex, updatedItem)
             .onSuccess {
                 // Keep the desired timeline cached. If Media3 rebuilds the same current MediaItem,
                 // later playback-state events can restore a missing lyricInfo without rewriting
                 // metadata while the value is still identical.
                 AppLogger.d(TAG, "published ColorOS lock-screen lyrics trackId=${track.id}")
+                // An implicit bindings broadcast is dropped when no receiver is registered yet, so
+                // re-publish the admission alongside the payload the lock screen is about to read.
+                ColorOsBridgeBindings.publish(context, "lock-screen-lyrics")
             }
             .onFailure { throwable ->
                 AppLogger.w(TAG, "failed to publish ColorOS lock-screen lyrics trackId=${track.id}", throwable)
@@ -575,7 +576,7 @@ class AndroidNativeAudioEngine(
         val extras = Bundle(currentExtras).apply {
             remove(COLOR_OS_LYRIC_INFO_KEY)
         }
-        replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
+        replaceMediaItemMetadata(controller, currentIndex, currentItem.withColorOsExtras(extras))
             .onFailure { throwable ->
                 AppLogger.w(TAG, "failed to clear ColorOS lock-screen lyrics", throwable)
             }
@@ -584,33 +585,21 @@ class AndroidNativeAudioEngine(
     private fun replaceMediaItemMetadata(
         controller: MediaController,
         currentIndex: Int,
-        currentItem: MediaItem,
-        extras: Bundle,
+        updatedItem: MediaItem,
     ): Result<Unit> = runCatching {
-        // MediaMetadata.equals() deliberately ignores Bundle contents. Change requestMetadata too so
-        // Media3 propagates extras-only lyric updates to legacy/system controllers without touching
-        // the actual LocalConfiguration URI used for playback.
-        metadataRevision += 1L
-        val requestMetadata = MediaItem.RequestMetadata.Builder()
-            .setMediaUri(
-                Uri.Builder()
-                    .scheme("fuoevolve")
-                    .authority("media-metadata")
-                    .appendPath(currentItem.mediaId)
-                    .appendQueryParameter("revision", metadataRevision.toString())
-                    .build(),
-            )
-            .build()
-        val updatedItem = currentItem.buildUpon()
-            .setRequestMetadata(requestMetadata)
-            .setMediaMetadata(
-                currentItem.mediaMetadata.buildUpon()
-                    .setExtras(extras)
-                    .build(),
-            )
-            .build()
         controller.replaceMediaItem(currentIndex, updatedItem)
     }
+
+    private fun MediaItem.withColorOsExtras(extras: Bundle): MediaItem = buildUpon()
+        .setMediaMetadata(
+            mediaMetadata.buildUpon()
+                // Media3 ignores extras in equals(). An empty station change makes the platform
+                // session republish metadata; station is not exported to legacy MediaMetadata.
+                .setStation(if (mediaMetadata.station == null) "" else null)
+                .setExtras(extras)
+                .build(),
+        )
+        .build()
 
     private fun updateColorOsTranslationAction(available: Boolean) {
         if (colorOsTranslationAvailable == available) return
