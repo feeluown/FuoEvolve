@@ -33,6 +33,7 @@ class AndroidNativeAudioEngine(
     private var mediaController: MediaController? = null
     private var controllerConnecting = false
     private var pendingLockScreenLyrics: PendingLockScreenLyrics? = null
+    private var colorOsTranslationAvailable = false
     private var activePlan: PlaybackPlan? = restoredSession?.plan
     private var pendingResumePositionMs: Long? = null
     private var lastPersistedIdentity: String? = null
@@ -160,9 +161,9 @@ class AndroidNativeAudioEngine(
             return
         }
 
-        // The ColorOS contract requires the previous song's complete timeline to disappear as soon
-        // as a fresh selection starts. Waiting for the next MediaItem would briefly associate stale
-        // lyrics with the new track while playback resolution is still in flight.
+        // A fresh selection owns a new ColorOS lyric generation. Clear the previous payload and
+        // translation action before any asynchronous source/lyric resolution can complete.
+        updateColorOsTranslationAction(false)
         clearCurrentLockScreenLyrics()
         restoredSession = null
         rawAudioQuality = null
@@ -176,7 +177,7 @@ class AndroidNativeAudioEngine(
             status = PlayerStatus.Loading,
             currentTrack = track,
             positionMs = 0,
-            durationMs = track.durationMs ?: 0,
+            durationMs = track.durationMs ?: 0L,
             bufferedMs = 0,
             lyrics = track.lyrics,
             audioQuality = null,
@@ -338,6 +339,7 @@ class AndroidNativeAudioEngine(
         lastPersistedPositionMs = 0L
         playbackResumeStore.clear()
         rawAudioQuality = null
+        updateColorOsTranslationAction(false)
         clearCurrentLockScreenLyrics()
         mediaController?.stop()
         FuoPlaybackService.stop(context)
@@ -375,6 +377,7 @@ class AndroidNativeAudioEngine(
         if (normalizedLyrics == null) {
             pendingLockScreenLyrics = null
             if (mutableState.value.currentTrack?.id == trackId) {
+                updateColorOsTranslationAction(false)
                 clearCurrentLockScreenLyrics(trackId)
             }
             return
@@ -520,10 +523,19 @@ class AndroidNativeAudioEngine(
             ?: toPlatformTimedLyrics(pending.lyrics)
         if (platformLyrics == null) {
             pendingLockScreenLyrics = null
+            updateColorOsTranslationAction(false)
             clearCurrentLockScreenLyrics(pending.trackId)
             return
         }
+        updateColorOsTranslationAction(platformLyrics.translationLyric != null)
         val lyricInfo = buildLockScreenLyricInfo(track, platformLyrics)
+        if (lyricInfo.toByteArray(Charsets.UTF_8).size > MAX_LYRIC_INFO_BYTES) {
+            AppLogger.w(TAG, "ColorOS lyricInfo too large; skipped trackId=${track.id}")
+            pendingLockScreenLyrics = null
+            updateColorOsTranslationAction(false)
+            clearCurrentLockScreenLyrics(pending.trackId)
+            return
+        }
         if (currentExtras?.getString(OPLUS_LYRIC_INFO_KEY) == lyricInfo) return
         val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
             putString(OPLUS_LYRIC_INFO_KEY, lyricInfo)
@@ -589,22 +601,49 @@ class AndroidNativeAudioEngine(
         controller.replaceMediaItem(currentIndex, updatedItem)
     }
 
+    private fun updateColorOsTranslationAction(available: Boolean) {
+        if (colorOsTranslationAvailable == available) return
+        colorOsTranslationAvailable = available
+        FuoPlaybackService.setColorOsTranslationAvailable(context, available)
+    }
+
     private fun MediaItem.matchesTrack(trackId: String): Boolean =
         mediaId.endsWith(":$trackId")
 
     private fun MediaItem.matchesGeneration(generation: Long): Boolean =
         mediaId.startsWith("$generation:")
 
-    private fun buildLockScreenLyricInfo(track: MusicTrack, lyrics: PlatformTimedLyrics): String =
-        JSONObject()
+    private fun buildLockScreenLyricInfo(track: MusicTrack, lyrics: PlatformTimedLyrics): String {
+        val providerTrackId = track.providerId?.takeIf(String::isNotBlank) ?: track.id
+        val trackKey = listOf(
+            track.source,
+            providerTrackId,
+            track.title,
+            track.artists,
+            track.durationMs?.toString().orEmpty(),
+        )
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .joinToString("|")
+            .ifBlank { track.id }
+        return JSONObject()
             .put("songName", track.title)
             .put("artist", track.artists)
             .put("songId", track.id)
+            .put("lyricType", 0)
             .put("lyric", lyrics.lyric)
+            .put("noLyric", false)
+            .put("provider", context.packageName)
+            .put("source", "fuoevolve")
+            .put("trackKey", trackKey)
+            .put("sessionGeneration", mutableState.value.playbackGeneration.coerceAtLeast(1L))
             .apply {
+                track.album.takeIf(String::isNotBlank)?.let { put("album", it) }
                 lyrics.rawLyric?.let { put("rawLyric", it) }
+                lyrics.translationLyric?.let { put("translationLyric", it) }
             }
             .toString()
+    }
 
     private fun updatePosition() {
         applyPendingResumeSeek()
@@ -678,5 +717,6 @@ class AndroidNativeAudioEngine(
         private const val TAG = "FuoAudioEngine"
         private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
         private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
+        private const val MAX_LYRIC_INFO_BYTES = 480 * 1024
     }
 }
