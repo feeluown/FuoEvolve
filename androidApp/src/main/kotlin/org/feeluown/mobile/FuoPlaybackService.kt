@@ -28,6 +28,10 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +46,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
-import org.json.JSONObject
 
 @OptIn(UnstableApi::class)
 class FuoPlaybackService : MediaSessionService() {
@@ -62,6 +65,7 @@ class FuoPlaybackService : MediaSessionService() {
     private var pendingPreloadError: String? = null
     private var stopAfterCurrentTrack = false
     private var holdAtCurrentEnd = false
+    private var colorOsTranslationAvailable = false
     // Playback resolution completes asynchronously. A disconnect (or pause command) must stop
     // its eventual play() call, not just pause the currently prepared ExoPlayer instance.
     private var pauseRequestedDuringLoad = false
@@ -109,6 +113,9 @@ class FuoPlaybackService : MediaSessionService() {
                         }
                         activePlayback = prepared
                         activePlaybackHasReachedReady = player.playbackState == Player.STATE_READY
+                        updateColorOsTranslationAvailability(
+                            toPlatformTimedLyrics(prepared.payload.lyrics)?.translationLyric != null,
+                        )
                         enqueueRemainingParts(prepared)
                         applyStopAfterCurrentTrackGate()
                         publishPlaybackState()
@@ -181,9 +188,28 @@ class FuoPlaybackService : MediaSessionService() {
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                 ): MediaSession.ConnectionResult {
+                    val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+                        .buildUpon()
+                        .add(COLOR_OS_TRANSLATION_COMMAND)
+                        .build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(sessionCommands)
                         .setAvailablePlayerCommands(sessionPlayer.getAvailableCommands())
                         .build()
+                }
+
+                override fun onCustomCommand(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand,
+                    args: Bundle,
+                ): ListenableFuture<SessionResult> {
+                    if (customCommand.customAction == COLOR_OS_TOGGLE_TRANSLATION_ACTION) {
+                        // Bridge/SystemUI owns the visual translation toggle. The player only needs
+                        // to keep this public action present in the platform PlaybackState.
+                        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                    }
+                    return super.onCustomCommand(session, controller, customCommand, args)
                 }
 
                 override fun onMediaButtonEvent(
@@ -194,7 +220,7 @@ class FuoPlaybackService : MediaSessionService() {
                     return handleMediaButtonEvent(intent)
                 }
             })
-            .setMediaButtonPreferences(mediaButtonPreferences())
+            .setMediaButtonPreferences(mediaButtonPreferences(colorOsTranslationAvailable))
             .build()
     }
 
@@ -248,10 +274,16 @@ class FuoPlaybackService : MediaSessionService() {
                 applyStopAfterCurrentTrackGate()
                 publishPlaybackState()
             }
+            ACTION_SET_COLOROS_TRANSLATION_AVAILABLE -> {
+                updateColorOsTranslationAvailability(
+                    intent.getBooleanExtra(EXTRA_COLOROS_TRANSLATION_AVAILABLE, false),
+                )
+            }
             ACTION_STOP -> {
                 pauseRequestedDuringLoad = false
                 stopAfterCurrentTrack = false
                 holdAtCurrentEnd = false
+                updateColorOsTranslationAvailability(false)
                 player?.stop()
                 mutableAudioDecoderInfo.value = null
                 mutableAudioFormatInfo.value = null
@@ -278,6 +310,12 @@ class FuoPlaybackService : MediaSessionService() {
         if (state.status == PlayerStatus.Loading) {
             mutablePlaybackState.value = state.copy(status = PlayerStatus.Paused)
         }
+    }
+
+    private fun updateColorOsTranslationAvailability(available: Boolean) {
+        if (colorOsTranslationAvailable == available) return
+        colorOsTranslationAvailable = available
+        mediaSession?.setMediaButtonPreferences(mediaButtonPreferences(available))
     }
 
     override fun onDestroy() {
@@ -321,6 +359,7 @@ class FuoPlaybackService : MediaSessionService() {
         holdAtCurrentEnd = false
         pauseRequestedDuringLoad = false
         activeGeneration = plan.generation
+        updateColorOsTranslationAvailability(false)
         mutableAudioFormatInfo.value = null
         mutablePlaybackState.value = PlaybackState(
             status = PlayerStatus.Loading,
@@ -338,6 +377,9 @@ class FuoPlaybackService : MediaSessionService() {
                     if (activeGeneration != plan.generation) return@withContext
                     activePlayback = prepared
                     preparedItems[prepared.mediaItem.mediaId] = prepared
+                    updateColorOsTranslationAvailability(
+                        toPlatformTimedLyrics(prepared.payload.lyrics)?.translationLyric != null,
+                    )
                     player?.run {
                         applyStopAfterCurrentTrackGate()
                         setMediaSource(prepared.mediaSource)
@@ -556,7 +598,8 @@ class FuoPlaybackService : MediaSessionService() {
     ): MediaItem {
         val url = payload.url
         require(url.isNotBlank()) { "Playback URL is blank" }
-        val lineLyrics = toTimedLineLrc(payload.lyrics)
+        val platformLyrics = toPlatformTimedLyrics(payload.lyrics)
+        val mediaSerial = ++itemSerial
         val extras = Bundle().apply {
             putString("source", track.source)
             putString("source_type", track.sourceType.name)
@@ -581,18 +624,29 @@ class FuoPlaybackService : MediaSessionService() {
             putString("replacement_strategy", track.replacementStrategy.orEmpty())
             putDouble("replacement_score", track.replacementScore ?: 0.0)
             putString("lyrics", payload.lyrics.orEmpty())
-            lineLyrics?.let { lyrics ->
-                putString(OPLUS_LYRIC_INFO_KEY, buildLockScreenLyricInfo(track, lyrics))
+            platformLyrics?.let { lyrics ->
+                val lyricInfo = buildColorOsLyricInfo(
+                    packageName = packageName,
+                    track = track,
+                    lyrics = lyrics,
+                    generation = mediaSerial,
+                )
+                if (isColorOsLyricInfoWithinLimit(lyricInfo)) {
+                    putString(COLOR_OS_LYRIC_INFO_KEY, lyricInfo)
+                } else {
+                    AppLogger.w(TAG, "initial ColorOS lyricInfo too large; skipped trackId=${track.id}")
+                }
             }
             putString("audio_quality", payload.audioQuality.orEmpty())
             putString("playback_parts", JSONArray().apply {
-                parts.forEach { part -> put(JSONObject().put("id", part.id).put("title", part.title).put("duration_ms", part.durationMs)) }
+                parts.forEach { part -> put(org.json.JSONObject().put("id", part.id).put("title", part.title).put("duration_ms", part.durationMs)) }
             }.toString())
             putInt("current_part_index", currentPartIndex)
             putLong("playback_generation", activeGeneration)
+            putLong("coloros_session_generation", mediaSerial)
         }
         return MediaItem.Builder()
-            .setMediaId("$activeGeneration:${++itemSerial}:${track.id}")
+            .setMediaId("$activeGeneration:$mediaSerial:${track.id}")
             .setUri(url)
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -605,14 +659,6 @@ class FuoPlaybackService : MediaSessionService() {
             )
             .build()
     }
-
-    private fun buildLockScreenLyricInfo(track: MusicTrack, lineLyrics: String): String =
-        JSONObject()
-            .put("songName", track.title)
-            .put("artist", track.artists)
-            .put("songId", track.id)
-            .put("lyric", lineLyrics)
-            .toString()
 
     private fun createMediaSource(mediaItem: MediaItem, headers: Map<String, String>): ProgressiveMediaSource {
         val url = mediaItem.localConfiguration?.uri?.toString().orEmpty()
@@ -869,12 +915,18 @@ class FuoPlaybackService : MediaSessionService() {
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
         private const val ACTION_RESUME = "org.feeluown.mobile.action.RESUME"
         private const val ACTION_SET_STOP_AFTER_CURRENT = "org.feeluown.mobile.action.SET_STOP_AFTER_CURRENT"
+        private const val ACTION_SET_COLOROS_TRANSLATION_AVAILABLE =
+            "org.feeluown.mobile.action.SET_COLOROS_TRANSLATION_AVAILABLE"
         private const val ACTION_STOP = "org.feeluown.mobile.action.STOP"
         private const val EXTRA_PLAN = "plan"
         private const val EXTRA_STOP_AFTER_CURRENT = "stop_after_current"
+        private const val EXTRA_COLOROS_TRANSLATION_AVAILABLE = "coloros_translation_available"
         private const val PLAYBACK_RESOLVE_TIMEOUT_MS = 30_000L
         private const val TAG = "FuoPlaybackService"
-        private const val OPLUS_LYRIC_INFO_KEY = "lyricInfo"
+        private val COLOR_OS_TRANSLATION_COMMAND = SessionCommand(
+            COLOR_OS_TOGGLE_TRANSLATION_ACTION,
+            Bundle.EMPTY,
+        )
         private val MEDIA_AUDIO_ATTRIBUTES = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -929,6 +981,16 @@ class FuoPlaybackService : MediaSessionService() {
             )
         }
 
+        fun setColorOsTranslationAvailable(context: Context, available: Boolean) {
+            start(
+                context,
+                Intent(context, FuoPlaybackService::class.java).apply {
+                    action = ACTION_SET_COLOROS_TRANSLATION_AVAILABLE
+                    putExtra(EXTRA_COLOROS_TRANSLATION_AVAILABLE, available)
+                },
+            )
+        }
+
         fun stop(context: Context) {
             start(context, Intent(context, FuoPlaybackService::class.java).setAction(ACTION_STOP))
         }
@@ -938,18 +1000,30 @@ class FuoPlaybackService : MediaSessionService() {
         }
 
         @OptIn(UnstableApi::class)
-        private fun mediaButtonPreferences(): List<CommandButton> = listOf(
-            CommandButton.Builder(CommandButton.ICON_PREVIOUS)
-                .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
-                .setDisplayName("上一首")
-                .setSlots(CommandButton.SLOT_BACK)
-                .build(),
-            CommandButton.Builder(CommandButton.ICON_NEXT)
-                .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT)
-                .setDisplayName("下一首")
-                .setSlots(CommandButton.SLOT_FORWARD)
-                .build(),
-        )
+        private fun mediaButtonPreferences(includeTranslation: Boolean): List<CommandButton> = buildList {
+            if (includeTranslation) {
+                add(
+                    CommandButton.Builder(CommandButton.ICON_CLOSED_CAPTIONS)
+                        .setSessionCommand(COLOR_OS_TRANSLATION_COMMAND)
+                        .setDisplayName("翻译")
+                        .build(),
+                )
+            }
+            add(
+                CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+                    .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
+                    .setDisplayName("上一首")
+                    .setSlots(CommandButton.SLOT_BACK)
+                    .build(),
+            )
+            add(
+                CommandButton.Builder(CommandButton.ICON_NEXT)
+                    .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT)
+                    .setDisplayName("下一首")
+                    .setSlots(CommandButton.SLOT_FORWARD)
+                    .build(),
+            )
+        }
 
         @OptIn(UnstableApi::class)
         @Suppress("WrongConstant")
