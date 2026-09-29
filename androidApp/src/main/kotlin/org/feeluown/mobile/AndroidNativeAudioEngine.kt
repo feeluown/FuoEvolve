@@ -371,7 +371,11 @@ class AndroidNativeAudioEngine(
      * Publishes complete timed lyrics through the OPlus/ColorOS media-session extension.
      * Other Android systems ignore this metadata extra.
      */
-    internal fun publishLockScreenLyrics(trackId: String, lyrics: String?) {
+    internal fun publishLockScreenLyrics(
+        trackId: String,
+        lyrics: String?,
+        alignmentOffsetMs: Long = 0L,
+    ) {
         val normalizedLyrics = lyrics?.takeIf { it.isNotBlank() }
         if (normalizedLyrics == null) {
             pendingLockScreenLyrics = null
@@ -381,7 +385,11 @@ class AndroidNativeAudioEngine(
             }
             return
         }
-        pendingLockScreenLyrics = PendingLockScreenLyrics(trackId, normalizedLyrics)
+        pendingLockScreenLyrics = PendingLockScreenLyrics(
+            trackId = trackId,
+            lyrics = normalizedLyrics,
+            alignmentOffsetMs = alignmentOffsetMs,
+        )
         applyPendingLockScreenLyrics()
     }
 
@@ -509,17 +517,10 @@ class AndroidNativeAudioEngine(
         val currentIndex = controller.currentMediaItemIndex
         if (currentIndex < 0) return
         val currentExtras = currentItem.mediaMetadata.extras
-        val sourceLyrics = currentExtras
-            ?.getString("lyrics")
-            ?.takeIf(String::isNotBlank)
-        val platformLyrics = sourceLyrics
-            ?.let { lyrics ->
-                toPlatformTimedLyrics(
-                    rawLyrics = lyrics,
-                    alignmentOffsetMs = inferTimedLyricsAlignmentOffsetMs(lyrics, pending.lyrics),
-                )
-            }
-            ?: toPlatformTimedLyrics(pending.lyrics)
+        val platformLyrics = toPlatformTimedLyrics(
+            rawLyrics = pending.lyrics,
+            alignmentOffsetMs = pending.alignmentOffsetMs,
+        )
         if (platformLyrics == null) {
             pendingLockScreenLyrics = null
             updateColorOsTranslationAction(false)
@@ -691,6 +692,7 @@ class AndroidNativeAudioEngine(
     private data class PendingLockScreenLyrics(
         val trackId: String,
         val lyrics: String,
+        val alignmentOffsetMs: Long,
     )
 
     private companion object {
