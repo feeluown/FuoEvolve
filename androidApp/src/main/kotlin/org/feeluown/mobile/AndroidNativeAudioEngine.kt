@@ -160,6 +160,10 @@ class AndroidNativeAudioEngine(
             return
         }
 
+        // The ColorOS contract requires the previous song's complete timeline to disappear as soon
+        // as a fresh selection starts. Waiting for the next MediaItem would briefly associate stale
+        // lyrics with the new track while playback resolution is still in flight.
+        clearCurrentLockScreenLyrics()
         restoredSession = null
         rawAudioQuality = null
         if (reason.clearsDurablePlaybackResume) {
@@ -226,7 +230,7 @@ class AndroidNativeAudioEngine(
             status = PlayerStatus.Loading,
             currentTrack = first.track,
             positionMs = 0,
-            durationMs = first.track.durationMs ?: 0,
+            durationMs = first.track.durationMs ?: 0L,
             lyrics = first.track.lyrics,
             audioQuality = null,
             audioFormatInfo = null,
@@ -520,16 +524,15 @@ class AndroidNativeAudioEngine(
             return
         }
         val lyricInfo = buildLockScreenLyricInfo(track, platformLyrics)
-        if (currentExtras?.getString(OPLUS_LYRIC_INFO_KEY) == lyricInfo) {
-            pendingLockScreenLyrics = null
-            return
-        }
+        if (currentExtras?.getString(OPLUS_LYRIC_INFO_KEY) == lyricInfo) return
         val extras = Bundle(currentExtras ?: Bundle.EMPTY).apply {
             putString(OPLUS_LYRIC_INFO_KEY, lyricInfo)
         }
         replaceMediaItemMetadata(controller, currentIndex, currentItem, extras)
             .onSuccess {
-                pendingLockScreenLyrics = null
+                // Keep the desired timeline cached. If Media3 rebuilds the same current MediaItem,
+                // later playback-state events can restore a missing lyricInfo without rewriting
+                // metadata while the value is still identical.
                 AppLogger.d(TAG, "published ColorOS lock-screen lyrics trackId=${track.id}")
             }
             .onFailure { throwable ->
@@ -592,30 +595,16 @@ class AndroidNativeAudioEngine(
     private fun MediaItem.matchesGeneration(generation: Long): Boolean =
         mediaId.startsWith("$generation:")
 
-    private fun buildLockScreenLyricInfo(track: MusicTrack, lyrics: PlatformTimedLyrics): String {
-        val providerTrackId = track.providerId?.takeIf(String::isNotBlank) ?: track.id
-        val trackKey = listOf(track.source, providerTrackId)
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .joinToString(":")
-            .ifBlank { track.id }
-        return JSONObject()
+    private fun buildLockScreenLyricInfo(track: MusicTrack, lyrics: PlatformTimedLyrics): String =
+        JSONObject()
             .put("songName", track.title)
             .put("artist", track.artists)
             .put("songId", track.id)
-            .put("lyricType", 0)
             .put("lyric", lyrics.lyric)
-            .put("noLyric", false)
-            .put("provider", context.packageName)
-            .put("source", "fuoevolve")
-            .put("trackKey", trackKey)
-            .put("sessionGeneration", mutableState.value.playbackGeneration)
             .apply {
                 lyrics.rawLyric?.let { put("rawLyric", it) }
-                lyrics.translationLyric?.let { put("translationLyric", it) }
             }
             .toString()
-    }
 
     private fun updatePosition() {
         applyPendingResumeSeek()
