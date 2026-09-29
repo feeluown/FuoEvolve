@@ -59,6 +59,7 @@ private class AndroidAudioRecognitionCaptureDevice(
         )
         check(minBufferSize > 0) { "设备不支持 48 kHz 麦克风录音" }
         val recorder = createAudioRecord(MediaRecorder.AudioSource.UNPROCESSED, minBufferSize)
+            ?: createAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, minBufferSize)
             ?: createAudioRecord(MediaRecorder.AudioSource.MIC, minBufferSize)
             ?: throw IllegalStateException("麦克风初始化失败")
         check(activeRecorder.compareAndSet(null, recorder)) { "麦克风录音已经在进行中" }
