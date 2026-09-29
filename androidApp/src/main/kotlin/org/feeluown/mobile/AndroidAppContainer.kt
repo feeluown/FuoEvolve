@@ -275,7 +275,7 @@ internal class AndroidAppContainer(
             providerDetails = providerDetailOwners,
             localPlaylist = localPlaylistFeatureController,
             scope = appScope,
-            onProviderMutation = { homeRefreshPort.refreshMine() },
+            onProviderMutation = homeRefreshPort::refreshMine,
         )
     }
 
@@ -478,8 +478,7 @@ internal class AndroidAppContainer(
                 Triple(state.currentTrack?.id, state.lyrics, state.lyricsAlignmentOffsetMs)
             }.distinctUntilChanged().collect { (trackId, lyrics, alignmentOffsetMs) ->
                 if (trackId != null) {
-                    val platformLyrics = toTimedLineLrc(lyrics, alignmentOffsetMs) ?: lyrics
-                    playbackEngine.publishLockScreenLyrics(trackId, platformLyrics)
+                    playbackEngine.publishLockScreenLyrics(trackId, lyrics, alignmentOffsetMs)
                 }
             }
         }
