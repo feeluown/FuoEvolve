@@ -1,5 +1,7 @@
 package org.feeluown.mobile.desktop
 
+import java.net.URI
+import java.nio.file.Path
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -177,8 +179,9 @@ class DesktopMpvPlaybackEngine(
         payload: PlaybackPayload,
         resolvedSource: ResolvedPlaybackSource,
     ) {
+        val playbackUrl = normalizeNativePlaybackUrl(payload.url)
         paused = false
-        activeRequestedPath = payload.url
+        activeRequestedPath = playbackUrl
         activePlaylistEntryId = null
         activeFileLoaded = false
         activePlaybackConfirmed = false
@@ -209,7 +212,7 @@ class DesktopMpvPlaybackEngine(
             // play intent; PersistentDesktopPlaybackEngine reapplies a pause requested while the
             // asynchronous start is in progress.
             activeBackend.setPaused(false)
-            activeBackend.load(payload.url, payload.headers)
+            activeBackend.load(playbackUrl, payload.headers)
         }.onFailure(::publishBackendFailure)
     }
 
@@ -480,6 +483,16 @@ interface DesktopMpvBackend : AutoCloseable {
     fun setVolume(volume: Double) = Unit
     fun stop()
     fun seekTo(positionMs: Long)
+}
+
+private fun normalizeNativePlaybackUrl(url: String): String {
+    if (!url.startsWith("file:", ignoreCase = true)) return url
+    // libmpv reports file URIs as native paths; keep request and event identity aligned.
+    return try {
+        Path.of(URI.create(url)).toString()
+    } catch (_: IllegalArgumentException) {
+        url
+    }
 }
 
 private fun desktopMpvSourceKind(url: String): String = when {
