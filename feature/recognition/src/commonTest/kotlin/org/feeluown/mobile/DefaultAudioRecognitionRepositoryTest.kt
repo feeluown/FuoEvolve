@@ -1,9 +1,15 @@
 package org.feeluown.mobile
 
+import kotlin.math.PI
+import kotlin.math.sin
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 
 class DefaultAudioRecognitionRepositoryTest {
     @Test
@@ -54,5 +60,164 @@ class DefaultAudioRecognitionRepositoryTest {
         assertEquals("session", matcherSession)
         assertIs<AudioRecognitionEvent.Matching>(events.first { it is AudioRecognitionEvent.Matching })
         assertIs<AudioRecognitionEvent.Success>(events.last())
+    }
+
+    @Test
+    fun recognitionWindowsOverlapByConfiguredStride() = runTest {
+        val firstWindow = sineWave(AUDIO_RECOGNITION_WINDOW_SAMPLES, frequencyHz = 440.0)
+        val nextStride = sineWave(AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES, frequencyHz = 880.0)
+        val capture = object : AudioRecognitionCaptureDevice {
+            override suspend fun capture(onSamples: (FloatArray) -> Unit) {
+                onSamples(firstWindow)
+                yield()
+                onSamples(nextStride)
+                yield()
+            }
+            override fun cancel() = Unit
+        }
+        val generated = mutableListOf<FloatArray>()
+        val fingerprint = object : AudioFingerprintRuntime {
+            override suspend fun generate(samples: FloatArray): String {
+                generated += samples.copyOf()
+                return "fingerprint-${generated.size}"
+            }
+        }
+        val expectedSong = RecognizedSong(
+            neteaseSongId = "84",
+            title = "Overlap",
+            artists = listOf("Artist"),
+            album = "Album",
+        )
+        var matches = 0
+        val matcher = object : AudioRecognitionMatcher {
+            override suspend fun match(sessionId: String, fingerprint: String): List<RecognizedSong> {
+                matches += 1
+                return if (matches == 2) listOf(expectedSong) else emptyList()
+            }
+        }
+        val repository = DefaultAudioRecognitionRepository(
+            captureDevice = capture,
+            fingerprintRuntime = fingerprint,
+            matcher = matcher,
+        )
+
+        val result = repository.recognize { }
+
+        val expectedSecondWindow = FloatArray(AUDIO_RECOGNITION_WINDOW_SAMPLES)
+        firstWindow.copyInto(
+            destination = expectedSecondWindow,
+            destinationOffset = 0,
+            startIndex = AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES,
+            endIndex = firstWindow.size,
+        )
+        nextStride.copyInto(
+            destination = expectedSecondWindow,
+            destinationOffset = AUDIO_RECOGNITION_WINDOW_SAMPLES - AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES,
+        )
+        assertEquals(listOf(expectedSong), result)
+        assertEquals(2, generated.size)
+        assertContentEquals(downsampleRecognitionWindow(firstWindow), generated[0])
+        assertContentEquals(downsampleRecognitionWindow(expectedSecondWindow), generated[1])
+    }
+
+    @Test
+    fun unusableWindowsSkipFingerprintAndNetworkWork() = runTest {
+        val capture = object : AudioRecognitionCaptureDevice {
+            override suspend fun capture(onSamples: (FloatArray) -> Unit) {
+                onSamples(FloatArray(AUDIO_RECOGNITION_WINDOW_SAMPLES))
+                yield()
+                repeat(AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS - 1) {
+                    onSamples(FloatArray(AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES))
+                    yield()
+                }
+            }
+            override fun cancel() = Unit
+        }
+        var fingerprintCalls = 0
+        val fingerprint = object : AudioFingerprintRuntime {
+            override suspend fun generate(samples: FloatArray): String {
+                fingerprintCalls += 1
+                return "unexpected"
+            }
+        }
+        var matcherCalls = 0
+        val matcher = object : AudioRecognitionMatcher {
+            override suspend fun match(sessionId: String, fingerprint: String): List<RecognizedSong> {
+                matcherCalls += 1
+                return emptyList()
+            }
+        }
+        val repository = DefaultAudioRecognitionRepository(
+            captureDevice = capture,
+            fingerprintRuntime = fingerprint,
+            matcher = matcher,
+        )
+
+        val result = repository.recognize { }
+
+        assertEquals(emptyList(), result)
+        assertEquals(0, fingerprintCalls)
+        assertEquals(0, matcherCalls)
+    }
+
+    @Test
+    fun captureStopsAtConfiguredWindowHorizonWhenConsumerFallsBehind() = runTest {
+        val firstWindow = sineWave(AUDIO_RECOGNITION_WINDOW_SAMPLES, frequencyHz = 440.0)
+        val stride = sineWave(AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES, frequencyHz = 880.0)
+        var cancelled = false
+        var cancelCount = 0
+        var chunksDelivered = 0
+        val capture = object : AudioRecognitionCaptureDevice {
+            override suspend fun capture(onSamples: (FloatArray) -> Unit) {
+                onSamples(firstWindow)
+                chunksDelivered += 1
+                yield()
+                repeat(AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS + 5) {
+                    if (cancelled) return
+                    onSamples(stride)
+                    chunksDelivered += 1
+                    yield()
+                }
+            }
+
+            override fun cancel() {
+                if (!cancelled) {
+                    cancelled = true
+                    cancelCount += 1
+                }
+            }
+        }
+        val fingerprint = object : AudioFingerprintRuntime {
+            override suspend fun generate(samples: FloatArray): String = "fingerprint"
+        }
+        var matcherCalls = 0
+        val matcher = object : AudioRecognitionMatcher {
+            override suspend fun match(sessionId: String, fingerprint: String): List<RecognizedSong> {
+                matcherCalls += 1
+                delay(5_000)
+                return emptyList()
+            }
+        }
+        val events = mutableListOf<AudioRecognitionEvent>()
+        val repository = DefaultAudioRecognitionRepository(
+            captureDevice = capture,
+            fingerprintRuntime = fingerprint,
+            matcher = matcher,
+        )
+
+        val result = repository.recognize(events::add)
+
+        assertEquals(emptyList(), result)
+        assertEquals(AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS, chunksDelivered)
+        assertEquals(1, cancelCount)
+        assertEquals(2, matcherCalls)
+        val matchingAttempts = events.filterIsInstance<AudioRecognitionEvent.Matching>().map { it.attempt }
+        assertEquals(listOf(1, AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS), matchingAttempts)
+        val captureAttempts = events.filterIsInstance<AudioRecognitionEvent.Capturing>().map { it.attempt }
+        assertTrue(captureAttempts.all { it <= AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS })
+    }
+
+    private fun sineWave(size: Int, frequencyHz: Double): FloatArray = FloatArray(size) { index ->
+        (0.1 * sin(2.0 * PI * frequencyHz * index / AUDIO_RECOGNITION_SAMPLE_RATE)).toFloat()
     }
 }

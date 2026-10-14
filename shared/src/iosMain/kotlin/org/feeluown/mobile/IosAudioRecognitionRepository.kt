@@ -16,7 +16,7 @@ class IosAudioRecognitionRepository(
     override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> =
         suspendCancellableCoroutine { continuation ->
             output.recognize(
-                eventHandler = { type, attemptValue, capturedMsValue ->
+                eventHandler = event@ { type, attemptValue, capturedMsValue ->
                     val attempt = attemptValue.toIntOrNull() ?: 1
                     val capturedMs = capturedMsValue.toLongOrNull() ?: 0L
                     when (type) {
@@ -27,7 +27,14 @@ class IosAudioRecognitionRepository(
                             ),
                         )
                         "matching" -> onEvent(AudioRecognitionEvent.Matching(attempt))
-                        "no_match" -> onEvent(AudioRecognitionEvent.NoMatch(attempt))
+                        "no_match" -> {
+                            onEvent(AudioRecognitionEvent.NoMatch(attempt))
+                            if (attempt >= IOS_AUDIO_RECOGNITION_MAX_ATTEMPTS && continuation.isActive) {
+                                output.cancel()
+                                continuation.resume(emptyList())
+                                return@event
+                            }
+                        }
                         "cancelled" -> onEvent(AudioRecognitionEvent.Cancelled)
                     }
                 },
@@ -67,3 +74,5 @@ class IosAudioRecognitionRepository(
         }
     }
 }
+
+private const val IOS_AUDIO_RECOGNITION_MAX_ATTEMPTS = 6
