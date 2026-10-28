@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.rememberWindowState
 import dev.nucleusframework.application.DecoratedWindow
-import dev.nucleusframework.application.NucleusBackend
 import dev.nucleusframework.application.NucleusDecoratedWindowScope
 import dev.nucleusframework.application.nucleusApplication
 import dev.nucleusframework.composenativetray.tray.api.Tray
@@ -122,7 +121,6 @@ fun main(args: Array<String>) {
 
     nucleusApplication(
         args = args,
-        backend = NucleusBackend.Tao,
         // Keep Nucleus' public lock/watcher implementation, but own the restore payload so ordinary
         // file-association paths and taskbar media actions can be forwarded alongside URI deep links.
         enableSingleInstance = false,
