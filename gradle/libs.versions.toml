@@ -1,13 +1,14 @@
 [versions]
+nucleus = "3.0.0-dev-202610272317"
 agp = "9.1.1"
 androidCompileSdk = "37"
 androidMinSdk = "24"
-compose = "1.12.0"
-kotlin = "2.4.10"
+compose = "1.12.1"
+kotlin = "2.4.20"
 media3 = "1.6.1"
 activityCompose = "1.10.1"
 coreKtx = "1.15.0"
-coroutines = "1.10.2"
+coroutines = "1.11.0"
 serializationJson = "1.8.1"
 lifecycle = "2.10.0"
 navigation3 = "1.1.1"
@@ -26,6 +27,13 @@ dbusJava = "5.2.0"
 quickJsKt = "1.0.15"
 
 [libraries]
+nucleus-application = { module = "dev.nucleusframework:nucleus.nucleus-application", version.ref = "nucleus" }
+nucleus-decorated-window-tao = { module = "dev.nucleusframework:nucleus.decorated-window-tao", version.ref = "nucleus" }
+nucleus-graalvm-runtime = { module = "dev.nucleusframework:nucleus.graalvm-runtime", version.ref = "nucleus" }
+nucleus-media-control = { module = "dev.nucleusframework:nucleus.media-control", version.ref = "nucleus" }
+nucleus-notification-common = { module = "dev.nucleusframework:nucleus.notification-common", version.ref = "nucleus" }
+nucleus-taskbar-progress-tao = { module = "dev.nucleusframework:nucleus.taskbar-progress-tao", version.ref = "nucleus" }
+nucleus-launcher-windows = { module = "dev.nucleusframework:nucleus.launcher-windows", version.ref = "nucleus" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
@@ -73,6 +81,7 @@ dbus-java-transport-native-unixsocket = { module = "com.github.hypfvieh:dbus-jav
 quickjs-kt = { module = "io.github.dokar3:quickjs-kt", version.ref = "quickJsKt" }
 
 [plugins]
+nucleus = { id = "dev.nucleusframework", version.ref = "nucleus" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
