@@ -10,7 +10,6 @@ import java.util.jar.JarEntry
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
 import java.util.zip.ZipFile
-import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.WriteProperties
 import org.gradle.jvm.tasks.Jar
@@ -19,7 +18,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
-    id("dev.nucleusframework") version "2.5.15"
+    alias(libs.plugins.nucleus)
 }
 
 kotlin {
@@ -392,13 +391,13 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.core)
 
-    implementation("dev.nucleusframework:nucleus.nucleus-application:2.5.15")
-    implementation("dev.nucleusframework:nucleus.decorated-window-tao:2.5.15")
-    implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.5.15")
-    implementation("dev.nucleusframework:nucleus.media-control:2.5.15")
-    implementation("dev.nucleusframework:nucleus.notification-common:2.5.15")
-    implementation("dev.nucleusframework:nucleus.taskbar-progress-tao:2.5.15")
-    implementation("dev.nucleusframework:nucleus.launcher-windows:2.5.15")
+    implementation(libs.nucleus.application)
+    implementation(libs.nucleus.decorated.window.tao)
+    implementation(libs.nucleus.graalvm.runtime)
+    implementation(libs.nucleus.media.control)
+    implementation(libs.nucleus.notification.common)
+    implementation(libs.nucleus.taskbar.progress.tao)
+    implementation(libs.nucleus.launcher.windows)
     implementation("dev.nucleusframework:composenativetray:2.1.6")
 
     testImplementation(kotlin("test"))
@@ -487,6 +486,14 @@ nucleus.application {
         }
         macOS {
             packageName = "FuoEvolve"
+            infoPlist {
+                extraKeysRawXml = """
+                    <key>NSMicrophoneUsageDescription</key>
+                    <string>FuoEvolve 使用麦克风进行听歌识曲。</string>
+                    <key>NSAudioCaptureUsageDescription</key>
+                    <string>FuoEvolve 使用系统音频进行听歌识曲。</string>
+                """.trimIndent()
+            }
             bundleID = "org.feeluown.mobile.desktop"
             appCategory = "public.app-category.music"
             iconFile.set(desktopMacIcon)
@@ -775,40 +782,6 @@ tasks.configureEach {
             }
         }
     }
-}
-
-// Nucleus 2.5.15 does not apply macOS.infoPlist.extraKeysRawXml to its GraalVM bundle.
-// Patch the plist immediately after Nucleus copies it into Contents; the bundle codesign task
-// depends on this Copy task, so the final signature covers the patched permission metadata.
-if (isMacHost) {
-    tasks.withType<Copy>()
-        .matching { task -> task.name.contains("graalvmInfoPlist", ignoreCase = true) }
-        .configureEach {
-            doLast {
-                val plist = destinationDir.resolve("Info.plist")
-                check(plist.isFile) { "Nucleus GraalVM Info.plist was not copied: ${plist.absolutePath}" }
-                listOf(
-                    "NSMicrophoneUsageDescription" to "FuoEvolve 使用麦克风进行听歌识曲。",
-                    "NSAudioCaptureUsageDescription" to "FuoEvolve 使用系统音频进行听歌识曲。",
-                ).forEach { (key, value) ->
-                    val setCommand = "Set :$key $value"
-                    val setResult = providers.exec {
-                        isIgnoreExitValue = true
-                        commandLine("/usr/libexec/PlistBuddy", "-c", setCommand, plist.absolutePath)
-                    }.result.get()
-                    if (setResult.exitValue != 0) {
-                        providers.exec {
-                            commandLine(
-                                "/usr/libexec/PlistBuddy",
-                                "-c",
-                                "Add :$key string $value",
-                                plist.absolutePath,
-                            )
-                        }.result.get().assertNormalExitValue()
-                    }
-                }
-            }
-        }
 }
 
 // Compose/Nucleus consume appResources through prepareAppResources. Make the staging dependency

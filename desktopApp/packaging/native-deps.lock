@@ -8,8 +8,8 @@ macos.x64.mpv.version=0.41.0_8
 
 # shinchiro/mpv-winbuild-cmake development archive contains the libmpv DLL + development runtime.
 # Cache schema v2 stages the complete public mpv header set for the GPU render API.
-windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260902/mpv-dev-x86_64-20260902-git-174b638f29.7z
-windows.x64.libmpv.sha256=f23fbdee1864958df65886b56b1d640a319a4430df89aaa4417473d9d581c57f
+windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261102/mpv-dev-x86_64-20261102-git-2137d21b2e.7z
+windows.x64.libmpv.sha256=5ca801552661c18fa0b1edfd41dba6e5d9aa9d6d3d6c42dbe3fb91a45eb79f16
 
 # AppImage tooling is pinned independently of the Linux distribution packages used to collect libmpv.
 appimagetool.x64.url=https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
