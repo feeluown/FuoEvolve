@@ -154,29 +154,14 @@ internal class AudioRecognitionController(
                 windowDurationMs = event.windowDurationMs,
             )
             is AudioRecognitionEvent.Matching -> RecognitionUiState.Matching
-            is AudioRecognitionEvent.NoMatch -> {
-                if (event.attempt >= AUDIO_RECOGNITION_MAX_ATTEMPTS) {
-                    stopWithoutResult()
-                    RecognitionUiState.NoResult
-                } else {
-                    RecognitionUiState.Capturing(
-                        capturedMs = 0,
-                        windowDurationMs = AUDIO_RECOGNITION_WINDOW_MS,
-                    )
-                }
-            }
+            is AudioRecognitionEvent.NoMatch -> RecognitionUiState.Capturing(
+                capturedMs = 0,
+                windowDurationMs = event.nextWindowDurationMs,
+            )
             is AudioRecognitionEvent.Success -> resultState(event.songs)
             is AudioRecognitionEvent.Error -> RecognitionUiState.Error(event.message)
             AudioRecognitionEvent.Cancelled -> RecognitionUiState.Cancelled
         }
-    }
-
-    private fun stopWithoutResult() {
-        recognitionSerial += 1
-        recognitionJob?.cancel()
-        repository.cancel()
-        recognitionJob = null
-        restorePlaybackIfOwned()
     }
 
     private fun restorePlaybackIfOwned() {

@@ -83,6 +83,49 @@ class AudioRecognitionControllerTest {
     }
 
     @Test
+    fun noMatchLeavesExhaustionToRepositoryAndUsesItsNextWindowDuration() = runTest {
+        var cancelCount = 0
+        val repository = object : AudioRecognitionRepository {
+            override suspend fun recognize(onEvent: (AudioRecognitionEvent) -> Unit): List<RecognizedSong> {
+                onEvent(
+                    AudioRecognitionEvent.NoMatch(
+                        attempt = 99,
+                        nextWindowDurationMs = AUDIO_RECOGNITION_WINDOW_STRIDE_MS,
+                    ),
+                )
+                awaitCancellation()
+            }
+
+            override fun cancel() {
+                cancelCount += 1
+            }
+        }
+        val controller = createRecognitionFeatureController(
+            repository = repository,
+            scope = this,
+            isPlaybackActive = { false },
+            pausePlayback = {},
+            resumePlayback = {},
+        )
+
+        controller.dispatch(RecognitionAction.Start)
+        runCurrent()
+
+        assertEquals(
+            RecognitionUiState.Capturing(
+                capturedMs = 0,
+                windowDurationMs = AUDIO_RECOGNITION_WINDOW_STRIDE_MS,
+            ),
+            controller.uiState.value,
+        )
+        assertEquals(0, cancelCount)
+
+        controller.dispatch(RecognitionAction.Cancel)
+        runCurrent()
+        assertEquals(1, cancelCount)
+    }
+
+    @Test
     fun recognitionDoesNotResumePlaybackThatWasAlreadyPaused() = runTest {
         var pauseCount = 0
         var resumeCount = 0
