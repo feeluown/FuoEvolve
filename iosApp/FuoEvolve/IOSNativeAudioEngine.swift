@@ -611,7 +611,7 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
         providerName: String,
         loginUrl: String,
         cookieKeyGroupsJson: String,
-        onAuthorizationCode: @escaping (String) -> Void,
+        onAuthorizationCode: @escaping (String, Int32) -> Void,
         completionHandler: @escaping (String?) -> Void
     ) {
         DispatchQueue.main.async {
@@ -783,7 +783,7 @@ final class IOSNetworkStatusOutput: NSObject, IosNetworkStatusOutput {
 private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate {
     private let webView = WKWebView(frame: .zero)
     private let requiredCookieGroups: [[String]]
-    private let onAuthorizationCode: (String) -> Void
+    private let onAuthorizationCode: (String, Int32) -> Void
     private let completion: (String?) -> Void
     private var finished = false
 
@@ -791,7 +791,7 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
         providerName: String,
         url: URL,
         requiredCookieGroups: [[String]],
-        onAuthorizationCode: @escaping (String) -> Void,
+        onAuthorizationCode: @escaping (String, Int32) -> Void,
         completion: @escaping (String?) -> Void
     ) {
         self.requiredCookieGroups = requiredCookieGroups
@@ -861,7 +861,7 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        guard let code = Self.authorizationCode(from: navigationAction.request.url) else {
+        guard let redirect = Self.authorizationRedirect(from: navigationAction.request.url) else {
             decisionHandler(.allow)
             return
         }
@@ -871,12 +871,18 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
         guard !finished else { return }
         finished = true
         DispatchQueue.main.async {
-            self.dismiss(animated: true) { self.onAuthorizationCode(code) }
+            self.dismiss(animated: true) {
+                self.onAuthorizationCode(redirect.code, redirect.loginType)
+            }
         }
     }
 
     /// QQ Music's authorization redirect, or nil when the URL is not that redirect.
-    private static func authorizationCode(from url: URL?) -> String? {
+    ///
+    /// Both login entries (QQ account and WeChat account) come back to the same page; the
+    /// login_type query value says which ecosystem the code belongs to (1 = QQ, 2 = WeChat).
+    /// It is reported as 0 when absent, and the code itself is never logged.
+    private static func authorizationRedirect(from url: URL?) -> (code: String, loginType: Int32)? {
         guard let url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return nil
         }
@@ -886,7 +892,10 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
             return nil
         }
         let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        return code.isEmpty ? nil : code
+        guard !code.isEmpty else { return nil }
+        let rawLoginType = components.queryItems?.first(where: { $0.name == "login_type" })?.value
+        let loginType = rawLoginType.flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+        return (code, loginType > 0 ? loginType : 0)
     }
 }
 

@@ -144,8 +144,11 @@ class KotlinProviderRepository :
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         requireProvider(providerId).loginWithCookies(cookiesJson)
 
-    override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState =
-        requireProvider(providerId).loginWithAuthorizationCode(code)
+    override suspend fun loginWithAuthorizationCode(
+        providerId: String,
+        code: String,
+        loginType: Int?,
+    ): ProviderAuthState = requireProvider(providerId).loginWithAuthorizationCode(code, loginType)
 
     override suspend fun loginWithHeaders(
         providerId: String,

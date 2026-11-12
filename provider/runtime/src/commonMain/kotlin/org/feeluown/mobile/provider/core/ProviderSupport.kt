@@ -95,6 +95,11 @@ data class ProviderSessionCredential(
     val unionId: String? = null,
     val accountId: String? = null,
     val encryptedAccountId: String? = null,
+    /**
+     * Provider-specific login flavour tag, e.g. QQ Music uses `qq` / `wechat` because the renewal
+     * request shape and the login-type number differ per account ecosystem.
+     */
+    val loginMethod: String? = null,
     /** Wall-clock time at which [authKey] was issued. */
     val authKeyCreatedAtMillis: Long = 0L,
     /** Lifetime of [authKey] as reported by the provider. */

@@ -162,7 +162,11 @@ interface ProviderAuthRepository {
      * Exchanges an authorization code captured from the platform web-login redirect.
      * Providers without an authorization-code login reject this call.
      */
-    suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState {
+    suspend fun loginWithAuthorizationCode(
+        providerId: String,
+        code: String,
+        loginType: Int? = null,
+    ): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support authorization code login: $providerId")
     }
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {

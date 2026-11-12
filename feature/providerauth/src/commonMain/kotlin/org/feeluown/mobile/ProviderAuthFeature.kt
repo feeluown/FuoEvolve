@@ -75,7 +75,7 @@ interface ProviderAuthSessionPort<Auth, Session> {
     fun error(session: Session, providerId: String): String?
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): Auth
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): Auth
-    suspend fun loginWithAuthorizationCode(providerId: String, code: String): Auth
+    suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null): Auth
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): Auth
     suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): Auth
     suspend fun loginWithOAuth(
@@ -142,7 +142,7 @@ interface ProviderAuthFeatureOwner<Provider, Auth, Session> {
      * Starts the sign-in for [providerId] on behalf of a platform host that already captured an
      * authorization code from its web-login redirect.
      */
-    fun loginWithAuthorizationCode(providerId: String, code: String)
+    fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null)
 
     fun loginWithHeaders(providerId: String)
     fun loginWithHeaderFile(providerId: String, headerFileJson: String)
@@ -271,7 +271,7 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
         }
     }
 
-    override fun loginWithAuthorizationCode(providerId: String, code: String) {
+    override fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int?) {
         val authorizationCode = code.trim()
         if (authorizationCode.isEmpty()) {
             feedback("未获取到 " + providerName(providerId) + " 登录授权码")
@@ -279,7 +279,7 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
         }
         scope.launch {
             feedback("正在登录 " + providerName(providerId))
-            runCatching { sessionPort.loginWithAuthorizationCode(providerId, authorizationCode) }
+            runCatching { sessionPort.loginWithAuthorizationCode(providerId, authorizationCode, loginType) }
                 .onSuccess { auth ->
                     feedback(loginFeedback(auth))
                     onSessionChanged()

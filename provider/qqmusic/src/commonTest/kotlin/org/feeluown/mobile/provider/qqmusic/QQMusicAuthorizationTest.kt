@@ -7,6 +7,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -74,6 +75,7 @@ class QQMusicAuthorizationTest {
         createdAt: Long = now,
         lifetimeMillis: Long = THREE_DAYS_MILLIS,
         grantExpiresAt: Long = now + 60 * DAY_MILLIS,
+        loginMethod: String? = null,
     ) = ProviderSessionCredential(
         authKey = authKey,
         refreshToken = refreshToken,
@@ -82,6 +84,7 @@ class QQMusicAuthorizationTest {
         unionId = "UNIONID",
         accountId = accountId,
         encryptedAccountId = "ENC_OLD",
+        loginMethod = loginMethod,
         authKeyCreatedAtMillis = createdAt,
         authKeyExpiresInMillis = lifetimeMillis,
         grantExpiresAtMillis = grantExpiresAt,
@@ -197,6 +200,10 @@ class QQMusicAuthorizationTest {
         // refresh_key is empty for this login type and not required by the server.
         assertEquals("", param.string("refresh_key"))
         assertEquals(2, param.int("loginMode"))
+        // QQ Music's reference client sends the credential login type as an int here.
+        val comm = assertNotNull(request.obj("comm"))
+        assertEquals(2, comm.int("tmeLoginType"))
+        assertFalse((comm["tmeLoginType"] as JsonPrimitive).isString)
         http.close()
     }
 
@@ -367,6 +374,206 @@ class QQMusicAuthorizationTest {
         assertEquals("1152921505375946065", cookies["uin"])
         assertEquals("Q_H_L_KEY", cookies["qm_keyst"])
         assertEquals("Q_H_L_KEY", cookies["qqmusic_key"])
+        // A legacy (qq) session is a QQ session: login_type 1 and no WeChat identity cookies.
+        assertEquals("1", cookies["login_type"])
+        assertNull(cookies["wxuin"])
+        assertNull(cookies["wxopenid"])
+        assertNull(cookies["wxunionid"])
+    }
+
+    @Test
+    fun wechatAuthorizationCodeExchangeSendsWechatPayloadAndPersistsWechatSession() = runTest {
+        val requests = mutableListOf<RecordedRequest>()
+        val http = providerHttp(requests)
+        val credentials = InMemoryProviderCredentialStore()
+        val provider = QQMusicCompositeProvider(
+            ProviderRuntimeDependencies(http, credentials),
+            nowMillis = { now },
+        )
+
+        val auth = provider.loginWithAuthorizationCode("WXCODE", loginType = 2)
+
+        assertTrue(auth.isLoggedIn, auth.failure?.technicalMessage)
+        val stored = assertNotNull(credentials.read(ID))
+        val session = assertNotNull(stored.session)
+        // The method is persisted so the renewal later picks the WeChat request shape.
+        assertEquals("wechat", session.loginMethod)
+        assertEquals("Q_H_L_NEW", session.authKey)
+        assertEquals("REFRESH_NEW", session.refreshToken)
+        assertEquals(accountId, session.accountId)
+        // Cookies QQ Music's account-scoped request paths need for a WeChat session.
+        assertEquals(accountId, stored.cookies["uin"])
+        assertEquals(accountId, stored.cookies["wxuin"])
+        assertEquals(accountId, stored.cookies["str_musicid"])
+        assertEquals(accountId, stored.cookies["musicid"])
+        assertEquals("OPENID", stored.cookies["wxopenid"])
+        assertEquals("UNIONID", stored.cookies["wxunionid"])
+        assertEquals("2", stored.cookies["login_type"])
+        assertEquals("Q_H_L_NEW", stored.cookies["qm_keyst"])
+        assertEquals("Q_H_L_NEW", stored.cookies["qqmusic_key"])
+        // The provider's own account-id resolution prefers wxuin; it must agree.
+        assertEquals(accountId, qqAccountId(stored.cookies))
+
+        val exchange = payload(requests, QQMusicAuthorization.WECHAT_EXCHANGE_MODULE)
+        val comm = assertNotNull(exchange.obj("comm"))
+        assertEquals("qqmusic", comm.string("tmeAppID"))
+        assertEquals("1", comm.string("tmeLoginType"))
+        assertTrue((comm["tmeLoginType"] as JsonPrimitive).isString)
+        assertEquals(5381L, comm.long("g_tk"))
+        assertEquals("yqq", comm.string("platform"))
+        val req = assertNotNull(exchange.obj("req"))
+        assertEquals("music.login.LoginServer", req.string("module"))
+        assertEquals("Login", req.string("method"))
+        val param = assertNotNull(req.obj("param"))
+        assertEquals("wx48db31d50e334801", param.string("strAppid"))
+        assertEquals("WXCODE", param.string("code"))
+        http.close()
+    }
+
+    @Test
+    fun wechatRenewalSendsStrMusicIdAndUnionIdWithoutAccessToken() = runTest {
+        val requests = mutableListOf<RecordedRequest>()
+        val http = providerHttp(
+            requests,
+            onPost = { """{"req":{"code":0,"data":{"musickey":"W_X_ROTATED"}}}""" },
+        )
+        val previous = storedSession(
+            authKey = "W_X_OLD",
+            createdAt = now - 2 * DAY_MILLIS,
+            loginMethod = "wechat",
+        )
+
+        val renewed = renewSession(http, previous, nowMillis = now)
+
+        assertEquals("wechat", renewed.loginMethod)
+        assertEquals("W_X_ROTATED", renewed.authKey)
+        assertEquals("REFRESH_OLD", renewed.refreshToken)
+        val request = payload(requests, QQMusicAuthorization.RENEW_MODULE)
+        val param = assertNotNull(request.obj("req")?.obj("param"))
+        // WeChat sends the account id as a string and identifies the account by openid/unionid.
+        assertEquals(accountId, param.string("str_musicid"))
+        assertEquals("UNIONID", param.string("unionid"))
+        assertEquals("OPENID", param.string("openid"))
+        assertEquals("REFRESH_OLD", param.string("refresh_token"))
+        assertEquals("W_X_OLD", param.string("musickey"))
+        assertEquals("", param.string("refresh_key"))
+        assertEquals(2, param.int("loginMode"))
+        // The QQ-only fields are absent from the WeChat renewal, notably access_token/expired_in.
+        assertNull(param["access_token"])
+        assertNull(param["expired_in"])
+        assertNull(param["musicid"])
+        val comm = assertNotNull(request.obj("comm"))
+        assertEquals("1", comm.string("tmeLoginType"))
+        assertTrue((comm["tmeLoginType"] as JsonPrimitive).isString)
+        // Cookies synthesized after a WeChat renewal stay WeChat.
+        val cookies = qqSessionCookies(renewed)
+        assertEquals("2", cookies["login_type"])
+        assertEquals(accountId, cookies["wxuin"])
+        assertEquals("OPENID", cookies["wxopenid"])
+        assertEquals("UNIONID", cookies["wxunionid"])
+        http.close()
+    }
+
+    @Test
+    fun legacySessionWithoutLoginMethodRenewsWithTheQqShape() = runTest {
+        val requests = mutableListOf<RecordedRequest>()
+        val http = providerHttp(
+            requests,
+            onPost = { """{"req":{"code":0,"data":{"musickey":"Q_H_L_ROTATED"}}}""" },
+        )
+        // Sessions stored before WeChat support existed carry no login method at all.
+        val legacy = storedSession(loginMethod = null, createdAt = now - 2 * DAY_MILLIS)
+
+        val renewed = renewSession(http, legacy, nowMillis = now)
+
+        // The tag is filled in so every later renewal keeps using the QQ shape.
+        assertEquals("qq", renewed.loginMethod)
+        assertEquals("Q_H_L_ROTATED", renewed.authKey)
+        val request = payload(requests, QQMusicAuthorization.RENEW_MODULE)
+        val param = assertNotNull(request.obj("req")?.obj("param"))
+        assertEquals("ACCESS_OLD", param.string("access_token"))
+        assertEquals(accountId.toLong(), param.long("musicid"))
+        assertEquals((now + 60 * DAY_MILLIS) / 1_000L, param.long("expired_in"))
+        assertNull(param["str_musicid"])
+        assertEquals(2, request.obj("comm")?.int("tmeLoginType"))
+        http.close()
+    }
+
+    @Test
+    fun verifySessionRenewsAWechatSessionWithTheWechatShapeAndKeepsWechatCookies() = runTest {
+        val requests = mutableListOf<RecordedRequest>()
+        val http = providerHttp(
+            requests,
+            onPost = {
+                """{"req":{"code":0,"data":{"musickey":"W_X_ROTATED","refresh_token":"REFRESH_ROTATED","keyExpiresIn":259200}}}"""
+            },
+        )
+        val credentials = InMemoryProviderCredentialStore()
+        val stale = storedSession(
+            authKey = "W_X_OLD",
+            createdAt = now - 2 * DAY_MILLIS,
+            loginMethod = "wechat",
+        )
+        credentials.write(ID, ProviderCredentials(cookies = qqSessionCookies(stale), session = stale))
+        val provider = QQMusicCompositeProvider(
+            ProviderRuntimeDependencies(http, credentials),
+            nowMillis = { now },
+        )
+
+        val auth = provider.verifySession()
+
+        assertTrue(auth.isLoggedIn, auth.failure?.technicalMessage)
+        val stored = assertNotNull(credentials.read(ID))
+        val session = assertNotNull(stored.session)
+        assertEquals("wechat", session.loginMethod)
+        assertEquals("W_X_ROTATED", session.authKey)
+        assertEquals("REFRESH_ROTATED", session.refreshToken)
+        assertEquals("2", stored.cookies["login_type"])
+        assertEquals(accountId, stored.cookies["wxuin"])
+        assertEquals("OPENID", stored.cookies["wxopenid"])
+        assertEquals("UNIONID", stored.cookies["wxunionid"])
+        assertEquals("W_X_ROTATED", stored.cookies["qm_keyst"])
+        val renewal = payload(requests, QQMusicAuthorization.RENEW_MODULE)
+        assertEquals(accountId, renewal.obj("req")?.obj("param")?.string("str_musicid"))
+        http.close()
+    }
+
+    @Test
+    fun wechatExchangeFailureIsReportedAsLoginExpiredAndPersistsNothing() = runTest {
+        val http = providerHttp(onPost = { """{"code":0,"req":{"code":1000,"msg":"authorization code expired"}}""" })
+        val credentials = InMemoryProviderCredentialStore()
+        val provider = QQMusicCompositeProvider(
+            ProviderRuntimeDependencies(http, credentials),
+            nowMillis = { now },
+        )
+
+        val auth = provider.loginWithAuthorizationCode("REPLAYED_WX_CODE", loginType = 2)
+
+        assertFalse(auth.isLoggedIn)
+        assertEquals(ProviderFailureKind.LoginExpired, auth.failure?.kind)
+        assertTrue(auth.failure?.technicalMessage.orEmpty().contains("code=1000"))
+        assertNull(credentials.read(ID))
+        http.close()
+    }
+
+    @Test
+    fun loginConfigExposesQqAndWechatLoginChoices() {
+        val config = assertNotNull(QQMusicProviderDefinition.info.loginConfig)
+
+        assertEquals(2, config.loginChoices.size)
+        val choices = config.effectiveLoginChoices
+        assertEquals(listOf("qq", "wechat"), choices.map { it.id })
+        assertEquals(listOf("QQ 账号", "微信账号"), choices.map { it.label })
+        assertEquals(QQMusicProviderDefinition.LOGIN_URL, choices[0].loginUrl)
+        assertEquals(
+            "https://open.weixin.qq.com/connect/qrconnect?appid=wx48db31d50e334801&scope=snsapi_login" +
+                "&redirect_uri=https%3A%2F%2Fy.qq.com%2Fportal%2Fwx_redirect.html" +
+                "%3Flogin_type%3D2%26surl%3Dhttps%3A%2F%2Fy.qq.com%2F" +
+                "&state=state#wechat_redirect",
+            choices[1].loginUrl,
+        )
+        // The default entry stays QQ so a platform build that only knows loginUrl keeps working.
+        assertEquals(choices[0].loginUrl, config.loginUrl)
     }
 
     private companion object {

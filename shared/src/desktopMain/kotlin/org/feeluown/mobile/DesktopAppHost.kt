@@ -29,7 +29,7 @@ fun DesktopAppHost(
     openGlRenderContextParameters: DesktopOpenGlRenderContextParameters? = null,
 ) {
     val container = remember(audioCaptureApi) { DesktopAppContainer(audioCaptureApi) }
-    var activeWebLoginProvider by remember { mutableStateOf<ProviderInfo?>(null) }
+    var activeWebLogin by remember { mutableStateOf<DesktopPendingWebLogin?>(null) }
     installDesktopFfmMpvVideoControllerFactory(
         nativeApi = nativeMpvApi,
         videoDecodeMode = container::desktopVideoDecodeMode,
@@ -41,30 +41,33 @@ fun DesktopAppHost(
     LaunchedEffect(container, externalInputs) {
         externalInputs?.collect(container::openExternalInput)
     }
-    fun requestProviderWebLogin(provider: ProviderInfo) {
+    /** [loginUrl] is the selected login entry (QQ / WeChat for QQ Music), null for the provider default. */
+    fun requestProviderWebLogin(provider: ProviderInfo, loginUrl: String? = null) {
         val config = provider.loginConfig
+        val effectiveLoginUrl = loginUrl?.takeIf(String::isNotBlank) ?: config?.loginUrl.orEmpty()
         when {
             config == null -> container.appViewModel.showFeedback("${provider.providerName} 未配置网页登录地址")
-            config.loginUrl.isBlank() -> container.appViewModel.showFeedback("${provider.providerName} 未配置有效网页登录地址")
+            effectiveLoginUrl.isBlank() -> container.appViewModel.showFeedback("${provider.providerName} 未配置有效网页登录地址")
             config.cookieKeyGroups.isEmpty() -> {
                 container.appViewModel.showFeedback("${provider.providerName} 未配置登录 Cookie 判定规则")
             }
-            activeWebLoginProvider != null -> {
-                container.appViewModel.showFeedback("${activeWebLoginProvider?.providerName} 网页登录正在进行中")
+            activeWebLogin != null -> {
+                container.appViewModel.showFeedback("${activeWebLogin?.provider?.providerName} 网页登录正在进行中")
             }
-            else -> activeWebLoginProvider = provider
+            else -> activeWebLogin = DesktopPendingWebLogin(provider = provider, loginUrl = effectiveLoginUrl)
         }
     }
     val desktopWindowContentWrapper: @Composable (@Composable () -> Unit) -> Unit = { content ->
         windowContentWrapper {
             Box(Modifier.fillMaxSize()) {
                 content()
-                activeWebLoginProvider?.let { provider ->
+                activeWebLogin?.let { pending ->
                     DesktopProviderWebLogin(
-                        provider = provider,
+                        provider = pending.provider,
+                        loginUrl = pending.loginUrl,
                         onResult = { result ->
-                            activeWebLoginProvider = null
-                            container.handleProviderWebLoginResult(provider, result)
+                            activeWebLogin = null
+                            container.handleProviderWebLoginResult(pending.provider, result)
                         },
                     )
                 }
@@ -85,7 +88,7 @@ fun DesktopAppHost(
                 // app-wide cookie jar to wipe; dropping the in-flight login session is the
                 // platform equivalent of clearing the shared web login state.
                 clearWebLoginState = {
-                    activeWebLoginProvider = null
+                    activeWebLogin = null
                     container.appViewModel.showFeedback("已清除网页登录状态，请重新登录")
                 },
             ),
@@ -561,9 +564,14 @@ private class DesktopAppContainer(
                 }
             }
             // A captured OAuth authorization code is preferred over cookies: only it can be exchanged
-            // for a renewable session. Never log the code.
+            // for a renewable session. The redirect's login_type says which ecosystem the code belongs
+            // to (1 = QQ account, 2 = WeChat account); null keeps the provider default. Never log the code.
             is DesktopWebLoginResult.AuthorizationCode -> {
-                providerAuthFeatureController.loginWithAuthorizationCode(provider.providerId, result.code)
+                providerAuthFeatureController.loginWithAuthorizationCode(
+                    provider.providerId,
+                    result.code,
+                    result.loginType,
+                )
             }
             DesktopWebLoginResult.Cancelled -> Unit
             is DesktopWebLoginResult.Failure -> appViewModel.showFeedback(result.message)
@@ -635,5 +643,14 @@ private class DesktopAppContainer(
         playbackEngine.close()
     }
 }
+
+/**
+ * The provider whose web login overlay is open, together with the resolved login entry URL so the
+ * overlay opens exactly the entry the user picked (QQ account vs WeChat account for QQ Music).
+ */
+private data class DesktopPendingWebLogin(
+    val provider: ProviderInfo,
+    val loginUrl: String,
+)
 
 private const val DESKTOP_VERSION_RESOURCE = "fuoevolve-desktop-version.properties"

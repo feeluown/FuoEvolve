@@ -66,10 +66,30 @@ data class ProviderMutationResult(
     val message: String,
 )
 
+/**
+ * One selectable web-login entry point.
+ *
+ * Most providers have exactly one (`loginChoices` stays empty and [ProviderLoginConfig.loginUrl] is
+ * used). Providers that offer several account ecosystems — QQ Music accepts a QQ account or a WeChat
+ * account, each with its own authorize URL — declare them here so the UI can offer a choice instead
+ * of hard-coding one of them.
+ */
+data class ProviderLoginChoice(
+    /** Stable identifier the platform may echo back, e.g. `qq` / `wechat`. */
+    val id: String,
+    val label: String,
+    val loginUrl: String,
+)
+
 data class ProviderLoginConfig(
     val loginUrl: String,
     val cookieKeyGroups: List<List<String>>,
-)
+    val loginChoices: List<ProviderLoginChoice> = emptyList(),
+) {
+    /** Selectable entries; falls back to the single [loginUrl] so existing providers are unchanged. */
+    val effectiveLoginChoices: List<ProviderLoginChoice>
+        get() = loginChoices.ifEmpty { listOf(ProviderLoginChoice(id = "", label = "", loginUrl = loginUrl)) }
+}
 
 data class ProviderInfo(
     val providerId: String,

@@ -256,7 +256,7 @@ internal fun ProviderDetailSettingsExpressive(
     settingsController: SettingsFeatureController,
     authController: ProviderAuthFeatureController,
     authUiState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -275,7 +275,17 @@ internal fun ProviderDetailSettingsExpressive(
     // An expired provider session must be recoverable with one tap, without logging out first.
     val needsRelogin = !auth.isLoggedIn && authController.needsRelogin(provider.providerId)
     val webLoginAvailable = provider.loginConfig != null && ProviderLoginMode.WebView in modes
+    // Some providers expose several account ecosystems behind one web login (QQ Music: QQ / WeChat).
+    val loginChoices = provider.loginConfig?.effectiveLoginChoices.orEmpty()
+    val loginUrlForChoice = { choice: ProviderLoginChoice -> choice.loginUrl }
     var mode by remember(provider.providerId, modes) { mutableStateOf(modes.first()) }
+    var loginChoiceId by remember(provider.providerId, loginChoices) {
+        mutableStateOf(loginChoices.firstOrNull()?.id.orEmpty())
+    }
+    val selectedLoginChoice = loginChoices.firstOrNull { it.id == loginChoiceId } ?: loginChoices.firstOrNull()
+    val openWebLogin: () -> Unit = {
+        onOpenProviderWebLogin(provider, selectedLoginChoice?.let(loginUrlForChoice))
+    }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
     val oauthFlow = authUiState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
@@ -367,6 +377,14 @@ internal fun ProviderDetailSettingsExpressive(
                 verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
             ) {
                 if (webLoginAvailable) {
+                    if (loginChoices.size > 1) {
+                        ProviderLoginChoiceSelector(
+                            choices = loginChoices,
+                            selectedId = selectedLoginChoice?.id.orEmpty(),
+                            enabled = !authBusy,
+                            onSelect = { loginChoiceId = it },
+                        )
+                    }
                     Button(
                         onClick = {
                             mode = ProviderLoginMode.WebView
@@ -374,7 +392,7 @@ internal fun ProviderDetailSettingsExpressive(
                             // it came from are dead too. Wipe them first, otherwise the login page
                             // re-reads the same dead cookies and the app re-stores that session.
                             webLoginStateActions.clearWebLoginState?.invoke()
-                            onOpenProviderWebLogin(provider)
+                            openWebLogin()
                         },
                         enabled = !authBusy,
                         modifier = Modifier.fillMaxWidth(),
@@ -414,8 +432,16 @@ internal fun ProviderDetailSettingsExpressive(
                     modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
                     verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
                 ) {
+                    if (loginChoices.size > 1) {
+                        ProviderLoginChoiceSelector(
+                            choices = loginChoices,
+                            selectedId = selectedLoginChoice?.id.orEmpty(),
+                            enabled = !authBusy,
+                            onSelect = { loginChoiceId = it },
+                        )
+                    }
                     Button(
-                        onClick = { onOpenProviderWebLogin(provider) },
+                        onClick = { openWebLogin() },
                         enabled = provider.loginConfig != null && !authBusy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("网页登录") }
@@ -423,7 +449,7 @@ internal fun ProviderDetailSettingsExpressive(
                         OutlinedButton(
                             onClick = {
                                 clearWebLoginState()
-                                onOpenProviderWebLogin(provider)
+                                openWebLogin()
                             },
                             enabled = provider.loginConfig != null && !authBusy,
                             modifier = Modifier.fillMaxWidth(),
@@ -824,4 +850,29 @@ private fun expressiveProviderLoginModeLabel(mode: ProviderLoginMode): String = 
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"
+}
+/**
+ * Account-ecosystem picker for providers whose web login covers several ecosystems.
+ *
+ * QQ Music accepts a QQ account and a WeChat account through different authorize URLs; both end at the
+ * same redirect, so the platform reports which ecosystem the authorization code belongs to.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderLoginChoiceSelector(
+    choices: List<ProviderLoginChoice>,
+    selectedId: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        choices.forEachIndexed { index, choice ->
+            SegmentedButton(
+                selected = choice.id == selectedId,
+                enabled = enabled,
+                onClick = { onSelect(choice.id) },
+                shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+            ) { Text(choice.label.ifBlank { choice.id }) }
+        }
+    }
 }

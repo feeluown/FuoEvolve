@@ -6,6 +6,8 @@ import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderFeature
 import org.feeluown.mobile.ProviderFeatureCategory
 import org.feeluown.mobile.ProviderInfo
+import org.feeluown.mobile.ProviderLoginChoice
+import org.feeluown.mobile.ProviderLoginConfig
 
 internal object QQMusicProviderDefinition {
     const val ID = "qqmusic"
@@ -24,6 +26,10 @@ internal object QQMusicProviderDefinition {
     /** Redirect that carries the single-use authorization code the platform hosts intercept. */
     private const val OAUTH_REDIRECT_URI =
         "https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=https://y.qq.com/"
+
+    /** The same redirect for a WeChat account login (`login_type=2`), captured from y.qq.com. */
+    private const val WECHAT_REDIRECT_URI =
+        "https://y.qq.com/portal/wx_redirect.html?login_type=2&surl=https://y.qq.com/"
 
     /**
      * QQ's OAuth authorize page (verified working end to end).
@@ -47,13 +53,38 @@ internal object QQMusicProviderDefinition {
         append("&src=1")
     }
 
+    /**
+     * WeChat's open-platform QR authorize page (renders QQ Music's 微信登录 QR), captured from
+     * y.qq.com's own `wx_redirect` login (`login_type=2`).
+     *
+     * Same interception contract as [LOGIN_URL]: WeChat redirects back to
+     * `https://y.qq.com/portal/wx_redirect.html?login_type=2&surl=...&code=XXXX&state=state` and the
+     * hosts hand the code to [exchangeAuthorizationCode] with `loginType = 2`. The trailing
+     * `#wechat_redirect` fragment is part of the protocol and must stay.
+     */
+    val WECHAT_LOGIN_URL: String = buildString {
+        append("https://open.weixin.qq.com/connect/qrconnect")
+        append("?appid=")
+        append(QQMusicAuthorization.WECHAT_APP_ID)
+        append("&scope=snsapi_login")
+        append("&redirect_uri=")
+        append(encodeUrlComponent(WECHAT_REDIRECT_URI))
+        append("&state=state")
+        append("#wechat_redirect")
+    }
+
     val info = ProviderInfo(
         providerId = ID,
         providerName = NAME,
-        loginConfig = org.feeluown.mobile.ProviderLoginConfig(
+        loginConfig = ProviderLoginConfig(
+            // Default stays the QQ entry so a platform build that only knows `loginUrl` still works.
             LOGIN_URL,
             // Fallback for manually captured cookies; the authorization code above is the real path.
             listOf(listOf("qqmusic_key", "wxuin", "qm_keyst"), listOf("qqmusic_key", "uin", "qm_keyst")),
+            loginChoices = listOf(
+                ProviderLoginChoice(id = "qq", label = "QQ 账号", loginUrl = LOGIN_URL),
+                ProviderLoginChoice(id = "wechat", label = "微信账号", loginUrl = WECHAT_LOGIN_URL),
+            ),
         ),
         supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
     )

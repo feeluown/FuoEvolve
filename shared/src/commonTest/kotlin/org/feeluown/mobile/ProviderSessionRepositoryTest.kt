@@ -101,7 +101,11 @@ class ProviderSessionRepositoryTest {
             return state(providerId, true)
         }
 
-        override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState {
+        override suspend fun loginWithAuthorizationCode(
+            providerId: String,
+            code: String,
+            loginType: Int?,
+        ): ProviderAuthState {
             capturedCode = code
             isLoggedIn = true
             return state(providerId, true)

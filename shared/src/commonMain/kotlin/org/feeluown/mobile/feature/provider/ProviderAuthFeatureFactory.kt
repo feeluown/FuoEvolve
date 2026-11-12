@@ -45,7 +45,7 @@ interface ProviderAuthFeatureController {
     fun onOAuthClientIdChange(providerId: String, value: String)
     fun onOAuthClientSecretChange(providerId: String, value: String)
     fun loginWithCookies(providerId: String, cookiesJson: String)
-    fun loginWithAuthorizationCode(providerId: String, code: String)
+    fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null)
     fun loginWithHeaders(providerId: String)
     fun loginYtmusicWithHeaderFile(headerFileJson: String)
     fun startYtmusicTvOAuthLogin()
@@ -118,8 +118,8 @@ private class BoundProviderAuthFeatureController(
     override fun onOAuthClientSecretChange(providerId: String, value: String) =
         owner.onOAuthClientSecretChange(providerId, value)
     override fun loginWithCookies(providerId: String, cookiesJson: String) = owner.loginWithCookies(providerId, cookiesJson)
-    override fun loginWithAuthorizationCode(providerId: String, code: String) =
-        owner.loginWithAuthorizationCode(providerId, code)
+    override fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int?) =
+        owner.loginWithAuthorizationCode(providerId, code, loginType)
     override fun loginWithHeaders(providerId: String) = owner.loginWithHeaders(providerId)
     override fun loginYtmusicWithHeaderFile(headerFileJson: String) = owner.loginWithHeaderFile("ytmusic", headerFileJson)
     override fun startYtmusicTvOAuthLogin() = owner.startDeviceOAuthLogin()
@@ -144,8 +144,11 @@ private class ProviderAuthSessionBinding(
         delegate.refresh(providerId, refreshUserInfo)
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         delegate.loginWithCookies(providerId, cookiesJson)
-    override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState =
-        delegate.loginWithAuthorizationCode(providerId, code)
+    override suspend fun loginWithAuthorizationCode(
+        providerId: String,
+        code: String,
+        loginType: Int?,
+    ): ProviderAuthState = delegate.loginWithAuthorizationCode(providerId, code, loginType)
     override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState =
         delegate.loginWithHeaders(providerId, authorization, cookie)
     override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState =

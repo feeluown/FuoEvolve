@@ -129,10 +129,10 @@ class ProviderWebLoginActivity : ComponentActivity() {
                     if (!request.isForMainFrame) return null
                     val url = request.url?.toString() ?: return null
                     if (!mayBeAuthorizationCodeRedirect(url)) return null
-                    val code = authorizationCodeFromRedirect(url) ?: return null
+                    val redirect = authorizationCodeFromRedirect(url) ?: return null
                     // Claim from this worker thread before anything else can complete with cookies.
                     if (!authorizationCodeCaptured.compareAndSet(false, true)) return null
-                    runOnUiThread { completeWithAuthorizationCode(code) }
+                    runOnUiThread { completeWithAuthorizationCode(redirect) }
                     // Serve an empty body so the redirect page never runs and cannot consume the code.
                     return WebResourceResponse(
                         "text/plain",
@@ -293,9 +293,9 @@ class ProviderWebLoginActivity : ComponentActivity() {
      */
     private fun handleAuthorizationCodeRedirect(url: String?): Boolean {
         if (authorizationCodeCaptured.get()) return true
-        val code = authorizationCodeFromRedirect(url) ?: return false
+        val redirect = authorizationCodeFromRedirect(url) ?: return false
         if (!authorizationCodeCaptured.compareAndSet(false, true)) return true
-        completeWithAuthorizationCode(code)
+        completeWithAuthorizationCode(redirect)
         return true
     }
 
@@ -307,28 +307,47 @@ class ProviderWebLoginActivity : ComponentActivity() {
         url.contains(OAUTH_REDIRECT_PATH, ignoreCase = true) &&
             url.contains(OAUTH_REDIRECT_HOST, ignoreCase = true)
 
-    private fun authorizationCodeFromRedirect(url: String?): String? {
+    /**
+     * Single parser for the provider OAuth redirect: the single-use [AuthorizationCodeRedirect.code]
+     * plus the account ecosystem the code belongs to.
+     *
+     * QQ Music sends both QQ-account (login_type=1) and WeChat-account (login_type=2) logins back to
+     * the same redirect and the exchange payload differs, so the type has to travel with the code.
+     */
+    private fun authorizationCodeFromRedirect(url: String?): AuthorizationCodeRedirect? {
         if (url.isNullOrBlank()) return null
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
         // Non-hierarchical navigations (about:blank, intent:…) have no host and must not match.
         val host = uri.host ?: return null
         if (!host.equals(OAUTH_REDIRECT_HOST, ignoreCase = true)) return null
         if (uri.path != OAUTH_REDIRECT_PATH) return null
-        return uri.getQueryParameter(OAUTH_REDIRECT_CODE_PARAMETER)?.trim()?.takeIf(String::isNotEmpty)
+        val code = uri.getQueryParameter(OAUTH_REDIRECT_CODE_PARAMETER)?.trim()?.takeIf(String::isNotEmpty)
+            ?: return null
+        val loginType = uri.getQueryParameter(OAUTH_REDIRECT_LOGIN_TYPE_PARAMETER)
+            ?.trim()
+            ?.toIntOrNull()
+            ?.takeIf { it > 0 }
+        return AuthorizationCodeRedirect(code = code, loginType = loginType)
     }
+
+    /** A captured provider OAuth redirect: the single-use code and its account ecosystem. */
+    private data class AuthorizationCodeRedirect(val code: String, val loginType: Int?)
 
     /**
      * Produces the activity result for a code whose [authorizationCodeCaptured] claim the caller won.
      * Must run on the main thread. Never logs the code: it is a single-use credential.
      */
-    private fun completeWithAuthorizationCode(code: String) {
+    private fun completeWithAuthorizationCode(redirect: AuthorizationCodeRedirect) {
         if (isFinishing || isDestroyed) return
         if (::webView.isInitialized) {
             webView.stopLoading()
         }
         val data = Intent()
             .putExtra(EXTRA_PROVIDER_ID, providerId)
-            .putExtra(EXTRA_AUTHORIZATION_CODE, code)
+            .putExtra(EXTRA_AUTHORIZATION_CODE, redirect.code)
+        // Only present when the redirect said which ecosystem the code belongs to; absent means the
+        // provider default (QQ account).
+        redirect.loginType?.let { loginType -> data.putExtra(EXTRA_AUTHORIZATION_LOGIN_TYPE, loginType) }
         setResult(RESULT_OK, data)
         finish()
     }
@@ -457,9 +476,16 @@ class ProviderWebLoginActivity : ComponentActivity() {
         /** OAuth authorization code captured from a provider login redirect, when one was seen. */
         const val EXTRA_AUTHORIZATION_CODE = "authorization_code"
 
+        /**
+         * Account ecosystem of [EXTRA_AUTHORIZATION_CODE], taken from the redirect's `login_type`
+         * (1 = QQ account, 2 = WeChat account). Absent means the provider default.
+         */
+        const val EXTRA_AUTHORIZATION_LOGIN_TYPE = "authorization_login_type"
+
         private const val OAUTH_REDIRECT_HOST = "y.qq.com"
         private const val OAUTH_REDIRECT_PATH = "/portal/wx_redirect.html"
         private const val OAUTH_REDIRECT_CODE_PARAMETER = "code"
+        private const val OAUTH_REDIRECT_LOGIN_TYPE_PARAMETER = "login_type"
 
         private const val EXTRA_PROVIDER_NAME = "provider_name"
         private const val EXTRA_LOGIN_URL = "login_url"
@@ -476,8 +502,13 @@ class ProviderWebLoginActivity : ComponentActivity() {
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
-        fun createIntent(context: Context, provider: ProviderInfo): Intent {
+        /**
+         * @param loginUrl the selected [ProviderLoginChoice.loginUrl] when the provider offers more
+         *   than one account ecosystem, or null/blank to use the provider's default login URL.
+         */
+        fun createIntent(context: Context, provider: ProviderInfo, loginUrl: String? = null): Intent {
             val loginConfig = requireNotNull(provider.loginConfig)
+            val effectiveLoginUrl = loginUrl?.takeIf(String::isNotBlank) ?: loginConfig.loginUrl
             val keyGroups = JSONArray()
             loginConfig.cookieKeyGroups.forEach { group ->
                 val groupArray = JSONArray()
@@ -487,7 +518,7 @@ class ProviderWebLoginActivity : ComponentActivity() {
             return Intent(context, ProviderWebLoginActivity::class.java)
                 .putExtra(EXTRA_PROVIDER_ID, provider.providerId)
                 .putExtra(EXTRA_PROVIDER_NAME, provider.providerName)
-                .putExtra(EXTRA_LOGIN_URL, loginConfig.loginUrl)
+                .putExtra(EXTRA_LOGIN_URL, effectiveLoginUrl)
                 .putExtra(EXTRA_COOKIE_KEY_GROUPS, keyGroups.toString())
         }
 

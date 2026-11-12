@@ -25,7 +25,7 @@ interface ProviderSessionRepository {
     suspend fun updateProviders(providers: List<ProviderInfo>)
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
-    suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState
+    suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState
     suspend fun loginWithOAuth(
@@ -111,10 +111,13 @@ class DefaultProviderSessionRepository(
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         mutate(providerId, ProviderSessionOperation.Login) { providerRepository.loginWithCookies(providerId, cookiesJson) }
 
-    override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState =
-        mutate(providerId, ProviderSessionOperation.Login) {
-            providerRepository.loginWithAuthorizationCode(providerId, code)
-        }
+    override suspend fun loginWithAuthorizationCode(
+        providerId: String,
+        code: String,
+        loginType: Int?,
+    ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
+        providerRepository.loginWithAuthorizationCode(providerId, code, loginType)
+    }
 
     override suspend fun loginWithHeaders(
         providerId: String,

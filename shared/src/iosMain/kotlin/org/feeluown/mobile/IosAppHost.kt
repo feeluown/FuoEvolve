@@ -491,21 +491,29 @@ private class IosAppContainer(
         }
     }
 
-    fun openProviderWebLogin(provider: ProviderInfo) {
+    fun openProviderWebLogin(provider: ProviderInfo, loginUrl: String? = null) {
         val loginConfig = provider.loginConfig ?: return
+        // The UI may offer several account ecosystems for the same provider; the selected entry wins
+        // over the provider default.
+        val effectiveLoginUrl = loginUrl?.takeIf(String::isNotBlank) ?: loginConfig.loginUrl
         val groupsJson = loginConfig.cookieKeyGroups.joinToString(prefix = "[", postfix = "]") { group ->
             group.joinToString(prefix = "[\"", postfix = "\"]", separator = "\",\"")
         }
         webLoginOutput.open(
             provider.providerId,
             provider.providerName,
-            loginConfig.loginUrl,
+            effectiveLoginUrl,
             groupsJson,
             // Preferred over cookies: only the exchanged authorization code yields a renewable session.
-            // The code is never logged.
-            onAuthorizationCode = { code ->
+            // The redirect's login_type says which ecosystem the code belongs to (0 = unspecified,
+            // mapped to null here). The code is never logged.
+            onAuthorizationCode = { code, loginType ->
                 if (code.isNotBlank()) {
-                    providerAuthFeatureController.loginWithAuthorizationCode(provider.providerId, code)
+                    providerAuthFeatureController.loginWithAuthorizationCode(
+                        provider.providerId,
+                        code,
+                        loginType.takeIf { it > 0 },
+                    )
                 }
             },
         ) { cookiesJson ->

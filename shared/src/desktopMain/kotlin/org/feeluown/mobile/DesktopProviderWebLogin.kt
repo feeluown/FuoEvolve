@@ -48,39 +48,47 @@ internal sealed interface DesktopWebLoginResult {
 
     /**
      * The provider's OAuth redirect was intercepted and its navigation cancelled before the page ran,
-     * so the single-use [code] is still exchangeable by the provider.
+     * so the single-use [code] is still exchangeable by the provider. [loginType] is the redirect's
+     * `login_type` (1 = QQ account, 2 = WeChat account) or null when the redirect carried none.
      */
-    data class AuthorizationCode(val code: String) : DesktopWebLoginResult
+    data class AuthorizationCode(val code: String, val loginType: Int?) : DesktopWebLoginResult
 
     data object Cancelled : DesktopWebLoginResult
     data class Failure(val message: String) : DesktopWebLoginResult
 }
 
+/**
+ * @param loginUrl the selected login entry when the provider offers more than one account ecosystem
+ *   (QQ Music: QQ account / WeChat account), or null/blank to use the provider's default login URL.
+ */
 @Composable
 internal fun DesktopProviderWebLogin(
     provider: ProviderInfo,
+    loginUrl: String? = null,
     onResult: (DesktopWebLoginResult) -> Unit,
 ) {
     val config = requireNotNull(provider.loginConfig) {
         "${provider.providerName} 未配置网页登录地址"
     }
-    require(config.loginUrl.isNotBlank()) {
+    val effectiveLoginUrl = loginUrl?.takeIf(String::isNotBlank) ?: config.loginUrl
+    require(effectiveLoginUrl.isNotBlank()) {
         "${provider.providerName} 未配置有效网页登录地址"
     }
     require(config.cookieKeyGroups.isNotEmpty()) {
         "${provider.providerName} 未配置登录 Cookie 判定规则"
     }
 
-    val state = rememberWebViewState(config.loginUrl) {
+    val state = rememberWebViewState(effectiveLoginUrl) {
         customUserAgentString = desktopWebLoginUserAgent(provider.providerId)
         isJavaScriptEnabled = true
         desktopWebSettings.incognito = true
         desktopWebSettings.enableClipboard = true
     }
-    // An OAuth authorize page can only end in the redirect that carries the single-use authorization
-    // code. For such a flow the cookie poll must never complete the login first: a cookie-only session
-    // is not renewable, and the (incognito) jar may already satisfy the required names mid-flow.
-    val requiresAuthorizationCode = requiresDesktopAuthorizationCode(config.loginUrl)
+    // An OAuth login page (QQ account authorize URL, WeChat qrconnect URL) can only end in the redirect
+    // that carries the single-use authorization code. For such a flow the cookie poll must never
+    // complete the login first: a cookie-only session is not renewable, and the (incognito) jar may
+    // already satisfy the required names mid-flow.
+    val requiresAuthorizationCode = requiresDesktopAuthorizationCode(effectiveLoginUrl)
     val currentOnResult by rememberUpdatedState(onResult)
     var finished by remember(provider.providerId) { mutableStateOf(false) }
 
@@ -94,16 +102,16 @@ internal fun DesktopProviderWebLogin(
     // The navigation interceptor runs on the native web view callback, not necessarily on the
     // composition thread, so the captured code is handed over through an atomic slot and consumed by
     // the polling effect below instead of being written into compose state from that callback.
-    val capturedAuthorizationCode = remember(provider.providerId) { AtomicReference<String?>(null) }
-    val navigationInterceptor = remember(provider.providerId, capturedAuthorizationCode) {
+    val capturedRedirect = remember(provider.providerId) { AtomicReference<DesktopAuthorizationRedirect?>(null) }
+    val navigationInterceptor = remember(provider.providerId, capturedRedirect) {
         object : RequestInterceptor {
             override fun onInterceptUrlRequest(
                 request: WebRequest,
                 navigator: WebViewNavigator,
             ): WebRequestInterceptResult {
-                val code = desktopAuthorizationCodeFromRedirect(request.url)
+                val redirect = desktopAuthorizationRedirectFrom(request.url)
                     ?: return WebRequestInterceptResult.Allow
-                capturedAuthorizationCode.compareAndSet(null, code)
+                capturedRedirect.compareAndSet(null, redirect)
                 // Cancel the navigation: the redirect page would otherwise consume the single-use code.
                 return WebRequestInterceptResult.Reject
             }
@@ -113,13 +121,13 @@ internal fun DesktopProviderWebLogin(
 
     LaunchedEffect(provider.providerId, state) {
         while (isActive && !finished) {
-            capturedAuthorizationCode.get()?.let { code ->
-                finish(DesktopWebLoginResult.AuthorizationCode(code))
+            capturedRedirect.get()?.let { redirect ->
+                finish(DesktopWebLoginResult.AuthorizationCode(redirect.code, redirect.loginType))
                 return@LaunchedEffect
             }
             val cookieUrls = desktopWebLoginCookieUrls(
                 providerId = provider.providerId,
-                loginUrl = config.loginUrl,
+                loginUrl = effectiveLoginUrl,
                 currentUrl = state.lastLoadedUrl,
             )
             val cookies = mutableMapOf<String, String>()
@@ -238,20 +246,25 @@ private fun desktopWebLoginCookieHosts(providerId: String): List<String> = when 
 }
 
 /**
- * True when [loginUrl] is a provider OAuth authorize page, i.e. the flow must end in the redirect that
- * carries the authorization code. Cookies are only a fallback for providers whose login URL is an
- * ordinary page; completing an OAuth flow from cookies would store a session that cannot be renewed.
+ * True when [loginUrl] is a provider OAuth login page, i.e. the flow must end in the redirect that
+ * carries the authorization code: QQ's authorize URL (`oauth2.0/authorize`) and WeChat's QR-connect
+ * URL (`connect/qrconnect`) both qualify. Cookies are only a fallback for providers whose login URL is
+ * an ordinary page; completing an OAuth flow from cookies would store a session that cannot be renewed.
  */
 internal fun requiresDesktopAuthorizationCode(loginUrl: String): Boolean =
-    loginUrl.contains(OAUTH_AUTHORIZE_PATH_MARKER, ignoreCase = true)
+    OAUTH_LOGIN_URL_MARKERS.any { marker -> loginUrl.contains(marker, ignoreCase = true) }
 
 /**
- * QQ Music's authorization redirect, or null when [url] is not that redirect.
+ * QQ Music's authorization redirect: the single-use code plus the account ecosystem it belongs to.
  *
- * The redirect carries the single-use authorization code that the provider exchanges for a renewable
- * session; the code itself must never be logged.
+ * Both login entries (QQ account and WeChat account) come back to the same page; the `login_type`
+ * query value says which ecosystem the code belongs to (1 = QQ, 2 = WeChat). The code itself must
+ * never be logged.
  */
-internal fun desktopAuthorizationCodeFromRedirect(url: String?): String? {
+internal data class DesktopAuthorizationRedirect(val code: String, val loginType: Int?)
+
+/** See [DesktopAuthorizationRedirect]; null when [url] is not that redirect. */
+internal fun desktopAuthorizationRedirectFrom(url: String?): DesktopAuthorizationRedirect? {
     if (url.isNullOrBlank()) return null
     val uri = runCatching { URI(url) }.getOrNull() ?: return null
     val host = uri.host ?: return null
@@ -259,21 +272,31 @@ internal fun desktopAuthorizationCodeFromRedirect(url: String?): String? {
     val path = uri.path ?: return null
     if (path != OAUTH_REDIRECT_PATH) return null
     val rawQuery = uri.rawQuery ?: return null
-    return rawQuery.split('&').firstNotNullOfOrNull { parameter ->
+    val parameters = rawQuery.split('&').mapNotNull { parameter ->
         val separator = parameter.indexOf('=')
-        if (separator <= 0) return@firstNotNullOfOrNull null
-        if (parameter.substring(0, separator) != OAUTH_REDIRECT_CODE_PARAMETER) return@firstNotNullOfOrNull null
-        runCatching { URLDecoder.decode(parameter.substring(separator + 1), "UTF-8") }
+        if (separator <= 0) return@mapNotNull null
+        val name = parameter.substring(0, separator)
+        val value = runCatching { URLDecoder.decode(parameter.substring(separator + 1), "UTF-8") }
             .getOrNull()
             ?.trim()
-            ?.takeIf(String::isNotEmpty)
+        if (value.isNullOrEmpty()) null else name to value
     }
+    val code = parameters.firstOrNull { (name, _) -> name == OAUTH_REDIRECT_CODE_PARAMETER }?.second
+        ?: return null
+    val loginType = parameters
+        .firstOrNull { (name, _) -> name == OAUTH_REDIRECT_LOGIN_TYPE_PARAMETER }
+        ?.second
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 }
+    return DesktopAuthorizationRedirect(code = code, loginType = loginType)
 }
 
-private const val OAUTH_AUTHORIZE_PATH_MARKER = "oauth2.0/authorize"
+/** Login entry URLs whose flow can only complete through the authorization-code redirect. */
+private val OAUTH_LOGIN_URL_MARKERS = listOf("oauth2.0/authorize", "connect/qrconnect")
 private const val OAUTH_REDIRECT_HOST = "y.qq.com"
 private const val OAUTH_REDIRECT_PATH = "/portal/wx_redirect.html"
 private const val OAUTH_REDIRECT_CODE_PARAMETER = "code"
+private const val OAUTH_REDIRECT_LOGIN_TYPE_PARAMETER = "login_type"
 private const val COOKIE_POLL_INTERVAL_MILLIS = 500L
 private const val DESKTOP_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +

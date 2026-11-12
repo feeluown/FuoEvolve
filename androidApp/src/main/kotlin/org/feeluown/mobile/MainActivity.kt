@@ -115,11 +115,19 @@ class MainActivity : ComponentActivity() {
                     val authorizationCode = result.data
                         ?.getStringExtra(ProviderWebLoginActivity.EXTRA_AUTHORIZATION_CODE)
                         .orEmpty()
+                    // 1 = QQ account, 2 = WeChat account; absent means the provider default.
+                    val authorizationLoginType = result.data
+                        ?.getIntExtra(ProviderWebLoginActivity.EXTRA_AUTHORIZATION_LOGIN_TYPE, 0)
+                        ?.takeIf { it > 0 }
                     val cookies = result.data?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON).orEmpty()
                     when {
                         providerId.isBlank() -> Unit
                         authorizationCode.isNotBlank() -> {
-                            appUiGraph.providerAuth.loginWithAuthorizationCode(providerId, authorizationCode)
+                            appUiGraph.providerAuth.loginWithAuthorizationCode(
+                                providerId,
+                                authorizationCode,
+                                authorizationLoginType,
+                            )
                         }
                         cookies.isNotBlank() -> appUiGraph.providerAuth.loginWithCookies(providerId, cookies)
                     }
@@ -241,10 +249,12 @@ class MainActivity : ComponentActivity() {
                             isAvailable = hasMicrophonePermission,
                             requestAccess = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                         ),
-                        onOpenProviderWebLogin = { provider ->
+                        onOpenProviderWebLogin = { provider, loginUrl ->
                             if (provider.loginConfig != null) {
                                 pendingWebLoginProviderId = provider.providerId
-                                webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
+                                webLoginLauncher.launch(
+                                    ProviderWebLoginActivity.createIntent(this@MainActivity, provider, loginUrl),
+                                )
                             }
                         },
                         onLogoutProvider = { provider ->

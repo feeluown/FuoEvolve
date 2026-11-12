@@ -4,8 +4,10 @@
 > surface as "音源接口响应已变化，请更新应用" and could only be fixed by logging out. This document
 > records the verified protocol that replaces it: the platform web-login hosts intercept the single-use
 > OAuth `code` from `y.qq.com/portal/wx_redirect.html`, the provider exchanges it for a `musickey`
-> (3-day lifetime) plus a `refresh_token` (≈60-day grant), and renews the key before it expires. All
-> numbers below come from a live account, not estimation.
+> (3-day lifetime) plus a `refresh_token` (≈60-day grant), and renews the key before it expires. Both
+> account ecosystems are supported: a QQ account (`login_type=1`, `QQConnectLogin.LoginServer/QQLogin`)
+> and a WeChat account (`login_type=2`, `music.login.LoginServer/Login` + `strAppid`). All numbers below
+> come from a live QQ-account measurement, not estimation.
 
 > **状态**：核心闭环已落地（跨模块契约 + `provider/qqmusic` 实现 + 三端浏览器拦截），`provider:qqmusic` / `:shared` / `feature:providerauth` 单元测试通过；**真机冒烟未做**。
 > **关联**：[#307](https://github.com/feeluown/FuoEvolve/issues/307)（主）、[#306](https://github.com/feeluown/FuoEvolve/issues/306)、[#283](https://github.com/feeluown/FuoEvolve/issues/283)。
@@ -25,7 +27,7 @@
 | 授权码能复用吗 | ❌ 一次性。重放返回 `req.code = 1000`，因此**必须在重定向页执行前拦下导航** |
 | 需要 refresh 材料之外的东西吗 | `openid` / `unionid` / `access_token` / `musicid`，兑换响应一次全给 |
 
-一句话：**把 QQ 音乐登录从"抓网页 cookie"升级为"截授权码 → 兑换可续期会话 → 定时续期"**，一次扫码的免登录期从「随时失效」变成「约 60 天」，且失效时不再需要先退出登录。
+一句话：**把 QQ 音乐登录从"抓网页 cookie"升级为"截授权码 → 兑换可续期会话 → 定时续期"**，一次扫码的免登录期从「随时失效」变成「约 60 天」，且失效时不再需要先退出登录。**QQ 账号与微信账号都支持**（设置页可选「QQ 账号」/「微信账号」两种登录入口）。
 
 ---
 
@@ -100,6 +102,20 @@ https://graph.qq.com/oauth2.0/authorize
 
 第 5 节的实测就是用 `login_type=9` 完成的；App 内实现不依赖它。
 
+### 4.1b 微信账号入口（login_type=2）
+
+微信入口：`https://open.weixin.qq.com/connect/qrconnect?appid=wx48db31d50e334801&scope=snsapi_login&redirect_uri=<带 login_type=2 的 wx_redirect>&state=state#wechat_redirect`（实测可打开「微信登录」二维码，`#wechat_redirect` 片段是协议的一部分）。回跳仍落在同一个 `wx_redirect.html`，只是携带 `login_type=2`，所以**平台侧拦截逻辑完全复用**，只是把 `login_type` 一并回传。
+
+兑换（同为 `POST /cgi-bin/musicu.fcg`，JSON body，返回同一套 credential 字段）：
+
+```json
+{"comm":{"tmeAppID":"qqmusic","tmeLoginType":"1","g_tk":5381,"platform":"yqq","ct":24,"cv":0},
+ "req":{"module":"music.login.LoginServer","method":"Login",
+        "param":{"strAppid":"wx48db31d50e334801","code":"<code>"}}}
+```
+
+两套编号别混：重定向 URL 的 `login_type` 是 `1=QQ / 2=微信`，而 `comm.tmeLoginType` 是 `1=微信 / 2=QQ`，并且微信侧用字符串 `"1"`、QQ 侧用数字 `2`（与抓到的报文一致）。
+
 ### 4.2 授权码兑换
 
 ```http
@@ -129,17 +145,29 @@ Content-Type: application/x-www-form-urlencoded
 
 成功返回一份**新的**会话（新 `musickey`，以及新的 `refresh_token`/`access_token`）。**必须无条件持久化返回的 `refresh_token`**：是否轮换未验证，按会轮换处理才安全。
 
+微信会话的续期报文不同（不带 `access_token`/`expired_in`，改带 `str_musicid` + `unionid`，`comm.tmeLoginType` 为字符串 `"1"`）：
+
+```json
+{"comm":{"tmeLoginType":"1","g_tk":5381,"platform":"yqq","ct":24,"cv":0},
+ "req":{"module":"music.login.LoginServer","method":"Login",
+        "param":{"openid":"…","refresh_token":"…","str_musicid":"<musicid>","musickey":"…",
+                 "unionid":"…","refresh_key":"","loginMode":2}}}
+```
+
+因此 `ProviderSessionCredential.loginMethod` 记录 `qq` / `wechat`，续期时按它选择报文形状（`null` 视为 `qq`，兼容本次改动前已存下的会话）。
+
 ### 4.4 会话 → Cookie 合成
 
 除授权码外不依赖任何浏览器状态，直接由会话推导 cookie：
 
 | cookie | 来源 |
 | --- | --- |
-| `uin` | `musicid` |
-| `qm_keyst` | `musickey` |
-| `qqmusic_key` | `musickey` |
+| `uin` | `musicid`（十进制，无遗留 `o` 前缀） |
+| `qm_keyst` / `qqmusic_key` | `musickey` |
+| `login_type` | `1`（QQ）/ `2`（微信）—— provider 自身靠它区分账号体系 |
+| 微信：`wxuin` / `str_musicid` / `musicid` | `musicid` |
+| 微信：`wxopenid` / `wxunionid` | `openid` / `unionid` |
 | `encrypt_uin`（可选） | `encryptUin` |
-| `login_type` | `2`（QQ） |
 
 这样 `QQMusicProvider` / `QQMusicContentProvider` / `QQMusicUserLibrary` 等既有请求路径**完全不用改**，`qqToken()` 的 `g_tk` 推导也保持不变。
 
@@ -208,7 +236,8 @@ Content-Type: application/x-www-form-urlencoded
 | 契约 | 作用 |
 | --- | --- |
 | `KotlinMusicProvider.verifySession()` | 允许"问服务端/本地会话状态"，默认等同 `authState()`；只有 QQ 音乐覆盖 |
-| `KotlinMusicProvider.loginWithAuthorizationCode(code, loginType)` | 用授权码登录；默认抛 `UnsupportedOperationException`，不影响其它音源 |
+| `KotlinMusicProvider.loginWithAuthorizationCode(code, loginType)` | 用授权码登录；默认抛 `UnsupportedOperationException`，不影响其它音源。`loginType` 来自回跳的 `login_type`（1=QQ / 2=微信） |
+| `ProviderLoginConfig.loginChoices` | 一个音源可暴露多个登录入口（QQ 音乐：QQ 账号 / 微信账号）；平台打开用户选中的那个 |
 | `ProviderAuthRepository.loginWithAuthorizationCode(providerId, code)` | 应用层入口，默认抛不支持；`KotlinProviderRepository` 透传给 provider |
 | `ProviderAuthState.failure` | 让"会话失效"能带着原因上报，UI 才能给一键重登 |
 
@@ -216,9 +245,9 @@ Content-Type: application/x-www-form-urlencoded
 
 | 文件 | 职责 |
 | --- | --- |
-| `QQMusicAuthorization.kt` | 兑换 (`exchangeAuthorizationCode`)、续期 (`renewSession`)、cookie 合成 (`qqSessionCookies`)、会话映射 (`sessionFromPayload`)、失败归因 |
+| `QQMusicAuthorization.kt` | 兑换 (`exchangeAuthorizationCode`)、续期 (`renewSession`)、cookie 合成 (`qqSessionCookies`)、会话映射 (`sessionFromPayload`)、失败归因；`QQMusicLoginMethod`（`Qq`/`Wechat`）决定报文形状与 cookie 差异 |
 | `QQMusicCompositeProvider.kt` | `loginWithAuthorizationCode` / `verifySession` 状态机；续期后写回凭据并让 `authState()` 立即反映新状态 |
-| `QQMusicProviderDefinition.kt` | `LOGIN_URL` 改为 OAuth 授权地址；cookie 组保留为手工兜底 |
+| `QQMusicProviderDefinition.kt` | `LOGIN_URL` 改为 QQ OAuth 授权地址；`loginChoices` 额外声明微信入口；cookie 组保留为手工兜底 |
 | `QQMusicSession.kt` | 改造前的旧能力（`GetLoginUserInfo` 探针、`qqAccountId`、非 JSON 风控页归类）保留，作为 cookie-only 登录的兜底 |
 
 `verifySession()` 的判定顺序：
@@ -296,7 +325,7 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 | --- | --- | --- |
 | `refresh_token` 是否轮换 | 两次续期都返回 32 字符，未比较值 | 低：实现已"每次都用返回的新 token" |
 | 60 天到期后的行为 | 未测 | 中：决定文案与预期；预计必须重扫 |
-| 微信登录路径（`login_type=2` → `open.weixin.qq.com` → `strAppid=wx48db31d50e334801`） | 未测 | 中：目前只覆盖 QQ 账号 |
+| 微信登录路径（`login_type=2` → `open.weixin.qq.com/connect/qrconnect` → `strAppid=wx48db31d50e334801`） | **已实现**（兑换/续期报文、cookie 合成、登录入口选择、`login_type` 透传均有单测），但**未用真实微信账号实测** | 中：报文取自 QQ 音乐自身页面与参考实现 |
 | 真机三端拦截 | 仅编译 + 单测 | 高：需手动冒烟（见第 10 节） |
 | 协议变更 | 无版本协商 | 中：`req.code` 归因 + 降级重登兜底 |
 | 二维码/授权页改版 | `LOGIN_URL` 参数写死 | 低：改常量即可 |
@@ -314,7 +343,9 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 ./gradlew :androidApp:compileDebugKotlin
 ```
 
-单测覆盖：授权码兑换成功 / 去除首尾空白 / 重放返回 1000、续期成功并换新 key、grant 过期、key 过期且不可续期、cookie 合成、失败归因；明文导出剥离 `session` / 加密导出保留 `session`（`ProviderCredentialBackupSessionTest`）；`ProviderSessionRepository.loginWithAuthorizationCode` 的状态发布（`ProviderSessionRepositoryTest`）。
+单测覆盖：授权码兑换成功 / 去除首尾空白 / 重放返回 1000、续期成功并换新 key、grant 过期、key 过期且不可续期、cookie 合成、失败归因；**微信兑换/续期报文与 cookie、legacy(`loginMethod == null`) 按 QQ 续期、两个登录入口定义**；明文导出剥离 `session` / 加密导出保留 `session`（`ProviderCredentialBackupSessionTest`）；`ProviderSessionRepository.loginWithAuthorizationCode` 的状态发布（`ProviderSessionRepositoryTest`）。
+
+当前规模：**456 个单测全绿**（qqmusic 49 / shared 311 / runtime 12 / netease 15 / bilibili 13 / ytmusic 34 / search 11 / providerauth 6 / providercatalog 5）。
 
 ### 10.2 待补测试
 
@@ -324,7 +355,7 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 
 ### 10.3 待人工验收（真机）
 
-1. Android：全新安装 → QQ 音乐「网页登录」→ 扫码 → 确认跳转被拦、登录成功、`我的` 可用。
+1. Android：全新安装 → QQ 音乐「网页登录」→ 先选「QQ 账号」扫码登录，再退出后选「微信账号」扫码登录 → 两次都应确认跳转被拦、登录成功、`我的` 可用（微信会话的 `login_type=2` 与 `wxuin` 分类正确，特别看「关注歌手/收藏」这类按账号体系分支的接口）。
 2. 把设备时间/会话强制到 `keyExpiresIn/2` 之后（或直接把 `authKeyCreatedAtMillis` 前推）→ 冷启动 App → 确认自动续期且**无需重新扫码**。
 3. 断网续期 → 确认降级为未登录 + 一键重登，且不丢失 refresh 材料。
 4. 「导出凭据（明文）」→ 确认导出文件**不含** `session`。

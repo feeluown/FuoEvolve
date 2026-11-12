@@ -201,7 +201,7 @@ class ProviderAuthFeatureTest {
             signIn(providerId)
             return Auth(true)
         }
-        override suspend fun loginWithAuthorizationCode(providerId: String, code: String): Auth {
+        override suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int?): Auth {
             signIn(providerId)
             return Auth(true)
         }
