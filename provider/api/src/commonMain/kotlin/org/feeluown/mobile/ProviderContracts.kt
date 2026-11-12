@@ -27,6 +27,12 @@ data class ProviderAuthState(
     val providerName: String,
     val isLoggedIn: Boolean,
     val userName: String? = null,
+    /**
+     * Why the session is not usable, when the provider learned it from the server rather than from
+     * the absence of stored credentials. Lets the UI offer "重新登录" for an expired session without
+     * asking the user to log out first.
+     */
+    val failure: ProviderFailure? = null,
 )
 
 data class ProviderCapabilities(

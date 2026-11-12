@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -36,6 +39,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import java.io.ByteArrayInputStream
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -46,6 +51,25 @@ class ProviderWebLoginActivity : ComponentActivity() {
     private lateinit var loginUrl: String
     private lateinit var cookieKeyGroups: List<List<String>>
     private lateinit var webView: WebView
+
+    /**
+     * Values of the required auth cookies as they existed before the login page was opened.
+     *
+     * An expired provider session does not remove cookies from the persistent WebView jar: the jar
+     * still contains every required cookie NAME with a dead VALUE. Auto-finishing purely on
+     * "required cookies exist" therefore captured the same dead session again and re-stored it,
+     * which is what made 退出登录 the only workaround users had. Comparing against this baseline
+     * means the login page only completes on its own after the browser session actually changed.
+     */
+    private var baselineAuthCookies: Map<String, String> = emptyMap()
+
+    /**
+     * Claimed by whichever callback first sees the provider's OAuth redirect, before the activity
+     * result is produced. It takes precedence over the cookie result because a cookie-only session
+     * cannot be renewed later, and it is an atomic claim because [WebViewClient.shouldInterceptRequest]
+     * runs on a WebView worker thread while the cookie callbacks run on the main thread.
+     */
+    private val authorizationCodeCaptured = AtomicBoolean(false)
     private var statusMessage by mutableStateOf("")
 
     @SuppressLint("SetJavaScriptEnabled") // 提供方登录页完成认证需要 JavaScript。
@@ -76,13 +100,60 @@ class ProviderWebLoginActivity : ComponentActivity() {
             cookieManager().setAcceptThirdPartyCookies(this, true)
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
+                // minSdk is 24, so 24+ always consults the WebResourceRequest overload.
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean {
+                    return handleAuthorizationCodeRedirect(request.url?.toString())
+                }
+
+                /**
+                 * Fallback for the redirect that [shouldOverrideUrlLoading] does not report.
+                 *
+                 * QQ's OAuth hop back to `y.qq.com/portal/wx_redirect.html` is an HTTP 3xx redirect,
+                 * and WebView does not reliably consult [shouldOverrideUrlLoading] for those, so the
+                 * single-use code would otherwise be consumed by the page we never saw. This callback
+                 * fires for the target of every request, redirects included.
+                 *
+                 * It runs on a WebView worker thread for every subresource, so the main-frame guard and
+                 * the cheap substring prefilter come first, and the completion is bounced to the main
+                 * thread (activity result + finish must run there). The code is never logged.
+                 */
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? {
+                    if (authorizationCodeCaptured.get()) return null
+                    if (isFinishing || isDestroyed) return null
+                    if (!request.isForMainFrame) return null
+                    val url = request.url?.toString() ?: return null
+                    if (!mayBeAuthorizationCodeRedirect(url)) return null
+                    val code = authorizationCodeFromRedirect(url) ?: return null
+                    // Claim from this worker thread before anything else can complete with cookies.
+                    if (!authorizationCodeCaptured.compareAndSet(false, true)) return null
+                    runOnUiThread { completeWithAuthorizationCode(code) }
+                    // Serve an empty body so the redirect page never runs and cannot consume the code.
+                    return WebResourceResponse(
+                        "text/plain",
+                        "utf-8",
+                        ByteArrayInputStream(ByteArray(0)),
+                    )
+                }
+
                 override fun onPageFinished(view: WebView, url: String?) {
                     super.onPageFinished(view, url)
+                    // The redirect can arrive as the last navigation of the login page; never let the
+                    // cookie fallback overwrite an already captured authorization code.
+                    if (authorizationCodeCaptured.get()) return
                     cookieManager().flush()
                     finishWithCookies(url, auto = true)
                 }
             }
         }
+
+        // Snapshot the browser session before the login page can touch it. See [baselineAuthCookies].
+        baselineAuthCookies = authCookieSnapshot()
 
         setContent {
             FuoTheme(
@@ -185,12 +256,20 @@ class ProviderWebLoginActivity : ComponentActivity() {
     }
 
     private fun finishWithCookies(currentUrl: String?, auto: Boolean) {
+        if (authorizationCodeCaptured.get()) return
         if (!auto && ::webView.isInitialized) {
             webView.stopLoading()
         }
         cookieManager().flush()
         val cookies = collectCookies(currentUrl)
         if (auto && !hasRequiredCookies(cookies)) return
+        if (auto && !hasFreshAuthCookies(cookies)) {
+            // The jar still holds the cookies the app already had, i.e. the page was opened with a
+            // known-rejected session and the user has not signed in again yet. Keep waiting (or let
+            // the user press 完成 explicitly) instead of re-storing that dead session.
+            statusMessage = STALE_SESSION_HINT
+            return
+        }
         if (!auto && cookies.isEmpty()) {
             Toast.makeText(this, "未获取到 Cookie", Toast.LENGTH_SHORT).show()
             return
@@ -203,7 +282,78 @@ class ProviderWebLoginActivity : ComponentActivity() {
         finish()
     }
 
-    private fun collectCookies(currentUrl: String?): Map<String, String> {
+    /**
+     * QQ Music's authorization redirect: [OAUTH_REDIRECT_HOST] + [OAUTH_REDIRECT_PATH] + a `code`.
+     *
+     * The single-use [code] is consumed the moment that page is allowed to run (its JavaScript posts
+     * it back to QQ), so returning `true` from [WebViewClient.shouldOverrideUrlLoading] — i.e. never
+     * loading the URL — is what keeps the code exchangeable by the provider. Cookies are deliberately
+     * not collected in this case: the exchanged credential synthesizes its own cookies and is the only
+     * renewable session we can persist.
+     */
+    private fun handleAuthorizationCodeRedirect(url: String?): Boolean {
+        if (authorizationCodeCaptured.get()) return true
+        val code = authorizationCodeFromRedirect(url) ?: return false
+        if (!authorizationCodeCaptured.compareAndSet(false, true)) return true
+        completeWithAuthorizationCode(code)
+        return true
+    }
+
+    /**
+     * Cheap substring prefilter for [shouldInterceptRequest], which is called for every request of the
+     * page on a worker thread: full URI parsing only happens for URLs that can possibly match.
+     */
+    private fun mayBeAuthorizationCodeRedirect(url: String): Boolean =
+        url.contains(OAUTH_REDIRECT_PATH, ignoreCase = true) &&
+            url.contains(OAUTH_REDIRECT_HOST, ignoreCase = true)
+
+    private fun authorizationCodeFromRedirect(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+        // Non-hierarchical navigations (about:blank, intent:…) have no host and must not match.
+        val host = uri.host ?: return null
+        if (!host.equals(OAUTH_REDIRECT_HOST, ignoreCase = true)) return null
+        if (uri.path != OAUTH_REDIRECT_PATH) return null
+        return uri.getQueryParameter(OAUTH_REDIRECT_CODE_PARAMETER)?.trim()?.takeIf(String::isNotEmpty)
+    }
+
+    /**
+     * Produces the activity result for a code whose [authorizationCodeCaptured] claim the caller won.
+     * Must run on the main thread. Never logs the code: it is a single-use credential.
+     */
+    private fun completeWithAuthorizationCode(code: String) {
+        if (isFinishing || isDestroyed) return
+        if (::webView.isInitialized) {
+            webView.stopLoading()
+        }
+        val data = Intent()
+            .putExtra(EXTRA_PROVIDER_ID, providerId)
+            .putExtra(EXTRA_AUTHORIZATION_CODE, code)
+        setResult(RESULT_OK, data)
+        finish()
+    }
+
+    /** Required auth cookie values currently in the jar, keyed by cookie name. */
+    private fun authCookieSnapshot(): Map<String, String> {
+        val requiredKeys = cookieKeyGroups.flatten().toSet()
+        if (requiredKeys.isEmpty()) return emptyMap()
+        return collectCookies(currentUrl = null, updateStatus = false).filterKeys { it in requiredKeys }
+    }
+
+    /**
+     * True when at least one cookie of the satisfied group changed since the login page was opened,
+     * i.e. the user actually completed a new sign-in instead of the page re-reading a dead session.
+     */
+    private fun hasFreshAuthCookies(cookies: Map<String, String>): Boolean {
+        if (cookieKeyGroups.isEmpty()) return true
+        return cookieKeyGroups.any { group ->
+            group.isNotEmpty() &&
+                group.all { key -> cookies[key].isNullOrBlank().not() } &&
+                group.any { key -> cookies[key] != baselineAuthCookies[key] }
+        }
+    }
+
+    private fun collectCookies(currentUrl: String?, updateStatus: Boolean = true): Map<String, String> {
         val result = linkedMapOf<String, String>()
         cookieLookupUrls(currentUrl).forEach { url ->
             cookieManager().getCookie(url)
@@ -219,10 +369,12 @@ class ProviderWebLoginActivity : ComponentActivity() {
                     }
                 }
         }
-        statusMessage = if (result.isEmpty()) {
-            "等待登录 Cookie"
-        } else {
-            "已获取 ${result.size} 个 Cookie"
+        if (updateStatus) {
+            statusMessage = if (result.isEmpty()) {
+                "等待登录 Cookie"
+            } else {
+                "已获取 ${result.size} 个 Cookie"
+            }
         }
         return result
     }
@@ -302,6 +454,13 @@ class ProviderWebLoginActivity : ComponentActivity() {
         const val EXTRA_PROVIDER_ID = "provider_id"
         const val EXTRA_COOKIES_JSON = "cookies_json"
 
+        /** OAuth authorization code captured from a provider login redirect, when one was seen. */
+        const val EXTRA_AUTHORIZATION_CODE = "authorization_code"
+
+        private const val OAUTH_REDIRECT_HOST = "y.qq.com"
+        private const val OAUTH_REDIRECT_PATH = "/portal/wx_redirect.html"
+        private const val OAUTH_REDIRECT_CODE_PARAMETER = "code"
+
         private const val EXTRA_PROVIDER_NAME = "provider_name"
         private const val EXTRA_LOGIN_URL = "login_url"
         private const val EXTRA_COOKIE_KEY_GROUPS = "cookie_key_groups"
@@ -311,6 +470,8 @@ class ProviderWebLoginActivity : ComponentActivity() {
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        private const val STALE_SESSION_HINT =
+            "当前网页登录会话可能已失效，请在本页面重新登录；完成后可点按右上角「完成」。"
         private const val MOBILE_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"

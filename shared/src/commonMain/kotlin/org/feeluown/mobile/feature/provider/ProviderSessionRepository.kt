@@ -25,6 +25,7 @@ interface ProviderSessionRepository {
     suspend fun updateProviders(providers: List<ProviderInfo>)
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+    suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState
     suspend fun loginWithOAuth(
@@ -110,6 +111,11 @@ class DefaultProviderSessionRepository(
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         mutate(providerId, ProviderSessionOperation.Login) { providerRepository.loginWithCookies(providerId, cookiesJson) }
 
+    override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState =
+        mutate(providerId, ProviderSessionOperation.Login) {
+            providerRepository.loginWithAuthorizationCode(providerId, code)
+        }
+
     override suspend fun loginWithHeaders(
         providerId: String,
         authorization: String,
@@ -168,10 +174,18 @@ class DefaultProviderSessionRepository(
         try {
             val authState = block()
             val current = mutableState.value
+            // A provider that probed the server can report "the session expired" without throwing.
+            // Keep that explanation so the account card can offer a direct re-login instead of
+            // silently flipping to 未登录.
+            val sessionFailure = authState.failure?.takeIf { !authState.isLoggedIn }?.userMessage
             mutableState.value = current.copy(
                 authStates = current.authStates + (providerId to authState),
                 operations = current.operations - providerId,
-                errors = current.errors - providerId,
+                errors = if (sessionFailure != null) {
+                    current.errors + (providerId to sessionFailure)
+                } else {
+                    current.errors - providerId
+                },
             )
             authState
         } catch (throwable: Throwable) {

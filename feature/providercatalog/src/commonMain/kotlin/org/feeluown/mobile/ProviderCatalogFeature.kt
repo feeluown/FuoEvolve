@@ -70,7 +70,12 @@ interface ProviderCatalogPreferencesPort {
 interface ProviderCatalogSessionPort<Provider, Session> {
     val state: StateFlow<Session>
     suspend fun updateProviders(providers: List<Provider>)
-    suspend fun refresh(providerId: String)
+
+    /**
+     * @param refreshUserInfo when true the session port may verify the account with the provider's
+     *   servers, which lets an expired login be reported before the user hits a failing request.
+     */
+    suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false)
 }
 
 interface ProviderCatalogFeatureOwner<Provider, Feature, Capability, Session> {
@@ -229,7 +234,10 @@ private class DefaultProviderCatalogFeatureOwner<Provider, Feature, Capability, 
 
     private suspend fun refreshProviderSessions(providers: List<Provider>) {
         providers.forEach { provider ->
-            runCatching { sessions.refresh(repository.providerId(provider)) }
+            // Ask providers that can verify server-side (QQ Music) rather than only reading the
+            // locally stored credentials, so an expired session is reported here instead of
+            // surfacing later as a misleading "音源接口响应已变化" failure.
+            runCatching { sessions.refresh(repository.providerId(provider), refreshUserInfo = true) }
         }
     }
 

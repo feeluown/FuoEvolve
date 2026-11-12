@@ -157,6 +157,14 @@ interface ProviderAuthRepository {
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun refreshAuthState(providerId: String): ProviderAuthState = authState(providerId)
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+
+    /**
+     * Exchanges an authorization code captured from the platform web-login redirect.
+     * Providers without an authorization-code login reject this call.
+     */
+    suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support authorization code login: $providerId")
+    }
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support header login: $providerId")
     }

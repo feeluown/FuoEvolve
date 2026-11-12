@@ -139,17 +139,19 @@ open class ProviderCredentialBackup(
             require(credentials.isNotEmpty()) { "$providerName 没有可导出的登录凭证" }
         }
 
-        val plaintext = encodePlaintext(credentials)
+        // The password-encrypted backup keeps the renewable session so a restore does not force
+        // another QR scan; the plaintext one must not, see [withoutRenewableSessions].
+        val fullCredentials = encodeCredentials(credentials)
         when (mode) {
             ProviderCredentialExportMode.Plaintext -> ProviderCredentialBackupFile(
                 fileName = backupFileName(providerId, encrypted = false),
-                content = plaintext,
+                content = encodeCredentials(credentials.withoutRenewableSessions()),
             )
             ProviderCredentialExportMode.Encrypted -> {
                 require(password.length >= MIN_PASSWORD_LENGTH) { "备份密码至少需要 $MIN_PASSWORD_LENGTH 位" }
                 ProviderCredentialBackupFile(
                     fileName = backupFileName(providerId, encrypted = true),
-                    content = encrypt(plaintext, password),
+                    content = encrypt(fullCredentials, password),
                 )
             }
         }
@@ -229,6 +231,9 @@ open class ProviderCredentialBackup(
                     authorization = authorization,
                     cookie = cookieHeader,
                 )
+                // Restored renewable session: the credentials were already written as-is, and a cookie
+                // re-login would drop the refresh token. Let the provider validate/renew instead.
+                credentials.hasSession() -> providerAuth.refreshAuthState(providerId)
                 credentials.cookies.isNotEmpty() -> providerAuth.loginWithCookies(
                     providerId = providerId,
                     cookiesJson = JsonObject(credentials.cookies.mapValues { JsonPrimitive(it.value) }).toString(),
@@ -237,7 +242,15 @@ open class ProviderCredentialBackup(
         }
     }
 
-    private fun encodePlaintext(credentials: Map<String, ProviderCredentials>): String {
+    /**
+     * A renewable provider session (`refresh_token`) is a long-lived account credential: whoever
+     * holds it can mint fresh access keys for weeks. The encrypted backup keeps it so a restore does
+     * not force another QR scan, but a plaintext export must never contain it.
+     */
+    private fun Map<String, ProviderCredentials>.withoutRenewableSessions(): Map<String, ProviderCredentials> =
+        mapValues { (_, value) -> if (value.session == null) value else value.copy(session = null) }
+
+    private fun encodeCredentials(credentials: Map<String, ProviderCredentials>): String {
         val root = buildJsonObject {
             put(FORMAT_FIELD, JsonPrimitive(FORMAT))
             put(VERSION_FIELD, JsonPrimitive(VERSION))

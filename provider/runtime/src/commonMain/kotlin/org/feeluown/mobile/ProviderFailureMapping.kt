@@ -32,10 +32,15 @@ fun Throwable.providerFailureOrNull(providerId: String? = null): ProviderFailure
     return null
 }
 
+/**
+ * @param loginExpiredCodes upstream business codes that mean "the session expired and the user has to
+ *   sign in again". Providers pass their own vendor codes so a shared integer namespace is never assumed.
+ */
 fun providerBusinessException(
     providerId: String,
     code: Int?,
     message: String,
+    loginExpiredCodes: Set<Int> = emptySet(),
 ): ProviderOperationException {
     val technicalMessage = buildString {
         append(providerId)
@@ -57,8 +62,19 @@ fun providerBusinessException(
             providerId,
             technicalMessage,
         )
-        else -> IllegalStateException(technicalMessage).providerFailureOrNull(providerId)
+        else -> if (code != null && code in loginExpiredCodes) {
+            ProviderFailure(
+                ProviderFailureKind.LoginExpired,
+                providerId,
+                technicalMessage,
+            )
+        } else {
+            IllegalStateException(technicalMessage).providerFailureOrNull(providerId)
+        }
     }
+    // Unrecognized business codes keep the conservative contract-change bucket; providers that
+    // express expiry through their own codes pass them via [loginExpiredCodes] so a dead session is
+    // never reported as "the upstream response changed, please update the app".
     val failure = detected ?: ProviderFailure(
         kind = ProviderFailureKind.UpstreamContractChanged,
         providerId = providerId,
@@ -91,11 +107,13 @@ private fun failureKindFromMessage(message: String): ProviderFailureKind? = when
         "access token expired",
         "cookie expired",
         "invalid cookie",
+        "session expired",
         "account id is unavailable",
         "encrypted uin is unavailable",
         "profile is unavailable",
         "登录失效",
         "登录过期",
+        "登录态失效",
         "未登录",
         "重新登录",
     ) -> ProviderFailureKind.LoginExpired

@@ -65,9 +65,25 @@ class ProviderSessionRepositoryTest {
         assertTrue(provider.oauthLoggedIn)
     }
 
+    @Test
+    fun authorizationCodeLoginPublishesLoggedInStateAndPublishesTheCapturedCode() = runTest {
+        val provider = RacingProviderRepository()
+        provider.allowRefreshToFinish.complete(Unit)
+        val repository = DefaultProviderSessionRepository(provider)
+        repository.updateProviders(listOf(PROVIDER))
+
+        val state = repository.loginWithAuthorizationCode(PROVIDER.providerId, "captured-code")
+
+        assertTrue(state.isLoggedIn)
+        assertEquals("captured-code", provider.capturedCode)
+        assertTrue(repository.state.value.authStates.getValue(PROVIDER.providerId).isLoggedIn)
+        assertTrue(repository.state.value.operations.isEmpty())
+    }
+
     private class RacingProviderRepository : ProviderAuthRepository {
         var isLoggedIn = false
         var oauthLoggedIn = false
+        var capturedCode: String? = null
         val refreshStarted = CompletableDeferred<Unit>()
         val allowRefreshToFinish = CompletableDeferred<Unit>()
 
@@ -81,6 +97,12 @@ class ProviderSessionRepositoryTest {
         }
 
         override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
+            isLoggedIn = true
+            return state(providerId, true)
+        }
+
+        override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState {
+            capturedCode = code
             isLoggedIn = true
             return state(providerId, true)
         }

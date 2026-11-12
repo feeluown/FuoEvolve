@@ -33,6 +33,9 @@ interface ProviderAuthFeatureController {
     fun authStateFor(provider: ProviderInfo): ProviderAuthState
     fun isBusy(providerId: String): Boolean
     fun authError(providerId: String): String?
+
+    /** Signed out with a failed/expired session: offer a one-tap re-login instead of a logout first. */
+    fun needsRelogin(providerId: String): Boolean
     fun cookieInput(providerId: String): String
     fun headerInput(providerId: String): ProviderHeaderInput
     fun oauthInput(providerId: String): ProviderOAuthInput
@@ -42,6 +45,7 @@ interface ProviderAuthFeatureController {
     fun onOAuthClientIdChange(providerId: String, value: String)
     fun onOAuthClientSecretChange(providerId: String, value: String)
     fun loginWithCookies(providerId: String, cookiesJson: String)
+    fun loginWithAuthorizationCode(providerId: String, code: String)
     fun loginWithHeaders(providerId: String)
     fun loginYtmusicWithHeaderFile(headerFileJson: String)
     fun startYtmusicTvOAuthLogin()
@@ -102,6 +106,7 @@ private class BoundProviderAuthFeatureController(
     override fun authStateFor(provider: ProviderInfo): ProviderAuthState = owner.authStateFor(provider)
     override fun isBusy(providerId: String): Boolean = owner.isBusy(providerId)
     override fun authError(providerId: String): String? = owner.authError(providerId)
+    override fun needsRelogin(providerId: String): Boolean = owner.needsRelogin(providerId)
     override fun cookieInput(providerId: String): String = owner.cookieInput(providerId)
     override fun headerInput(providerId: String): ProviderHeaderInput = owner.headerInput(providerId).toAppInput()
     override fun oauthInput(providerId: String): ProviderOAuthInput = owner.oauthInput(providerId).toAppInput()
@@ -113,6 +118,8 @@ private class BoundProviderAuthFeatureController(
     override fun onOAuthClientSecretChange(providerId: String, value: String) =
         owner.onOAuthClientSecretChange(providerId, value)
     override fun loginWithCookies(providerId: String, cookiesJson: String) = owner.loginWithCookies(providerId, cookiesJson)
+    override fun loginWithAuthorizationCode(providerId: String, code: String) =
+        owner.loginWithAuthorizationCode(providerId, code)
     override fun loginWithHeaders(providerId: String) = owner.loginWithHeaders(providerId)
     override fun loginYtmusicWithHeaderFile(headerFileJson: String) = owner.loginWithHeaderFile("ytmusic", headerFileJson)
     override fun startYtmusicTvOAuthLogin() = owner.startDeviceOAuthLogin()
@@ -137,6 +144,8 @@ private class ProviderAuthSessionBinding(
         delegate.refresh(providerId, refreshUserInfo)
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         delegate.loginWithCookies(providerId, cookiesJson)
+    override suspend fun loginWithAuthorizationCode(providerId: String, code: String): ProviderAuthState =
+        delegate.loginWithAuthorizationCode(providerId, code)
     override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState =
         delegate.loginWithHeaders(providerId, authorization, cookie)
     override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState =

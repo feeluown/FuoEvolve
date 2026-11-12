@@ -57,7 +57,10 @@ class CapabilityDelegatingProvider(
         playback.videoPlaybackPayload(video)
 
     override suspend fun authState(): ProviderAuthState = account.authState()
+    override suspend fun verifySession(): ProviderAuthState = account.verifySession()
     override suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState = account.loginWithCookies(cookiesJson)
+    override suspend fun loginWithAuthorizationCode(code: String, loginType: Int?): ProviderAuthState =
+        account.loginWithAuthorizationCode(code, loginType)
     override suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState =
         account.loginWithHeaders(authorization, cookie)
     override suspend fun loginWithHeaderFile(headerFileJson: String): ProviderAuthState =

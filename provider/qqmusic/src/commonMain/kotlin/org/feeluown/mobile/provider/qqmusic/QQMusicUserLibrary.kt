@@ -10,7 +10,6 @@ import org.feeluown.mobile.ProviderMediaItemType
 import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
 import org.feeluown.mobile.ProviderResourceState
-import org.feeluown.mobile.providerBusinessException
 import org.feeluown.mobile.providerContractException
 import org.feeluown.mobile.providerFailureOrNull
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
@@ -220,7 +219,7 @@ internal class QQMusicUserLibrary(
             headers = authenticatedHeaders("https://y.qq.com/"),
             kind = ProviderRequestKind.Mutation,
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         return root.int("code") == 0
     }
 
@@ -288,10 +287,7 @@ internal class QQMusicUserLibrary(
         limit: Int,
     ): ProviderContentSection {
         val snapshot = runCatching { snapshot() }.getOrElse { failure ->
-            return ProviderContentSection(
-                feature = feature,
-                errorMessage = failure.providerMessage("QQ 音乐账号资料加载失败，当前登录状态已保留"),
-            )
+            return failureSection(feature, failure, "QQ 音乐账号资料加载失败，当前登录状态已保留")
         }
         val page = snapshot.playlists.drop(offset).take(limit)
         return ProviderContentSection(
@@ -333,10 +329,7 @@ internal class QQMusicUserLibrary(
                 ?: (rawValues.size >= limit),
         )
     }.getOrElse { failure ->
-        ProviderContentSection(
-            feature = feature,
-            errorMessage = failure.providerMessage("QQ 音乐收藏歌单加载失败"),
-        )
+        failureSection(feature, failure, "QQ 音乐收藏歌单加载失败")
     }
 
     suspend fun loadFollowedArtists(
@@ -373,10 +366,7 @@ internal class QQMusicUserLibrary(
             },
         )
     }.getOrElse { failure ->
-        ProviderContentSection(
-            feature = feature,
-            errorMessage = failure.providerMessage("QQ 音乐关注歌手加载失败"),
-        )
+        failureSection(feature, failure, "QQ 音乐关注歌手加载失败")
     }
 
     suspend fun loadFavoriteAlbums(
@@ -410,10 +400,7 @@ internal class QQMusicUserLibrary(
                 ?: (rawValues.size >= limit),
         )
     }.getOrElse { failure ->
-        ProviderContentSection(
-            feature = feature,
-            errorMessage = failure.providerMessage("QQ 音乐收藏专辑加载失败"),
-        )
+        failureSection(feature, failure, "QQ 音乐收藏专辑加载失败")
     }
 
     private suspend fun snapshot(): QQMusicUserLibrarySnapshot {
@@ -500,11 +487,11 @@ internal class QQMusicUserLibrary(
             ),
             headers = authenticatedHeaders("https://y.qq.com/portal/profile.html?uin=$accountId"),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
 
         val code = root.int("code")
         if (code != null && code != 0) {
-            throw providerBusinessException(ID, code, root.errorMessage())
+            throw qqBusinessException(code, root.errorMessage())
         }
         val data = root.obj("data")
             ?: throw providerContractException(ID, "QQ Music profile payload missing data")
@@ -594,12 +581,12 @@ internal class QQMusicUserLibrary(
             ),
             headers = authenticatedHeaders("https://y.qq.com/portal/profile.html"),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val data = root.obj("data")
         if (data == null) {
             val code = root.int("code")
             if (code == PRIVATE_PLAYLIST_CODE) return CreatedPlaylistsResult()
-            throw providerBusinessException(ID, code, root.errorMessage())
+            throw qqBusinessException(code, root.errorMessage())
         }
         val rawPlaylists = data.array("disslist")
         return CreatedPlaylistsResult(
@@ -834,17 +821,13 @@ internal class QQMusicUserLibrary(
             headers = authenticatedHeaders("https://y.qq.com/"),
             kind = kind,
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
     }
 
     private suspend fun qqRpcPayload(payload: String): String {
         val root = providerJson.parseToJsonElement(payload).jsonObject
         val values = qqCookies()
-        val uin = values["wxuin"]?.removePrefix("o")?.takeIf(String::isNotBlank)
-            ?: values["uin"]?.removePrefix("o")?.takeIf(String::isNotBlank)
-            ?: values["str_musicid"]?.takeIf(String::isNotBlank)
-            ?: values["musicid"]?.takeIf(String::isNotBlank)
-            ?: "0"
+        val uin = qqAccountId(values) ?: "0"
         val token = qqToken(values)
         val common = mapOf(
             "loginUin" to JsonPrimitive(uin),
@@ -867,7 +850,7 @@ internal class QQMusicUserLibrary(
         val envelope = root.obj(key) ?: root
         val code = envelope.int("code")
         if (code != null && code != 0) {
-            throw providerBusinessException(ID, code, envelope.errorMessage())
+            throw qqBusinessException(code, envelope.errorMessage())
         }
         return envelope.obj("data") ?: envelope
     }
@@ -929,6 +912,20 @@ internal class QQMusicUserLibrary(
 
     private fun Throwable.providerMessage(fallback: String): String =
         providerFailureOrNull(ID)?.userMessage ?: fallback
+
+    /**
+     * A dead web session is not a load failure: it is the "sign in again" state, which the UI shows
+     * as the login prompt instead of an error banner (issue #307).
+     */
+    private fun failureSection(feature: ProviderFeature, failure: Throwable, fallback: String): ProviderContentSection {
+        val sessionExpired = failure.providerFailureOrNull(ID)?.kind ==
+            org.feeluown.mobile.ProviderFailureKind.LoginExpired
+        return ProviderContentSection(
+            feature = feature,
+            isLoginRequired = sessionExpired,
+            errorMessage = if (sessionExpired) null else failure.providerMessage(fallback),
+        )
+    }
 
     private fun CreatedPlaylistsResult?.orEmptyPlaylists(): List<ProviderPlaylist> = this?.playlists.orEmpty()
 

@@ -611,6 +611,7 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
         providerName: String,
         loginUrl: String,
         cookieKeyGroupsJson: String,
+        onAuthorizationCode: @escaping (String) -> Void,
         completionHandler: @escaping (String?) -> Void
     ) {
         DispatchQueue.main.async {
@@ -624,6 +625,7 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
                 providerName: providerName,
                 url: url,
                 requiredCookieGroups: groups,
+                onAuthorizationCode: onAuthorizationCode,
                 completion: completionHandler
             )
             presenter.present(UINavigationController(rootViewController: login), animated: true)
@@ -781,15 +783,19 @@ final class IOSNetworkStatusOutput: NSObject, IosNetworkStatusOutput {
 private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate {
     private let webView = WKWebView(frame: .zero)
     private let requiredCookieGroups: [[String]]
+    private let onAuthorizationCode: (String) -> Void
     private let completion: (String?) -> Void
+    private var finished = false
 
     init(
         providerName: String,
         url: URL,
         requiredCookieGroups: [[String]],
+        onAuthorizationCode: @escaping (String) -> Void,
         completion: @escaping (String?) -> Void
     ) {
         self.requiredCookieGroups = requiredCookieGroups
+        self.onAuthorizationCode = onAuthorizationCode
         self.completion = completion
         super.init(nibName: nil, bundle: nil)
         title = providerName
@@ -821,10 +827,13 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
     }
 
     @objc private func cancel() {
+        guard !finished else { return }
+        finished = true
         dismiss(animated: true) { self.completion(nil) }
     }
 
     @objc private func done() {
+        guard !finished else { return }
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
             var values: [String: String] = [:]
             for cookie in cookies where !cookie.value.isEmpty || values[cookie.name] == nil {
@@ -840,9 +849,44 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
                 return
             }
             DispatchQueue.main.async {
+                guard !self.finished else { return }
+                self.finished = true
                 self.dismiss(animated: true) { self.completion(json) }
             }
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let code = Self.authorizationCode(from: navigationAction.request.url) else {
+            decisionHandler(.allow)
+            return
+        }
+        // Cancel the navigation: the redirect page consumes the single-use code as soon as it runs,
+        // so loading it would leave the provider nothing to exchange. The code is never logged.
+        decisionHandler(.cancel)
+        guard !finished else { return }
+        finished = true
+        DispatchQueue.main.async {
+            self.dismiss(animated: true) { self.onAuthorizationCode(code) }
+        }
+    }
+
+    /// QQ Music's authorization redirect, or nil when the URL is not that redirect.
+    private static func authorizationCode(from url: URL?) -> String? {
+        guard let url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        guard components.host?.lowercased() == "y.qq.com" else { return nil }
+        guard components.path == "/portal/wx_redirect.html" else { return nil }
+        guard let rawCode = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+            return nil
+        }
+        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        return code.isEmpty ? nil : code
     }
 }
 

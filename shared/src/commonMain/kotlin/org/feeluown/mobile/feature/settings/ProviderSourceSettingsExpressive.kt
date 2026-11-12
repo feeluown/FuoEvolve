@@ -264,6 +264,7 @@ internal fun ProviderDetailSettingsExpressive(
 ) {
     val uriHandler = LocalUriHandler.current
     val credentialBackupActions = LocalProviderCredentialBackupActions.current
+    val webLoginStateActions = LocalProviderWebLoginStateActions.current
     val openSupportedLinksSettings = rememberSupportedLinksSettingsAction()
     val auth = authController.authStateFor(provider)
     val authBusy = authController.isBusy(provider.providerId)
@@ -271,6 +272,9 @@ internal fun ProviderDetailSettingsExpressive(
     val enabled = provider.providerId in catalog.enabledProviderIds
     val canToggleEnabled = !busy && (!enabled || catalog.enabledProviderIds.size > 1)
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
+    // An expired provider session must be recoverable with one tap, without logging out first.
+    val needsRelogin = !auth.isLoggedIn && authController.needsRelogin(provider.providerId)
+    val webLoginAvailable = provider.loginConfig != null && ProviderLoginMode.WebView in modes
     var mode by remember(provider.providerId, modes) { mutableStateOf(modes.first()) }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
@@ -347,6 +351,47 @@ internal fun ProviderDetailSettingsExpressive(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("退出登录") }
             }
+        } else if (needsRelogin) {
+            // One-tap recovery: re-login directly instead of asking the user to log out and wipe
+            // the browser session, which providers such as QQ Music punish as 登录环境异常.
+            authController.authError(provider.providerId)?.let { message ->
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = FuoSpacing.lg),
+                )
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+            ) {
+                if (webLoginAvailable) {
+                    Button(
+                        onClick = {
+                            mode = ProviderLoginMode.WebView
+                            // The stored session was rejected by the provider, so the browser cookies
+                            // it came from are dead too. Wipe them first, otherwise the login page
+                            // re-reads the same dead cookies and the app re-stores that session.
+                            webLoginStateActions.clearWebLoginState?.invoke()
+                            onOpenProviderWebLogin(provider)
+                        },
+                        enabled = !authBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("重新登录") }
+                    Text(
+                        "重新登录会先清除已失效的网页登录状态，再打开登录页；无需先退出登录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "请在下方登录方式中重新登录，无需先退出登录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 
@@ -365,12 +410,31 @@ internal fun ProviderDetailSettingsExpressive(
                 }
             }
             when (mode) {
-                ProviderLoginMode.WebView -> Box(Modifier.fillMaxWidth().padding(FuoSpacing.lg)) {
+                ProviderLoginMode.WebView -> Column(
+                    modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+                ) {
                     Button(
                         onClick = { onOpenProviderWebLogin(provider) },
                         enabled = provider.loginConfig != null && !authBusy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("网页登录") }
+                    webLoginStateActions.clearWebLoginState?.let { clearWebLoginState ->
+                        OutlinedButton(
+                            onClick = {
+                                clearWebLoginState()
+                                onOpenProviderWebLogin(provider)
+                            },
+                            enabled = provider.loginConfig != null && !authBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("使用其他账号登录") }
+                        Text(
+                            "使用其他账号登录会先清除本机网页登录状态（Cookie），再打开登录页；" +
+                                "仅在需要切换账号或登录页异常时使用。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 ProviderLoginMode.Cookie -> Column(
                     modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
@@ -560,9 +624,11 @@ internal fun ProviderDetailSettingsExpressive(
         }
     }
 
-    authController.authError(provider.providerId)?.let { error ->
-        ExpressiveSettingsGroup(title = "错误") {
-            ExpressiveSettingsRow(title = error, titleColor = MaterialTheme.colorScheme.error)
+    if (!needsRelogin) {
+        authController.authError(provider.providerId)?.let { error ->
+            ExpressiveSettingsGroup(title = "错误") {
+                ExpressiveSettingsRow(title = error, titleColor = MaterialTheme.colorScheme.error)
+            }
         }
     }
     authUiState.feedback?.let { feedback ->

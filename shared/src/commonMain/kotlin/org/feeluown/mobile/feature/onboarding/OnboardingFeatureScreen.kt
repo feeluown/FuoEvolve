@@ -496,10 +496,11 @@ private fun OnboardingProviderAccountCard(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(provider.providerName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (currentAuth.isLoggedIn) {
-                            currentAuth.userName?.takeIf { it.isNotBlank() }?.let { "已连接 · $it" } ?: "已连接"
-                        } else {
-                            "尚未连接"
+                        when {
+                            currentAuth.isLoggedIn ->
+                                currentAuth.userName?.takeIf { it.isNotBlank() }?.let { "已连接 · $it" } ?: "已连接"
+                            authController.needsRelogin(provider.providerId) -> "登录已失效，请重新登录"
+                            else -> "尚未连接"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -566,10 +567,21 @@ private fun OnboardingProviderLoginControls(
             }
         }
         when (selectedMode) {
-            ProviderLoginMode.WebView -> Button(
-                onClick = { onOpenProviderWebLogin(provider) },
-                enabled = provider.loginConfig != null && operationInteractive,
-            ) { Text("网页登录") }
+            ProviderLoginMode.WebView -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onOpenProviderWebLogin(provider) },
+                    enabled = provider.loginConfig != null && operationInteractive,
+                ) { Text("网页登录") }
+                LocalProviderWebLoginStateActions.current.clearWebLoginState?.let { clearWebLoginState ->
+                    TextButton(
+                        onClick = {
+                            clearWebLoginState()
+                            onOpenProviderWebLogin(provider)
+                        },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) { Text("使用其他账号登录") }
+                }
+            }
             ProviderLoginMode.Cookie -> {
                 OutlinedTextField(
                     value = authController.cookieInput(provider.providerId),

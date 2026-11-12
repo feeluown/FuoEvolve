@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,25 +79,37 @@ fun DesktopAppHost(
         },
         onFeedback = container.appViewModel::showFeedback,
     ) {
-        AppRoot(
-            appViewModel = container.appViewModel,
-            uiGraph = container.appUiGraph,
-            windowContentWrapper = desktopWindowContentWrapper,
-            platform = AppPlatformBindings(
-                hasAudioPermission = true,
-                onRequestAudioPermission = {},
-                audioRecognitionAccess = AudioRecognitionAccess(
-                    source = AudioRecognitionSource.SystemOutput,
-                    isAvailable = true,
-                ),
-                onOpenProviderWebLogin = ::requestProviderWebLogin,
-                onLogoutProvider = container::logoutProvider,
-                onImportLocalPlaylistFile = container::importLocalPlaylistFile,
-                onExportLocalPlaylistFile = container::exportLocalPlaylistFile,
-                desktopVideoSettingsAvailable = true,
-                appVersionInfo = desktopAppVersionInfo(),
+        CompositionLocalProvider(
+            LocalProviderWebLoginStateActions provides ProviderWebLoginStateActions(
+                // Desktop web login runs in a throw-away incognito web view, so there is no
+                // app-wide cookie jar to wipe; dropping the in-flight login session is the
+                // platform equivalent of clearing the shared web login state.
+                clearWebLoginState = {
+                    activeWebLoginProvider = null
+                    container.appViewModel.showFeedback("已清除网页登录状态，请重新登录")
+                },
             ),
-        )
+        ) {
+            AppRoot(
+                appViewModel = container.appViewModel,
+                uiGraph = container.appUiGraph,
+                windowContentWrapper = desktopWindowContentWrapper,
+                platform = AppPlatformBindings(
+                    hasAudioPermission = true,
+                    onRequestAudioPermission = {},
+                    audioRecognitionAccess = AudioRecognitionAccess(
+                        source = AudioRecognitionSource.SystemOutput,
+                        isAvailable = true,
+                    ),
+                    onOpenProviderWebLogin = ::requestProviderWebLogin,
+                    onLogoutProvider = container::logoutProvider,
+                    onImportLocalPlaylistFile = container::importLocalPlaylistFile,
+                    onExportLocalPlaylistFile = container::exportLocalPlaylistFile,
+                    desktopVideoSettingsAvailable = true,
+                    appVersionInfo = desktopAppVersionInfo(),
+                ),
+            )
+        }
     }
 }
 
@@ -546,6 +559,11 @@ private class DesktopAppContainer(
                 scope.launch {
                     providerAuthFeatureController.loginWithCookies(provider.providerId, result.cookiesJson)
                 }
+            }
+            // A captured OAuth authorization code is preferred over cookies: only it can be exchanged
+            // for a renewable session. Never log the code.
+            is DesktopWebLoginResult.AuthorizationCode -> {
+                providerAuthFeatureController.loginWithAuthorizationCode(provider.providerId, result.code)
             }
             DesktopWebLoginResult.Cancelled -> Unit
             is DesktopWebLoginResult.Failure -> appViewModel.showFeedback(result.message)

@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 
 class AppFeaturePortAdaptersTest {
     @Test
-    fun searchPortUsesFeatureOwnersAndClosesSearchAfterPlaybackSelection() {
+    fun searchPortPlaysSelectedResultWithoutLeavingSearch() {
         val first = track("netease:1")
         val second = track("netease:2")
         val search = FakeSearchController(SearchUiState(searchResults = listOf(first, second)))
@@ -33,7 +33,69 @@ class AppFeaturePortAdaptersTest {
 
         assertEquals(listOf(first, second), queue.playedTracks)
         assertEquals(1, queue.playedIndex)
+        assertEquals(0, search.clearCount)
+        assertEquals(AppRoute.Search, navigator.currentEntry)
+    }
+
+    /** Regression for issue #283: tapping a result must leave the search page usable. */
+    @Test
+    fun playingSearchResultKeepsQueryAndResultsSoUserCanKeepSearching() {
+        val first = track("netease:1")
+        val second = track("qqmusic:2")
+        val searchResults = listOf(first, second)
+        val search = RealStateSearchController(
+            SearchUiState(query = "night", searchResults = searchResults, message = "搜索到 2 项"),
+        )
+        val queue = RecordingPlaybackQueuePort()
+        val navigator = AppNavigator().apply { navigate(AppRoute.Search) }
+        var closedCallbacks = 0
+        val port = DefaultSearchAppPort(
+            searchController = search,
+            providerSessions = { ProviderSessionState() },
+            playbackQueue = queue,
+            downloads = FakeDownloadActionPort(),
+            playlists = FakePlaylistActionPort(),
+            providerTrackActions = FakeProviderTrackActionPort(),
+            navigator = navigator,
+            onSearchClosed = { closedCallbacks += 1 },
+        )
+
+        port.playResult(0)
+
+        assertEquals(listOf(first, second), queue.playedTracks)
+        assertEquals("night", search.uiState.value.query)
+        assertEquals(searchResults, search.uiState.value.searchResults)
+        assertEquals("搜索到 2 项", search.uiState.value.message)
+        assertEquals(0, search.clearCount)
+        assertEquals(0, closedCallbacks)
+        assertEquals(AppRoute.Search, navigator.currentEntry)
+        assertEquals(listOf(AppRoute.Home, AppRoute.Search), navigator.backStack.value)
+    }
+
+    /** Explicit dismissal (search back button / system back) still clears and pops. */
+    @Test
+    fun explicitCloseSearchStillClearsResultsAndPopsSearch() {
+        val search = RealStateSearchController(
+            SearchUiState(query = "night", searchResults = listOf(track("netease:1"))),
+        )
+        val navigator = AppNavigator().apply { navigate(AppRoute.Search) }
+        var closedCallbacks = 0
+        val port = DefaultSearchAppPort(
+            searchController = search,
+            providerSessions = { ProviderSessionState() },
+            playbackQueue = RecordingPlaybackQueuePort(),
+            downloads = FakeDownloadActionPort(),
+            playlists = FakePlaylistActionPort(),
+            providerTrackActions = FakeProviderTrackActionPort(),
+            navigator = navigator,
+            onSearchClosed = { closedCallbacks += 1 },
+        )
+
+        port.closeSearch()
+
+        assertEquals(emptyList(), search.uiState.value.searchResults)
         assertEquals(1, search.clearCount)
+        assertEquals(1, closedCallbacks)
         assertEquals(AppRoute.Home, navigator.currentEntry)
     }
 
@@ -162,6 +224,30 @@ class AppFeaturePortAdaptersTest {
         override fun clearResults() {
             clearCount += 1
         }
+        override fun applyPreferences(searchScope: SearchScope, selectedSearchProviderId: String?) = Unit
+        override fun normalizeProviderSelection(providerIds: Set<String>) = Unit
+        override fun searchRecognitionResult(title: String, artists: List<String>) = Unit
+        override fun searchText(text: String, providerId: String?) = Unit
+    }
+
+    /**
+     * Keeps query/result state like the real controller so the port's effect on search state is
+     * observable. [clearResults] only drops results, matching production semantics.
+     */
+    private class RealStateSearchController(
+        initialState: SearchUiState = SearchUiState(),
+    ) : SearchFeatureController {
+        private val state = MutableStateFlow(initialState)
+        override val uiState: StateFlow<SearchUiState> = state
+        var clearCount = 0
+
+        override fun dispatch(action: SearchAction) = Unit
+
+        override fun clearResults() {
+            clearCount += 1
+            state.value = state.value.copy(searchResults = emptyList(), message = null)
+        }
+
         override fun applyPreferences(searchScope: SearchScope, selectedSearchProviderId: String?) = Unit
         override fun normalizeProviderSelection(providerIds: Set<String>) = Unit
         override fun searchRecognitionResult(title: String, artists: List<String>) = Unit
