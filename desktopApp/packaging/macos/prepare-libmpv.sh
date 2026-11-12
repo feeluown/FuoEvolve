@@ -38,11 +38,17 @@ brew list mpv >/dev/null 2>&1 || brew install mpv
 brew list dylibbundler >/dev/null 2>&1 || brew install dylibbundler
 
 INSTALLED_MPV_VERSION="$(brew list --versions mpv | awk '{ print $2; exit }')"
-if [[ "$INSTALLED_MPV_VERSION" != "$PINNED_MPV_VERSION" ]]; then
-  echo "Homebrew resolved mpv $INSTALLED_MPV_VERSION for $(uname -m) but packaging is pinned to $PINNED_MPV_VERSION in $LOCK_FILE" >&2
+# Homebrew reports the upstream version with a formula revision suffix (for example 0.41.0_12).
+# The suffix is a homebrew-core rebuild counter, not an upstream mpv version, and an older revision
+# cannot be installed once a runner image moves past it. Compare the upstream version only so
+# dependency rebuilds do not fail packaging while a real mpv upgrade still needs a deliberate bump.
+INSTALLED_MPV_BASE_VERSION="${INSTALLED_MPV_VERSION%%_*}"
+if [[ "$INSTALLED_MPV_BASE_VERSION" != "$PINNED_MPV_VERSION" ]]; then
+  echo "Homebrew resolved mpv $INSTALLED_MPV_VERSION for $(uname -m) but packaging pins upstream mpv $PINNED_MPV_VERSION in $LOCK_FILE" >&2
   echo "Update the architecture-specific packaging lock deliberately before shipping a different macOS libmpv runtime." >&2
   exit 1
 fi
+printf 'Using Homebrew mpv %s (pinned upstream version %s)\n' "$INSTALLED_MPV_VERSION" "$PINNED_MPV_VERSION"
 
 MPV_PREFIX="$(brew --prefix mpv)"
 SOURCE_LIB="$MPV_PREFIX/lib/libmpv.dylib"

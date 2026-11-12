@@ -59,7 +59,7 @@ Desktop self-update is intentionally not implemented yet. These version values a
 ## Native inputs
 
 - Windows libmpv input pins live in `desktopApp/packaging/native-deps.lock`. CI verifies the pinned archive, stages the public headers/import library for JNI compilation, and bundles the runtime DLLs into the NSIS package.
-- macOS uses the architecture-specific pinned mpv input and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure.
+- macOS uses the architecture-specific pinned upstream mpv version and `desktopApp/packaging/macos/prepare-libmpv.sh` to produce an `@loader_path`-relative dylib closure. The lock pins the upstream mpv version rather than Homebrew's formula revision, because that revision is a rebuild counter that changes whenever the runner image rebuilds mpv or its dependency closure; an actual mpv upgrade still fails the prepare step until the lock is bumped deliberately.
 - Linux AppImage stages the portable libmpv, Libsecret, WebKitGTK, TLS and audio-capture dependency closure into the application. WebKitGTK is collected explicitly for the Nucleus provider-login WebView rather than inferred from the audio-fingerprint helper.
 - Linux DEB, RPM and Arch packages stage the application-owned JNI bridge, audio-capture library and headless audio-fingerprint helper. Their external native libraries are declared as package-manager dependencies instead of copied into the package.
 - Desktop system-audio recognition uses the CPAL/JNI library staged under `native/audio`; Windows and macOS capture the default output device, while Linux prefers PipeWire and falls back to a PulseAudio `.monitor` source.

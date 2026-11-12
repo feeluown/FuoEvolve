@@ -30,7 +30,19 @@ New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
 
 try {
     Write-Host "Downloading pinned Windows libmpv development bundle"
-    Invoke-WebRequest -Uri $url -OutFile $archive
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $archive
+    }
+    catch {
+        # A 404 from the upstream project returns a large HTML error page; keep it out of the log.
+        $reason = $_.Exception.Message
+        if ($reason.Length -gt 300) { $reason = $reason.Substring(0, 300) + "..." }
+        throw ("Failed to download the pinned Windows libmpv development bundle.`n" +
+            "  URL:   $url`n" +
+            "  Cause: $reason`n" +
+            "The pinned archive is probably no longer published by shinchiro/mpv-winbuild-cmake.`n" +
+            "Re-pin windows.x64.libmpv.url and windows.x64.libmpv.sha256 in $lockFile, then retry.")
+    }
     $actualSha = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualSha -ne $expectedSha.ToLowerInvariant()) {
         throw "Windows libmpv SHA-256 mismatch: expected $expectedSha, got $actualSha"
