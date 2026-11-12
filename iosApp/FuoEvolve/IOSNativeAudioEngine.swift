@@ -611,6 +611,7 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
         providerName: String,
         loginUrl: String,
         cookieKeyGroupsJson: String,
+        authorizationCodeRedirect: ProviderAuthorizationCodeRedirect?,
         onAuthorizationCode: @escaping (String, Int32) -> Void,
         completionHandler: @escaping (String?) -> Void
     ) {
@@ -625,6 +626,7 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
                 providerName: providerName,
                 url: url,
                 requiredCookieGroups: groups,
+                authorizationCodeRedirect: authorizationCodeRedirect,
                 onAuthorizationCode: onAuthorizationCode,
                 completion: completionHandler
             )
@@ -783,6 +785,7 @@ final class IOSNetworkStatusOutput: NSObject, IosNetworkStatusOutput {
 private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate {
     private let webView = WKWebView(frame: .zero)
     private let requiredCookieGroups: [[String]]
+    private let authorizationCodeRedirect: ProviderAuthorizationCodeRedirect?
     private let onAuthorizationCode: (String, Int32) -> Void
     private let completion: (String?) -> Void
     private var finished = false
@@ -791,10 +794,12 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
         providerName: String,
         url: URL,
         requiredCookieGroups: [[String]],
+        authorizationCodeRedirect: ProviderAuthorizationCodeRedirect?,
         onAuthorizationCode: @escaping (String, Int32) -> Void,
         completion: @escaping (String?) -> Void
     ) {
         self.requiredCookieGroups = requiredCookieGroups
+        self.authorizationCodeRedirect = authorizationCodeRedirect
         self.onAuthorizationCode = onAuthorizationCode
         self.completion = completion
         super.init(nibName: nil, bundle: nil)
@@ -861,7 +866,13 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        guard let redirect = Self.authorizationRedirect(from: navigationAction.request.url) else {
+        // The declared redirect decides what to intercept, and every frame is inspected: the OAuth
+        // hop can happen inside a login iframe that navigates the top frame.
+        guard let declaration = authorizationCodeRedirect,
+              let redirect = Self.authorizationRedirect(
+                from: navigationAction.request.url,
+                declaration: declaration
+              ) else {
             decisionHandler(.allow)
             return
         }
@@ -877,25 +888,68 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
         }
     }
 
-    /// QQ Music's authorization redirect, or nil when the URL is not that redirect.
+    /// The provider-declared authorization redirect, or nil when the URL is not that redirect.
     ///
-    /// Both login entries (QQ account and WeChat account) come back to the same page; the
-    /// login_type query value says which ecosystem the code belongs to (1 = QQ, 2 = WeChat).
-    /// It is reported as 0 when absent, and the code itself is never logged.
-    private static func authorizationRedirect(from url: URL?) -> (code: String, loginType: Int32)? {
+    /// Host, path and both parameter names come from ProviderAuthorizationCodeRedirect, so nothing
+    /// about a specific provider is hard-coded here. All login entries of a provider usually come back
+    /// to the same page; the declared login-type parameter says which ecosystem the code belongs to
+    /// (reported as 0 when absent). The code itself is never logged.
+    private static func authorizationRedirect(
+        from url: URL?,
+        declaration: ProviderAuthorizationCodeRedirect
+    ) -> (code: String, loginType: Int32)? {
         guard let url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return nil
         }
-        guard components.host?.lowercased() == "y.qq.com" else { return nil }
-        guard components.path == "/portal/wx_redirect.html" else { return nil }
-        guard let rawCode = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+        guard let host = components.host,
+              host.caseInsensitiveCompare(declaration.host) == .orderedSame else {
+            return nil
+        }
+        guard components.path == declaration.path else { return nil }
+        guard let rawCode = components.queryItems?
+            .first(where: { $0.name == declaration.codeParameter })?.value else {
             return nil
         }
         let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !code.isEmpty else { return nil }
-        let rawLoginType = components.queryItems?.first(where: { $0.name == "login_type" })?.value
-        let loginType = rawLoginType.flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+        var loginType: Int32 = 0
+        if let loginTypeParameter = declaration.loginTypeParameter,
+           let rawLoginType = components.queryItems?
+            .first(where: { $0.name == loginTypeParameter })?.value {
+            loginType = Int32(rawLoginType.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        }
         return (code, loginType > 0 ? loginType : 0)
+    }
+
+    // Load-failure diagnosis: a blank web view must say why instead of showing nothing.
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        showLoadFailure(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showLoadFailure(error)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.isForMainFrame,
+           let httpResponse = navigationResponse.response as? HTTPURLResponse,
+           httpResponse.statusCode >= 400 {
+            navigationItem.prompt = "加载失败：HTTP \(httpResponse.statusCode)"
+        }
+        decisionHandler(.allow)
+    }
+
+    private func showLoadFailure(_ error: Error) {
+        let nsError = error as NSError
+        navigationItem.prompt = "加载失败：\(nsError.code) \(nsError.localizedDescription)"
     }
 }
 

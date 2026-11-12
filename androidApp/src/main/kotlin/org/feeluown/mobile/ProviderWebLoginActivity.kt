@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebStorage
@@ -70,6 +71,14 @@ class ProviderWebLoginActivity : ComponentActivity() {
      * runs on a WebView worker thread while the cookie callbacks run on the main thread.
      */
     private val authorizationCodeCaptured = AtomicBoolean(false)
+
+    /**
+     * Provider-declared OAuth redirect, or null when this provider does not finish with a code.
+     *
+     * The host/path/parameter names come from [ProviderLoginConfig.authorizationCodeRedirect] through
+     * the intent extras; the platform must not hard-code any provider's redirect shape.
+     */
+    private var authorizationRedirect: AuthorizationRedirectSpec? = null
     private var statusMessage by mutableStateOf("")
 
     @SuppressLint("SetJavaScriptEnabled") // 提供方登录页完成认证需要 JavaScript。
@@ -80,6 +89,7 @@ class ProviderWebLoginActivity : ComponentActivity() {
         providerName = intent.getStringExtra(EXTRA_PROVIDER_NAME).orEmpty().ifBlank { providerId }
         loginUrl = intent.getStringExtra(EXTRA_LOGIN_URL).orEmpty()
         cookieKeyGroups = parseCookieKeyGroups(intent.getStringExtra(EXTRA_COOKIE_KEY_GROUPS).orEmpty())
+        authorizationRedirect = intent.authorizationRedirectSpec()
         if (providerId.isBlank() || loginUrl.isBlank()) {
             setResult(RESULT_CANCELED)
             finish()
@@ -109,16 +119,16 @@ class ProviderWebLoginActivity : ComponentActivity() {
                 }
 
                 /**
-                 * Fallback for the redirect that [shouldOverrideUrlLoading] does not report.
+                 * Fallback for redirects that [shouldOverrideUrlLoading] does not report.
                  *
-                 * QQ's OAuth hop back to `y.qq.com/portal/wx_redirect.html` is an HTTP 3xx redirect,
-                 * and WebView does not reliably consult [shouldOverrideUrlLoading] for those, so the
-                 * single-use code would otherwise be consumed by the page we never saw. This callback
-                 * fires for the target of every request, redirects included.
+                 * Providers usually hop back to their declared redirect with an HTTP 3xx response, and
+                 * WebView does not reliably consult [shouldOverrideUrlLoading] for those, so the
+                 * single-use code would otherwise be consumed by a page we never saw. This callback
+                 * fires for the target of every request, redirects included, in any frame.
                  *
-                 * It runs on a WebView worker thread for every subresource, so the main-frame guard and
-                 * the cheap substring prefilter come first, and the completion is bounced to the main
-                 * thread (activity result + finish must run there). The code is never logged.
+                 * It runs on a WebView worker thread for every subresource, so the cheap substring
+                 * prefilter comes first and the completion is bounced to the main thread (activity
+                 * result + finish must run there). The code is never logged.
                  */
                 override fun shouldInterceptRequest(
                     view: WebView,
@@ -126,8 +136,10 @@ class ProviderWebLoginActivity : ComponentActivity() {
                 ): WebResourceResponse? {
                     if (authorizationCodeCaptured.get()) return null
                     if (isFinishing || isDestroyed) return null
-                    if (!request.isForMainFrame) return null
                     val url = request.url?.toString() ?: return null
+                    // No main-frame check on purpose: providers can put the OAuth redirect in an
+                    // iframe (the QQ login dialog navigates its top frame from a child frame), and the
+                    // sub-frame request is the only chance to see the code before the page consumes it.
                     if (!mayBeAuthorizationCodeRedirect(url)) return null
                     val redirect = authorizationCodeFromRedirect(url) ?: return null
                     // Claim from this worker thread before anything else can complete with cookies.
@@ -146,8 +158,35 @@ class ProviderWebLoginActivity : ComponentActivity() {
                     // The redirect can arrive as the last navigation of the login page; never let the
                     // cookie fallback overwrite an already captured authorization code.
                     if (authorizationCodeCaptured.get()) return
+                    // Providers that declare an authorization-code redirect must not auto-complete from
+                    // cookies: a cookie-only session can never be renewed, and the login page usually
+                    // sets those cookies before its redirect (so the poll would win the race). The user
+                    // can still press 完成 to fall back to cookies explicitly.
+                    if (authorizationRedirect != null) return
                     cookieManager().flush()
                     finishWithCookies(url, auto = true)
+                }
+
+                // White-screen diagnosis: keep the failure reason on screen instead of a blank page.
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: WebResourceError,
+                ) {
+                    super.onReceivedError(view, request, error)
+                    if (!request.isForMainFrame) return
+                    statusMessage = "加载失败：${error.errorCode} ${error.description}"
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: WebResourceResponse,
+                ) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    if (!request.isForMainFrame) return
+                    val reason = errorResponse.reasonPhrase.orEmpty()
+                    statusMessage = "加载失败：HTTP ${errorResponse.statusCode}${if (reason.isBlank()) "" else " $reason"}"
                 }
             }
         }
@@ -283,12 +322,28 @@ class ProviderWebLoginActivity : ComponentActivity() {
     }
 
     /**
-     * QQ Music's authorization redirect: [OAUTH_REDIRECT_HOST] + [OAUTH_REDIRECT_PATH] + a `code`.
+     * The provider-declared OAuth redirect match spec, resolved once from the intent extras.
      *
-     * The single-use [code] is consumed the moment that page is allowed to run (its JavaScript posts
-     * it back to QQ), so returning `true` from [WebViewClient.shouldOverrideUrlLoading] — i.e. never
-     * loading the URL — is what keeps the code exchangeable by the provider. Cookies are deliberately
-     * not collected in this case: the exchanged credential synthesizes its own cookies and is the only
+     * [codeParameter] and [loginTypeParameter] are the provider's query parameter names, so nothing
+     * about a specific provider is hard-coded in the platform.
+     */
+    private data class AuthorizationRedirectSpec(
+        val host: String,
+        val path: String,
+        val codeParameter: String,
+        val loginTypeParameter: String?,
+    )
+
+    /** A captured provider OAuth redirect: the single-use code and its account ecosystem. */
+    private data class CapturedAuthorizationCode(val code: String, val loginType: Int?)
+
+    /**
+     * The provider's declared authorization redirect must never be loaded as a page.
+     *
+     * The single-use code is consumed the moment that page is allowed to run (its JavaScript posts it
+     * back to the provider), so returning `true` from [WebViewClient.shouldOverrideUrlLoading] — i.e.
+     * never loading the URL — is what keeps the code exchangeable. Cookies are deliberately not
+     * collected in this case: the exchanged credential synthesizes its own cookies and is the only
      * renewable session we can persist.
      */
     private fun handleAuthorizationCodeRedirect(url: String?): Boolean {
@@ -303,9 +358,10 @@ class ProviderWebLoginActivity : ComponentActivity() {
      * Cheap substring prefilter for [shouldInterceptRequest], which is called for every request of the
      * page on a worker thread: full URI parsing only happens for URLs that can possibly match.
      */
-    private fun mayBeAuthorizationCodeRedirect(url: String): Boolean =
-        url.contains(OAUTH_REDIRECT_PATH, ignoreCase = true) &&
-            url.contains(OAUTH_REDIRECT_HOST, ignoreCase = true)
+    private fun mayBeAuthorizationCodeRedirect(url: String): Boolean {
+        val spec = authorizationRedirect ?: return false
+        return url.contains(spec.path, ignoreCase = true) && url.contains(spec.host, ignoreCase = true)
+    }
 
     /**
      * Single parser for the provider OAuth redirect: the single-use [AuthorizationCodeRedirect.code]
@@ -314,30 +370,43 @@ class ProviderWebLoginActivity : ComponentActivity() {
      * QQ Music sends both QQ-account (login_type=1) and WeChat-account (login_type=2) logins back to
      * the same redirect and the exchange payload differs, so the type has to travel with the code.
      */
-    private fun authorizationCodeFromRedirect(url: String?): AuthorizationCodeRedirect? {
+    private fun authorizationCodeFromRedirect(url: String?): CapturedAuthorizationCode? {
+        val spec = authorizationRedirect ?: return null
         if (url.isNullOrBlank()) return null
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
         // Non-hierarchical navigations (about:blank, intent:…) have no host and must not match.
         val host = uri.host ?: return null
-        if (!host.equals(OAUTH_REDIRECT_HOST, ignoreCase = true)) return null
-        if (uri.path != OAUTH_REDIRECT_PATH) return null
-        val code = uri.getQueryParameter(OAUTH_REDIRECT_CODE_PARAMETER)?.trim()?.takeIf(String::isNotEmpty)
+        if (!host.equals(spec.host, ignoreCase = true)) return null
+        if (uri.path != spec.path) return null
+        val code = uri.getQueryParameter(spec.codeParameter)?.trim()?.takeIf(String::isNotEmpty)
             ?: return null
-        val loginType = uri.getQueryParameter(OAUTH_REDIRECT_LOGIN_TYPE_PARAMETER)
-            ?.trim()
-            ?.toIntOrNull()
-            ?.takeIf { it > 0 }
-        return AuthorizationCodeRedirect(code = code, loginType = loginType)
+        val loginType = spec.loginTypeParameter?.let { parameter ->
+            uri.getQueryParameter(parameter)?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+        }
+        return CapturedAuthorizationCode(code = code, loginType = loginType)
     }
 
-    /** A captured provider OAuth redirect: the single-use code and its account ecosystem. */
-    private data class AuthorizationCodeRedirect(val code: String, val loginType: Int?)
+    /** Resolves the provider's declared redirect spec from the intent; null disables interception. */
+    private fun Intent.authorizationRedirectSpec(): AuthorizationRedirectSpec? {
+        val host = getStringExtra(EXTRA_REDIRECT_HOST).orEmpty()
+        val path = getStringExtra(EXTRA_REDIRECT_PATH).orEmpty()
+        if (host.isBlank() || path.isBlank()) return null
+        return AuthorizationRedirectSpec(
+            host = host,
+            path = path,
+            codeParameter = getStringExtra(EXTRA_REDIRECT_CODE_PARAMETER)
+                ?.takeIf(String::isNotBlank)
+                ?: DEFAULT_CODE_PARAMETER,
+            loginTypeParameter = getStringExtra(EXTRA_REDIRECT_LOGIN_TYPE_PARAMETER)
+                ?.takeIf(String::isNotBlank),
+        )
+    }
 
     /**
      * Produces the activity result for a code whose [authorizationCodeCaptured] claim the caller won.
      * Must run on the main thread. Never logs the code: it is a single-use credential.
      */
-    private fun completeWithAuthorizationCode(redirect: AuthorizationCodeRedirect) {
+    private fun completeWithAuthorizationCode(redirect: CapturedAuthorizationCode) {
         if (isFinishing || isDestroyed) return
         if (::webView.isInitialized) {
             webView.stopLoading()
@@ -476,16 +545,19 @@ class ProviderWebLoginActivity : ComponentActivity() {
         /** OAuth authorization code captured from a provider login redirect, when one was seen. */
         const val EXTRA_AUTHORIZATION_CODE = "authorization_code"
 
+        /** Provider-declared redirect shape (see ProviderAuthorizationCodeRedirect). */
+        private const val EXTRA_REDIRECT_HOST = "redirect_host"
+        private const val EXTRA_REDIRECT_PATH = "redirect_path"
+        private const val EXTRA_REDIRECT_CODE_PARAMETER = "redirect_code_parameter"
+        private const val EXTRA_REDIRECT_LOGIN_TYPE_PARAMETER = "redirect_login_type_parameter"
+
         /**
          * Account ecosystem of [EXTRA_AUTHORIZATION_CODE], taken from the redirect's `login_type`
          * (1 = QQ account, 2 = WeChat account). Absent means the provider default.
          */
         const val EXTRA_AUTHORIZATION_LOGIN_TYPE = "authorization_login_type"
 
-        private const val OAUTH_REDIRECT_HOST = "y.qq.com"
-        private const val OAUTH_REDIRECT_PATH = "/portal/wx_redirect.html"
-        private const val OAUTH_REDIRECT_CODE_PARAMETER = "code"
-        private const val OAUTH_REDIRECT_LOGIN_TYPE_PARAMETER = "login_type"
+        private const val DEFAULT_CODE_PARAMETER = "code"
 
         private const val EXTRA_PROVIDER_NAME = "provider_name"
         private const val EXTRA_LOGIN_URL = "login_url"
@@ -515,11 +587,22 @@ class ProviderWebLoginActivity : ComponentActivity() {
                 group.forEach { groupArray.put(it) }
                 keyGroups.put(groupArray)
             }
-            return Intent(context, ProviderWebLoginActivity::class.java)
+            val intent = Intent(context, ProviderWebLoginActivity::class.java)
                 .putExtra(EXTRA_PROVIDER_ID, provider.providerId)
                 .putExtra(EXTRA_PROVIDER_NAME, provider.providerName)
                 .putExtra(EXTRA_LOGIN_URL, effectiveLoginUrl)
                 .putExtra(EXTRA_COOKIE_KEY_GROUPS, keyGroups.toString())
+            // The redirect shape is provider-declared, never hard-coded per provider in this activity.
+            loginConfig.authorizationCodeRedirect?.let { redirect ->
+                intent
+                    .putExtra(EXTRA_REDIRECT_HOST, redirect.host)
+                    .putExtra(EXTRA_REDIRECT_PATH, redirect.path)
+                    .putExtra(EXTRA_REDIRECT_CODE_PARAMETER, redirect.codeParameter)
+                redirect.loginTypeParameter?.let { parameter ->
+                    intent.putExtra(EXTRA_REDIRECT_LOGIN_TYPE_PARAMETER, parameter)
+                }
+            }
+            return intent
         }
 
         fun clearWebLoginState() {

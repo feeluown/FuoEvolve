@@ -81,10 +81,32 @@ data class ProviderLoginChoice(
     val loginUrl: String,
 )
 
+/**
+ * Describes the OAuth redirect that ends a provider web login.
+ *
+ * Platforms intercept this navigation instead of letting the page run: the page would exchange the
+ * single-use [codeParameter] code itself, and the app needs that code to obtain renewable
+ * credentials. Declaring it in the provider keeps provider-specific host/path knowledge out of the
+ * three platform hosts.
+ */
+data class ProviderAuthorizationCodeRedirect(
+    val host: String,
+    val path: String,
+    val codeParameter: String = "code",
+    /** Query parameter carrying the account ecosystem (QQ Music: 1 = QQ, 2 = WeChat), if any. */
+    val loginTypeParameter: String? = null,
+)
+
 data class ProviderLoginConfig(
     val loginUrl: String,
     val cookieKeyGroups: List<List<String>>,
     val loginChoices: List<ProviderLoginChoice> = emptyList(),
+    /**
+     * Set when the login completes by handing an authorization code to the provider. Platforms then
+     * wait for that redirect instead of finishing on captured cookies, which would store a
+     * non-renewable session.
+     */
+    val authorizationCodeRedirect: ProviderAuthorizationCodeRedirect? = null,
 ) {
     /** Selectable entries; falls back to the single [loginUrl] so existing providers are unchanged. */
     val effectiveLoginChoices: List<ProviderLoginChoice>

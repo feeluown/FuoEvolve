@@ -350,16 +350,12 @@ class QQMusicAuthorizationTest {
     }
 
     @Test
-    fun loginConfigUsesQqOAuthAuthorizeUrlWithInterceptableRedirect() {
+    fun loginConfigUsesWebViewFriendlyEntryWithInterceptableRedirect() {
         val config = assertNotNull(QQMusicProviderDefinition.info.loginConfig)
 
-        assertEquals(
-            "https://graph.qq.com/oauth2.0/authorize?response_type=code&client_id=100497308" +
-                "&redirect_uri=https%3A%2F%2Fy.qq.com%2Fportal%2Fwx_redirect.html" +
-                "%3Flogin_type%3D1%26surl%3Dhttps%3A%2F%2Fy.qq.com%2F" +
-                "&scope=get_user_info,get_app_friends&state=state&from_ptlogin=1&src=1",
-            config.loginUrl,
-        )
+        // QQ's standalone authorize page is blank in Android WebView, so the QQ-account entry is the
+        // site itself; the interception of the shared redirect is what yields renewable credentials.
+        assertEquals("https://y.qq.com/", config.loginUrl)
         // Cookie key groups stay as the manual-cookie fallback.
         assertTrue(config.cookieKeyGroups.isNotEmpty())
         assertEquals(setOf(ProviderLoginMode.WebView), QQMusicProviderDefinition.info.supportedLoginModes)
@@ -564,7 +560,9 @@ class QQMusicAuthorizationTest {
         val choices = config.effectiveLoginChoices
         assertEquals(listOf("qq", "wechat"), choices.map { it.id })
         assertEquals(listOf("QQ 账号", "微信账号"), choices.map { it.label })
-        assertEquals(QQMusicProviderDefinition.LOGIN_URL, choices[0].loginUrl)
+        // The QQ-account entry is QQ Music's own site: QQ's standalone authorize page is blank in web views.
+        assertEquals(QQMusicProviderDefinition.WEB_LOGIN_URL, choices[0].loginUrl)
+        assertEquals("https://y.qq.com/", choices[0].loginUrl)
         assertEquals(
             "https://open.weixin.qq.com/connect/qrconnect?appid=wx48db31d50e334801&scope=snsapi_login" +
                 "&redirect_uri=https%3A%2F%2Fy.qq.com%2Fportal%2Fwx_redirect.html" +
@@ -574,6 +572,12 @@ class QQMusicAuthorizationTest {
         )
         // The default entry stays QQ so a platform build that only knows loginUrl keeps working.
         assertEquals(choices[0].loginUrl, config.loginUrl)
+        // Both ecosystems finish on the same redirect; the platforms intercept exactly this one.
+        val redirect = assertNotNull(config.authorizationCodeRedirect)
+        assertEquals("y.qq.com", redirect.host)
+        assertEquals("/portal/wx_redirect.html", redirect.path)
+        assertEquals("code", redirect.codeParameter)
+        assertEquals("login_type", redirect.loginTypeParameter)
     }
 
     private companion object {

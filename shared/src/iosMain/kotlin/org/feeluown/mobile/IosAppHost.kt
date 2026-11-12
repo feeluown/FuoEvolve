@@ -504,8 +504,11 @@ private class IosAppContainer(
             provider.providerName,
             effectiveLoginUrl,
             groupsJson,
+            // Provider-declared redirect shape; the platform hard-codes nothing. Null disables
+            // interception and keeps the cookie-login path.
+            authorizationCodeRedirect = loginConfig.authorizationCodeRedirect,
             // Preferred over cookies: only the exchanged authorization code yields a renewable session.
-            // The redirect's login_type says which ecosystem the code belongs to (0 = unspecified,
+            // The redirect's login-type value says which ecosystem the code belongs to (0 = unspecified,
             // mapped to null here). The code is never logged.
             onAuthorizationCode = { code, loginType ->
                 if (code.isNotBlank()) {

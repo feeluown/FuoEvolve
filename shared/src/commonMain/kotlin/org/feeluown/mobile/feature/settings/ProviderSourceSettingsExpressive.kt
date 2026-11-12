@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -286,6 +287,21 @@ internal fun ProviderDetailSettingsExpressive(
     val openWebLogin: () -> Unit = {
         onOpenProviderWebLogin(provider, selectedLoginChoice?.let(loginUrlForChoice))
     }
+    // Some account ecosystems cannot be completed on the device itself (a QR cannot be scanned from
+    // the same phone), so let the user hand over the authorization redirect captured elsewhere.
+    val authorizationCodeRedirect = provider.loginConfig?.authorizationCodeRedirect
+    var showAuthorizationCodeDialog by remember(provider.providerId) { mutableStateOf(false) }
+    if (showAuthorizationCodeDialog && authorizationCodeRedirect != null) {
+        ProviderAuthorizationCodeDialog(
+            provider = provider,
+            redirect = authorizationCodeRedirect,
+            onDismiss = { showAuthorizationCodeDialog = false },
+            onSubmit = { code, loginType ->
+                showAuthorizationCodeDialog = false
+                authController.loginWithAuthorizationCode(provider.providerId, code, loginType)
+            },
+        )
+    }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
     val oauthFlow = authUiState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
@@ -445,6 +461,28 @@ internal fun ProviderDetailSettingsExpressive(
                         enabled = provider.loginConfig != null && !authBusy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("网页登录") }
+                    if (loginChoices.size > 1) {
+                        Text(
+                            "微信二维码需要用另一台设备的微信扫码；手机端可先用 QQ 账号登录，" +
+                                "或在别处完成授权后用下面的「粘贴授权链接」导入。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (authorizationCodeRedirect != null) {
+                        TextButton(
+                            onClick = { showAuthorizationCodeDialog = true },
+                            enabled = !authBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("粘贴授权链接") }
+                        Text(
+                            "在另一台设备或微信里打开登录页，授权后地址栏会停在 " +
+                                "${authorizationCodeRedirect.host}${authorizationCodeRedirect.path}?…&" +
+                                "${authorizationCodeRedirect.codeParameter}=…；把整条链接粘贴进来即可在本机完成登录。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     webLoginStateActions.clearWebLoginState?.let { clearWebLoginState ->
                         OutlinedButton(
                             onClick = {
@@ -875,4 +913,93 @@ private fun ProviderLoginChoiceSelector(
             ) { Text(choice.label.ifBlank { choice.id }) }
         }
     }
+}
+
+/**
+ * Lets the user import a provider authorization redirect captured on another device.
+ *
+ * A WeChat QR cannot be scanned from the phone that displays it, and QQ's authorize page does not
+ * render in every web view, so the same redirect the platform hosts intercept is also accepted as
+ * pasted text: the single-use code plus the account ecosystem are extracted with the provider's own
+ * [ProviderAuthorizationCodeRedirect] declaration.
+ */
+@Composable
+private fun ProviderAuthorizationCodeDialog(
+    provider: ProviderInfo,
+    redirect: ProviderAuthorizationCodeRedirect,
+    onDismiss: () -> Unit,
+    onSubmit: (code: String, loginType: Int?) -> Unit,
+) {
+    var input by remember(provider.providerId) { mutableStateOf("") }
+    val parsed = remember(input) { parseProviderAuthorizationCode(input, redirect) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("粘贴授权链接") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "粘贴授权完成后停在 " + redirect.host + redirect.path + "?… 的整条链接，" +
+                        "或直接粘贴其中的 " + redirect.codeParameter + " 值。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text("授权链接或授权码") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (input.isNotBlank() && parsed == null) {
+                    Text(
+                        "没有识别到授权码，请确认粘贴的是授权完成后的完整链接。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { parsed?.let { onSubmit(it.first, it.second) } },
+                enabled = parsed != null,
+            ) { Text("登录") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/**
+ * Extracts (code, login_type) from a pasted authorization redirect or a bare code.
+ *
+ * Returns null when the text neither parses as a URL carrying the declared code parameter nor looks
+ * like a bare authorization code, so the dialog can refuse to submit obvious garbage.
+ */
+private const val MIN_BARE_CODE_LENGTH = 8
+
+internal fun parseProviderAuthorizationCode(
+    input: String,
+    redirect: ProviderAuthorizationCodeRedirect,
+): Pair<String, Int?>? {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return null
+    if (!trimmed.contains("://") && !trimmed.contains('?')) {
+        // A bare code: no URL context, so the provider falls back to its default ecosystem. Only accept
+        // opaque token shapes, otherwise ordinary pasted text would be submitted as a code.
+        val bare = trimmed.trim('"', '\'', ' ')
+        val looksLikeCode = bare.length >= MIN_BARE_CODE_LENGTH &&
+            bare.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+        return bare.takeIf { looksLikeCode }?.let { it to null }
+    }
+    val query = trimmed.substringAfter('?', missingDelimiterValue = "")
+    if (query.isEmpty()) return null
+    val params = query.substringBefore('#').split('&').mapNotNull { pair ->
+        val index = pair.indexOf('=')
+        if (index <= 0) null else pair.substring(0, index) to pair.substring(index + 1)
+    }.toMap()
+    val code = params[redirect.codeParameter]?.takeIf { it.isNotBlank() } ?: return null
+    val loginType = redirect.loginTypeParameter
+        ?.let { params[it] }
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 }
+    return code to loginType
 }

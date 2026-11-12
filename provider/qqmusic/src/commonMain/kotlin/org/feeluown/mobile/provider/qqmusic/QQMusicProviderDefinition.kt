@@ -1,6 +1,7 @@
 package org.feeluown.mobile.provider.qqmusic
 
 import kotlin.random.Random
+import org.feeluown.mobile.ProviderAuthorizationCodeRedirect
 import org.feeluown.mobile.ProviderCapabilities
 import org.feeluown.mobile.ProviderContentType
 import org.feeluown.mobile.ProviderFeature
@@ -20,44 +21,29 @@ internal object QQMusicProviderDefinition {
 
     val defaultGuid = Random.nextLong(100_000_000, 1_000_000_000).toString()
 
-    /** QQ Music's public OAuth client id used by its own y.qq.com web login. */
-    private const val OAUTH_CLIENT_ID = "100497308"
-
-    /** Redirect that carries the single-use authorization code the platform hosts intercept. */
-    private const val OAUTH_REDIRECT_URI =
-        "https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=https://y.qq.com/"
-
     /** The same redirect for a WeChat account login (`login_type=2`), captured from y.qq.com. */
     private const val WECHAT_REDIRECT_URI =
         "https://y.qq.com/portal/wx_redirect.html?login_type=2&surl=https://y.qq.com/"
 
     /**
-     * QQ's OAuth authorize page (verified working end to end).
+     * QQ-account web login entry: QQ Music's own site.
      *
-     * After the user approves, QQ redirects to
-     * `https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=...&code=XXXX&state=state`; the
-     * platform web-login hosts intercept that navigation and hand the single-use `code` to
-     * [exchangeAuthorizationCode], which turns it into a renewable session. Without the interception
-     * the page would land on y.qq.com and only set cookies, i.e. a login that can never be renewed.
+     * QQ's standalone OAuth authorize page renders fine in a desktop browser but comes up blank in
+     * Android WebView (graph.qq.com serves its login through a page/iframe combination the WebView
+     * does not render), which made the login screen unusable there. Loading y.qq.com instead keeps the
+     * pre-existing, known-good rendering and still ends at
+     * `https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=...&code=XXXX&state=state`, the
+     * redirect the platform hosts intercept to obtain renewable credentials. The site's own login
+     * dialog covers QQ accounts (scan or password) and WeChat accounts.
      */
-    val LOGIN_URL: String = buildString {
-        append("https://graph.qq.com/oauth2.0/authorize")
-        append("?response_type=code")
-        append("&client_id=")
-        append(OAUTH_CLIENT_ID)
-        append("&redirect_uri=")
-        append(encodeUrlComponent(OAUTH_REDIRECT_URI))
-        append("&scope=get_user_info,get_app_friends")
-        append("&state=state")
-        append("&from_ptlogin=1")
-        append("&src=1")
-    }
+    val WEB_LOGIN_URL: String = "https://y.qq.com/"
+
 
     /**
      * WeChat's open-platform QR authorize page (renders QQ Music's 微信登录 QR), captured from
      * y.qq.com's own `wx_redirect` login (`login_type=2`).
      *
-     * Same interception contract as [LOGIN_URL]: WeChat redirects back to
+     * Same interception contract as [WEB_LOGIN_URL]: WeChat redirects back to
      * `https://y.qq.com/portal/wx_redirect.html?login_type=2&surl=...&code=XXXX&state=state` and the
      * hosts hand the code to [exchangeAuthorizationCode] with `loginType = 2`. The trailing
      * `#wechat_redirect` fragment is part of the protocol and must stay.
@@ -77,13 +63,20 @@ internal object QQMusicProviderDefinition {
         providerId = ID,
         providerName = NAME,
         loginConfig = ProviderLoginConfig(
-            // Default stays the QQ entry so a platform build that only knows `loginUrl` still works.
-            LOGIN_URL,
-            // Fallback for manually captured cookies; the authorization code above is the real path.
+            // Default stays the QQ-account entry so a platform build that only knows `loginUrl` works.
+            WEB_LOGIN_URL,
+            // Fallback for manually captured cookies; the authorization code path is the real one.
             listOf(listOf("qqmusic_key", "wxuin", "qm_keyst"), listOf("qqmusic_key", "uin", "qm_keyst")),
             loginChoices = listOf(
-                ProviderLoginChoice(id = "qq", label = "QQ 账号", loginUrl = LOGIN_URL),
+                ProviderLoginChoice(id = "qq", label = "QQ 账号", loginUrl = WEB_LOGIN_URL),
                 ProviderLoginChoice(id = "wechat", label = "微信账号", loginUrl = WECHAT_LOGIN_URL),
+            ),
+            // Both ecosystems end on the same redirect; `login_type` tells the exchange which one it is.
+            authorizationCodeRedirect = ProviderAuthorizationCodeRedirect(
+                host = "y.qq.com",
+                path = "/portal/wx_redirect.html",
+                codeParameter = "code",
+                loginTypeParameter = "login_type",
             ),
         ),
         supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),

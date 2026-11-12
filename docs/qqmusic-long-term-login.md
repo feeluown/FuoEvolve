@@ -81,7 +81,9 @@
 
 ### 4.1 授权入口与「惰性重定向」技巧
 
-登录页直接用 QQ 音乐的 OAuth 授权地址（`QQMusicProviderDefinition.LOGIN_URL`）：
+> **真机修正**：QQ 自己的 OAuth 授权页（`graph.qq.com/oauth2.0/authorize`）在桌面浏览器正常，但在 **Android WebView 里白屏**，所以 QQ 账号入口已改回 `https://y.qq.com/`（本次改动之前一直可用）；微信入口仍是 `open.weixin.qq.com/connect/qrconnect`（真机可正常渲染二维码）。两者最后都回跳到同一个 `wx_redirect.html`，拦截逻辑不变。平台侧改为读取 `ProviderLoginConfig.authorizationCodeRedirect` 这份声明来匹配，不再硬编码 host/path。
+
+下面是手工验证时用的授权页形态（仅供理解协议；App 内不依赖它）：
 
 ```text
 https://graph.qq.com/oauth2.0/authorize
@@ -268,6 +270,10 @@ Content-Type: application/x-www-form-urlencoded
 
 | 平台 | 位置 | 做法 |
 | --- | --- | --- |
+三端都不再硬编码 provider 的 host/path：它们读取 `ProviderLoginConfig.authorizationCodeRedirect` 这份声明来匹配回跳，并据此判定"本次登录必须等授权码"（因此不会用 cookie 自动完成）。`authorizationCodeRedirect == null` 的音源行为完全不变。另外三端都要能命中**子 frame** 的回跳（QQ 的登录对话框会在 iframe 里跳回），并给出加载失败诊断（Android 顶栏、桌面错误行、iOS prompt），这样白屏能直接看出原因。
+
+| 平台 | 文件 | 机制 |
+| --- | --- | --- |
 | Android | [`ProviderWebLoginActivity.kt`](../androidApp/src/main/kotlin/org/feeluown/mobile/ProviderWebLoginActivity.kt) | **双通道**：`shouldOverrideUrlLoading`（点击/JS 导航）**与** `shouldInterceptRequest`（覆盖 302 重定向目标 —— WebView 对 3xx 不会回调前者）都匹配 `y.qq.com/portal/wx_redirect.html` + 非空 `code`。命中后用 `AtomicBoolean` 在工作线程抢占（后者运行于 WebView worker 线程，cookie 回调在主线程），再切主线程以 `EXTRA_AUTHORIZATION_CODE` 回传；`shouldInterceptRequest` 返回空 `WebResourceResponse` 阻止页面执行 |
 | iOS | [`IosWebLoginOutput.kt`](../shared/src/iosMain/kotlin/org/feeluown/mobile/IosWebLoginOutput.kt) | `decidePolicyFor` 取消该导航并回调 `onAuthorizationCode` |
 | Desktop | [`DesktopProviderWebLogin.kt`](../shared/src/desktopMain/kotlin/org/feeluown/mobile/DesktopProviderWebLogin.kt) | `RequestInterceptor` 拦 `wx_redirect`（`WebRequestInterceptResult.Reject`），返回 `DesktopWebLoginResult.AuthorizationCode`；登录 URL 为 OAuth 授权页时会**抑制 cookie 轮询提前完成**，避免旧 jar 里的同名 cookie 抢先给出不可续期会话 |
@@ -295,6 +301,19 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 ```
 
 ---
+
+### 6.7 手机端的账号获取路径
+
+二维码无法用"显示它的那台手机"去扫，所以手机端需要别的入口（App 内已提供）：
+
+| 路径 | 适用 | 说明 |
+| --- | --- | --- |
+| 网页登录 → QQ 账号 | 手机/桌面 | 走 y.qq.com 自己的登录对话框：扫码**或密码登录**，手机上密码登录不需要第二台设备 |
+| 网页登录 → 微信账号 | 桌面 | 微信二维码需要有另一台设备的微信来扫 |
+| 「粘贴授权链接」 | 手机（微信） | 在别处（另一台设备/微信内置浏览器）完成授权后，把停在 `y.qq.com/portal/wx_redirect.html?…&code=…` 的整条链接粘贴进 App 完成登录 |
+| 凭据备份导入 | 手机 | 桌面端登录后「导出凭据（加密）」，手机端导入即可复用可续期会话（加密备份保留 `session`） |
+
+「粘贴授权链接」的解析由 provider 声明的 `authorizationCodeRedirect` 驱动（`parseProviderAuthorizationCode`），因此不绑定 QQ 音乐的具体参数名。
 
 ## 7. 刷新调度与降级
 
