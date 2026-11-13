@@ -18,7 +18,9 @@ No desktop artifact bundles a JVM.
 
 ## Nucleus packaging
 
-Nucleus 2.5.15 exposes one GraalVM packaging task per format. Windows and macOS build one package branch each. Linux intentionally uses two independent branches because AppImage and distro packages have different native-dependency policies:
+The plugin and all Nucleus runtime modules share the pinned `nucleus` version in `gradle/libs.versions.toml`. This is a 3.0 development release, not a stable release. Kotlin 2.4.20, Compose Multiplatform 1.12.1 and kotlinx.coroutines 1.11.0 match its upstream build. The application uses the sole Tao backend; `nucleusApplication` no longer accepts a backend selector. macOS audio permission descriptions are supplied through `macOS.infoPlist` and included by the GraalVM packaging plugin.
+
+Nucleus `3.0.0-dev-202610272317` exposes one GraalVM packaging task per format. Windows and macOS build one package branch each. Linux intentionally uses two independent branches because AppImage and distro packages have different native-dependency policies:
 
 ```bash
 # Windows
