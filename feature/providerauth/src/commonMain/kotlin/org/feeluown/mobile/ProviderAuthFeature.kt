@@ -75,6 +75,7 @@ interface ProviderAuthSessionPort<Auth, Session> {
     fun error(session: Session, providerId: String): String?
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): Auth
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): Auth
+    suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null): Auth
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): Auth
     suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): Auth
     suspend fun loginWithOAuth(
@@ -120,6 +121,13 @@ interface ProviderAuthFeatureOwner<Provider, Auth, Session> {
     fun authStateFor(provider: Provider): Auth
     fun isBusy(providerId: String): Boolean
     fun authError(providerId: String): String?
+
+    /**
+     * True when the provider is signed out and the last sign-in attempt failed, i.e. the session
+     * needs to be signed in again. UI uses this to offer a one-tap recovery instead of asking the
+     * user to log out first.
+     */
+    fun needsRelogin(providerId: String): Boolean
     fun cookieInput(providerId: String): String
     fun headerInput(providerId: String): ProviderAuthHeaderInput
     fun oauthInput(providerId: String): ProviderAuthOAuthInput
@@ -129,6 +137,13 @@ interface ProviderAuthFeatureOwner<Provider, Auth, Session> {
     fun onOAuthClientIdChange(providerId: String, value: String)
     fun onOAuthClientSecretChange(providerId: String, value: String)
     fun loginWithCookies(providerId: String, cookiesJson: String)
+
+    /**
+     * Starts the sign-in for [providerId] on behalf of a platform host that already captured an
+     * authorization code from its web-login redirect.
+     */
+    fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null)
+
     fun loginWithHeaders(providerId: String)
     fun loginWithHeaderFile(providerId: String, headerFileJson: String)
     fun startDeviceOAuthLogin()
@@ -208,6 +223,12 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
 
     override fun authError(providerId: String): String? = sessionPort.error(state.value.sessions, providerId)
 
+    override fun needsRelogin(providerId: String): Boolean {
+        if (authError(providerId).isNullOrBlank()) return false
+        val auth = sessionPort.authState(state.value.sessions, providerId) ?: return false
+        return !authIsLoggedIn(auth)
+    }
+
     override fun cookieInput(providerId: String): String = state.value.cookieInputs[providerId].orEmpty()
 
     override fun headerInput(providerId: String): ProviderAuthHeaderInput =
@@ -243,6 +264,23 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
             runCatching { sessionPort.loginWithCookies(providerId, cookies) }
                 .onSuccess { auth ->
                     update { copy(cookieInputs = cookieInputs - providerId) }
+                    feedback(loginFeedback(auth))
+                    onSessionChanged()
+                }
+                .onFailure(::failure)
+        }
+    }
+
+    override fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int?) {
+        val authorizationCode = code.trim()
+        if (authorizationCode.isEmpty()) {
+            feedback("未获取到 " + providerName(providerId) + " 登录授权码")
+            return
+        }
+        scope.launch {
+            feedback("正在登录 " + providerName(providerId))
+            runCatching { sessionPort.loginWithAuthorizationCode(providerId, authorizationCode, loginType) }
+                .onSuccess { auth ->
                     feedback(loginFeedback(auth))
                     onSessionChanged()
                 }
@@ -423,6 +461,9 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
     }
 
     override fun logout(providerId: String) {
+        // Logging out only forgets the app-side credentials of this provider. The platform web
+        // login state is deliberately kept: a fresh browser session makes providers such as
+        // QQ Music answer with 登录环境异常, so switching accounts is an explicit separate action.
         scope.launch {
             feedback("正在退出 ${providerName(providerId)}")
             runCatching { sessionPort.logout(providerId) }
@@ -435,7 +476,7 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
                         )
                     }
                     if (providerId == deviceOAuthProviderId) cancelDeviceOAuthLogin()
-                    feedback("${authProviderName(auth)} 已退出登录")
+                    feedback("${authProviderName(auth)} 已退出登录（网页登录状态已保留）")
                     onSessionChanged()
                 }
                 .onFailure(::failure)

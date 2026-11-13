@@ -3,11 +3,13 @@ package org.feeluown.mobile.feature.providerauth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -101,6 +103,68 @@ class ProviderAuthFeatureTest {
         assertEquals(1, sessionChanged)
     }
 
+    @Test
+    fun expiredSessionOffersOneTapReloginWithoutLogout() = runTest {
+        // Regression for feelsuown/FuoEvolve#306 / #307: an expired provider session used to leave
+        // the UI with no recovery path other than logging out first, which also wiped the browser
+        // session and made the provider answer with 登录环境异常.
+        val session = FakeSessionPort().apply { expire("qqmusic", "登录已失效，请重新登录") }
+        val owner = createOwner(session)
+        runCurrent()
+
+        assertFalse(owner.authStateFor(Provider("qqmusic")).loggedIn)
+        assertEquals("登录已失效，请重新登录", owner.authError("qqmusic"))
+        assertTrue(owner.needsRelogin("qqmusic"))
+    }
+
+    @Test
+    fun successfulReloginClearsReloginRecovery() = runTest {
+        val session = FakeSessionPort().apply { expire("qqmusic", "登录已失效，请重新登录") }
+        val owner = createOwner(session)
+        runCurrent()
+        assertTrue(owner.needsRelogin("qqmusic"))
+
+        owner.loginWithCookies("qqmusic", "qqmusic_key=value")
+        runCurrent()
+
+        assertFalse(owner.needsRelogin("qqmusic"))
+        assertTrue(owner.authStateFor(Provider("qqmusic")).loggedIn)
+    }
+
+    @Test
+    fun healthySessionDoesNotOfferReloginRecovery() = runTest {
+        val session = FakeSessionPort()
+        val owner = createOwner(session)
+        runCurrent()
+
+        assertFalse(owner.needsRelogin("qqmusic"))
+
+        session.signIn("qqmusic")
+        runCurrent()
+
+        assertFalse(owner.needsRelogin("qqmusic"))
+        assertTrue(owner.authStateFor(Provider("qqmusic")).loggedIn)
+    }
+
+    private fun TestScope.createOwner(
+        sessionPort: FakeSessionPort,
+        onSessionChanged: () -> Unit = {},
+    ): ProviderAuthFeatureOwner<Provider, Auth, Session> = createProviderAuthFeatureOwner(
+        sessionPort = sessionPort,
+        deviceAuthorizationPort = FakeDeviceAuthorizationPort(),
+        deviceCodeAssistant = FakeAssistant(),
+        oauthImportPort = ProviderOAuthImportPort { ProviderOAuthImportResult.Unknown },
+        scope = backgroundScope,
+        providerId = Provider::id,
+        providerName = { "QQ 音乐" },
+        defaultAuth = { Auth(false) },
+        authProviderName = { "QQ 音乐" },
+        authIsLoggedIn = Auth::loggedIn,
+        authUserName = { if (it.loggedIn) "User" else null },
+        deviceOAuthProviderId = "ytmusic",
+        onSessionChanged = onSessionChanged,
+    )
+
     private data class Provider(val id: String)
     private data class Auth(val loggedIn: Boolean)
     private data class Session(
@@ -114,11 +178,33 @@ class ProviderAuthFeatureTest {
         override val state: StateFlow<Session> = mutableState
         var oauthLoggedIn = false
 
+        /** Mirrors the session layer reporting a failed/expired sign-in while still signed out. */
+        fun expire(providerId: String, message: String) {
+            mutableState.value = mutableState.value.copy(
+                auth = mutableState.value.auth + (providerId to Auth(false)),
+                errors = mutableState.value.errors + (providerId to message),
+            )
+        }
+
+        fun signIn(providerId: String) {
+            mutableState.value = mutableState.value.copy(
+                auth = mutableState.value.auth + (providerId to Auth(true)),
+                errors = mutableState.value.errors - providerId,
+            )
+        }
+
         override fun authState(session: Session, providerId: String): Auth? = session.auth[providerId]
         override fun isBusy(session: Session, providerId: String): Boolean = providerId in session.busy
         override fun error(session: Session, providerId: String): String? = session.errors[providerId]
         override suspend fun refresh(providerId: String, refreshUserInfo: Boolean): Auth = Auth(false)
-        override suspend fun loginWithCookies(providerId: String, cookiesJson: String): Auth = Auth(true)
+        override suspend fun loginWithCookies(providerId: String, cookiesJson: String): Auth {
+            signIn(providerId)
+            return Auth(true)
+        }
+        override suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int?): Auth {
+            signIn(providerId)
+            return Auth(true)
+        }
         override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): Auth = Auth(true)
         override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): Auth = Auth(true)
         override suspend fun loginWithOAuth(

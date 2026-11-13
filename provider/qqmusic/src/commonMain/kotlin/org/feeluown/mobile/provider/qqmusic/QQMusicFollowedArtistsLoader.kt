@@ -7,7 +7,6 @@ import org.feeluown.mobile.ProviderContentSection
 import org.feeluown.mobile.ProviderFeature
 import org.feeluown.mobile.ProviderMediaItem
 import org.feeluown.mobile.ProviderMediaItemType
-import org.feeluown.mobile.providerBusinessException
 import org.feeluown.mobile.providerFailureOrNull
 import org.feeluown.mobile.provider.core.ProviderCredentialStore
 import org.feeluown.mobile.provider.core.array
@@ -72,9 +71,13 @@ internal class QQMusicFollowedArtistsLoader(
             },
         )
     }.getOrElse { failure ->
+        // A dead web session is the "sign in again" state, not a load failure (issue #307).
+        val sessionExpired = failure.providerFailureOrNull(ID)?.kind ==
+            org.feeluown.mobile.ProviderFailureKind.LoginExpired
         ProviderContentSection(
             feature = feature,
-            errorMessage = failure.providerMessage("QQ 音乐关注歌手加载失败"),
+            isLoginRequired = sessionExpired,
+            errorMessage = if (sessionExpired) null else failure.providerMessage("QQ 音乐关注歌手加载失败"),
         )
     }
 
@@ -124,10 +127,10 @@ internal class QQMusicFollowedArtistsLoader(
             ),
             headers = authenticatedHeaders("https://y.qq.com/portal/profile.html?uin=$accountId"),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val code = root.int("code")
         if (code != null && code != 0) {
-            throw providerBusinessException(ID, code, root.errorMessage())
+            throw qqBusinessException(code, root.errorMessage())
         }
         val data = root.obj("data") ?: return null
         val creator = data.obj("creator")
@@ -155,7 +158,7 @@ internal class QQMusicFollowedArtistsLoader(
             ),
             headers = authenticatedHeaders("https://y.qq.com/"),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
     }
 
     private suspend fun rpcPayload(payload: String): String {
@@ -187,7 +190,7 @@ internal class QQMusicFollowedArtistsLoader(
         val envelope = root.obj(key) ?: root
         val code = envelope.int("code")
         if (code != null && code != 0) {
-            throw providerBusinessException(ID, code, envelope.errorMessage())
+            throw qqBusinessException(code, envelope.errorMessage())
         }
         return envelope.obj("data") ?: envelope
     }

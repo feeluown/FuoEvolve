@@ -27,6 +27,12 @@ data class ProviderAuthState(
     val providerName: String,
     val isLoggedIn: Boolean,
     val userName: String? = null,
+    /**
+     * Why the session is not usable, when the provider learned it from the server rather than from
+     * the absence of stored credentials. Lets the UI offer "重新登录" for an expired session without
+     * asking the user to log out first.
+     */
+    val failure: ProviderFailure? = null,
 )
 
 data class ProviderCapabilities(
@@ -60,10 +66,52 @@ data class ProviderMutationResult(
     val message: String,
 )
 
+/**
+ * One selectable web-login entry point.
+ *
+ * Most providers have exactly one (`loginChoices` stays empty and [ProviderLoginConfig.loginUrl] is
+ * used). Providers that offer several account ecosystems — QQ Music accepts a QQ account or a WeChat
+ * account, each with its own authorize URL — declare them here so the UI can offer a choice instead
+ * of hard-coding one of them.
+ */
+data class ProviderLoginChoice(
+    /** Stable identifier the platform may echo back, e.g. `qq` / `wechat`. */
+    val id: String,
+    val label: String,
+    val loginUrl: String,
+)
+
+/**
+ * Describes the OAuth redirect that ends a provider web login.
+ *
+ * Platforms intercept this navigation instead of letting the page run: the page would exchange the
+ * single-use [codeParameter] code itself, and the app needs that code to obtain renewable
+ * credentials. Declaring it in the provider keeps provider-specific host/path knowledge out of the
+ * three platform hosts.
+ */
+data class ProviderAuthorizationCodeRedirect(
+    val host: String,
+    val path: String,
+    val codeParameter: String = "code",
+    /** Query parameter carrying the account ecosystem (QQ Music: 1 = QQ, 2 = WeChat), if any. */
+    val loginTypeParameter: String? = null,
+)
+
 data class ProviderLoginConfig(
     val loginUrl: String,
     val cookieKeyGroups: List<List<String>>,
-)
+    val loginChoices: List<ProviderLoginChoice> = emptyList(),
+    /**
+     * Set when the login completes by handing an authorization code to the provider. Platforms then
+     * wait for that redirect instead of finishing on captured cookies, which would store a
+     * non-renewable session.
+     */
+    val authorizationCodeRedirect: ProviderAuthorizationCodeRedirect? = null,
+) {
+    /** Selectable entries; falls back to the single [loginUrl] so existing providers are unchanged. */
+    val effectiveLoginChoices: List<ProviderLoginChoice>
+        get() = loginChoices.ifEmpty { listOf(ProviderLoginChoice(id = "", label = "", loginUrl = loginUrl)) }
+}
 
 data class ProviderInfo(
     val providerId: String,

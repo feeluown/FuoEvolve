@@ -142,7 +142,7 @@ fun SettingsFeatureScreen(
     providerCatalog: ProviderCatalogFeatureController,
     providerAuth: ProviderAuthFeatureController,
     appVersionInfo: String?,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportYtmusicOAuthFile: (() -> Unit)? = null,
@@ -1348,7 +1348,7 @@ private fun ProviderAccountSettings(
     settingsController: SettingsFeatureController,
     authController: ProviderAuthFeatureController,
     authUiState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -1432,7 +1432,7 @@ private fun ProviderAccountSettings(
             when (mode) {
                 ProviderLoginMode.WebView -> Box(Modifier.fillMaxWidth().padding(FuoSpacing.lg)) {
                     Button(
-                        onClick = { onOpenProviderWebLogin(provider) },
+                        onClick = { onOpenProviderWebLogin(provider, null) },
                         enabled = provider.loginConfig != null && !busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("网页登录") }

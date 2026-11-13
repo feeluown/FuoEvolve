@@ -611,6 +611,8 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
         providerName: String,
         loginUrl: String,
         cookieKeyGroupsJson: String,
+        authorizationCodeRedirect: ProviderAuthorizationCodeRedirect?,
+        onAuthorizationCode: @escaping (String, Int32) -> Void,
         completionHandler: @escaping (String?) -> Void
     ) {
         DispatchQueue.main.async {
@@ -624,6 +626,8 @@ final class IOSWebLoginOutput: NSObject, IosWebLoginOutput {
                 providerName: providerName,
                 url: url,
                 requiredCookieGroups: groups,
+                authorizationCodeRedirect: authorizationCodeRedirect,
+                onAuthorizationCode: onAuthorizationCode,
                 completion: completionHandler
             )
             presenter.present(UINavigationController(rootViewController: login), animated: true)
@@ -781,15 +785,22 @@ final class IOSNetworkStatusOutput: NSObject, IosNetworkStatusOutput {
 private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate {
     private let webView = WKWebView(frame: .zero)
     private let requiredCookieGroups: [[String]]
+    private let authorizationCodeRedirect: ProviderAuthorizationCodeRedirect?
+    private let onAuthorizationCode: (String, Int32) -> Void
     private let completion: (String?) -> Void
+    private var finished = false
 
     init(
         providerName: String,
         url: URL,
         requiredCookieGroups: [[String]],
+        authorizationCodeRedirect: ProviderAuthorizationCodeRedirect?,
+        onAuthorizationCode: @escaping (String, Int32) -> Void,
         completion: @escaping (String?) -> Void
     ) {
         self.requiredCookieGroups = requiredCookieGroups
+        self.authorizationCodeRedirect = authorizationCodeRedirect
+        self.onAuthorizationCode = onAuthorizationCode
         self.completion = completion
         super.init(nibName: nil, bundle: nil)
         title = providerName
@@ -821,10 +832,13 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
     }
 
     @objc private func cancel() {
+        guard !finished else { return }
+        finished = true
         dismiss(animated: true) { self.completion(nil) }
     }
 
     @objc private func done() {
+        guard !finished else { return }
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
             var values: [String: String] = [:]
             for cookie in cookies where !cookie.value.isEmpty || values[cookie.name] == nil {
@@ -840,9 +854,102 @@ private final class FuoWebLoginViewController: UIViewController, WKNavigationDel
                 return
             }
             DispatchQueue.main.async {
+                guard !self.finished else { return }
+                self.finished = true
                 self.dismiss(animated: true) { self.completion(json) }
             }
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        // The declared redirect decides what to intercept, and every frame is inspected: the OAuth
+        // hop can happen inside a login iframe that navigates the top frame.
+        guard let declaration = authorizationCodeRedirect,
+              let redirect = Self.authorizationRedirect(
+                from: navigationAction.request.url,
+                declaration: declaration
+              ) else {
+            decisionHandler(.allow)
+            return
+        }
+        // Cancel the navigation: the redirect page consumes the single-use code as soon as it runs,
+        // so loading it would leave the provider nothing to exchange. The code is never logged.
+        decisionHandler(.cancel)
+        guard !finished else { return }
+        finished = true
+        DispatchQueue.main.async {
+            self.dismiss(animated: true) {
+                self.onAuthorizationCode(redirect.code, redirect.loginType)
+            }
+        }
+    }
+
+    /// The provider-declared authorization redirect, or nil when the URL is not that redirect.
+    ///
+    /// Host, path and both parameter names come from ProviderAuthorizationCodeRedirect, so nothing
+    /// about a specific provider is hard-coded here. All login entries of a provider usually come back
+    /// to the same page; the declared login-type parameter says which ecosystem the code belongs to
+    /// (reported as 0 when absent). The code itself is never logged.
+    private static func authorizationRedirect(
+        from url: URL?,
+        declaration: ProviderAuthorizationCodeRedirect
+    ) -> (code: String, loginType: Int32)? {
+        guard let url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        guard let host = components.host,
+              host.caseInsensitiveCompare(declaration.host) == .orderedSame else {
+            return nil
+        }
+        guard components.path == declaration.path else { return nil }
+        guard let rawCode = components.queryItems?
+            .first(where: { $0.name == declaration.codeParameter })?.value else {
+            return nil
+        }
+        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else { return nil }
+        var loginType: Int32 = 0
+        if let loginTypeParameter = declaration.loginTypeParameter,
+           let rawLoginType = components.queryItems?
+            .first(where: { $0.name == loginTypeParameter })?.value {
+            loginType = Int32(rawLoginType.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        }
+        return (code, loginType > 0 ? loginType : 0)
+    }
+
+    // Load-failure diagnosis: a blank web view must say why instead of showing nothing.
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        showLoadFailure(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showLoadFailure(error)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.isForMainFrame,
+           let httpResponse = navigationResponse.response as? HTTPURLResponse,
+           httpResponse.statusCode >= 400 {
+            navigationItem.prompt = "加载失败：HTTP \(httpResponse.statusCode)"
+        }
+        decisionHandler(.allow)
+    }
+
+    private func showLoadFailure(_ error: Error) {
+        let nsError = error as NSError
+        navigationItem.prompt = "加载失败：\(nsError.code) \(nsError.localizedDescription)"
     }
 }
 

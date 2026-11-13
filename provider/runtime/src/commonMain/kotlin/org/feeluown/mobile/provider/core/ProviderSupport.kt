@@ -77,6 +77,59 @@ fun splitResourceId(value: String, expectedPrefix: String? = null): Pair<String,
     return provider to id
 }
 
+/**
+ * Long-lived, renewable session material for providers whose upstream issues an auth key plus a
+ * refresh token (QQ Music: `musickey` + `refresh_token`).
+ *
+ * Kept separate from the OAuth fields below because these are the provider's own session
+ * credentials, not an OAuth grant held by this application. Keeping them out of the OAuth slots
+ * also keeps them out of OAuth-shaped backup/export paths by default.
+ */
+@Serializable
+data class ProviderSessionCredential(
+    /** The provider's auth key, e.g. QQ Music `musickey` (`Q_H_L_…` / `W_X_…`). */
+    val authKey: String? = null,
+    val refreshToken: String? = null,
+    val accessToken: String? = null,
+    val openId: String? = null,
+    val unionId: String? = null,
+    val accountId: String? = null,
+    val encryptedAccountId: String? = null,
+    /**
+     * Provider-specific login flavour tag, e.g. QQ Music uses `qq` / `wechat` because the renewal
+     * request shape and the login-type number differ per account ecosystem.
+     */
+    val loginMethod: String? = null,
+    /** Wall-clock time at which [authKey] was issued. */
+    val authKeyCreatedAtMillis: Long = 0L,
+    /** Lifetime of [authKey] as reported by the provider. */
+    val authKeyExpiresInMillis: Long = 0L,
+    /** Lifetime of the refresh grant as a whole; re-authorization is required after this. */
+    val grantExpiresAtMillis: Long = 0L,
+) {
+    val hasAuthKey: Boolean get() = !authKey.isNullOrBlank()
+
+    /** True when [authKey] is past the point where it should be renewed (half of its lifetime). */
+    fun shouldRenewAt(nowMillis: Long): Boolean {
+        if (!hasAuthKey || authKeyExpiresInMillis <= 0L || authKeyCreatedAtMillis <= 0L) return false
+        return nowMillis >= authKeyCreatedAtMillis + authKeyExpiresInMillis / 2
+    }
+
+    /** True once [authKey] is past its own lifetime and must not be used any more. */
+    fun isAuthKeyExpiredAt(nowMillis: Long): Boolean {
+        if (!hasAuthKey || authKeyExpiresInMillis <= 0L || authKeyCreatedAtMillis <= 0L) return false
+        return nowMillis >= authKeyCreatedAtMillis + authKeyExpiresInMillis
+    }
+
+    /** True once the refresh grant itself expired; renewing can no longer help. */
+    fun isGrantExpiredAt(nowMillis: Long): Boolean =
+        grantExpiresAtMillis > 0L && nowMillis >= grantExpiresAtMillis
+
+    /** True when renewal is still possible and the auth key is worth renewing. */
+    fun canRenewAt(nowMillis: Long): Boolean =
+        !refreshToken.isNullOrBlank() && !isGrantExpiredAt(nowMillis)
+}
+
 @Serializable
 data class ProviderCredentials(
     val cookies: Map<String, String> = emptyMap(),
@@ -89,9 +142,13 @@ data class ProviderCredentials(
     val oauthScope: String? = null,
     val oauthClientId: String? = null,
     val oauthClientSecret: String? = null,
+    /** Renewable provider session (see [ProviderSessionCredential]). */
+    val session: ProviderSessionCredential? = null,
 ) {
     fun hasOAuthAccess(): Boolean =
         !oauthAccessToken.isNullOrBlank() || !oauthRefreshToken.isNullOrBlank()
+
+    fun hasSession(): Boolean = session?.hasAuthKey == true
 }
 
 interface ProviderCredentialStore {
@@ -272,7 +329,8 @@ abstract class BaseKotlinProvider(
                 !credentials.authorization.isNullOrBlank() ||
                 !credentials.cookieHeader.isNullOrBlank() ||
                 !credentials.headerFileJson.isNullOrBlank() ||
-                credentials.hasOAuthAccess()
+                credentials.hasOAuthAccess() ||
+                credentials.hasSession()
             ),
         userName = null,
     )
@@ -433,7 +491,29 @@ interface KotlinMusicProvider {
     suspend fun lyrics(track: MusicTrack): String? = null
     suspend fun lyricsSearchKeyword(track: MusicTrack): String? = null
     suspend fun authState(): ProviderAuthState
+
+    /**
+     * Like [authState], but allowed to consult the provider's own servers to decide whether the
+     * stored session is still valid. Providers whose upstream expires sessions server-side override
+     * this and return `isLoggedIn = false` with a [org.feeluown.mobile.ProviderAuthState.failure]
+     * describing the expiry, so the app can offer a direct re-login.
+     */
+    suspend fun verifySession(): ProviderAuthState = authState()
+
     suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState
+
+    /**
+     * Completes a browser-based login by exchanging the provider's OAuth [code] for a session.
+     *
+     * The platform web-login hosts capture the authorization code from the redirect navigation and
+     * hand it here, which lets the provider obtain renewable credentials (refresh token) that a plain
+     * cookie capture cannot see.
+     *
+     * @param loginType provider-specific login flavour, e.g. QQ 1 = QQ account, 2 = WeChat.
+     */
+    suspend fun loginWithAuthorizationCode(code: String, loginType: Int? = null): ProviderAuthState =
+        throw UnsupportedOperationException("provider does not support authorization code login: $id")
+
     suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithHeaderFile(headerFileJson: String): ProviderAuthState
     suspend fun loginWithOAuth(

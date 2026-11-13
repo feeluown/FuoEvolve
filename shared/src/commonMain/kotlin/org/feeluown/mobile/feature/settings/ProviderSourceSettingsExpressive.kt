@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -256,7 +257,7 @@ internal fun ProviderDetailSettingsExpressive(
     settingsController: SettingsFeatureController,
     authController: ProviderAuthFeatureController,
     authUiState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -264,6 +265,7 @@ internal fun ProviderDetailSettingsExpressive(
 ) {
     val uriHandler = LocalUriHandler.current
     val credentialBackupActions = LocalProviderCredentialBackupActions.current
+    val webLoginStateActions = LocalProviderWebLoginStateActions.current
     val openSupportedLinksSettings = rememberSupportedLinksSettingsAction()
     val auth = authController.authStateFor(provider)
     val authBusy = authController.isBusy(provider.providerId)
@@ -271,7 +273,35 @@ internal fun ProviderDetailSettingsExpressive(
     val enabled = provider.providerId in catalog.enabledProviderIds
     val canToggleEnabled = !busy && (!enabled || catalog.enabledProviderIds.size > 1)
     val modes = provider.supportedLoginModes.toList().ifEmpty { listOf(ProviderLoginMode.Cookie) }
+    // An expired provider session must be recoverable with one tap, without logging out first.
+    val needsRelogin = !auth.isLoggedIn && authController.needsRelogin(provider.providerId)
+    val webLoginAvailable = provider.loginConfig != null && ProviderLoginMode.WebView in modes
+    // Some providers expose several account ecosystems behind one web login (QQ Music: QQ / WeChat).
+    val loginChoices = provider.loginConfig?.effectiveLoginChoices.orEmpty()
+    val loginUrlForChoice = { choice: ProviderLoginChoice -> choice.loginUrl }
     var mode by remember(provider.providerId, modes) { mutableStateOf(modes.first()) }
+    var loginChoiceId by remember(provider.providerId, loginChoices) {
+        mutableStateOf(loginChoices.firstOrNull()?.id.orEmpty())
+    }
+    val selectedLoginChoice = loginChoices.firstOrNull { it.id == loginChoiceId } ?: loginChoices.firstOrNull()
+    val openWebLogin: () -> Unit = {
+        onOpenProviderWebLogin(provider, selectedLoginChoice?.let(loginUrlForChoice))
+    }
+    // Some account ecosystems cannot be completed on the device itself (a QR cannot be scanned from
+    // the same phone), so let the user hand over the authorization redirect captured elsewhere.
+    val authorizationCodeRedirect = provider.loginConfig?.authorizationCodeRedirect
+    var showAuthorizationCodeDialog by remember(provider.providerId) { mutableStateOf(false) }
+    if (showAuthorizationCodeDialog && authorizationCodeRedirect != null) {
+        ProviderAuthorizationCodeDialog(
+            provider = provider,
+            redirect = authorizationCodeRedirect,
+            onDismiss = { showAuthorizationCodeDialog = false },
+            onSubmit = { code, loginType ->
+                showAuthorizationCodeDialog = false
+                authController.loginWithAuthorizationCode(provider.providerId, code, loginType)
+            },
+        )
+    }
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
     val oauthFlow = authUiState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
@@ -347,6 +377,55 @@ internal fun ProviderDetailSettingsExpressive(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("退出登录") }
             }
+        } else if (needsRelogin) {
+            // One-tap recovery: re-login directly instead of asking the user to log out and wipe
+            // the browser session, which providers such as QQ Music punish as 登录环境异常.
+            authController.authError(provider.providerId)?.let { message ->
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = FuoSpacing.lg),
+                )
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+            ) {
+                if (webLoginAvailable) {
+                    if (loginChoices.size > 1) {
+                        ProviderLoginChoiceSelector(
+                            choices = loginChoices,
+                            selectedId = selectedLoginChoice?.id.orEmpty(),
+                            enabled = !authBusy,
+                            onSelect = { loginChoiceId = it },
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            mode = ProviderLoginMode.WebView
+                            // The stored session was rejected by the provider, so the browser cookies
+                            // it came from are dead too. Wipe them first, otherwise the login page
+                            // re-reads the same dead cookies and the app re-stores that session.
+                            webLoginStateActions.clearWebLoginState?.invoke()
+                            openWebLogin()
+                        },
+                        enabled = !authBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("重新登录") }
+                    Text(
+                        "重新登录会先清除已失效的网页登录状态，再打开登录页；无需先退出登录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "请在下方登录方式中重新登录，无需先退出登录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 
@@ -365,12 +444,61 @@ internal fun ProviderDetailSettingsExpressive(
                 }
             }
             when (mode) {
-                ProviderLoginMode.WebView -> Box(Modifier.fillMaxWidth().padding(FuoSpacing.lg)) {
+                ProviderLoginMode.WebView -> Column(
+                    modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
+                ) {
+                    if (loginChoices.size > 1) {
+                        ProviderLoginChoiceSelector(
+                            choices = loginChoices,
+                            selectedId = selectedLoginChoice?.id.orEmpty(),
+                            enabled = !authBusy,
+                            onSelect = { loginChoiceId = it },
+                        )
+                    }
                     Button(
-                        onClick = { onOpenProviderWebLogin(provider) },
+                        onClick = { openWebLogin() },
                         enabled = provider.loginConfig != null && !authBusy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("网页登录") }
+                    if (loginChoices.size > 1) {
+                        Text(
+                            "微信二维码需要用另一台设备的微信扫码；手机端可先用 QQ 账号登录，" +
+                                "或在别处完成授权后用下面的「粘贴授权链接」导入。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (authorizationCodeRedirect != null) {
+                        TextButton(
+                            onClick = { showAuthorizationCodeDialog = true },
+                            enabled = !authBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("粘贴授权链接") }
+                        Text(
+                            "在另一台设备或微信里打开登录页，授权后地址栏会停在 " +
+                                "${authorizationCodeRedirect.host}${authorizationCodeRedirect.path}?…&" +
+                                "${authorizationCodeRedirect.codeParameter}=…；把整条链接粘贴进来即可在本机完成登录。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    webLoginStateActions.clearWebLoginState?.let { clearWebLoginState ->
+                        OutlinedButton(
+                            onClick = {
+                                clearWebLoginState()
+                                openWebLogin()
+                            },
+                            enabled = provider.loginConfig != null && !authBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("使用其他账号登录") }
+                        Text(
+                            "使用其他账号登录会先清除本机网页登录状态（Cookie），再打开登录页；" +
+                                "仅在需要切换账号或登录页异常时使用。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 ProviderLoginMode.Cookie -> Column(
                     modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
@@ -560,9 +688,11 @@ internal fun ProviderDetailSettingsExpressive(
         }
     }
 
-    authController.authError(provider.providerId)?.let { error ->
-        ExpressiveSettingsGroup(title = "错误") {
-            ExpressiveSettingsRow(title = error, titleColor = MaterialTheme.colorScheme.error)
+    if (!needsRelogin) {
+        authController.authError(provider.providerId)?.let { error ->
+            ExpressiveSettingsGroup(title = "错误") {
+                ExpressiveSettingsRow(title = error, titleColor = MaterialTheme.colorScheme.error)
+            }
         }
     }
     authUiState.feedback?.let { feedback ->
@@ -758,4 +888,118 @@ private fun expressiveProviderLoginModeLabel(mode: ProviderLoginMode): String = 
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"
+}
+/**
+ * Account-ecosystem picker for providers whose web login covers several ecosystems.
+ *
+ * QQ Music accepts a QQ account and a WeChat account through different authorize URLs; both end at the
+ * same redirect, so the platform reports which ecosystem the authorization code belongs to.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderLoginChoiceSelector(
+    choices: List<ProviderLoginChoice>,
+    selectedId: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        choices.forEachIndexed { index, choice ->
+            SegmentedButton(
+                selected = choice.id == selectedId,
+                enabled = enabled,
+                onClick = { onSelect(choice.id) },
+                shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+            ) { Text(choice.label.ifBlank { choice.id }) }
+        }
+    }
+}
+
+/**
+ * Lets the user import a provider authorization redirect captured on another device.
+ *
+ * A WeChat QR cannot be scanned from the phone that displays it, and QQ's authorize page does not
+ * render in every web view, so the same redirect the platform hosts intercept is also accepted as
+ * pasted text: the single-use code plus the account ecosystem are extracted with the provider's own
+ * [ProviderAuthorizationCodeRedirect] declaration.
+ */
+@Composable
+private fun ProviderAuthorizationCodeDialog(
+    provider: ProviderInfo,
+    redirect: ProviderAuthorizationCodeRedirect,
+    onDismiss: () -> Unit,
+    onSubmit: (code: String, loginType: Int?) -> Unit,
+) {
+    var input by remember(provider.providerId) { mutableStateOf("") }
+    val parsed = remember(input) { parseProviderAuthorizationCode(input, redirect) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("粘贴授权链接") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "粘贴授权完成后停在 " + redirect.host + redirect.path + "?… 的整条链接，" +
+                        "或直接粘贴其中的 " + redirect.codeParameter + " 值。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text("授权链接或授权码") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (input.isNotBlank() && parsed == null) {
+                    Text(
+                        "没有识别到授权码，请确认粘贴的是授权完成后的完整链接。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { parsed?.let { onSubmit(it.first, it.second) } },
+                enabled = parsed != null,
+            ) { Text("登录") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/**
+ * Extracts (code, login_type) from a pasted authorization redirect or a bare code.
+ *
+ * Returns null when the text neither parses as a URL carrying the declared code parameter nor looks
+ * like a bare authorization code, so the dialog can refuse to submit obvious garbage.
+ */
+private const val MIN_BARE_CODE_LENGTH = 8
+
+internal fun parseProviderAuthorizationCode(
+    input: String,
+    redirect: ProviderAuthorizationCodeRedirect,
+): Pair<String, Int?>? {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return null
+    if (!trimmed.contains("://") && !trimmed.contains('?')) {
+        // A bare code: no URL context, so the provider falls back to its default ecosystem. Only accept
+        // opaque token shapes, otherwise ordinary pasted text would be submitted as a code.
+        val bare = trimmed.trim('"', '\'', ' ')
+        val looksLikeCode = bare.length >= MIN_BARE_CODE_LENGTH &&
+            bare.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+        return bare.takeIf { looksLikeCode }?.let { it to null }
+    }
+    val query = trimmed.substringAfter('?', missingDelimiterValue = "")
+    if (query.isEmpty()) return null
+    val params = query.substringBefore('#').split('&').mapNotNull { pair ->
+        val index = pair.indexOf('=')
+        if (index <= 0) null else pair.substring(0, index) to pair.substring(index + 1)
+    }.toMap()
+    val code = params[redirect.codeParameter]?.takeIf { it.isNotBlank() } ?: return null
+    val loginType = redirect.loginTypeParameter
+        ?.let { params[it] }
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 }
+    return code to loginType
 }

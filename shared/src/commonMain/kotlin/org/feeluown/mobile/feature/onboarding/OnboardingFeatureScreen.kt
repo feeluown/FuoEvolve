@@ -67,7 +67,7 @@ fun OnboardingFeatureScreen(
     onboarding: OnboardingFeatureController,
     providerCatalog: ProviderCatalogFeatureController,
     providerAuth: ProviderAuthFeatureController,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportYtmusicOAuthFile: (() -> Unit)? = null,
@@ -419,7 +419,7 @@ private fun OnboardingAccountsPage(
     enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -468,7 +468,7 @@ private fun OnboardingProviderAccountCard(
     authState: ProviderAuthUiState,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -496,10 +496,11 @@ private fun OnboardingProviderAccountCard(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(provider.providerName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (currentAuth.isLoggedIn) {
-                            currentAuth.userName?.takeIf { it.isNotBlank() }?.let { "已连接 · $it" } ?: "已连接"
-                        } else {
-                            "尚未连接"
+                        when {
+                            currentAuth.isLoggedIn ->
+                                currentAuth.userName?.takeIf { it.isNotBlank() }?.let { "已连接 · $it" } ?: "已连接"
+                            authController.needsRelogin(provider.providerId) -> "登录已失效，请重新登录"
+                            else -> "尚未连接"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -537,7 +538,7 @@ private fun OnboardingProviderLoginControls(
     enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
     onStartYtmusicOAuth: (() -> Unit)?,
@@ -566,10 +567,34 @@ private fun OnboardingProviderLoginControls(
             }
         }
         when (selectedMode) {
-            ProviderLoginMode.WebView -> Button(
-                onClick = { onOpenProviderWebLogin(provider) },
-                enabled = provider.loginConfig != null && operationInteractive,
-            ) { Text("网页登录") }
+            ProviderLoginMode.WebView -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // A provider may expose several account ecosystems through one web login
+                // (QQ Music: QQ / WeChat); offer one button per entry instead of guessing.
+                val loginChoices = provider.loginConfig?.effectiveLoginChoices.orEmpty()
+                loginChoices.forEach { choice ->
+                    Button(
+                        onClick = { onOpenProviderWebLogin(provider, choice.loginUrl) },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) {
+                        Text(choice.label.ifBlank { "网页登录" })
+                    }
+                }
+                if (loginChoices.size <= 1) {
+                    Button(
+                        onClick = { onOpenProviderWebLogin(provider, null) },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) { Text("网页登录") }
+                }
+                LocalProviderWebLoginStateActions.current.clearWebLoginState?.let { clearWebLoginState ->
+                    TextButton(
+                        onClick = {
+                            clearWebLoginState()
+                            onOpenProviderWebLogin(provider, loginChoices.firstOrNull()?.loginUrl)
+                        },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) { Text("使用其他账号登录") }
+                }
+            }
             ProviderLoginMode.Cookie -> {
                 OutlinedTextField(
                     value = authController.cookieInput(provider.providerId),

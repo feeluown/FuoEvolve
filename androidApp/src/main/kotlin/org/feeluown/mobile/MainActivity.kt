@@ -110,9 +110,26 @@ class MainActivity : ComponentActivity() {
                 val providerId = result.data?.getStringExtra(ProviderWebLoginActivity.EXTRA_PROVIDER_ID).orEmpty()
                     .ifBlank { pendingWebLoginProviderId.orEmpty() }
                 if (result.resultCode == RESULT_OK) {
+                    // A provider OAuth redirect hands back a single-use authorization code; that
+                    // renewable credential wins over the cookie fallback. The code is never logged.
+                    val authorizationCode = result.data
+                        ?.getStringExtra(ProviderWebLoginActivity.EXTRA_AUTHORIZATION_CODE)
+                        .orEmpty()
+                    // 1 = QQ account, 2 = WeChat account; absent means the provider default.
+                    val authorizationLoginType = result.data
+                        ?.getIntExtra(ProviderWebLoginActivity.EXTRA_AUTHORIZATION_LOGIN_TYPE, 0)
+                        ?.takeIf { it > 0 }
                     val cookies = result.data?.getStringExtra(ProviderWebLoginActivity.EXTRA_COOKIES_JSON).orEmpty()
-                    if (providerId.isNotBlank() && cookies.isNotBlank()) {
-                        appUiGraph.providerAuth.loginWithCookies(providerId, cookies)
+                    when {
+                        providerId.isBlank() -> Unit
+                        authorizationCode.isNotBlank() -> {
+                            appUiGraph.providerAuth.loginWithAuthorizationCode(
+                                providerId,
+                                authorizationCode,
+                                authorizationLoginType,
+                            )
+                        }
+                        cookies.isNotBlank() -> appUiGraph.providerAuth.loginWithCookies(providerId, cookies)
                     }
                 }
                 pendingWebLoginProviderId = null
@@ -177,6 +194,12 @@ class MainActivity : ComponentActivity() {
                 },
             )
 
+            val providerWebLoginStateActions = ProviderWebLoginStateActions(
+                // The WebView cookie jar is only wiped by this explicit action. Logout keeps it so a
+                // re-login reuses the trusted browser session (QQ Music answers 登录环境异常 otherwise).
+                clearWebLoginState = { ProviderWebLoginActivity.clearWebLoginState() },
+            )
+
             var pendingLocalPlaylistExport by remember { mutableStateOf<PendingLocalPlaylistExport?>(null) }
             val localPlaylistFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) {
@@ -208,7 +231,10 @@ class MainActivity : ComponentActivity() {
                 launchSharedText?.let(appUiGraph.sharedResources::open)
             }
 
-            CompositionLocalProvider(LocalProviderCredentialBackupActions provides credentialBackupActions) {
+            CompositionLocalProvider(
+                LocalProviderCredentialBackupActions provides credentialBackupActions,
+                LocalProviderWebLoginStateActions provides providerWebLoginStateActions,
+            ) {
                 AppRoot(
                     appViewModel = appViewModel,
                     uiGraph = appUiGraph,
@@ -223,14 +249,17 @@ class MainActivity : ComponentActivity() {
                             isAvailable = hasMicrophonePermission,
                             requestAccess = { microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                         ),
-                        onOpenProviderWebLogin = { provider ->
+                        onOpenProviderWebLogin = { provider, loginUrl ->
                             if (provider.loginConfig != null) {
                                 pendingWebLoginProviderId = provider.providerId
-                                webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
+                                webLoginLauncher.launch(
+                                    ProviderWebLoginActivity.createIntent(this@MainActivity, provider, loginUrl),
+                                )
                             }
                         },
                         onLogoutProvider = { provider ->
-                            ProviderWebLoginActivity.clearWebLoginState()
+                            // Logout only forgets the app-side provider credentials; the WebView
+                            // cookie jar stays until the user picks "使用其他账号登录".
                             appUiGraph.providerAuth.logout(provider.providerId)
                         },
                         onImportYtmusicHeaderFile = { ytmusicHeaderFileLauncher.launch(arrayOf("application/json")) },
