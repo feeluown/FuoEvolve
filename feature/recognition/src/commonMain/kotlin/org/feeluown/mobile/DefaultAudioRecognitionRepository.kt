@@ -47,18 +47,21 @@ class DefaultAudioRecognitionRepository(
         recognitionMutex.withLock {
             coroutineScope recognition@{
                 cancelled.value = false
-                val windows = Channel<FloatArray>(Channel.CONFLATED)
+                val windows = Channel<CapturedRecognitionWindow>(Channel.CONFLATED)
                 var matching = false
-                var captureAttempt = 1
+                var nextWindowOrdinal = 1
+                var captureComplete = false
                 var window = FloatArray(AUDIO_RECOGNITION_WINDOW_SAMPLES)
                 var windowOffset = 0
                 var lastProgressMs = -1L
+                val overlapSamples =
+                    AUDIO_RECOGNITION_WINDOW_SAMPLES - AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES
 
                 val captureJob = launch {
                     captureDevice.capture { chunk ->
-                        if (cancelled.value || chunk.isEmpty()) return@capture
+                        if (cancelled.value || captureComplete || chunk.isEmpty()) return@capture
                         var sourceOffset = 0
-                        while (sourceOffset < chunk.size && !cancelled.value) {
+                        while (sourceOffset < chunk.size && !cancelled.value && !captureComplete) {
                             val copied = minOf(chunk.size - sourceOffset, window.size - windowOffset)
                             chunk.copyInto(
                                 destination = window,
@@ -69,22 +72,52 @@ class DefaultAudioRecognitionRepository(
                             sourceOffset += copied
                             windowOffset += copied
 
-                            val capturedMs = windowOffset * 1_000L / AUDIO_RECOGNITION_SAMPLE_RATE
+                            val initialWindow = nextWindowOrdinal == 1
+                            val progressSamples = if (initialWindow) {
+                                windowOffset
+                            } else {
+                                (windowOffset - overlapSamples).coerceAtLeast(0)
+                            }
+                            val progressDurationMs = if (initialWindow) {
+                                AUDIO_RECOGNITION_WINDOW_MS
+                            } else {
+                                AUDIO_RECOGNITION_WINDOW_STRIDE_MS
+                            }
+                            val capturedMs = progressSamples * 1_000L / AUDIO_RECOGNITION_SAMPLE_RATE
                             if (!matching && capturedMs - lastProgressMs >= RECOGNITION_PROGRESS_INTERVAL_MS) {
                                 lastProgressMs = capturedMs
                                 onEvent(
                                     AudioRecognitionEvent.Capturing(
-                                        attempt = captureAttempt,
+                                        attempt = nextWindowOrdinal,
                                         capturedMs = capturedMs,
+                                        windowDurationMs = progressDurationMs,
                                     ),
                                 )
                             }
 
                             if (windowOffset == window.size) {
-                                windows.trySend(window)
-                                window = FloatArray(AUDIO_RECOGNITION_WINDOW_SAMPLES)
-                                windowOffset = 0
-                                captureAttempt += 1
+                                val ordinal = nextWindowOrdinal
+                                val capturedWindow = window.copyOf()
+                                windows.trySend(
+                                    CapturedRecognitionWindow(
+                                        ordinal = ordinal,
+                                        samples = capturedWindow,
+                                        quality = analyzeRecognitionSignal(capturedWindow),
+                                    ),
+                                )
+                                if (ordinal >= AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS) {
+                                    captureComplete = true
+                                    captureDevice.cancel()
+                                    return@capture
+                                }
+                                window.copyInto(
+                                    destination = window,
+                                    destinationOffset = 0,
+                                    startIndex = AUDIO_RECOGNITION_WINDOW_STRIDE_SAMPLES,
+                                    endIndex = window.size,
+                                )
+                                windowOffset = overlapSamples
+                                nextWindowOrdinal += 1
                                 lastProgressMs = -1L
                             }
                         }
@@ -92,14 +125,28 @@ class DefaultAudioRecognitionRepository(
                 }
 
                 val sessionId = sessionIdFactory()
-                var attempt = 1
                 try {
                     while (isActive && !cancelled.value) {
                         val capturedWindow = windows.receive()
+                        val attempt = capturedWindow.ordinal
                         matching = true
+                        if (!capturedWindow.quality.usable) {
+                            matching = false
+                            onEvent(
+                                AudioRecognitionEvent.NoMatch(
+                                    attempt = attempt,
+                                    nextWindowDurationMs = AUDIO_RECOGNITION_WINDOW_STRIDE_MS,
+                                ),
+                            )
+                            if (attempt >= AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS) {
+                                return@recognition emptyList()
+                            }
+                            continue
+                        }
+
                         onEvent(AudioRecognitionEvent.Matching(attempt))
                         val fingerprint = fingerprintRuntime.generate(
-                            downsampleRecognitionWindow(capturedWindow),
+                            downsampleRecognitionWindow(capturedWindow.samples),
                         )
                         val matches = matcher.match(sessionId, fingerprint)
                         if (matches.isNotEmpty()) {
@@ -108,11 +155,15 @@ class DefaultAudioRecognitionRepository(
                         }
 
                         matching = false
-                        onEvent(AudioRecognitionEvent.NoMatch(attempt))
-                        if (attempt >= AUDIO_RECOGNITION_MAX_ATTEMPTS) {
+                        onEvent(
+                            AudioRecognitionEvent.NoMatch(
+                                attempt = attempt,
+                                nextWindowDurationMs = AUDIO_RECOGNITION_WINDOW_STRIDE_MS,
+                            ),
+                        )
+                        if (attempt >= AUDIO_RECOGNITION_MAX_CAPTURED_WINDOWS) {
                             return@recognition emptyList()
                         }
-                        attempt += 1
                     }
                     emptyList()
                 } catch (throwable: Throwable) {
@@ -138,6 +189,12 @@ class DefaultAudioRecognitionRepository(
         matcher.cancel()
     }
 }
+
+private data class CapturedRecognitionWindow(
+    val ordinal: Int,
+    val samples: FloatArray,
+    val quality: RecognitionSignalQuality,
+)
 
 private fun newRecognitionSessionId(): String = buildString {
     repeat(4) { index ->

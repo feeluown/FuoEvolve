@@ -1,15 +1,25 @@
 # Native dependency inputs used by desktop packaging CI.
 # Keep immutable release URLs and SHA-256 values here so packaging does not silently follow latest assets.
 
-# GitHub's macOS arm64/x64 runner images currently carry different Homebrew core snapshots,
-# so pin the exact formula revision per architecture instead of silently accepting either.
-macos.arm64.mpv.version=0.41.0_9
-macos.x64.mpv.version=0.41.0_8
+# GitHub's macOS arm64/x64 runner images can carry different Homebrew core snapshots, so pin the
+# upstream mpv version per architecture instead of silently accepting either one.
+#
+# Homebrew reports the version with a formula revision suffix (for example 0.41.0_12). That suffix
+# is a homebrew-core rebuild counter that changes whenever mpv or its dependency closure is rebuilt,
+# and an older revision cannot be installed once a runner image moves past it. Pinning it made CI
+# fail on unrelated rebuilds, so prepare-libmpv.sh tolerates revision drift and only fails when the
+# upstream mpv version changes, which still requires a deliberate bump here.
+macos.arm64.mpv.version=0.41.0
+macos.x64.mpv.version=0.41.0
 
 # shinchiro/mpv-winbuild-cmake development archive contains the libmpv DLL + development runtime.
 # Cache schema v2 stages the complete public mpv header set for the GPU render API.
-windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261102/mpv-dev-x86_64-20261102-git-2137d21b2e.7z
-windows.x64.libmpv.sha256=5ca801552661c18fa0b1edfd41dba6e5d9aa9d6d3d6c42dbe3fb91a45eb79f16
+#
+# The upstream project keeps only its most recent daily releases, so an old pin starts returning
+# 404 within roughly a month. When that happens, re-pin to a published mpv-dev-x86_64 archive and
+# replace the SHA-256 with the digest GitHub publishes for that asset.
+windows.x64.libmpv.url=https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261111/mpv-dev-x86_64-20261111-git-bcde6b93cc.7z
+windows.x64.libmpv.sha256=273c079b11ea5575822f972756f4c9a71149a5c10130353abeb8586738938452
 
 # AppImage tooling is pinned independently of the Linux distribution packages used to collect libmpv.
 appimagetool.x64.url=https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage

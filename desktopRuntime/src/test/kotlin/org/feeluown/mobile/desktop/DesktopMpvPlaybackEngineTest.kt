@@ -1,5 +1,6 @@
 package org.feeluown.mobile.desktop
 
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -10,6 +11,87 @@ import org.feeluown.mobile.PlayerStatus
 import org.feeluown.mobile.TrackSourceType
 
 class DesktopMpvPlaybackEngineTest {
+    @Test
+    fun fileUriLoadsDecodedPathAndAcceptsNativeFileLoaded() {
+        lateinit var listener: (DesktopMpvBackendEvent) -> Unit
+        val backend = RecordingBackend()
+        val engine = DesktopMpvPlaybackEngine { callback ->
+            listener = callback
+            backend
+        }
+        val path = Path.of("Music", "春雪 + #100%.mp3").toAbsolutePath()
+        val uri = path.toUri().toASCIIString()
+        val track = track("local:file").copy(
+            source = "local",
+            sourceType = TrackSourceType.LocalMediaStore,
+            localUri = uri,
+        )
+        try {
+            engine.play(track, payload(track).copy(url = uri))
+
+            listener(DesktopMpvBackendEvent.PlaybackRestart)
+            assertEquals(PlayerStatus.Loading, engine.state.value.status)
+            listener(DesktopMpvBackendEvent.FileLoaded(path.toString(), 1L))
+
+            assertEquals(PlayerStatus.Playing, engine.state.value.status)
+            assertEquals(path.toString(), backend.loadedUrl)
+            assertEquals(uri, engine.state.value.currentTrack?.localUri)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun resolvedFileUriIgnoresFileLoadedFromPreviousRequest() {
+        lateinit var listener: (DesktopMpvBackendEvent) -> Unit
+        val backend = RecordingBackend()
+        val engine = DesktopMpvPlaybackEngine { callback ->
+            listener = callback
+            backend
+        }
+        val previousPath = Path.of("Music", "previous.mp3").toAbsolutePath()
+        val currentPath = Path.of("Music", "current.mp3").toAbsolutePath()
+        val track = track("local:current")
+        try {
+            engine.play(track, payload(track).copy(url = previousPath.toUri().toString()))
+            engine.playResolved(track, track, payload(track).copy(url = currentPath.toUri().toString()))
+            listener(DesktopMpvBackendEvent.PlaybackRestart)
+            listener(DesktopMpvBackendEvent.FileLoaded(previousPath.toString(), 1L))
+            assertEquals(PlayerStatus.Loading, engine.state.value.status)
+
+            listener(DesktopMpvBackendEvent.FileLoaded(currentPath.toString(), 2L))
+
+            assertEquals(PlayerStatus.Playing, engine.state.value.status)
+            assertEquals(currentPath.toString(), backend.loadedUrl)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun nonFileUrlsNativePathsAndInvalidFileUrisArePassedThrough() {
+        val backend = RecordingBackend()
+        val engine = DesktopMpvPlaybackEngine { backend }
+        val track = track("passthrough")
+        val headers = mapOf("Referer" to "https://example.test/")
+        try {
+            listOf(
+                "https://example.test/song%20name.mp3?token=a%2Bb",
+                "http://example.test/song.mp3",
+                "/music/song + #100%.mp3",
+                "C:\\Music\\song.mp3",
+                "file:///music/invalid%ZZ.mp3",
+            ).forEach { url ->
+                engine.play(track, payload(track).copy(url = url, headers = headers))
+
+                assertEquals(url, backend.loadedUrl)
+                assertEquals(headers, backend.loadedHeaders)
+            }
+        } finally {
+            engine.close()
+        }
+    }
+
     @Test
     fun reloadingAfterPauseClearsNativePauseBeforePlaybackRestart() {
         lateinit var listener: (DesktopMpvBackendEvent) -> Unit
@@ -68,8 +150,13 @@ class DesktopMpvPlaybackEngineTest {
 
 private class RecordingBackend : DesktopMpvBackend {
     var nativePaused = false
+    var loadedUrl: String? = null
+    var loadedHeaders: Map<String, String> = emptyMap()
 
-    override fun load(url: String, headers: Map<String, String>) = Unit
+    override fun load(url: String, headers: Map<String, String>) {
+        loadedUrl = url
+        loadedHeaders = headers
+    }
 
     override fun setPaused(paused: Boolean) {
         nativePaused = paused
