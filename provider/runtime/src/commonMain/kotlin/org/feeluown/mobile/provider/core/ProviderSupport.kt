@@ -29,6 +29,8 @@ import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
 import org.feeluown.mobile.ProviderPlaylistDetail
 import org.feeluown.mobile.ProviderResourceState
+import org.feeluown.mobile.ProviderScanLogin
+import org.feeluown.mobile.ProviderScanLoginResult
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.ProviderVideo
 import org.feeluown.mobile.ProviderComment
@@ -513,6 +515,20 @@ interface KotlinMusicProvider {
      */
     suspend fun loginWithAuthorizationCode(code: String, loginType: Int? = null): ProviderAuthState =
         throw UnsupportedOperationException("provider does not support authorization code login: $id")
+
+    /**
+     * Starts a login the user approves outside the app (see [org.feeluown.mobile.ProviderLoginMode.Scan]).
+     *
+     * Providers that support it hand back their own authorize URL, which the app opens in a browser;
+     * the returned session id is what [pollScanLogin] keeps asking about. Providers that do not
+     * support it reject the call, and callers fall back to the web view login.
+     */
+    suspend fun beginScanLogin(loginType: Int? = null): ProviderScanLogin =
+        throw UnsupportedOperationException("provider does not support scan login: $id")
+
+    /** Polls a session created by [beginScanLogin]. */
+    suspend fun pollScanLogin(sessionId: String): ProviderScanLoginResult =
+        throw UnsupportedOperationException("provider does not support scan login: $id")
 
     suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithHeaderFile(headerFileJson: String): ProviderAuthState

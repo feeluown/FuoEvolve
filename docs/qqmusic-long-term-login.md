@@ -215,6 +215,40 @@ Content-Type: application/x-www-form-urlencoded
 
 ---
 
+### 4.1c 手机客户端扫码登录协议（手机端主路径）
+
+网页扫码（`qrconnect`）的二维码没法用「显示它的那台手机」去扫，所以手机端走 QQ 音乐自己的**手机客户端扫码登录**协议：它本质上是「创建会话 → 用浏览器打开授权页 → 轮询」，**页面只是确认环节，不需要真的扫码**，因此同一台手机就能完成 QQ 或微信登录。
+
+**前提：必须伪装成 Android 客户端**（`ct=11, cv=20090008`，`comm` 与 `param` 都要带）。用 Web 身份（`ct=24, cv=0`）创建会得到 `req=104610 can NOT scan the qrCode with this APP, not in cts-white-list`。
+
+| 步骤 | 请求 | 实测结果 |
+| --- | --- | --- |
+| ① 创建会话 | `music.login.LoginServer/CreateQRCode`，`param:{tmeAppID:\"qqmusic\",ct:11,cv:20090008}` | `req=0`，`data={qrcodeID(91 字符), qrcode(150×150 PNG), expiresIn:900}` |
+| ② 取会话 token | 同上 `GetQRCodeStatus`，`param:{tmeAppID,ct,cv,qrCodeID}` | `req=0`，`data.token`（72 字符，**未扫码阶段就有**） |
+| ③ 授权页 | 浏览器打开自建的 OAuth URL（见下） | HTTP 200，`redirect_uri` 被完整保留 |
+| ④ 轮询 | `GetQRCodeStatus` | `data.info.status`、`data.info.scanUser{tmeAppID,loginType,userID,musicId,openid,unionid,…}` |
+| ⑤ 换凭据 | `music.login.LoginServer/Login`，`param:{musicid, qrCodeID, token}` | 与授权码兑换**同一套** Credential 字段 |
+
+**为什么不用官网那个授权页**：`authorize.html?qrcode_id=…` 上自带的 QQ / 微信按钮，其 `client_id` / `appid` 全部取自 `GetQRCodeStatus` 返回的 `info.oauth_appid`，而实测该字段**恒为空字符串**（Android 身份、Web 身份、`comm:{}`、带 `uid`/`appid`/`appName` 参数都一样），按钮会拼出 `client_id=undefined`。因此改为**自己拼 OAuth URL**，复用页面自己的回调承载页 `redirect.html`（它读 query 里的 `code` 并调用 `QRCodeLogin` 完成确认）：
+
+```text
+# QQ（loginType=1）：client_id 是 y.qq.com 自己的 100497308
+https://graph.qq.com/oauth2.0/authorize?response_type=code&client_id=100497308
+  &redirect_uri=<urlencoded redirect.html>&state=state&display=mobile
+  &scope=get_user_info,get_app_friends
+
+# 微信（loginType=2）：非微信内置浏览器打开会提示「请在微信客户端打开链接」（预期行为）
+https://open.weixin.qq.com/connect/oauth2/authorize?appid=wx48db31d50e334801
+  &redirect_uri=<urlencoded redirect.html>&response_type=code&scope=snsapi_userinfo
+  &state=state#wechat_redirect
+
+# 两者共用的回调承载页（注意键名是大写 qrcodeID，与 authorize.html 的 qrcode_id 不同）
+https://y.qq.com/m/client/qr_code_login/redirect.html?qrcodeID=<id>&tmeAppID=qqmusic&appName=&token=<token>
+```
+
+**微信路径在手机上的实际操作**：点微信账号 → 打开的是微信授权页，浏览器会提示需要用微信打开 → 把该链接发到微信里打开（或直接在微信内打开）→ 微信内一键授权 → 回跳到 `redirect.html` 完成确认 → App 轮询到 Approved。
+
+**换来的凭据与授权码登录完全等价**：`musickey` + `refresh_token` + `expired_at`，因此续期、落盘、凭据备份、`loginMethod` 判定全部复用既有实现，没有第二套会话模型。
 ## 6. 代码实现（当前已落地）
 
 分层原则：**provider 拥有协议与凭据，平台只负责把授权码递上来，应用层只负责状态与 UI**。
@@ -304,17 +338,20 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 
 ### 6.7 手机端的账号获取路径
 
-二维码无法用"显示它的那台手机"去扫，所以手机端需要别的入口（App 内已提供）：
+二维码无法用「显示它的那台手机」去扫，所以手机端需要别的入口。当前 App 内有两条自助路径：
 
-| 路径 | 适用 | 说明 |
+| 路径 | 手机可用 | 说明 |
 | --- | --- | --- |
-| 网页登录 → QQ 账号 | 手机/桌面 | 走 y.qq.com 自己的登录对话框：扫码**或密码登录**，手机上密码登录不需要第二台设备 |
-| 网页登录 → 微信账号 | 桌面 | 微信二维码需要有另一台设备的微信来扫 |
-| 「粘贴授权链接」 | 手机（微信） | 在别处（另一台设备/微信内置浏览器）完成授权后，把停在 `y.qq.com/portal/wx_redirect.html?…&code=…` 的整条链接粘贴进 App 完成登录 |
-| 凭据备份导入 | 手机 | 桌面端登录后「导出凭据（加密）」，手机端导入即可复用可续期会话（加密备份保留 `session`） |
+| **扫码登录 → QQ 账号** | ✅ | 打开 QQ 的手机版授权页，扫码**或密码登录**都可以，不需要第二台设备 |
+| **扫码登录 → 微信账号** | ⚠️ | 打开微信授权页，需要用微信内置浏览器打开该链接（可发给自己再点开）；不需要第二台设备 |
+| 网页登录 → QQ 账号 | ✅ | 走 y.qq.com 自己的登录对话框 |
+| 网页登录 → 微信账号 | ❌ | 二维码需要有另一台设备的微信来扫 |
+| 「粘贴授权链接」 | ✅ | 在别处完成网页授权后，把停在 `wx_redirect.html?…&code=…` 的整条链接粘进 App |
+| 凭据备份导入 | ✅ | 桌面端登录后「导出凭据（加密）」，手机端导入即可复用可续期会话 |
 
-「粘贴授权链接」的解析由 provider 声明的 `authorizationCodeRedirect` 驱动（`parseProviderAuthorizationCode`），因此不绑定 QQ 音乐的具体参数名。
+扫码登录的实现分层：`ProviderLoginMode.Scan` + `ProviderScanLogin` / `ProviderScanLoginResult`（契约）→ `beginScanLogin(loginType)` / `pollScanLogin(sessionId)`（provider）→ `ProviderAuthFeature` 的 `startScanLogin` 轮询与状态推进 → 设置页/引导页用系统浏览器打开 `authorizeUrl`。UI 从不直接调用 suspend port。
 
+`loginType` 由 provider 声明的 `ProviderLoginChoice.loginType` 驱动（QQ 音乐：1 = QQ，2 = 微信），UI 只负责回传，不硬编码。
 ## 7. 刷新调度与降级
 
 | 时机 | 动作 |
@@ -345,6 +382,8 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 | `refresh_token` 是否轮换 | 两次续期都返回 32 字符，未比较值 | 低：实现已"每次都用返回的新 token" |
 | 60 天到期后的行为 | 未测 | 中：决定文案与预期；预计必须重扫 |
 | 微信登录路径（`login_type=2` → `open.weixin.qq.com/connect/qrconnect` → `strAppid=wx48db31d50e334801`） | **已实现**（兑换/续期报文、cookie 合成、登录入口选择、`login_type` 透传均有单测），但**未用真实微信账号实测** | 中：报文取自 QQ 音乐自身页面与参考实现 |
+| 扫码登录的「已确认」状态字符串 | 推断集合（真机只抓到 `"scaned"` 且 `userID=0`），常量集中、大小写不敏感 | 中：真机抓到真值后加一行常量即可 |
+| 扫码登录的 `Login` 兑换成功返回 | 只验证到参数被接受（假值返回 `104400`），字段表与授权码兑换同 schema | 中：复用 `sessionFromPayload`，若上游字段有差异需补映射 |
 | 真机三端拦截 | 仅编译 + 单测 | 高：需手动冒烟（见第 10 节） |
 | 协议变更 | 无版本协商 | 中：`req.code` 归因 + 降级重登兜底 |
 | 二维码/授权页改版 | `LOGIN_URL` 参数写死 | 低：改常量即可 |
@@ -364,7 +403,7 @@ shared(desktopMain)    DesktopProviderWebLogin.kt / DesktopAppHost.kt
 
 单测覆盖：授权码兑换成功 / 去除首尾空白 / 重放返回 1000、续期成功并换新 key、grant 过期、key 过期且不可续期、cookie 合成、失败归因；**微信兑换/续期报文与 cookie、legacy(`loginMethod == null`) 按 QQ 续期、两个登录入口定义**；明文导出剥离 `session` / 加密导出保留 `session`（`ProviderCredentialBackupSessionTest`）；`ProviderSessionRepository.loginWithAuthorizationCode` 的状态发布（`ProviderSessionRepositoryTest`）。
 
-当前规模：**456 个单测全绿**（qqmusic 49 / shared 311 / runtime 12 / netease 15 / bilibili 13 / ytmusic 34 / search 11 / providerauth 6 / providercatalog 5）。
+当前规模：**478 个单测全绿**（qqmusic 65 / shared 315 / runtime 12 / netease 15 / bilibili 13 / ytmusic 34 / search 11 / providerauth 8 / providercatalog 5）。
 
 ### 10.2 待补测试
 

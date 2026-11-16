@@ -14,6 +14,8 @@ import org.feeluown.mobile.ProviderMutationResult
 import org.feeluown.mobile.ProviderPlaylist
 import org.feeluown.mobile.ProviderPlaylistDetail
 import org.feeluown.mobile.ProviderResourceState
+import org.feeluown.mobile.ProviderScanLogin
+import org.feeluown.mobile.ProviderScanLoginResult
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.ProviderVideo
 import org.feeluown.mobile.VideoPlaybackPayload
@@ -61,6 +63,9 @@ class CapabilityDelegatingProvider(
     override suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState = account.loginWithCookies(cookiesJson)
     override suspend fun loginWithAuthorizationCode(code: String, loginType: Int?): ProviderAuthState =
         account.loginWithAuthorizationCode(code, loginType)
+    override suspend fun beginScanLogin(loginType: Int?): ProviderScanLogin = account.beginScanLogin(loginType)
+    override suspend fun pollScanLogin(sessionId: String): ProviderScanLoginResult =
+        account.pollScanLogin(sessionId)
     override suspend fun loginWithHeaders(authorization: String, cookie: String): ProviderAuthState =
         account.loginWithHeaders(authorization, cookie)
     override suspend fun loginWithHeaderFile(headerFileJson: String): ProviderAuthState =

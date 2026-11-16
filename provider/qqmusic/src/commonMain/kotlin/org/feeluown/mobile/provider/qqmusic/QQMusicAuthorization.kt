@@ -93,6 +93,86 @@ internal object QQMusicAuthorization {
     const val DEFAULT_AUTH_KEY_LIFETIME_MILLIS = 259_200_000L
 
     const val REFERER = "https://y.qq.com/"
+
+    /**
+     * Identity of QQ Music's own **Android client**, required by every scan-login call.
+     *
+     * `ct`/`cv` tell the gateway which client build is calling. The web identity every other request
+     * in this module uses (`ct = 24`, `cv = 0`) is explicitly rejected by these methods: the service
+     * answers `req.code = 104610` ("can NOT scan the qrCode with this APP, not in cts-white-list").
+     * `CreateQRCode`, `GetQRCodeStatus` and the QR `Login` exchange therefore impersonate the phone
+     * client and send these numbers in *both* the `comm` block and the method `param`, exactly as the
+     * app itself does.
+     */
+    const val QR_CLIENT_CT = 11
+    const val QR_CLIENT_CV = 20090008
+
+    /**
+     * Scan-login module/methods.
+     *
+     * `Login` is the *QR* exchange (it takes `musicid` + `qrCodeID` + `token`); `QRCodeLogin` is what
+     * QQ Music's authorize H5 calls with its own OAuth code and is not needed here.
+     */
+    const val QR_MODULE = "music.login.LoginServer"
+    const val QR_CREATE_METHOD = "CreateQRCode"
+    const val QR_STATUS_METHOD = "GetQRCodeStatus"
+    const val QR_LOGIN_METHOD = "Login"
+
+    /**
+     * QQ Music's OAuth callback page for the scan-login session.
+     *
+     * `authorize.html` (the page QQ Music itself shows with a QR code) is NOT usable here: its own QQ
+     * and WeChat buttons take `client_id`/`appid` from `info.oauth_appid` returned by
+     * [QR_STATUS_METHOD], and that field is a verified-empty string for sessions created by this
+     * client - the buttons would navigate to `client_id=undefined`.
+     *
+     * `redirect.html` is the other entry point in the same bundle: it reads the OAuth `code` from its
+     * own query and calls `QRCodeLogin` to confirm the session. The app therefore builds the OAuth
+     * authorize URL itself and points `redirect_uri` at this page.
+     */
+    const val QR_REDIRECT_PAGE = "https://y.qq.com/m/client/qr_code_login/redirect.html"
+
+    /**
+     * `client_id` of the QQ-account OAuth app y.qq.com itself logs in with.
+     *
+     * Verified live: the authorize URL built with this id answers 200, lands on QQ's `ptlogin2` page
+     * and keeps `redirect_uri` intact.
+     */
+    const val QQ_OAUTH_CLIENT_ID = "100497308"
+
+    /** QQ OAuth authorize endpoint. */
+    const val QQ_OAUTH_AUTHORIZE_URL = "https://graph.qq.com/oauth2.0/authorize"
+
+    /** WeChat OAuth authorize endpoint (the mobile `snsapi_userinfo` flow). */
+    const val WECHAT_OAUTH_AUTHORIZE_URL = "https://open.weixin.qq.com/connect/oauth2/authorize"
+
+    /** QQ OAuth scope QQ Music's own login requests. */
+    const val QQ_OAUTH_SCOPE = "get_user_info,get_app_friends"
+
+    /** WeChat OAuth scope for the scan login. */
+    const val WECHAT_OAUTH_SCOPE = "snsapi_userinfo"
+
+    /** Server-side session lifetime in seconds, used when `CreateQRCode` omits `expiresIn`. */
+    const val DEFAULT_QR_SESSION_SECONDS = 900L
+
+    /** How often the app should poll `GetQRCodeStatus`. */
+    const val QR_POLL_INTERVAL_MILLIS = 2_000L
+
+    /**
+     * `info.status` values treated as "the user confirmed the login".
+     *
+     * INFERRED, not captured: the live service was only observed in the pre-confirmation phase
+     * (`"scaned"`). QQ Music's page switches on this string too, so the set is kept in one place and
+     * compared case-insensitively; add values here as real confirmations are observed.
+     */
+    val QR_CONFIRMED_STATUSES: Set<String> = setOf(
+        "confirmed",
+        "confirmedlogin",
+        "loginsuccess",
+        "loginok",
+        "success",
+        "done",
+    )
 }
 
 /**
@@ -190,6 +270,276 @@ internal suspend fun exchangeAuthorizationCode(
 }
 
 /**
+ * A scan-login session created by `music.login.LoginServer/CreateQRCode`.
+ *
+ * [sessionId] is the 91 character `qrcodeID` QQ Music issued; [authorizeUrl] is the OAuth authorize
+ * URL the user opens to approve it. Nothing about the account is known yet - the account arrives
+ * with the later status polls.
+ */
+internal data class QQMusicQrSession(
+    val sessionId: String,
+    /** OAuth authorize URL (QQ or WeChat) that returns to [QQMusicAuthorization.QR_REDIRECT_PAGE]. */
+    val authorizeUrl: String,
+    /** Absolute wall-clock deadline of the session (from `CreateQRCode`'s `expiresIn`). */
+    val expiresAtMillis: Long,
+    /** Login server token from the immediately following status poll; also embedded in the URL. */
+    val confirmToken: String,
+)
+
+/**
+ * One poll of a [QQMusicQrSession], i.e. the scan-login state machine before credentials exist.
+ *
+ * [Approved] cannot carry a session yet: minting credentials is a second call
+ * ([loginWithQrSession]) that only the provider layer performs, because only it can persist them.
+ */
+internal sealed interface QQMusicQrStatus {
+    /** The session is live but no account has been recognized yet. */
+    data object Pending : QQMusicQrStatus
+
+    /** An account was recognized and is waiting for the user to confirm in the browser page. */
+    data object Scanned : QQMusicQrStatus
+
+    /**
+     * The user confirmed; [musicId] + a token are what the QR `Login` exchange needs.
+     *
+     * [token] is the confirmation token this poll returned, or `null` when the poll omitted it - the
+     * caller then reuses the token [createQrSession] obtained right after `CreateQRCode`.
+     */
+    data class Approved(
+        val musicId: Long,
+        val token: String?,
+        /** `scanUser.loginType`; 1 = QQ account, 2 = WeChat account, `null` when absent. */
+        val loginType: Int?,
+    ) : QQMusicQrStatus
+
+    /** The session timed out or the login server forgot it; the app must create a new one. */
+    data object Expired : QQMusicQrStatus
+
+    /** The login server refused the poll; [message] is user-presentable. */
+    data class Failed(val message: String) : QQMusicQrStatus
+}
+
+/**
+ * Creates a scan-login session and returns its id plus the OAuth authorize URL to open.
+ *
+ * Two requests, in this order and both required:
+ *
+ * 1. `CreateQRCode` mints the `qrcodeID`;
+ * 2. `GetQRCodeStatus` immediately afterwards - it already carries `data.token` (72 characters,
+ *    verified live) before anybody scans, and `redirect.html` needs that token to confirm the
+ *    session after the OAuth round trip.
+ *
+ * The authorize URL is built here rather than by QQ Music's own `authorize.html`, whose QQ/WeChat
+ * buttons take their `client_id`/`appid` from `info.oauth_appid` - a verified-empty string for
+ * sessions this client creates. See [QQMusicAuthorization.QR_REDIRECT_PAGE].
+ *
+ * [loginMethod] selects the account ecosystem ([QQMusicLoginMethod.Qq] by default), which decides
+ * the OAuth endpoint, client id and scope; both variants return to the same redirect page.
+ *
+ * @throws ProviderOperationException when the login server refuses to create a session or answers
+ *   without the confirmation token.
+ */
+internal suspend fun createQrSession(
+    http: ProviderHttpClient,
+    loginMethod: QQMusicLoginMethod = QQMusicLoginMethod.Qq,
+    nowMillis: Long = currentTimeMillis(),
+): QQMusicQrSession {
+    val data = requestSessionData(
+        http = http,
+        payload = qrCreatePayload(),
+        operation = "QQ Music scan-login session creation",
+    )
+    val sessionId = data.stringOrNull("qrcodeID")
+        ?: data.stringOrNull("qrcodeId")
+        ?: throw providerContractException(
+            QQMusicProviderDefinition.ID,
+            "QQ Music CreateQRCode response is missing qrcodeID",
+        )
+    val lifetimeSeconds = data.qrNumber("expiresIn")?.takeIf { it > 0L }
+        ?: QQMusicAuthorization.DEFAULT_QR_SESSION_SECONDS
+    val confirmToken = requestSessionData(
+        http = http,
+        payload = qrStatusPayload(sessionId),
+        operation = "QQ Music scan-login status",
+    ).stringOrNull("token")
+        ?: throw providerContractException(
+            QQMusicProviderDefinition.ID,
+            "QQ Music GetQRCodeStatus response is missing the confirmation token",
+        )
+    return QQMusicQrSession(
+        sessionId = sessionId,
+        authorizeUrl = qrOAuthUrl(loginMethod, sessionId, confirmToken),
+        expiresAtMillis = nowMillis + lifetimeSeconds * 1_000L,
+        confirmToken = confirmToken,
+    )
+}
+
+/**
+ * Polls a scan-login session and maps it onto [QQMusicQrStatus].
+ *
+ * Verified against the live service in the pre-confirmation phase: the poll answers `req.code = 0`
+ * with a 72 character `token` and `info.scanUser`, but `info.status` is the string `"scaned"` and
+ * `scanUser.userID` is `0` - i.e. those fields alone mean "recognized, not confirmed yet", not
+ * "approved". The confirmed state was therefore modelled on QQ Music's own page logic:
+ *
+ * - `info.status` (case-insensitive) in [QQMusicAuthorization.QR_CONFIRMED_STATUSES] means approved;
+ * - otherwise `scanUser.userID > 0` / a non-blank `scanUser.musicId` means [QQMusicQrStatus.Scanned].
+ *
+ * The confirmed literals are *inferred* (no live sample was captured) and deliberately kept in one
+ * extensible set. Session-expiry business codes surface as [QQMusicQrStatus.Expired] and every other
+ * refusal as [QQMusicQrStatus.Failed], so a temporary upstream problem never loses the flow.
+ */
+internal suspend fun qrSessionStatus(
+    http: ProviderHttpClient,
+    sessionId: String,
+): QQMusicQrStatus {
+    val qrCodeId = sessionId.trim()
+    if (qrCodeId.isEmpty()) return QQMusicQrStatus.Expired
+    val data = try {
+        requestSessionData(
+            http = http,
+            payload = qrStatusPayload(qrCodeId),
+            operation = "QQ Music scan-login status",
+        )
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (failure: Throwable) {
+        if (failure.isQrSessionExpired()) return QQMusicQrStatus.Expired
+        return QQMusicQrStatus.Failed(failure.qrFailureMessage())
+    }
+    val info = data.obj("info")
+    val scanUser = info?.obj("scanUser") ?: data.obj("scanUser")
+    val status = info?.string("status").orEmpty()
+    val musicId = scanUser?.qrNumber("userID")
+    val token = data.stringOrNull("token")
+    val loginType = scanUser?.int("loginType")
+    val confirmed = status.trim().lowercase() in QQMusicAuthorization.QR_CONFIRMED_STATUSES
+    val recognized = (musicId ?: 0L) > 0L || scanUser?.stringOrNull("musicId") != null
+    return when {
+        confirmed -> {
+            val id = musicId?.takeIf { it > 0L }
+                ?: scanUser?.qrNumber("musicId")
+            if (id == null) {
+                QQMusicQrStatus.Failed("QQ Music scan-login confirmation carried no account id")
+            } else {
+                QQMusicQrStatus.Approved(musicId = id, token = token, loginType = loginType)
+            }
+        }
+
+        recognized -> QQMusicQrStatus.Scanned
+        else -> QQMusicQrStatus.Pending
+    }
+}
+
+/**
+ * Exchanges an approved [QQMusicQrStatus.Approved] for a renewable session.
+ *
+ * The response uses the *same* credential schema as the authorization-code exchange, so it goes
+ * through [sessionFromPayload] - one mapping, one set of renewable-session semantics. The login
+ * method is taken from `scanUser.loginType` (1 = QQ, 2 = WeChat) and, when the login server omits
+ * it, from the minted key's prefix (`W_X…` is WeChat's), so the later renewal picks the right
+ * request shape.
+ *
+ * @throws ProviderOperationException with [ProviderFailureKind.LoginExpired] when the session is not
+ *   confirmed yet - the service answers `req.code = 104400` for exactly that.
+ */
+internal suspend fun loginWithQrSession(
+    http: ProviderHttpClient,
+    sessionId: String,
+    musicId: Long,
+    token: String,
+    loginType: Int? = null,
+    nowMillis: Long = currentTimeMillis(),
+): QQMusicAuthorizationResult {
+    val qrCodeId = sessionId.trim()
+    if (qrCodeId.isEmpty()) {
+        throw providerContractException(
+            QQMusicProviderDefinition.ID,
+            "QQ Music scan-login session id is empty",
+        )
+    }
+    val data = requestSessionData(
+        http = http,
+        payload = qrLoginPayload(musicId, qrCodeId, token),
+        operation = "QQ Music scan-login exchange",
+    )
+    val authKey = data.stringOrNull("musickey").orEmpty()
+    return QQMusicAuthorizationResult(
+        session = sessionFromPayload(
+            data = data,
+            nowMillis = nowMillis,
+            previous = null,
+            loginMethod = qrLoginMethod(loginType, authKey),
+        ),
+    )
+}
+
+/**
+ * The OAuth callback URL `redirect.html` receives: the session it must confirm.
+ *
+ * Keys are exactly what the page's own serializer emits, including the **camel-case** `qrcodeID`
+ * (this page, unlike `authorize.html`, reads the camel-case spelling). `appName` is sent empty
+ * because the page tolerates it and this client has no app name to contribute.
+ */
+internal fun qrRedirectUrl(sessionId: String, token: String): String =
+    QQMusicAuthorization.QR_REDIRECT_PAGE +
+        "?qrcodeID=" +
+        encodeUrlComponent(sessionId) +
+        "&tmeAppID=" +
+        encodeUrlComponent(QQMusicAuthorization.TME_APP_ID) +
+        "&appName=" +
+        "&token=" +
+        encodeUrlComponent(token)
+
+/**
+ * Builds the OAuth authorize URL the user opens to approve [sessionId].
+ *
+ * Both ecosystems end on [qrRedirectUrl]; only the provider endpoint, client id and scope differ:
+ *
+ * - QQ: `graph.qq.com/oauth2.0/authorize` with y.qq.com's own `client_id` and `display=mobile`.
+ *   Verified live: HTTP 200, lands on `ptlogin2`, keeps `redirect_uri` intact.
+ * - WeChat: `open.weixin.qq.com/connect/oauth2/authorize` with `scope=snsapi_userinfo`. WeChat
+ *   renders only inside its in-app browser and otherwise shows "请在微信客户端打开链接", which is
+ *   the intended guidance for a user who picked WeChat in a normal mobile browser.
+ *
+ * The trailing `#wechat_redirect` fragment is part of the WeChat protocol and must stay.
+ */
+internal fun qrOAuthUrl(
+    loginMethod: QQMusicLoginMethod,
+    sessionId: String,
+    token: String,
+): String {
+    val redirectUrl = encodeUrlComponent(qrRedirectUrl(sessionId, token))
+    return when (loginMethod) {
+        QQMusicLoginMethod.Qq -> buildString {
+            append(QQMusicAuthorization.QQ_OAUTH_AUTHORIZE_URL)
+            append("?response_type=code")
+            append("&client_id=")
+            append(QQMusicAuthorization.QQ_OAUTH_CLIENT_ID)
+            append("&redirect_uri=")
+            append(redirectUrl)
+            append("&state=state")
+            append("&display=mobile")
+            append("&scope=")
+            append(encodeUrlComponent(QQMusicAuthorization.QQ_OAUTH_SCOPE))
+        }
+
+        QQMusicLoginMethod.Wechat -> buildString {
+            append(QQMusicAuthorization.WECHAT_OAUTH_AUTHORIZE_URL)
+            append("?appid=")
+            append(QQMusicAuthorization.WECHAT_APP_ID)
+            append("&redirect_uri=")
+            append(redirectUrl)
+            append("&response_type=code")
+            append("&scope=")
+            append(QQMusicAuthorization.WECHAT_OAUTH_SCOPE)
+            append("&state=state")
+            append("#wechat_redirect")
+        }
+    }
+}
+
+/**
  * Renews [session] with its `refresh_token` and returns the new session material.
  *
  * The request shape follows [ProviderSessionCredential.loginMethod]: QQ sessions send
@@ -260,6 +610,105 @@ internal fun qqSessionCookies(
         session.unionId?.takeIf(String::isNotBlank)?.let { put("wxunionid", it) }
     }
 }
+
+/**
+ * `comm` block for the scan-login calls.
+ *
+ * These calls impersonate QQ Music's Android client: the web identity (`ct = 24, cv = 0`) is
+ * rejected by the login server, and the scan methods read the client identity from *both* the
+ * `comm` block and their own `param`, so both carry [QQMusicAuthorization.QR_CLIENT_CT] /
+ * [QQMusicAuthorization.QR_CLIENT_CV].
+ */
+private fun qrCommObject(): JsonObject = JsonObject(
+    mapOf(
+        "ct" to JsonPrimitive(QQMusicAuthorization.QR_CLIENT_CT),
+        "cv" to JsonPrimitive(QQMusicAuthorization.QR_CLIENT_CV),
+    ),
+)
+
+/** The client identity a scan-login `param` repeats: `tmeAppID`, `ct`, `cv`. */
+private fun qrParamIdentity(): Map<String, JsonPrimitive> = mapOf(
+    "tmeAppID" to JsonPrimitive(QQMusicAuthorization.TME_APP_ID),
+    "ct" to JsonPrimitive(QQMusicAuthorization.QR_CLIENT_CT),
+    "cv" to JsonPrimitive(QQMusicAuthorization.QR_CLIENT_CV),
+)
+
+/** `music.login.LoginServer/CreateQRCode`: verified live. */
+private fun qrCreatePayload(): String = encodePayload(
+    mapOf(
+        "comm" to qrCommObject(),
+        "req" to loginRequest(
+            module = QQMusicAuthorization.QR_MODULE,
+            method = QQMusicAuthorization.QR_CREATE_METHOD,
+            param = qrParamIdentity(),
+        ),
+    ),
+)
+
+/** `music.login.LoginServer/GetQRCodeStatus`: verified live. */
+private fun qrStatusPayload(qrCodeId: String): String = encodePayload(
+    mapOf(
+        "comm" to qrCommObject(),
+        "req" to loginRequest(
+            module = QQMusicAuthorization.QR_MODULE,
+            method = QQMusicAuthorization.QR_STATUS_METHOD,
+            param = qrParamIdentity() + mapOf("qrCodeID" to JsonPrimitive(qrCodeId)),
+        ),
+    ),
+)
+
+/**
+ * `music.login.LoginServer/Login` for a confirmed scan session: verified parameter schema.
+ *
+ * This is the QR flavour of `Login` - it takes `musicid` + `qrCodeID` + `token` instead of an OAuth
+ * code, and answers with the same credential fields as the authorization-code exchange.
+ */
+private fun qrLoginPayload(musicId: Long, qrCodeId: String, token: String): String = encodePayload(
+    mapOf(
+        "comm" to qrCommObject(),
+        "req" to loginRequest(
+            module = QQMusicAuthorization.QR_MODULE,
+            method = QQMusicAuthorization.QR_LOGIN_METHOD,
+            param = mapOf(
+                "musicid" to JsonPrimitive(musicId),
+                "qrCodeID" to JsonPrimitive(qrCodeId),
+                "token" to JsonPrimitive(token),
+            ),
+        ),
+    ),
+)
+
+/**
+ * Login method for a scan session.
+ *
+ * `scanUser.loginType` wins (1 = QQ, 2 = WeChat). When the login server omits it the minted key's
+ * prefix decides: this module already treats `W_X…` as WeChat and `Q_H_L…` as QQ (see
+ * [ProviderSessionCredential.authKey]), which matches what QQ Music issues for the two ecosystems.
+ */
+private fun qrLoginMethod(loginType: Int?, authKey: String): QQMusicLoginMethod {
+    if (loginType != null) {
+        QQMusicLoginMethod.entries.firstOrNull { it.redirectLoginType == loginType }?.let { return it }
+    }
+    return if (authKey.startsWith("W_X")) QQMusicLoginMethod.Wechat else QQMusicLoginMethod.Qq
+}
+
+/** A number that may arrive as a JSON number *or* a numeric string (`userID`/`loginType` do both). */
+private fun JsonObject.qrNumber(key: String): Long? =
+    long(key) ?: stringOrNull(key)?.trim()?.toLongOrNull()
+
+/**
+ * True when a refused poll means "this QR session is gone" rather than a transient upstream problem.
+ *
+ * The login server reports it as a business code; QQ Music's session-expiry codes are already mapped
+ * to [ProviderFailureKind.LoginExpired] by [qqBusinessException], which the scan payloads reuse.
+ */
+private fun Throwable.isQrSessionExpired(): Boolean =
+    providerFailureOrNull(QQMusicProviderDefinition.ID)?.kind == ProviderFailureKind.LoginExpired
+
+/** User-presentable text for a refused poll; the provider never logs the session token. */
+private fun Throwable.qrFailureMessage(): String =
+    message?.takeIf(String::isNotBlank)?.let { "QQ Music scan-login failed: $it" }
+        ?: "QQ Music scan-login failed"
 
 private fun exchangeOperation(method: QQMusicLoginMethod): String = when (method) {
     QQMusicLoginMethod.Qq -> "QQ Music authorization code exchange"

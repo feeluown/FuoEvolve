@@ -11,6 +11,9 @@ import org.feeluown.mobile.feature.providerauth.ProviderAuthHeaderInput as CoreP
 import org.feeluown.mobile.feature.providerauth.ProviderAuthOAuthInput as CoreProviderAuthOAuthInput
 import org.feeluown.mobile.feature.providerauth.ProviderAuthSessionPort
 import org.feeluown.mobile.feature.providerauth.ProviderDeviceAuthorization as CoreProviderDeviceAuthorization
+import org.feeluown.mobile.feature.providerauth.ProviderScanLoginFlowState
+import org.feeluown.mobile.feature.providerauth.ProviderScanLoginPollResult
+import org.feeluown.mobile.feature.providerauth.ProviderScanLoginSession
 import org.feeluown.mobile.feature.providerauth.ProviderDeviceAuthorizationPollResult as CoreProviderDeviceAuthorizationPollResult
 import org.feeluown.mobile.feature.providerauth.ProviderDeviceAuthorizationPort
 import org.feeluown.mobile.feature.providerauth.ProviderDeviceCodeAssistantPort
@@ -25,6 +28,11 @@ data class ProviderAuthUiState(
     val headerInputs: Map<String, ProviderHeaderInput> = emptyMap(),
     val oauthInputs: Map<String, ProviderOAuthInput> = emptyMap(),
     val ytmusicOAuthFlow: YtMusicOAuthFlowUiState? = null,
+    /**
+     * The in-flight browser-approved login (QQ / WeChat on the same phone). Held as the feature-owned
+     * state type so the UI can read the authorize URL and status without reaching into a suspend port.
+     */
+    val scanLoginFlow: ProviderScanLoginFlowState? = null,
     val feedback: String? = null,
 )
 
@@ -47,6 +55,16 @@ interface ProviderAuthFeatureController {
     fun loginWithCookies(providerId: String, cookiesJson: String)
     fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null)
     fun loginWithHeaders(providerId: String)
+
+    /**
+     * Starts a login the user approves in a browser (see [ProviderLoginMode.Scan]).
+     *
+     * The controller creates the provider session and publishes [ProviderAuthUiState.scanLoginFlow];
+     * the UI opens [ProviderScanLoginFlowState.authorizeUrl] and calls [markScanBrowserOpened].
+     */
+    fun startScanLogin(providerId: String, loginType: Int? = null)
+    fun markScanBrowserOpened()
+    fun cancelScanLogin()
     fun loginYtmusicWithHeaderFile(headerFileJson: String)
     fun startYtmusicTvOAuthLogin()
     fun markYtmusicOAuthBrowserOpened()
@@ -121,6 +139,9 @@ private class BoundProviderAuthFeatureController(
     override fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int?) =
         owner.loginWithAuthorizationCode(providerId, code, loginType)
     override fun loginWithHeaders(providerId: String) = owner.loginWithHeaders(providerId)
+    override fun startScanLogin(providerId: String, loginType: Int?) = owner.startScanLogin(providerId, loginType)
+    override fun markScanBrowserOpened() = owner.markScanBrowserOpened()
+    override fun cancelScanLogin() = owner.cancelScanLogin()
     override fun loginYtmusicWithHeaderFile(headerFileJson: String) = owner.loginWithHeaderFile("ytmusic", headerFileJson)
     override fun startYtmusicTvOAuthLogin() = owner.startDeviceOAuthLogin()
     override fun markYtmusicOAuthBrowserOpened() = owner.markDeviceOAuthBrowserOpened()
@@ -149,6 +170,30 @@ private class ProviderAuthSessionBinding(
         code: String,
         loginType: Int?,
     ): ProviderAuthState = delegate.loginWithAuthorizationCode(providerId, code, loginType)
+    // The scan-login types live in provider/api, which feature/ must not reference, so the session
+    // port maps them onto the feature-owned feature/providerauth contract here.
+    override suspend fun beginScanLogin(
+        providerId: String,
+        loginType: Int?,
+    ): ProviderScanLoginSession =
+        delegate.beginScanLogin(providerId, loginType).let { session ->
+            ProviderScanLoginSession(
+                sessionId = session.sessionId,
+                authorizeUrl = session.authorizeUrl,
+                expiresInMillis = session.expiresInMillis,
+                pollIntervalMillis = session.pollIntervalMillis,
+            )
+        }
+    override suspend fun pollScanLogin(
+        providerId: String,
+        sessionId: String,
+    ): ProviderScanLoginPollResult<ProviderAuthState> = when (val result = delegate.pollScanLogin(providerId, sessionId)) {
+        is ProviderScanLoginResult.Approved -> ProviderScanLoginPollResult.Approved(result.authState)
+        ProviderScanLoginResult.Pending -> ProviderScanLoginPollResult.Pending
+        ProviderScanLoginResult.Scanned -> ProviderScanLoginPollResult.Scanned
+        ProviderScanLoginResult.Expired -> ProviderScanLoginPollResult.Expired
+        is ProviderScanLoginResult.Failed -> ProviderScanLoginPollResult.Failed(result.message)
+    }
     override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState =
         delegate.loginWithHeaders(providerId, authorization, cookie)
     override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState =
@@ -259,6 +304,7 @@ private fun CoreProviderAuthFeatureState<ProviderSessionState>.toProviderAuthUiS
                 browserOpened = flow.browserOpened,
             )
         },
+        scanLoginFlow = scanLoginFlow,
         feedback = feedback,
     )
 

@@ -1561,6 +1561,15 @@ private fun ProviderAccountSettings(
                         TextButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消授权") }
                     }
                 }
+                // This legacy card keeps the minimum needed to stay exhaustive; the Expressive
+                // provider detail page owns the real scan-login interaction.
+                ProviderLoginMode.Scan -> {
+                    Button(
+                        onClick = { authController.startScanLogin(provider.providerId) },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                    ) { Text("用浏览器登录") }
+                }
             }
         }
     }
@@ -1741,6 +1750,7 @@ private fun providerStatusText(enabled: Boolean, auth: ProviderAuthState?): Stri
 
 private fun providerLoginModeLabel(mode: ProviderLoginMode): String = when (mode) {
     ProviderLoginMode.WebView -> "网页"
+    ProviderLoginMode.Scan -> "扫码"
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"

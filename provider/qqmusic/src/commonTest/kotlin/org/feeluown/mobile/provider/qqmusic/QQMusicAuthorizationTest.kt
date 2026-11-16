@@ -358,7 +358,11 @@ class QQMusicAuthorizationTest {
         assertEquals("https://y.qq.com/", config.loginUrl)
         // Cookie key groups stay as the manual-cookie fallback.
         assertTrue(config.cookieKeyGroups.isNotEmpty())
-        assertEquals(setOf(ProviderLoginMode.WebView), QQMusicProviderDefinition.info.supportedLoginModes)
+        // Scan is QQ Music's phone-client login; the web view authorization-code path stays.
+        assertEquals(
+            setOf(ProviderLoginMode.WebView, ProviderLoginMode.Scan),
+            QQMusicProviderDefinition.info.supportedLoginModes,
+        )
     }
 
     @Test
@@ -570,6 +574,9 @@ class QQMusicAuthorizationTest {
                 "&state=state#wechat_redirect",
             choices[1].loginUrl,
         )
+        // Each entry carries the number the provider itself uses to pick the ecosystem, so the UI can
+        // hand it back instead of guessing (1 = QQ account, 2 = WeChat account).
+        assertEquals(listOf(1, 2), choices.map { it.loginType })
         // The default entry stays QQ so a platform build that only knows loginUrl keeps working.
         assertEquals(choices[0].loginUrl, config.loginUrl)
         // Both ecosystems finish on the same redirect; the platforms intercept exactly this one.

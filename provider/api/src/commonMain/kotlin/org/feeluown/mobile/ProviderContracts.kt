@@ -4,10 +4,58 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 enum class ProviderLoginMode {
+    /**
+     * A provider-issued login page that hands back an authorization code captured from its redirect.
+     */
     WebView,
+
+    /**
+     * A provider-issued login session that the user approves elsewhere — typically by opening the
+     * provider's own authorize page in a browser, where the phone can pick QQ or WeChat. The app only
+     * polls the session, so no web view and no second device are required.
+     */
+    Scan,
     Cookie,
     Headers,
     OAuth,
+}
+
+/**
+ * A provider login session that is approved outside the app.
+ *
+ * The provider creates the session up front and hands back the URL of its own authorize page. The app
+ * opens that URL in a browser, keeps polling, and turns the approved session into renewable
+ * credentials once the user approves there.
+ */
+data class ProviderScanLogin(
+    /** Opaque provider session identifier; [authorizeUrl] is only meaningful together with it. */
+    val sessionId: String,
+    /** Page the user must open and approve; already encodes [sessionId]. */
+    val authorizeUrl: String,
+    /** How long the session stays usable, counted from this call; polling stops afterwards. */
+    val expiresInMillis: Long,
+    /** How often the app should poll, in milliseconds. */
+    val pollIntervalMillis: Long = 2_000L,
+)
+
+/**
+ * Result of one poll of a [ProviderScanLogin].
+ */
+sealed interface ProviderScanLoginResult {
+    /** Nobody has authorized the session yet. Keep polling. */
+    data object Pending : ProviderScanLoginResult
+
+    /** The account was recognized and is waiting for the user to confirm. Keep polling. */
+    data object Scanned : ProviderScanLoginResult
+
+    /** The session was approved; [authState] is the persisted, renewable login. */
+    data class Approved(val authState: ProviderAuthState) : ProviderScanLoginResult
+
+    /** The session timed out; the app must create a new one. */
+    data object Expired : ProviderScanLoginResult
+
+    /** The provider refused the session; [message] is user-presentable. */
+    data class Failed(val message: String) : ProviderScanLoginResult
 }
 
 @Serializable
@@ -79,6 +127,12 @@ data class ProviderLoginChoice(
     val id: String,
     val label: String,
     val loginUrl: String,
+    /**
+     * Value handed to the provider's own login call to select this ecosystem, when the provider
+     * numbers them (QQ Music: 1 = QQ account, 2 = WeChat account). Null when the entry needs no
+     * selector, in which case the provider applies its default.
+     */
+    val loginType: Int? = null,
 )
 
 /**

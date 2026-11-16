@@ -305,6 +305,10 @@ internal fun ProviderDetailSettingsExpressive(
     val header = authController.headerInput(provider.providerId)
     val oauth = authController.oauthInput(provider.providerId)
     val oauthFlow = authUiState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
+    // The provider creates the session, so the authorize URL only exists after startScanLogin();
+    // the UI never calls the suspend port itself.
+    val scanFlow = authUiState.scanLoginFlow?.takeIf { it.providerId == provider.providerId }
+    val scanSupported = ProviderLoginMode.Scan in modes
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -392,7 +396,23 @@ internal fun ProviderDetailSettingsExpressive(
                 modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
                 verticalArrangement = Arrangement.spacedBy(FuoSpacing.sm),
             ) {
-                if (webLoginAvailable) {
+                if (scanSupported) {
+                    // The scan path never opens a web view, so there is no stale web-login state to
+                    // wipe here: create a fresh provider session and open its authorize page instead.
+                    Button(
+                        onClick = {
+                            mode = ProviderLoginMode.Scan
+                            authController.startScanLogin(provider.providerId, selectedLoginChoice?.loginType)
+                        },
+                        enabled = !authBusy && scanFlow == null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("重新登录") }
+                    Text(
+                        "重新登录会直接创建新的登录会话并在浏览器中打开授权页；无需先退出登录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (webLoginAvailable) {
                     if (loginChoices.size > 1) {
                         ProviderLoginChoiceSelector(
                             choices = loginChoices,
@@ -498,6 +518,60 @@ internal fun ProviderDetailSettingsExpressive(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+                ProviderLoginMode.Scan -> Column(
+                    modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(FuoSpacing.md),
+                ) {
+                    Text(
+                        "手机可直接登录：在打开的页面里选择 QQ 或微信账号。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (scanFlow == null) {
+                        Button(
+                            onClick = {
+                                authController.startScanLogin(provider.providerId, selectedLoginChoice?.loginType)
+                            },
+                            enabled = !authBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (loginChoices.size > 1 && selectedLoginChoice != null) {
+                                    "用浏览器登录（" + selectedLoginChoice.label + "）"
+                                } else {
+                                    "用浏览器登录"
+                                },
+                            )
+                        }
+                    } else {
+                        // The controller owns the polling; the page is opened exactly once per flow.
+                        LaunchedEffect(scanFlow.authorizeUrl) {
+                            if (!scanFlow.browserOpened && scanFlow.authorizeUrl.isNotBlank()) {
+                                runCatching { uriHandler.openUri(scanFlow.authorizeUrl) }
+                                    .onSuccess { authController.markScanBrowserOpened() }
+                            }
+                        }
+                        Text(
+                            if (scanFlow.browserOpened) scanFlow.statusMessage else "正在打开浏览器…",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            scanFlow.authorizeUrl,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(FuoSpacing.sm)) {
+                            TextButton(
+                                enabled = scanFlow.authorizeUrl.isNotBlank(),
+                                onClick = {
+                                    runCatching { uriHandler.openUri(scanFlow.authorizeUrl) }
+                                        .onSuccess { authController.markScanBrowserOpened() }
+                                },
+                            ) { Text("重新打开页面") }
+                            TextButton(onClick = authController::cancelScanLogin) { Text("取消") }
+                        }
                     }
                 }
                 ProviderLoginMode.Cookie -> Column(
@@ -885,6 +959,7 @@ private fun expressiveProviderStatusText(enabled: Boolean, auth: ProviderAuthSta
 
 private fun expressiveProviderLoginModeLabel(mode: ProviderLoginMode): String = when (mode) {
     ProviderLoginMode.WebView -> "网页"
+    ProviderLoginMode.Scan -> "扫码"
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"

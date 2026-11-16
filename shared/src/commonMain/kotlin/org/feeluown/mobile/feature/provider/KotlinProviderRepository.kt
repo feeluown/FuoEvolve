@@ -150,6 +150,12 @@ class KotlinProviderRepository :
         loginType: Int?,
     ): ProviderAuthState = requireProvider(providerId).loginWithAuthorizationCode(code, loginType)
 
+    override suspend fun beginScanLogin(providerId: String, loginType: Int?): ProviderScanLogin =
+        requireProvider(providerId).beginScanLogin(loginType)
+
+    override suspend fun pollScanLogin(providerId: String, sessionId: String): ProviderScanLoginResult =
+        requireProvider(providerId).pollScanLogin(sessionId)
+
     override suspend fun loginWithHeaders(
         providerId: String,
         authorization: String,

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlin.time.TimeSource
 
 data class ProviderAuthHeaderInput(
     val authorization: String = "",
@@ -30,12 +31,53 @@ data class ProviderDeviceOAuthFlowState(
     val browserOpened: Boolean = false,
 )
 
+/**
+ * An in-flight login that the user approves in a browser (see [ProviderLoginMode.Scan]).
+ *
+ * Nothing here is provider-specific: the provider hands back its own authorize URL, the app opens it
+ * and polls until the session is approved, so a phone can complete a QQ or WeChat login on itself.
+ */
+data class ProviderScanLoginFlowState(
+    val providerId: String,
+    val authorizeUrl: String,
+    val statusMessage: String = "请在浏览器中完成登录",
+    val browserOpened: Boolean = false,
+    val isScanned: Boolean = false,
+)
+
+/** A provider login session the user approves in a browser; see [ProviderLoginMode.Scan]. */
+data class ProviderScanLoginSession(
+    val sessionId: String,
+    val authorizeUrl: String,
+    val expiresInMillis: Long,
+    val pollIntervalMillis: Long = 2_000L,
+)
+
+/** One poll of a [ProviderScanLoginSession]. */
+sealed interface ProviderScanLoginPollResult<out Auth> {
+    /** Nobody has approved the session yet. */
+    data object Pending : ProviderScanLoginPollResult<Nothing>
+
+    /** An account was recognized and is waiting for the user's confirmation. */
+    data object Scanned : ProviderScanLoginPollResult<Nothing>
+
+    /** The session was approved and [auth] is the persisted, renewable login. */
+    data class Approved<Auth>(val auth: Auth) : ProviderScanLoginPollResult<Auth>
+
+    /** The session expired; the user must start over. */
+    data object Expired : ProviderScanLoginPollResult<Nothing>
+
+    /** The provider refused the session; [message] is user-presentable. */
+    data class Failed(val message: String) : ProviderScanLoginPollResult<Nothing>
+}
+
 data class ProviderAuthFeatureState<Session>(
     val sessions: Session,
     val cookieInputs: Map<String, String> = emptyMap(),
     val headerInputs: Map<String, ProviderAuthHeaderInput> = emptyMap(),
     val oauthInputs: Map<String, ProviderAuthOAuthInput> = emptyMap(),
     val oauthFlow: ProviderDeviceOAuthFlowState? = null,
+    val scanLoginFlow: ProviderScanLoginFlowState? = null,
     val feedback: String? = null,
 )
 
@@ -76,6 +118,8 @@ interface ProviderAuthSessionPort<Auth, Session> {
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): Auth
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): Auth
     suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null): Auth
+    suspend fun beginScanLogin(providerId: String, loginType: Int? = null): ProviderScanLoginSession
+    suspend fun pollScanLogin(providerId: String, sessionId: String): ProviderScanLoginPollResult<Auth>
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): Auth
     suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): Auth
     suspend fun loginWithOAuth(
@@ -146,6 +190,19 @@ interface ProviderAuthFeatureOwner<Provider, Auth, Session> {
 
     fun loginWithHeaders(providerId: String)
     fun loginWithHeaderFile(providerId: String, headerFileJson: String)
+
+    /**
+     * Starts a login the user approves outside the app (QQ / WeChat on the same phone).
+     *
+     * The provider hands back its authorize URL; the platform opens it in a browser and this
+     * controller polls until the session is approved, then publishes the resulting login.
+     */
+    fun startScanLogin(providerId: String, loginType: Int? = null)
+
+    /** The platform opened the authorize page; surfaced only so the UI can stop prompting. */
+    fun markScanBrowserOpened()
+
+    fun cancelScanLogin()
     fun startDeviceOAuthLogin()
     fun markDeviceOAuthBrowserOpened()
     fun copyDeviceOAuthUserCode()
@@ -205,6 +262,7 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
     private val mutableState = MutableStateFlow(ProviderAuthFeatureState(sessions = sessionPort.state.value))
     override val state: StateFlow<ProviderAuthFeatureState<Session>> = mutableState.asStateFlow()
     private var deviceOAuthJob: Job? = null
+    private var scanLoginJob: Job? = null
 
     init {
         scope.launch {
@@ -400,6 +458,69 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
         copy(oauthFlow = oauthFlow?.copy(browserOpened = true, statusMessage = "请在浏览器中输入验证码完成授权"))
     }
 
+    override fun startScanLogin(providerId: String, loginType: Int?) {
+        cancelScanLogin()
+        scanLoginJob = scope.launch {
+            feedback("正在创建 " + providerName(providerId) + " 登录会话")
+            val session = runCatching { sessionPort.beginScanLogin(providerId, loginType) }
+                .getOrElse { throwable ->
+                    failure(throwable)
+                    return@launch
+                }
+            update {
+                copy(
+                    scanLoginFlow = ProviderScanLoginFlowState(
+                        providerId = providerId,
+                        authorizeUrl = session.authorizeUrl,
+                        statusMessage = "请在弹出的页面中完成登录",
+                    ),
+                )
+            }
+            // Measured with the monotonic clock so a wall-clock jump cannot end the flow early.
+            val startedAt = TimeSource.Monotonic.markNow()
+            val interval = session.pollIntervalMillis.coerceAtLeast(500L)
+            val budgetMillis = session.expiresInMillis.coerceAtLeast(interval)
+            runCatching {
+                while (true) {
+                    delay(interval)
+                    when (val result = sessionPort.pollScanLogin(providerId, session.sessionId)) {
+                        ProviderScanLoginPollResult.Pending -> Unit
+                        ProviderScanLoginPollResult.Scanned -> update {
+                            copy(
+                                scanLoginFlow = scanLoginFlow?.copy(
+                                    isScanned = true,
+                                    statusMessage = "已识别到账号，请在页面中确认登录",
+                                ),
+                            )
+                        }
+                        is ProviderScanLoginPollResult.Approved -> return@runCatching result.auth
+                        ProviderScanLoginPollResult.Expired -> error("登录会话已过期，请重试")
+                        is ProviderScanLoginPollResult.Failed -> error(result.message)
+                    }
+                    if (startedAt.elapsedNow().inWholeMilliseconds >= budgetMillis) error("登录超时，请重试")
+                }
+                @Suppress("UNREACHABLE_CODE")
+                error("unreachable")
+            }.onSuccess { auth ->
+                clearScanLoginUi()
+                feedback(loginFeedback(auth))
+                onSessionChanged()
+            }.onFailure { throwable ->
+                clearScanLoginUi()
+                failure(throwable)
+            }
+        }
+    }
+
+    override fun markScanBrowserOpened() = update {
+        copy(scanLoginFlow = scanLoginFlow?.copy(browserOpened = true))
+    }
+
+    override fun cancelScanLogin() {
+        scanLoginJob?.cancel()
+        scanLoginJob = null
+        update { copy(scanLoginFlow = null) }
+    }
     override fun copyDeviceOAuthUserCode() {
         val code = state.value.oauthFlow?.userCode?.takeIf(String::isNotBlank) ?: return
         deviceCodeAssistant.copyUserCode(code)
@@ -513,6 +634,11 @@ private class DefaultProviderAuthFeatureOwner<Provider, Auth, Session>(
     private fun clearOAuthUi() {
         update { copy(oauthFlow = null) }
         deviceCodeAssistant.clearUserCodeNotification()
+    }
+
+    private fun clearScanLoginUi() {
+        scanLoginJob = null
+        update { copy(scanLoginFlow = null) }
     }
 
     private fun feedback(message: String) = update { copy(feedback = message) }

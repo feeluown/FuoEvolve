@@ -68,8 +68,18 @@ internal object QQMusicProviderDefinition {
             // Fallback for manually captured cookies; the authorization code path is the real one.
             listOf(listOf("qqmusic_key", "wxuin", "qm_keyst"), listOf("qqmusic_key", "uin", "qm_keyst")),
             loginChoices = listOf(
-                ProviderLoginChoice(id = "qq", label = "QQ 账号", loginUrl = WEB_LOGIN_URL),
-                ProviderLoginChoice(id = "wechat", label = "微信账号", loginUrl = WECHAT_LOGIN_URL),
+                ProviderLoginChoice(
+                    id = "qq",
+                    label = "QQ 账号",
+                    loginUrl = WEB_LOGIN_URL,
+                    loginType = QQMusicAuthorization.LOGIN_TYPE_QQ,
+                ),
+                ProviderLoginChoice(
+                    id = "wechat",
+                    label = "微信账号",
+                    loginUrl = WECHAT_LOGIN_URL,
+                    loginType = QQMusicAuthorization.LOGIN_TYPE_WECHAT,
+                ),
             ),
             // Both ecosystems end on the same redirect; `login_type` tells the exchange which one it is.
             authorizationCodeRedirect = ProviderAuthorizationCodeRedirect(
@@ -79,7 +89,12 @@ internal object QQMusicProviderDefinition {
                 loginTypeParameter = "login_type",
             ),
         ),
-        supportedLoginModes = setOf(org.feeluown.mobile.ProviderLoginMode.WebView),
+        // WebView stays the authorization-code path; Scan is QQ Music's own phone-client login, where
+        // the user approves the session in a browser on the same device instead of scanning a QR code.
+        supportedLoginModes = setOf(
+            org.feeluown.mobile.ProviderLoginMode.WebView,
+            org.feeluown.mobile.ProviderLoginMode.Scan,
+        ),
     )
 
     val capabilities = ProviderCapabilities(

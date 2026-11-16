@@ -146,6 +146,49 @@ class ProviderAuthFeatureTest {
         assertTrue(owner.authStateFor(Provider("qqmusic")).loggedIn)
     }
 
+    @Test
+    fun scanLoginPublishesAuthorizeUrlThenApprovesSession() = runTest {
+        // The provider creates the session and the app only polls it, so the flow must expose the
+        // authorize URL before any user interaction and clear itself once the session is approved.
+        val session = FakeSessionPort()
+        val owner = createOwner(session)
+        runCurrent()
+
+        owner.startScanLogin("qqmusic")
+        runCurrent()
+
+        val flow = owner.state.value.scanLoginFlow
+        assertEquals("qqmusic", flow?.providerId)
+        assertEquals("https://example.test/qr?session=scan-session", flow?.authorizeUrl)
+        assertFalse(flow?.browserOpened ?: true)
+
+        owner.markScanBrowserOpened()
+        assertTrue(owner.state.value.scanLoginFlow?.browserOpened ?: false)
+
+        advanceTimeBy(1_100)
+        runCurrent()
+
+        assertEquals(null, owner.state.value.scanLoginFlow)
+        assertTrue(owner.authStateFor(Provider("qqmusic")).loggedIn)
+    }
+
+    @Test
+    fun cancelScanLoginClearsTheFlowWithoutSigningIn() = runTest {
+        val session = FakeSessionPort()
+        val owner = createOwner(session)
+        runCurrent()
+
+        owner.startScanLogin("qqmusic")
+        runCurrent()
+        assertTrue(owner.state.value.scanLoginFlow != null)
+
+        owner.cancelScanLogin()
+        runCurrent()
+
+        assertEquals(null, owner.state.value.scanLoginFlow)
+        assertFalse(owner.authStateFor(Provider("qqmusic")).loggedIn)
+    }
+
     private fun TestScope.createOwner(
         sessionPort: FakeSessionPort,
         onSessionChanged: () -> Unit = {},
@@ -205,6 +248,23 @@ class ProviderAuthFeatureTest {
             signIn(providerId)
             return Auth(true)
         }
+        override suspend fun beginScanLogin(providerId: String, loginType: Int?): ProviderScanLoginSession =
+            ProviderScanLoginSession(
+                sessionId = "scan-session",
+                authorizeUrl = "https://example.test/qr?session=scan-session",
+                expiresInMillis = 60_000L,
+                pollIntervalMillis = 1_000L,
+            )
+
+        override suspend fun pollScanLogin(
+            providerId: String,
+            sessionId: String,
+        ): ProviderScanLoginPollResult<Auth> {
+            val auth = Auth(true)
+            signIn(providerId)
+            return ProviderScanLoginPollResult.Approved(auth)
+        }
+
         override suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): Auth = Auth(true)
         override suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): Auth = Auth(true)
         override suspend fun loginWithOAuth(
