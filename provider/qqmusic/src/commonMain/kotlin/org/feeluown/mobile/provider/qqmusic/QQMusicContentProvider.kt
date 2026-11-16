@@ -307,7 +307,7 @@ class QQMusicContentProvider(
             headers = publicHeaders(),
             cacheKey = "qqmusic:playlist-square:$categoryId:$sortId:$offset:$limit",
             cachePolicy = ProviderCachePolicies.recommendation,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val data = root.obj("data") ?: root
         val rawValues = firstNonEmpty(data.array("list"), data.array("disslist"))
         val playlists = rawValues.mapNotNull { value ->
@@ -340,7 +340,7 @@ class QQMusicContentProvider(
             headers = publicHeaders(),
             cacheKey = "qqmusic:playlist-categories",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         return root.obj("data")?.array("categories").orEmpty().flatMap { categoryValue ->
             val category = categoryValue.asObject()
             firstNonEmpty(category.array("items"), category.array("item")).mapNotNull { itemValue ->
@@ -695,15 +695,13 @@ class QQMusicContentProvider(
             headers = authenticatedHeaders(),
             cacheKey = cacheKey,
             cachePolicy = cachePolicy,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
     }
 
     private suspend fun qqRpcPayload(payload: String): String {
         val root = providerJson.parseToJsonElement(payload).jsonObject
         val cookies = qqCookies()
-        val uin = cookies["wxuin"]?.removePrefix("o")?.takeIf(String::isNotBlank)
-            ?: cookies["uin"]?.takeIf(String::isNotBlank)
-            ?: "0"
+        val uin = qqAccountId(cookies) ?: "0"
         val tokenSource = listOf("qqmusic_key", "p_skey", "skey", "p_lskey", "lskey")
             .asSequence()
             .mapNotNull { cookies[it] }

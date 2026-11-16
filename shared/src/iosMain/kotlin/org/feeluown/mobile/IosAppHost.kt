@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,53 +72,59 @@ private fun IosApp(
             networkStatusOutput, audioRecognitionOutput, oauthDeviceCodeOutput,
         )
     }
-    AppRoot(
-        appViewModel = container.appViewModel,
-        uiGraph = container.appUiGraph,
-        platform = AppPlatformBindings(
-            hasAudioPermission = container.hasAudioPermission,
-            onRequestAudioPermission = container::requestAudioPermission,
-            audioRecognitionAccess = AudioRecognitionAccess(
-                source = AudioRecognitionSource.Microphone,
-                isAvailable = container.hasMicrophonePermission,
-                requestAccess = container::requestMicrophonePermission,
-            ),
-            onOpenProviderWebLogin = container::openProviderWebLogin,
-            onLogoutProvider = container::logoutProvider,
-            onImportYtmusicHeaderFile = {
-                localPlaylistFileOutput.importFile { _, content ->
-                    handleIosJsonImportResult(
-                        content = content,
-                        onImport = container.appUiGraph.providerAuth::loginYtmusicWithHeaderFile,
-                        onReadFailure = { container.appViewModel.showFeedback("无法读取 ytmusic_header.json") },
-                    )
-                }
-            },
-            onImportYtmusicOAuthFile = {
-                localPlaylistFileOutput.importFile { _, content ->
-                    handleIosJsonImportResult(
-                        content = content,
-                        onImport = container.appUiGraph.providerAuth::importYtmusicOAuthRelatedJson,
-                        onReadFailure = { container.appViewModel.showFeedback("无法读取 OAuth JSON") },
-                    )
-                }
-            },
-            onStartYtmusicOAuth = container.appUiGraph.providerAuth::startYtmusicTvOAuthLogin,
-            onImportLocalPlaylistFile = {
-                localPlaylistFileOutput.importFile { fileName, content ->
-                    handleIosLocalPlaylistImportResult(
-                        fileName = fileName,
-                        content = content,
-                        onImport = container.appUiGraph.localPlaylist::prepareImport,
-                        onReadFailure = { container.appViewModel.showFeedback("无法读取本地歌单文件") },
-                    )
-                }
-            },
-            onExportLocalPlaylistFile = localPlaylistFileOutput::exportFile,
-            onShareLocalPlaylistFile = localPlaylistFileOutput::shareFile,
-            onShareText = shareOutput::share,
+    CompositionLocalProvider(
+        LocalProviderWebLoginStateActions provides ProviderWebLoginStateActions(
+            clearWebLoginState = container::clearProviderWebLoginState,
         ),
-    )
+    ) {
+        AppRoot(
+            appViewModel = container.appViewModel,
+            uiGraph = container.appUiGraph,
+            platform = AppPlatformBindings(
+                hasAudioPermission = container.hasAudioPermission,
+                onRequestAudioPermission = container::requestAudioPermission,
+                audioRecognitionAccess = AudioRecognitionAccess(
+                    source = AudioRecognitionSource.Microphone,
+                    isAvailable = container.hasMicrophonePermission,
+                    requestAccess = container::requestMicrophonePermission,
+                ),
+                onOpenProviderWebLogin = container::openProviderWebLogin,
+                onLogoutProvider = container::logoutProvider,
+                onImportYtmusicHeaderFile = {
+                    localPlaylistFileOutput.importFile { _, content ->
+                        handleIosJsonImportResult(
+                            content = content,
+                            onImport = container.appUiGraph.providerAuth::loginYtmusicWithHeaderFile,
+                            onReadFailure = { container.appViewModel.showFeedback("无法读取 ytmusic_header.json") },
+                        )
+                    }
+                },
+                onImportYtmusicOAuthFile = {
+                    localPlaylistFileOutput.importFile { _, content ->
+                        handleIosJsonImportResult(
+                            content = content,
+                            onImport = container.appUiGraph.providerAuth::importYtmusicOAuthRelatedJson,
+                            onReadFailure = { container.appViewModel.showFeedback("无法读取 OAuth JSON") },
+                        )
+                    }
+                },
+                onStartYtmusicOAuth = container.appUiGraph.providerAuth::startYtmusicTvOAuthLogin,
+                onImportLocalPlaylistFile = {
+                    localPlaylistFileOutput.importFile { fileName, content ->
+                        handleIosLocalPlaylistImportResult(
+                            fileName = fileName,
+                            content = content,
+                            onImport = container.appUiGraph.localPlaylist::prepareImport,
+                            onReadFailure = { container.appViewModel.showFeedback("无法读取本地歌单文件") },
+                        )
+                    }
+                },
+                onExportLocalPlaylistFile = localPlaylistFileOutput::exportFile,
+                onShareLocalPlaylistFile = localPlaylistFileOutput::shareFile,
+                onShareText = shareOutput::share,
+            ),
+        )
+    }
 }
 
 private class IosAppContainer(
@@ -484,18 +491,47 @@ private class IosAppContainer(
         }
     }
 
-    fun openProviderWebLogin(provider: ProviderInfo) {
+    fun openProviderWebLogin(provider: ProviderInfo, loginUrl: String? = null) {
         val loginConfig = provider.loginConfig ?: return
+        // The UI may offer several account ecosystems for the same provider; the selected entry wins
+        // over the provider default.
+        val effectiveLoginUrl = loginUrl?.takeIf(String::isNotBlank) ?: loginConfig.loginUrl
         val groupsJson = loginConfig.cookieKeyGroups.joinToString(prefix = "[", postfix = "]") { group ->
             group.joinToString(prefix = "[\"", postfix = "\"]", separator = "\",\"")
         }
-        webLoginOutput.open(provider.providerId, provider.providerName, loginConfig.loginUrl, groupsJson) { cookiesJson ->
+        webLoginOutput.open(
+            provider.providerId,
+            provider.providerName,
+            effectiveLoginUrl,
+            groupsJson,
+            // Provider-declared redirect shape; the platform hard-codes nothing. Null disables
+            // interception and keeps the cookie-login path.
+            authorizationCodeRedirect = loginConfig.authorizationCodeRedirect,
+            // Preferred over cookies: only the exchanged authorization code yields a renewable session.
+            // The redirect's login-type value says which ecosystem the code belongs to (0 = unspecified,
+            // mapped to null here). The code is never logged.
+            onAuthorizationCode = { code, loginType ->
+                if (code.isNotBlank()) {
+                    providerAuthFeatureController.loginWithAuthorizationCode(
+                        provider.providerId,
+                        code,
+                        loginType.takeIf { it > 0 },
+                    )
+                }
+            },
+        ) { cookiesJson ->
             if (!cookiesJson.isNullOrBlank()) providerAuthFeatureController.loginWithCookies(provider.providerId, cookiesJson)
         }
     }
 
     fun logoutProvider(provider: ProviderInfo) {
-        webLoginOutput.clear()
+        // Logout keeps the shared WKWebView cookie jar: a fresh browser session makes providers
+        // such as QQ Music answer with 登录环境异常. Clearing it is the separate explicit action.
         providerAuthFeatureController.logout(provider.providerId)
+    }
+
+    fun clearProviderWebLoginState() {
+        webLoginOutput.clear()
+        appViewModel.showFeedback("已清除网页登录状态，请重新登录")
     }
 }

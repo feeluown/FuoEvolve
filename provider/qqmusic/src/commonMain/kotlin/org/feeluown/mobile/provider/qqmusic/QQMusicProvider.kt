@@ -70,9 +70,7 @@ class QQMusicProvider(
         val mediaId = file?.stringOrNull("media_mid").orEmpty().ifBlank { songMid }
         val cookies = qqCookies()
         val guid = cookies["guid"]?.takeIf { it.isNotBlank() } ?: defaultGuid
-        val uin = cookies["wxuin"]?.removePrefix("o")
-            ?: cookies["uin"]
-            ?: "0"
+        val uin = qqAccountId(cookies) ?: "0"
         qqQualityCandidates(qualityPolicy, file).forEach { quality ->
             val url = qqMediaUrl(songMid, mediaId, quality, guid, uin) ?: return@forEach
             return PlaybackPayload(
@@ -121,7 +119,7 @@ class QQMusicProvider(
             ),
             headers = authenticatedHeaders(mapOf("Referer" to "http://y.qq.com/")),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val data = root.obj("req_0")?.obj("data") ?: return null
         val purl = data.array("midurlinfo").firstOrNull()?.asObject()?.stringOrNull("purl") ?: return null
         if (purl.startsWith("http")) return purl
@@ -150,7 +148,7 @@ class QQMusicProvider(
             authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:playlist:$identifier:$offset:$limit",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val detail = root.array("cdlist").firstOrNull()?.asObject() ?: return ProviderPlaylistDetail(playlist)
         val songItems = detail.array("songlist")
         val tracks = songs(songItems)
@@ -247,7 +245,7 @@ class QQMusicProvider(
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:comments:$identifier",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         return root.obj("hot_comment")?.array("commentlist").orEmpty().map { value ->
             val item = value.asObject()
             ProviderComment(
@@ -453,7 +451,7 @@ class QQMusicProvider(
             authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:artist-albums:$identifier:$offset:$limit",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val data = root.obj("data") ?: root
         val rawValues = data.array("list")
         val values = rawValues.mapNotNull { value ->
@@ -478,7 +476,7 @@ class QQMusicProvider(
             authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:album:$identifier",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         return root.obj("data") ?: root
     }
 
@@ -574,7 +572,7 @@ class QQMusicProvider(
             ),
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val data = root.obj("data") ?: return emptyList()
         val creator = data.obj("creator")
         val favoriteId = creator?.stringOrNull("fav_pid")
@@ -709,11 +707,7 @@ class QQMusicProvider(
         )
     }
 
-    private suspend fun currentUin(): String? {
-        val values = qqCookies()
-        return values["wxuin"]?.removePrefix("o")?.takeIf { it.isNotBlank() }
-            ?: values["uin"]?.takeIf { it.isNotBlank() }
-    }
+    private suspend fun currentUin(): String? = qqAccountId(qqCookies())
 
     private suspend fun qqCookies(): Map<String, String> {
         val stored = currentCredentials() ?: return emptyMap()
@@ -757,7 +751,7 @@ class QQMusicProvider(
             kind = kind,
             cacheKey = cacheKey,
             cachePolicy = cachePolicy,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
     }
 
     private suspend fun qqRpcPayload(payload: String): String {
@@ -818,7 +812,7 @@ class QQMusicProvider(
             ),
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = null,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         return root.array("cdlist").firstOrNull()?.asObject()?.long("dirid")?.takeIf { it > 0 }
     }
 
@@ -833,7 +827,7 @@ class QQMusicProvider(
             authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:song:$identifier",
             cachePolicy = ProviderCachePolicies.detail,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         return root.array("data").firstOrNull()?.asObject()
             ?: root.array("songlist").firstOrNull()?.asObject()
     }
@@ -884,7 +878,7 @@ class QQMusicProvider(
             headers = authenticatedHeaders(mapOf("Referer" to "https://y.qq.com/")),
             cacheKey = "qqmusic:lyric:$identifier",
             cachePolicy = ProviderCachePolicies.lyric,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         root.stringOrNull("lyric")?.let(::base64DecodeToString)
     }.getOrNull()
 

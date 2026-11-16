@@ -157,7 +157,7 @@ class ProviderCatalogFeatureTest {
 
         override suspend fun updateProviders(providers: List<Provider>) = Unit
 
-        override suspend fun refresh(providerId: String) {
+        override suspend fun refresh(providerId: String, refreshUserInfo: Boolean) {
             refreshed += providerId
         }
     }

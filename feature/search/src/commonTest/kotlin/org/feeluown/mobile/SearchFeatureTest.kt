@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SearchFeatureTest {
@@ -142,22 +143,153 @@ class SearchFeatureTest {
         assertEquals(1, opened)
     }
 
+    @Test
+    fun multiSourceSearchKeepsResultsWhenOneProviderFails() = runTest {
+        val owner = createOwner(
+            scope = this,
+            localSearch = { listOf(TestTrack("local:1")) },
+            providerIds = listOf("netease", "qqmusic"),
+            providerSearch = { _, providerId ->
+                when (providerId) {
+                    "qqmusic" -> throw IllegalStateException("登录已失效，请重新登录")
+                    else -> TestProviderResults(tracks = listOf(TestTrack("netease:1")))
+                }
+            },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+
+        val state = owner.uiState.value
+        // Healthy providers and local results survive the broken source.
+        assertEquals(listOf("local:1", "netease:1"), state.searchResults.map { it.id })
+        assertEquals(
+            mapOf("qqmusic" to "登录已失效，请重新登录"),
+            state.providerFailures,
+        )
+        assertEquals("搜索到 2 项", state.message)
+        assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun multiSourceSearchSurfacesJoinedFailuresWhenEveryProviderFails() = runTest {
+        val owner = createOwner(
+            scope = this,
+            providerIds = listOf("netease", "qqmusic"),
+            providerSearch = { _, providerId -> throw IllegalStateException("$providerId failed") },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+
+        val state = owner.uiState.value
+        assertEquals(emptyList(), state.searchResults)
+        assertEquals(
+            mapOf("netease" to "netease failed", "qqmusic" to "qqmusic failed"),
+            state.providerFailures,
+        )
+        assertTrue(state.message.orEmpty().contains("netease failed"))
+        assertTrue(state.message.orEmpty().contains("qqmusic failed"))
+        assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun multiSourceFailureMessageUsesFailingProviderId() = runTest {
+        val seenProviderIds = mutableListOf<String?>()
+        val owner = createOwner(
+            scope = this,
+            providerIds = listOf("netease", "qqmusic"),
+            providerSearch = { _, providerId ->
+                if (providerId == "qqmusic") throw IllegalStateException("expired") else TestProviderResults()
+            },
+            failureMessage = { _, providerId ->
+                seenProviderIds += providerId
+                "provider=$providerId"
+            },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+
+        assertEquals(listOf<String?>("qqmusic"), seenProviderIds)
+        assertEquals(mapOf("qqmusic" to "provider=qqmusic"), owner.uiState.value.providerFailures)
+    }
+
+    @Test
+    fun clearResultsResetsProviderFailures() = runTest {
+        val owner = createOwner(
+            scope = this,
+            providerIds = listOf("netease", "qqmusic"),
+            providerSearch = { _, providerId ->
+                if (providerId == "qqmusic") throw IllegalStateException("expired") else TestProviderResults(
+                    tracks = listOf(TestTrack("netease:1")),
+                )
+            },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+        assertTrue(owner.uiState.value.providerFailures.isNotEmpty())
+
+        owner.clearResults()
+
+        assertEquals(emptyMap(), owner.uiState.value.providerFailures)
+        assertEquals(emptyList(), owner.uiState.value.searchResults)
+        assertNull(owner.uiState.value.message)
+    }
+
+    @Test
+    fun successfulSearchClearsStaleProviderFailures() = runTest {
+        var failQqMusic = true
+        val owner = createOwner(
+            scope = this,
+            providerIds = listOf("netease", "qqmusic"),
+            providerSearch = { _, providerId ->
+                if (providerId == "qqmusic" && failQqMusic) throw IllegalStateException("expired")
+                TestProviderResults(tracks = listOf(TestTrack("$providerId:1")))
+            },
+        )
+
+        owner.dispatch(SearchAction.QueryChanged("song"))
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+        assertTrue(owner.uiState.value.providerFailures.isNotEmpty())
+
+        failQqMusic = false
+        owner.dispatch(SearchAction.Submit)
+        advanceUntilIdle()
+
+        assertEquals(emptyMap(), owner.uiState.value.providerFailures)
+        assertEquals(
+            listOf("netease:1", "qqmusic:1"),
+            owner.uiState.value.searchResults.map { it.id },
+        )
+    }
+
     private fun createOwner(
         scope: CoroutineScope,
         localSearch: suspend (String) -> List<TestTrack> = { emptyList() },
         providerSearch: suspend (String, String?) -> TestProviderResults = { _, _ -> TestProviderResults() },
         openSearch: () -> Unit = {},
         onPreferencesChanged: (SearchScope, String?) -> Unit = { _, _ -> },
+        providerIds: List<String> = listOf("netease"),
+        failureMessage: (Throwable, String?) -> String = { throwable, _ ->
+            throwable.message ?: "search failed"
+        },
     ): SearchFeatureOwner<TestTrack, TestProviderResults> = createSearchFeatureOwner(
         providerRepository = SearchProviderRepository(providerSearch),
         localRepository = SearchLocalRepository(localSearch),
         resultOperations = TestResultOperations,
         scope = scope,
-        providerIdsForSearch = { listOf("netease") },
-        providerExists = { it == "netease" },
+        providerIdsForSearch = { providerIds },
+        providerExists = { it in providerIds },
         openSearch = openSearch,
         onPreferencesChanged = onPreferencesChanged,
-        failureMessage = { throwable, _ -> throwable.message ?: "search failed" },
+        failureMessage = failureMessage,
         initialState = SearchFeatureState(providerSearchResults = TestProviderResults()),
     )
 }

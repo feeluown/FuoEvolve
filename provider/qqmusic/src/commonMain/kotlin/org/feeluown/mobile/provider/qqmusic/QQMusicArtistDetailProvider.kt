@@ -199,7 +199,7 @@ class QQMusicArtistDetailProvider(
             headers = authenticatedHeaders(),
             cacheKey = cacheKey,
             cachePolicy = cachePolicy,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
     }
 
     private fun qqRpcPayload(payload: String): String {

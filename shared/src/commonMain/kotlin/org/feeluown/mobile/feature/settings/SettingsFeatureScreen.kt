@@ -142,7 +142,7 @@ fun SettingsFeatureScreen(
     providerCatalog: ProviderCatalogFeatureController,
     providerAuth: ProviderAuthFeatureController,
     appVersionInfo: String?,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportYtmusicOAuthFile: (() -> Unit)? = null,
@@ -1348,7 +1348,7 @@ private fun ProviderAccountSettings(
     settingsController: SettingsFeatureController,
     authController: ProviderAuthFeatureController,
     authUiState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -1432,7 +1432,7 @@ private fun ProviderAccountSettings(
             when (mode) {
                 ProviderLoginMode.WebView -> Box(Modifier.fillMaxWidth().padding(FuoSpacing.lg)) {
                     Button(
-                        onClick = { onOpenProviderWebLogin(provider) },
+                        onClick = { onOpenProviderWebLogin(provider, null) },
                         enabled = provider.loginConfig != null && !busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("网页登录") }
@@ -1560,6 +1560,15 @@ private fun ProviderAccountSettings(
                         Text(verificationUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = authController::cancelYtmusicTvOAuthLogin) { Text("取消授权") }
                     }
+                }
+                // This legacy card keeps the minimum needed to stay exhaustive; the Expressive
+                // provider detail page owns the real scan-login interaction.
+                ProviderLoginMode.Scan -> {
+                    Button(
+                        onClick = { authController.startScanLogin(provider.providerId) },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().padding(FuoSpacing.lg),
+                    ) { Text("用浏览器登录") }
                 }
             }
         }
@@ -1741,6 +1750,7 @@ private fun providerStatusText(enabled: Boolean, auth: ProviderAuthState?): Stri
 
 private fun providerLoginModeLabel(mode: ProviderLoginMode): String = when (mode) {
     ProviderLoginMode.WebView -> "网页"
+    ProviderLoginMode.Scan -> "扫码"
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"

@@ -157,6 +157,29 @@ interface ProviderAuthRepository {
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun refreshAuthState(providerId: String): ProviderAuthState = authState(providerId)
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+
+    /**
+     * Exchanges an authorization code captured from the platform web-login redirect.
+     * Providers without an authorization-code login reject this call.
+     */
+    suspend fun loginWithAuthorizationCode(
+        providerId: String,
+        code: String,
+        loginType: Int? = null,
+    ): ProviderAuthState {
+        throw UnsupportedOperationException("provider does not support authorization code login: $providerId")
+    }
+    /**
+     * Starts a login approved outside the app: the provider returns its own authorize URL, which the
+     * caller opens in a browser, and [pollScanLogin] turns the approval into a renewable login.
+     */
+    suspend fun beginScanLogin(providerId: String, loginType: Int? = null): ProviderScanLogin {
+        throw UnsupportedOperationException("provider does not support scan login: $providerId")
+    }
+
+    suspend fun pollScanLogin(providerId: String, sessionId: String): ProviderScanLoginResult {
+        throw UnsupportedOperationException("provider does not support scan login: $providerId")
+    }
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState {
         throw UnsupportedOperationException("provider does not support header login: $providerId")
     }

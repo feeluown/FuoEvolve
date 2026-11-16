@@ -1,19 +1,32 @@
 package org.feeluown.mobile.provider.qqmusic
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.feeluown.mobile.MediaRef
 import org.feeluown.mobile.MediaRefType
 import org.feeluown.mobile.MusicTrack
 import org.feeluown.mobile.ProviderAuthState
 import org.feeluown.mobile.ProviderContentSection
 import org.feeluown.mobile.ProviderContentType
+import org.feeluown.mobile.ProviderFailure
+import org.feeluown.mobile.ProviderFailureKind
 import org.feeluown.mobile.ProviderFeature
 import org.feeluown.mobile.ProviderFeatureCategory
 import org.feeluown.mobile.ProviderFeatureFilterCodec
 import org.feeluown.mobile.ProviderMediaItemDetail
 import org.feeluown.mobile.ProviderPlaylist
+import org.feeluown.mobile.ProviderScanLogin
+import org.feeluown.mobile.ProviderScanLoginResult
 import org.feeluown.mobile.ProviderSearchResults
 import org.feeluown.mobile.provider.core.KotlinMusicProvider
+import org.feeluown.mobile.provider.core.ProviderCredentialStore
+import org.feeluown.mobile.provider.core.ProviderCredentials
 import org.feeluown.mobile.provider.core.ProviderRuntimeDependencies
+import org.feeluown.mobile.provider.core.ProviderSessionCredential
+import org.feeluown.mobile.provider.core.network.ProviderHttpClient
+import org.feeluown.mobile.provider.core.network.currentTimeMillis
+import org.feeluown.mobile.providerFailureOrNull
 
 /**
  * QQ Music module-local content/library composition.
@@ -39,7 +52,22 @@ internal class QQMusicCompositeProvider(
         dependencies.http,
         dependencies.credentials,
     ),
+    private val sessionValidator: QQMusicSessionValidator = QQMusicSessionValidator(
+        dependencies.http,
+        dependencies.credentials,
+    ),
+    private val http: ProviderHttpClient = dependencies.http,
+    private val credentials: ProviderCredentialStore = dependencies.credentials,
+    /** Injectable clock so session expiry/renewal decisions stay testable. */
+    private val nowMillis: () -> Long = { currentTimeMillis() },
 ) : KotlinMusicProvider {
+    /** Serializes renewals so a burst of account refreshes exchanges the same key only once. */
+    private val renewalMutex = Mutex()
+
+    /** Guarded by [scanLoginMutex]: scan sessions this process created and their deadlines. */
+    private val scanLoginSessions = mutableMapOf<String, QQMusicQrSession>()
+    private val scanLoginMutex = Mutex()
+
     override val id: String get() = content.id
     override val name: String get() = content.name
     override val info get() = content.info
@@ -63,7 +91,286 @@ internal class QQMusicCompositeProvider(
     override suspend fun lyrics(track: MusicTrack) = content.lyrics(track)
     override suspend fun lyricsSearchKeyword(track: MusicTrack) = content.lyricsSearchKeyword(track)
 
-    override suspend fun authState(): ProviderAuthState = enrichAuth(content.authState())
+    override suspend fun authState(): ProviderAuthState = enrichAuth(expiryAwareAuthState(content.authState()))
+
+    /**
+     * Answers "is the stored session still usable?" without an unnecessary network round trip.
+     *
+     * A renewable session (obtained from the login authorization code) is kept alive by exchanging
+     * its `refresh_token` for a fresh `musickey` once the current key is past half of its lifetime;
+     * that is the only way a QQ Music login survives longer than the 3 day cookie/key lifetime.
+     * Legacy cookie-only logins have no renewable material and keep using the cached server probe.
+     */
+    override suspend fun verifySession(): ProviderAuthState {
+        val stored = credentials.read(ID)
+        val session = stored?.session
+        if (stored != null && session != null && session.hasAuthKey) {
+            return verifyRenewableSession(stored, session)
+        }
+        val base = enrichAuth(content.authState())
+        if (!base.isLoggedIn) return base
+        // The validator fingerprints the stored cookies, so a fresh login or a credential restore
+        // re-probes automatically while repeated refreshes reuse the cached verdict.
+        if (sessionValidator.isSessionAlive() != false) return base
+        return expiredSessionState(base)
+    }
+
+    private suspend fun verifyRenewableSession(
+        stored: ProviderCredentials,
+        session: ProviderSessionCredential,
+    ): ProviderAuthState {
+        val now = nowMillis()
+        if (session.isGrantExpiredAt(now)) {
+            return expiredSessionState(content.authState(), GRANT_EXPIRED_MESSAGE)
+        }
+        if (session.shouldRenewAt(now)) {
+            val renewed = try {
+                renewStoredSession(stored, session)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                return expiredSessionState(content.authState(), renewalFailureMessage(failure))
+            }
+            if (renewed.isGrantExpiredAt(nowMillis())) {
+                return expiredSessionState(content.authState(), GRANT_EXPIRED_MESSAGE)
+            }
+            return enrichAuth(content.authState())
+        }
+        if (session.isAuthKeyExpiredAt(now) && !session.canRenewAt(now)) {
+            return expiredSessionState(content.authState(), AUTH_KEY_EXPIRED_MESSAGE)
+        }
+        return enrichAuth(content.authState())
+    }
+
+    /**
+     * Exchanges the stored session for a fresh auth key and persists both the session and the
+     * cookies synthesized from it, so every other QQ Music request path sees the new key.
+     *
+     * @throws Throwable when the exchange fails; the caller turns that into a LoginExpired state
+     *   while the previous credentials stay on disk for a later retry.
+     */
+    private suspend fun renewStoredSession(
+        stored: ProviderCredentials,
+        session: ProviderSessionCredential,
+    ): ProviderSessionCredential = renewalMutex.withLock {
+        // Another caller may have renewed while this one waited for the lock; reuse its key instead
+        // of exhausting the grant with a burst of exchanges.
+        val latest = credentials.read(ID)
+        val latestSession = latest?.session
+        if (
+            latestSession != null &&
+            latestSession.hasAuthKey &&
+            latestSession.authKey != session.authKey &&
+            !latestSession.shouldRenewAt(nowMillis())
+        ) {
+            return@withLock latestSession
+        }
+        val renewed = renewSession(http, session, nowMillis())
+        val base = latest ?: stored
+        credentials.write(
+            ID,
+            base.copy(
+                cookies = base.cookies.filterKeys { key -> key !in SESSION_COOKIE_KEYS } +
+                    qqSessionCookies(renewed),
+                // Session cookies are authoritative; a stale captured header must not shadow them.
+                cookieHeader = null,
+                session = renewed,
+            ),
+        )
+        renewed
+    }
+
+    /**
+     * Once this process knows the stored session is dead, keep reporting it as dead from [authState]
+     * too: [verifySession] performs the expensive work, this only replays the local verdict so the
+     * account card stops claiming 已登录 before the next catalogue refresh.
+     *
+     * A renewable session whose key already expired is still logged in *locally*: the very next
+     * [verifySession] (or account refresh) renews it before any account request is made.
+     */
+    private suspend fun expiryAwareAuthState(base: ProviderAuthState): ProviderAuthState {
+        if (!base.isLoggedIn) return base
+        val session = credentials.read(ID)?.session
+        if (session != null && session.hasAuthKey) {
+            val now = nowMillis()
+            if (session.isGrantExpiredAt(now)) return expiredSessionState(base, GRANT_EXPIRED_MESSAGE)
+            if (session.isAuthKeyExpiredAt(now) && !session.canRenewAt(now)) {
+                return expiredSessionState(base, AUTH_KEY_EXPIRED_MESSAGE)
+            }
+            return base
+        }
+        if (sessionValidator.cachedVerdict() != false) return base
+        return expiredSessionState(base)
+    }
+
+    private fun expiredSessionState(
+        base: ProviderAuthState,
+        technicalMessage: String = PROBE_EXPIRED_MESSAGE,
+    ): ProviderAuthState = base.copy(
+        isLoggedIn = false,
+        userName = null,
+        failure = ProviderFailure(
+            kind = ProviderFailureKind.LoginExpired,
+            providerId = ID,
+            technicalMessage = technicalMessage,
+        ),
+    )
+
+    /**
+     * Completes the browser login by exchanging the single-use OAuth code captured from QQ Music's
+     * redirect for a renewable session, then synthesizes the cookies every request path expects.
+     *
+     * A failed exchange reports the mapped failure in the returned state instead of throwing, which
+     * is how the rest of this provider surfaces account problems, and persists nothing.
+     */
+    override suspend fun loginWithAuthorizationCode(code: String, loginType: Int?): ProviderAuthState {
+        val result = try {
+            exchangeAuthorizationCode(http, code, loginType, nowMillis())
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            return failedAuthState(failure)
+        }
+        return persistAuthorization(result)
+    }
+
+    /**
+     * Starts QQ Music's own phone-client login.
+     *
+     * [loginType] follows the same convention as [loginWithAuthorizationCode] (1 = QQ account,
+     * 2 = WeChat account, `null` = the provider default, QQ) and decides which OAuth provider the
+     * returned URL points at.
+     *
+     * The app gets a ready-to-open OAuth authorize URL instead of a QR code to scan: the user opens
+     * it in a browser on the same phone and the OAuth round trip ends on QQ Music's `redirect.html`,
+     * which confirms the session itself. The session id is remembered so [pollScanLogin] knows when
+     * it expires even if the login server keeps answering `req.code = 0`.
+     */
+    override suspend fun beginScanLogin(loginType: Int?): ProviderScanLogin {
+        val method = QQMusicLoginMethod.fromRedirectLoginType(loginType)
+        val qrSession = createQrSession(http, method, nowMillis())
+        scanLoginMutex.withLock {
+            // Abandoned flows are never polled again; drop them so the map cannot grow forever.
+            scanLoginSessions.values.removeAll { session -> session.expiresAtMillis < nowMillis() }
+            scanLoginSessions[qrSession.sessionId] = qrSession
+        }
+        return ProviderScanLogin(
+            sessionId = qrSession.sessionId,
+            authorizeUrl = qrSession.authorizeUrl,
+            expiresInMillis = (qrSession.expiresAtMillis - nowMillis()).coerceAtLeast(0L),
+            pollIntervalMillis = QQMusicAuthorization.QR_POLL_INTERVAL_MILLIS,
+        )
+    }
+
+    /**
+     * Advances a scan session one step: pending, recognized, approved, expired or refused.
+     *
+     * Only [ProviderScanLoginResult.Approved] persists anything, and it persists through exactly the
+     * same path as the authorization-code login ([persistAuthorization]): the QR `Login` exchange
+     * returns the same renewable credential schema, so the resulting session renews like any other.
+     * Nothing is stored for the other outcomes - a refused or expired session must not touch a
+     * previously working account.
+     */
+    override suspend fun pollScanLogin(sessionId: String): ProviderScanLoginResult {
+        val now = nowMillis()
+        val known = scanLoginMutex.withLock { scanLoginSessions[sessionId] }
+        if (known != null && now >= known.expiresAtMillis) {
+            scanLoginMutex.withLock { scanLoginSessions.remove(sessionId) }
+            return ProviderScanLoginResult.Expired
+        }
+        val status = try {
+            qrSessionStatus(http, sessionId)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            return scanFailure(failure)
+        }
+        return when (status) {
+            QQMusicQrStatus.Pending -> ProviderScanLoginResult.Pending
+            QQMusicQrStatus.Scanned -> ProviderScanLoginResult.Scanned
+            QQMusicQrStatus.Expired -> {
+                scanLoginMutex.withLock { scanLoginSessions.remove(sessionId) }
+                ProviderScanLoginResult.Expired
+            }
+            is QQMusicQrStatus.Failed -> ProviderScanLoginResult.Failed(status.message)
+            is QQMusicQrStatus.Approved -> {
+                // The creation-time token is the documented one for this exchange; a token the
+                // approved poll returned is preferred when present.
+                val confirmToken = status.token
+                    ?: known?.confirmToken
+                    ?: return ProviderScanLoginResult.Failed(
+                        "QQ Music scan-login session carried no confirmation token",
+                    )
+                val result = try {
+                    loginWithQrSession(
+                        http = http,
+                        sessionId = sessionId,
+                        musicId = status.musicId,
+                        token = confirmToken,
+                        loginType = status.loginType,
+                        nowMillis = nowMillis(),
+                    )
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (failure: Throwable) {
+                    return scanFailure(failure)
+                }
+                // A consumed session must not be exchanged a second time.
+                scanLoginMutex.withLock { scanLoginSessions.remove(sessionId) }
+                ProviderScanLoginResult.Approved(persistAuthorization(result))
+            }
+        }
+    }
+
+    /**
+     * Persists an exchanged renewable session together with the cookies synthesized from it.
+     *
+     * Shared by the authorization-code login and the scan login because both produce the same
+     * [QQMusicAuthorizationResult]: a fresh session replaces the previous account's identity cookies
+     * (see [SESSION_COOKIE_KEYS]) and any stale captured header, which would otherwise shadow them.
+     */
+    private suspend fun persistAuthorization(result: QQMusicAuthorizationResult): ProviderAuthState {
+        val stored = credentials.read(ID)
+        credentials.write(
+            ID,
+            ProviderCredentials(
+                cookies = stored?.cookies.orEmpty().filterKeys { key -> key !in SESSION_COOKIE_KEYS } +
+                    result.cookies(),
+                session = result.session,
+            ),
+        )
+        return enrichAuth(content.authState())
+    }
+
+    /**
+     * User-presentable failure text for a refused poll.
+     *
+     * Prefers the provider's mapped technical message (it carries the upstream business code, which
+     * is what makes a scan failure diagnosable) and never includes the session token.
+     */
+    private fun scanFailure(failure: Throwable): ProviderScanLoginResult =
+        ProviderScanLoginResult.Failed(
+            failure.providerFailureOrNull(ID)?.technicalMessage?.takeIf(String::isNotBlank)
+                ?: failure.message?.takeIf(String::isNotBlank)
+                ?: "QQ Music scan-login failed",
+        )
+
+    private fun failedAuthState(failure: Throwable): ProviderAuthState = ProviderAuthState(
+        providerId = ID,
+        providerName = name,
+        isLoggedIn = false,
+        userName = null,
+        failure = failure.providerFailureOrNull(ID) ?: ProviderFailure(
+            kind = ProviderFailureKind.Unknown,
+            providerId = ID,
+            technicalMessage = failure.message,
+        ),
+    )
+
+    private fun renewalFailureMessage(failure: Throwable): String {
+        val detail = failure.message?.takeIf(String::isNotBlank)
+        return if (detail == null) RENEWAL_FAILED_MESSAGE else "$RENEWAL_FAILED_MESSAGE: $detail"
+    }
 
     override suspend fun loginWithCookies(cookiesJson: String): ProviderAuthState =
         enrichAuth(content.loginWithCookies(cookiesJson))
@@ -233,6 +540,35 @@ internal class QQMusicCompositeProvider(
 
     private companion object {
         const val ID = "qqmusic"
+
+        /**
+         * Cookies that belong to one specific QQ Music login. A fresh authorization-code login
+         * replaces them instead of keeping a previous account's identity cookies around (the request
+         * paths prefer `wxuin`/qqmusic_key over anything else stored).
+         */
+        val SESSION_COOKIE_KEYS = setOf(
+            "uin",
+            "wxuin",
+            "musicid",
+            "str_musicid",
+            "qm_keyst",
+            "qqmusic_key",
+            "encryptUin",
+            "encrypt_uin",
+            "login_type",
+            "wxopenid",
+            "wxunionid",
+            "p_skey",
+            "skey",
+            "p_lskey",
+            "lskey",
+        )
+
+        const val PROBE_EXPIRED_MESSAGE = "QQ Music session expired (music.UserInfo.userInfoServer code=1000)"
+        const val GRANT_EXPIRED_MESSAGE = "QQ Music session grant expired; sign in again to renew it"
+        const val AUTH_KEY_EXPIRED_MESSAGE = "QQ Music session key expired and cannot be renewed"
+        const val RENEWAL_FAILED_MESSAGE = "QQ Music session renewal failed"
+
         const val USER_PLAYLISTS_FEATURE_ID = "qqmusic_user_playlists"
         const val FAVORITE_PLAYLISTS_FEATURE_ID = "qqmusic_favorite_playlists"
         const val FOLLOWED_ARTISTS_FEATURE_ID = "qqmusic_followed_artists"

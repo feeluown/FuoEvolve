@@ -5,7 +5,11 @@ data class AppPlatformBindings(
     val hasAudioPermission: Boolean,
     val onRequestAudioPermission: () -> Unit,
     val audioRecognitionAccess: AudioRecognitionAccess,
-    val onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    /**
+     * Opens the provider web login. [loginUrl] is the selected [ProviderLoginChoice.loginUrl] when the
+     * provider offers several account ecosystems (QQ Music: QQ / WeChat), and null for the default.
+     */
+    val onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     val onLogoutProvider: (ProviderInfo) -> Unit,
     val onImportYtmusicHeaderFile: (() -> Unit)? = null,
     val onImportYtmusicOAuthFile: (() -> Unit)? = null,

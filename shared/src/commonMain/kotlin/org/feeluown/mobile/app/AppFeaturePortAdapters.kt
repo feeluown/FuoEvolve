@@ -27,12 +27,26 @@ class DefaultSearchAppPort(
     override val downloadStates: Map<String, DownloadState>
         get() = downloads.downloadStates
 
+    /**
+     * Explicit dismiss (search back button / system back through AppBackCoordinator).
+     *
+     * The query and results are discarded and the Search route is popped.
+     */
     override fun closeSearch() {
         searchController.clearResults()
         onSearchClosed()
         navigator.pop(AppRoute.Search)
     }
 
+    /**
+     * Plays a search result without leaving the Search screen.
+     *
+     * Starting playback used to call [closeSearch], which popped [AppRoute.Search] and cleared the
+     * query plus results, so users could not keep browsing the results of a multi-source search
+     * after tapping one song (issue #283). Playback is now a pure queue action: the Search route
+     * stays on the back stack and the controller state is left untouched. Explicit dismissal still
+     * goes through [closeSearch].
+     */
     override fun playResult(index: Int) {
         val state = searchController.uiState.value
         val tracks = state.searchResults
@@ -49,7 +63,6 @@ class DefaultSearchAppPort(
                 subtitle = "搜索结果",
             ),
         )
-        closeSearch()
     }
 
     override fun addToUpNext(track: MusicTrack) = playbackQueue.addToUpNext(track)

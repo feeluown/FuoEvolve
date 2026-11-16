@@ -48,6 +48,14 @@ data class SearchFeatureState<Track, ProviderResults>(
     val providerSearchTab: ProviderSearchTab = ProviderSearchTab.Comprehensive,
     val isLoading: Boolean = false,
     val message: String? = null,
+    /**
+     * Per-provider failures observed during the last search (providerId -> user-facing message).
+     *
+     * Multi-source search isolates each provider, so one broken source (for example an expired
+     * QQ Music session) no longer discards the healthy providers' results. The UI can surface
+     * these entries as a partial-failure warning; [message] stays the human-readable summary.
+     */
+    val providerFailures: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -130,6 +138,13 @@ private class SearchControllerState<Track, ProviderResults>(
     }
 }
 
+/** Outcome of one search execution, including any providers that failed in multi-source mode. */
+private data class SearchExecution<Track, ProviderResults>(
+    val tracks: List<Track>,
+    val providerResults: ProviderResults,
+    val providerFailures: Map<String, String> = emptyMap(),
+)
+
 /** Owns search state and search-specific orchestration. */
 private class SearchController<Track, ProviderResults>(
     private val providerRepository: SearchProviderRepository<ProviderResults>,
@@ -180,6 +195,7 @@ private class SearchController<Track, ProviderResults>(
                 providerSearchResults = resultOperations.empty(),
                 isLoading = false,
                 message = null,
+                providerFailures = emptyMap(),
             )
         }
     }
@@ -286,6 +302,7 @@ private class SearchController<Track, ProviderResults>(
                     providerSearchResults = resultOperations.empty(),
                     isLoading = false,
                     message = "请输入关键词",
+                    providerFailures = emptyMap(),
                 )
             }
             return
@@ -293,61 +310,42 @@ private class SearchController<Track, ProviderResults>(
 
         searchJob = scope.launch {
             if (generation != searchGeneration) return@launch
-            state.update { it.copy(isLoading = true, message = "正在搜索：$keyword") }
+            state.update {
+                it.copy(
+                    isLoading = true,
+                    message = "正在搜索：$keyword",
+                    providerFailures = emptyMap(),
+                )
+            }
             try {
-                val results = withTimeout(25_000) {
-                    when (state.uiState.value.searchScope) {
-                        SearchScope.Local -> {
-                            val local = localRepository.search(keyword)
-                            if (generation == searchGeneration) {
-                                state.update { it.copy(providerSearchResults = resultOperations.empty()) }
-                            }
-                            local
-                        }
-
-                        SearchScope.Provider -> {
-                            val current = state.uiState.value
-                            val provider = providerRepository.searchAll(keyword, current.selectedSearchProviderId)
-                            if (generation == searchGeneration) {
-                                state.update { it.copy(providerSearchResults = provider) }
-                            }
-                            resultOperations.tracks(provider)
-                        }
-
-                        SearchScope.All -> coroutineScope {
-                            val localDeferred = async { localRepository.search(keyword) }
-                            val providerDeferreds = providerIdsForSearch().map { providerId ->
-                                async { providerRepository.searchAll(keyword, providerId) }
-                            }
-                            val local = localDeferred.await()
-                            val provider = resultOperations.merge(providerDeferreds.awaitAll())
-                            if (generation == searchGeneration) {
-                                state.update { it.copy(providerSearchResults = provider) }
-                            }
-                            mergeResults(local, resultOperations.tracks(provider))
-                        }
-                    }
+                val execution = withTimeout(25_000) {
+                    searchInCurrentScope(keyword)
                 }
                 if (generation == searchGeneration) {
                     state.update { current ->
+                        val results = execution.tracks
                         val total = when (current.searchScope) {
                             SearchScope.Local -> results.size
                             SearchScope.Provider,
-                            SearchScope.All -> resultOperations.totalCount(current.providerSearchResults) +
+                            SearchScope.All -> resultOperations.totalCount(execution.providerResults) +
                                 if (current.searchScope == SearchScope.All) {
-                                    localOnlyCount(results, resultOperations.tracks(current.providerSearchResults))
+                                    localOnlyCount(results, resultOperations.tracks(execution.providerResults))
                                 } else {
                                     0
                                 }
                         }
-                        val providerError = resultOperations.errorMessage(current.providerSearchResults)
+                        val providerError = resultOperations.errorMessage(execution.providerResults)
+                        val failures = execution.providerFailures
                         current.copy(
                             searchResults = results,
+                            providerSearchResults = execution.providerResults,
+                            providerFailures = failures,
                             message = when {
-                                total == 0 && providerError != null -> providerError
-                                total == 0 -> "没有搜索结果"
-                                else -> "搜索到 $total 项"
-                            }
+                                total > 0 -> "搜索到 $total 项"
+                                failures.isNotEmpty() -> failures.values.distinct().joinToString("；")
+                                providerError != null -> providerError
+                                else -> "没有搜索结果"
+                            },
                         )
                     }
                 }
@@ -360,6 +358,7 @@ private class SearchController<Track, ProviderResults>(
                             searchResults = emptyList(),
                             providerSearchResults = resultOperations.empty(errorMessage = failure),
                             message = failure,
+                            providerFailures = emptyMap(),
                         )
                     }
                 }
@@ -374,6 +373,7 @@ private class SearchController<Track, ProviderResults>(
                             searchResults = emptyList(),
                             providerSearchResults = resultOperations.empty(errorMessage = failure),
                             message = failure,
+                            providerFailures = emptyMap(),
                         )
                     }
                 }
@@ -384,6 +384,77 @@ private class SearchController<Track, ProviderResults>(
                 }
             }
         }
+    }
+
+    private suspend fun searchInCurrentScope(keyword: String): SearchExecution<Track, ProviderResults> =
+        when (state.uiState.value.searchScope) {
+            SearchScope.Local -> SearchExecution(
+                tracks = localRepository.search(keyword),
+                providerResults = resultOperations.empty(),
+            )
+
+            SearchScope.Provider -> {
+                val provider = providerRepository.searchAll(
+                    keyword,
+                    state.uiState.value.selectedSearchProviderId,
+                )
+                SearchExecution(
+                    tracks = resultOperations.tracks(provider),
+                    providerResults = provider,
+                )
+            }
+
+            SearchScope.All -> searchAllSources(keyword)
+        }
+
+    /**
+     * Multi-source search with per-provider failure isolation.
+     *
+     * One unhealthy source (for example QQ Music with a server-side expired session) must not
+     * discard the results of the healthy ones, and must not fail the whole search. Each provider
+     * outcome is captured independently; successful results are merged and failures are reported
+     * through [SearchFeatureState.providerFailures].
+     */
+    private suspend fun searchAllSources(keyword: String): SearchExecution<Track, ProviderResults> =
+        coroutineScope {
+            val localDeferred = async { localRepository.search(keyword) }
+            val providerDeferreds = providerIdsForSearch().map { providerId ->
+                async { providerId to searchProviderIsolated(keyword, providerId) }
+            }
+            val local = localDeferred.await()
+            val providerOutcomes = providerDeferreds.awaitAll()
+
+            val successes = mutableListOf<ProviderResults>()
+            val failures = linkedMapOf<String, String>()
+            providerOutcomes.forEach { (providerId, outcome) ->
+                outcome.fold(
+                    onSuccess = { successes += it },
+                    onFailure = { failures[providerId] = failureMessage(it, providerId) },
+                )
+            }
+
+            val merged = if (successes.isEmpty()) {
+                val failureText = failures.values.distinct().joinToString("；")
+                resultOperations.empty(errorMessage = failureText.takeIf { failures.isNotEmpty() })
+            } else {
+                resultOperations.merge(successes)
+            }
+            SearchExecution(
+                tracks = mergeResults(local, resultOperations.tracks(merged)),
+                providerResults = merged,
+                providerFailures = failures,
+            )
+        }
+
+    private suspend fun searchProviderIsolated(
+        keyword: String,
+        providerId: String,
+    ): Result<ProviderResults> = try {
+        Result.success(providerRepository.searchAll(keyword, providerId))
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (exception: Exception) {
+        Result.failure(exception)
     }
 
     private fun notifyPreferencesChanged() {

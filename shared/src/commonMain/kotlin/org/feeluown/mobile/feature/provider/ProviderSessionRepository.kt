@@ -25,6 +25,9 @@ interface ProviderSessionRepository {
     suspend fun updateProviders(providers: List<ProviderInfo>)
     suspend fun refresh(providerId: String, refreshUserInfo: Boolean = false): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+    suspend fun loginWithAuthorizationCode(providerId: String, code: String, loginType: Int? = null): ProviderAuthState
+    suspend fun beginScanLogin(providerId: String, loginType: Int? = null): ProviderScanLogin
+    suspend fun pollScanLogin(providerId: String, sessionId: String): ProviderScanLoginResult
     suspend fun loginWithHeaders(providerId: String, authorization: String, cookie: String): ProviderAuthState
     suspend fun loginWithHeaderFile(providerId: String, headerFileJson: String): ProviderAuthState
     suspend fun loginWithOAuth(
@@ -110,6 +113,34 @@ class DefaultProviderSessionRepository(
     override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
         mutate(providerId, ProviderSessionOperation.Login) { providerRepository.loginWithCookies(providerId, cookiesJson) }
 
+    override suspend fun loginWithAuthorizationCode(
+        providerId: String,
+        code: String,
+        loginType: Int?,
+    ): ProviderAuthState = mutate(providerId, ProviderSessionOperation.Login) {
+        providerRepository.loginWithAuthorizationCode(providerId, code, loginType)
+    }
+
+    override suspend fun beginScanLogin(providerId: String, loginType: Int?): ProviderScanLogin =
+        providerRepository.beginScanLogin(providerId, loginType)
+
+    override suspend fun pollScanLogin(
+        providerId: String,
+        sessionId: String,
+    ): ProviderScanLoginResult = operationMutex.withLock {
+        val result = providerRepository.pollScanLogin(providerId, sessionId)
+        // An approved session is a completed login: publish its auth state exactly like any other
+        // login so every other feature sees the new account at the same moment.
+        if (result is ProviderScanLoginResult.Approved) {
+            val current = mutableState.value
+            mutableState.value = current.copy(
+                authStates = current.authStates + (providerId to result.authState),
+                errors = current.errors - providerId,
+            )
+        }
+        result
+    }
+
     override suspend fun loginWithHeaders(
         providerId: String,
         authorization: String,
@@ -168,10 +199,18 @@ class DefaultProviderSessionRepository(
         try {
             val authState = block()
             val current = mutableState.value
+            // A provider that probed the server can report "the session expired" without throwing.
+            // Keep that explanation so the account card can offer a direct re-login instead of
+            // silently flipping to 未登录.
+            val sessionFailure = authState.failure?.takeIf { !authState.isLoggedIn }?.userMessage
             mutableState.value = current.copy(
                 authStates = current.authStates + (providerId to authState),
                 operations = current.operations - providerId,
-                errors = current.errors - providerId,
+                errors = if (sessionFailure != null) {
+                    current.errors + (providerId to sessionFailure)
+                } else {
+                    current.errors - providerId
+                },
             )
             authState
         } catch (throwable: Throwable) {

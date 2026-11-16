@@ -136,7 +136,9 @@ private class ProviderCatalogSessionBinding(
 ) : ProviderCatalogSessionPort<ProviderInfo, ProviderSessionState> {
     override val state: StateFlow<ProviderSessionState> = delegate.state
     override suspend fun updateProviders(providers: List<ProviderInfo>) = delegate.updateProviders(providers)
-    override suspend fun refresh(providerId: String) { delegate.refresh(providerId) }
+    override suspend fun refresh(providerId: String, refreshUserInfo: Boolean) {
+        delegate.refresh(providerId, refreshUserInfo)
+    }
 }
 
 private fun CoreProviderCatalogFeatureState<ProviderInfo, ProviderFeature, ProviderCapabilities, ProviderSessionState>.toUiState() =

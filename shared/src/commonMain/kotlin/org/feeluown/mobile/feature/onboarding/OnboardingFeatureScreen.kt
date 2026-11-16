@@ -67,7 +67,7 @@ fun OnboardingFeatureScreen(
     onboarding: OnboardingFeatureController,
     providerCatalog: ProviderCatalogFeatureController,
     providerAuth: ProviderAuthFeatureController,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)? = null,
     onImportYtmusicOAuthFile: (() -> Unit)? = null,
@@ -93,6 +93,7 @@ fun OnboardingFeatureScreen(
     val replacementPage = pagerState.currentPage == 1
     val accountPage = pagerState.currentPage == 2
     val ytmusicOAuthFlowActive = authState.ytmusicOAuthFlow != null
+    val scanLoginFlowActive = authState.scanLoginFlow != null
     val authBusy = accountPage && selectedProviders.any { provider ->
         providerAuth.isBusy(provider.providerId) &&
             !(provider.providerId == "ytmusic" && ytmusicOAuthFlowActive)
@@ -117,8 +118,13 @@ fun OnboardingFeatureScreen(
                         IconButton(
                             enabled = !busy,
                             onClick = {
+                                // Leaving the accounts page would strand the in-flight login: its
+                                // polling job outlives the controls, so cancel it first.
                                 if (accountPage && ytmusicOAuthFlowActive) {
                                     providerAuth.cancelYtmusicTvOAuthLogin()
+                                }
+                                if (accountPage && scanLoginFlowActive) {
+                                    providerAuth.cancelScanLogin()
                                 }
                                 scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
                             },
@@ -149,6 +155,9 @@ fun OnboardingFeatureScreen(
                         else -> {
                             if (ytmusicOAuthFlowActive) {
                                 providerAuth.cancelYtmusicTvOAuthLogin()
+                            }
+                            if (scanLoginFlowActive) {
+                                providerAuth.cancelScanLogin()
                             }
                             onboarding.complete()
                         }
@@ -419,7 +428,7 @@ private fun OnboardingAccountsPage(
     enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -468,7 +477,7 @@ private fun OnboardingProviderAccountCard(
     authState: ProviderAuthUiState,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
@@ -496,10 +505,11 @@ private fun OnboardingProviderAccountCard(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(provider.providerName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (currentAuth.isLoggedIn) {
-                            currentAuth.userName?.takeIf { it.isNotBlank() }?.let { "已连接 · $it" } ?: "已连接"
-                        } else {
-                            "尚未连接"
+                        when {
+                            currentAuth.isLoggedIn ->
+                                currentAuth.userName?.takeIf { it.isNotBlank() }?.let { "已连接 · $it" } ?: "已连接"
+                            authController.needsRelogin(provider.providerId) -> "登录已失效，请重新登录"
+                            else -> "尚未连接"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -537,7 +547,7 @@ private fun OnboardingProviderLoginControls(
     enabled: Boolean,
     authController: ProviderAuthFeatureController,
     authState: ProviderAuthUiState,
-    onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onOpenProviderWebLogin: (ProviderInfo, String?) -> Unit,
     onImportYtmusicHeaderFile: (() -> Unit)?,
     onImportYtmusicOAuthFile: (() -> Unit)?,
     onStartYtmusicOAuth: (() -> Unit)?,
@@ -551,6 +561,7 @@ private fun OnboardingProviderLoginControls(
     val oauth = authController.oauthInput(provider.providerId)
     val oauthFlow = authState.ytmusicOAuthFlow.takeIf { provider.providerId == "ytmusic" }
     val oauthFlowInteractive = enabled && oauthFlow != null
+    val scanFlow = authState.scanLoginFlow?.takeIf { it.providerId == provider.providerId }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (modes.size > 1) {
@@ -566,10 +577,94 @@ private fun OnboardingProviderLoginControls(
             }
         }
         when (selectedMode) {
-            ProviderLoginMode.WebView -> Button(
-                onClick = { onOpenProviderWebLogin(provider) },
-                enabled = provider.loginConfig != null && operationInteractive,
-            ) { Text("网页登录") }
+            ProviderLoginMode.WebView -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // A provider may expose several account ecosystems through one web login
+                // (QQ Music: QQ / WeChat); offer one button per entry instead of guessing.
+                val loginChoices = provider.loginConfig?.effectiveLoginChoices.orEmpty()
+                loginChoices.forEach { choice ->
+                    Button(
+                        onClick = { onOpenProviderWebLogin(provider, choice.loginUrl) },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) {
+                        Text(choice.label.ifBlank { "网页登录" })
+                    }
+                }
+                if (loginChoices.size <= 1) {
+                    Button(
+                        onClick = { onOpenProviderWebLogin(provider, null) },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) { Text("网页登录") }
+                }
+                LocalProviderWebLoginStateActions.current.clearWebLoginState?.let { clearWebLoginState ->
+                    TextButton(
+                        onClick = {
+                            clearWebLoginState()
+                            onOpenProviderWebLogin(provider, loginChoices.firstOrNull()?.loginUrl)
+                        },
+                        enabled = provider.loginConfig != null && operationInteractive,
+                    ) { Text("使用其他账号登录") }
+                }
+            }
+            ProviderLoginMode.Scan -> {
+                // The provider numbers its account ecosystems (QQ Music: 1 = QQ, 2 = WeChat), so the
+                // login entry is picked here and handed to the provider instead of being hard-coded.
+                val scanChoices = provider.loginConfig?.effectiveLoginChoices.orEmpty()
+                Text(
+                    if (scanChoices.size > 1) {
+                        "手机可直接登录：选择账号类型后在打开的页面完成授权。"
+                    } else {
+                        "手机可直接登录：在打开的页面里完成授权。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (scanFlow == null) {
+                    if (scanChoices.size > 1) {
+                        scanChoices.forEach { choice ->
+                            Button(
+                                onClick = {
+                                    authController.startScanLogin(provider.providerId, choice.loginType)
+                                },
+                                enabled = operationInteractive,
+                            ) { Text(choice.label.ifBlank { "用浏览器登录" }) }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                authController.startScanLogin(
+                                    provider.providerId,
+                                    scanChoices.firstOrNull()?.loginType,
+                                )
+                            },
+                            enabled = operationInteractive,
+                        ) { Text("用浏览器登录") }
+                    }
+                } else {
+                    // Opening the page is a side effect of the flow existing, so it runs once here
+                    // rather than on every recomposition.
+                    LaunchedEffect(scanFlow.authorizeUrl) {
+                        if (!scanFlow.browserOpened && scanFlow.authorizeUrl.isNotBlank()) {
+                            runCatching { uriHandler.openUri(scanFlow.authorizeUrl) }
+                                .onSuccess { authController.markScanBrowserOpened() }
+                        }
+                    }
+                    Text(
+                        if (scanFlow.browserOpened) scanFlow.statusMessage else "正在打开浏览器…",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(scanFlow.authorizeUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            enabled = scanFlow.authorizeUrl.isNotBlank(),
+                            onClick = {
+                                runCatching { uriHandler.openUri(scanFlow.authorizeUrl) }
+                                    .onSuccess { authController.markScanBrowserOpened() }
+                            },
+                        ) { Text("重新打开页面") }
+                        TextButton(onClick = authController::cancelScanLogin) { Text("取消") }
+                    }
+                }
+            }
             ProviderLoginMode.Cookie -> {
                 OutlinedTextField(
                     value = authController.cookieInput(provider.providerId),
@@ -732,6 +827,7 @@ private fun OnboardingFeatureFooter(
 
 private fun onboardingLoginModeLabel(mode: ProviderLoginMode): String = when (mode) {
     ProviderLoginMode.WebView -> "网页"
+    ProviderLoginMode.Scan -> "扫码"
     ProviderLoginMode.Cookie -> "Cookie"
     ProviderLoginMode.Headers -> "Headers"
     ProviderLoginMode.OAuth -> "OAuth"

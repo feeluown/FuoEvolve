@@ -93,7 +93,7 @@ internal class QQMusicComprehensiveSearchProvider(
             headers = publicHeaders(),
             cacheKey = "qqmusic:search:quick:$keyword",
             cachePolicy = ProviderCachePolicies.search,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
         val data = root.obj("data") ?: return null
         val categories = listOf(
             QuickCategory("song", data.obj("song")),
@@ -139,7 +139,7 @@ internal class QQMusicComprehensiveSearchProvider(
             headers = publicHeaders(),
             cacheKey = cacheKey,
             cachePolicy = ProviderCachePolicies.search,
-        ).value.let { providerJson.parseToJsonElement(it).asObject() }
+        ).value.let { parseQQMusicObject(ID, it) }
     }
 
     private suspend fun publicHeaders(): Map<String, String> {
